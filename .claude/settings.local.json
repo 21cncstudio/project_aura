@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(where:*)",
+      "Bash(\"C:\\\\Users\\\\vpapu\\\\.platformio\\\\penv\\\\Scripts\\\\platformio.exe\" run:*)",
+      "Bash(\"C:\\\\Users\\\\vpapu\\\\.platformio\\\\penv\\\\Scripts\\\\platformio.exe\" device monitor --environment project_aura --echo)",
+      "Bash(\"C:\\\\Users\\\\vpapu\\\\.platformio\\\\penv\\\\Scripts\\\\platformio.exe\" run --target upload --environment project_aura)",
+      "Bash(\"C:\\\\Users\\\\vpapu\\\\.platformio\\\\penv\\\\Scripts\\\\platformio.exe\" pkg install --platform espressif32@6.9.0 --tool \"framework-arduinoespressif32 @ https://github.com/espressif/arduino-esp32.git#3.1.1\")"
+    ]
+  }
+}
