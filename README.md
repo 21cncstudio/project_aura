@@ -11,7 +11,10 @@ https://makerworld.com/en/crowdfunding/159-project-aura-make-the-invisible-visib
 
 ![Crowdfunding poster](docs/assets/crowdfunding-poster.jpg)
 
-Compact ESP32-S3 air-quality station with LVGL UI, local web setup, and MQTT + Home Assistant discovery.
+Project Aura is an open-source ESP32-S3 air-quality station built for makers who want a polished,
+reliable device rather than a bare sensor board. It combines a touch-friendly LVGL UI, a local web
+setup portal, and MQTT with Home Assistant discovery, all wrapped in a 3D-printable enclosure.
+This repository contains the firmware and configuration needed to flash and customize the device.
 
 ![Project Aura device](docs/assets/device-hero.jpg)
 
