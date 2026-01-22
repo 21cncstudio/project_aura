@@ -11,15 +11,24 @@ https://makerworld.com/en/crowdfunding/159-project-aura-make-the-invisible-visib
 
 Compact ESP32-S3 air-quality station with LVGL UI, local web setup, and MQTT + Home Assistant discovery.
 
-<!-- TODO: Insert the demo GIF(s) you already shared -->
-<!-- Example: ![UI demo](docs/assets/ui-demo.gif) -->
+![Project Aura device](docs/assets/device-hero.jpg)
+
+## Gallery
+![Assembly overview](docs/assets/device-assembly.jpg)
+![Internal wiring](docs/assets/device-internals.jpg)
+![Boot and live dashboard](docs/assets/device-boot-ui.jpg)
+
+## UI Screens
+![Dashboard](docs/assets/ui-dashboard.png)
+![Settings](docs/assets/ui-settings.png)
+![Theme presets](docs/assets/ui-theme-presets.png)
 
 ## Highlights
 - Multi-sensor telemetry (temp, humidity, CO2, VOC, NOx, PM, pressure, HCHO).
 - LVGL UI with night mode, custom themes, and status indicators.
 - Wi-Fi AP onboarding + mDNS portal (`aura.local`) for Wi-Fi/MQTT/theme setup.
 - MQTT state publishing and Home Assistant discovery + command topics.
-- 🛡️ **Robust Safe Boot:** automatic rollback to last-known-good config after crashes, plus boot diagnostics and I2C recovery.
+- **Robust Safe Boot:** automatic rollback to last-known-good config after crashes, plus boot diagnostics and I2C recovery.
 
 ## Hardware
 - Waveshare ESP32-S3-Touch-LCD-4.3 (16MB flash, LittleFS).
@@ -122,6 +131,8 @@ easy local setup.
 - Home Assistant discovery: `homeassistant/*/config`
 
 MQTT stays idle until configured and enabled.
+
+![Home Assistant dashboard](docs/assets/ha-dashboard.jpg)
 
 ## Tests
 See `TESTING.md` for native host tests and `scripts/run_tests.ps1`.
