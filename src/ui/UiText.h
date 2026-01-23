@@ -77,5 +77,35 @@ inline const char *LabelLedIndicators() { return UiStrings::text(UiStrings::Text
 inline const char *LabelAlertBlink() { return UiStrings::text(UiStrings::TextId::LabelAlertBlink); }
 inline const char *LabelVocRelearn() { return UiStrings::text(UiStrings::TextId::LabelVocRelearn); }
 inline const char *LabelBacklight() { return UiStrings::text(UiStrings::TextId::LabelBacklight); }
+inline const char *LabelWifiSettingsTitle() { return UiStrings::text(UiStrings::TextId::LabelWifiSettingsTitle); }
+inline const char *LabelWifiStatus() { return UiStrings::text(UiStrings::TextId::LabelWifiStatus); }
+inline const char *LabelWifiHelp() { return UiStrings::text(UiStrings::TextId::LabelWifiHelp); }
+inline const char *LabelWifiSsid() { return UiStrings::text(UiStrings::TextId::LabelWifiSsid); }
+inline const char *LabelWifiIp() { return UiStrings::text(UiStrings::TextId::LabelWifiIp); }
+inline const char *LabelWifiForget() { return UiStrings::text(UiStrings::TextId::LabelWifiForget); }
+inline const char *LabelWifiReconnect() { return UiStrings::text(UiStrings::TextId::LabelWifiReconnect); }
+inline const char *LabelWifiStartAp() { return UiStrings::text(UiStrings::TextId::LabelWifiStartAp); }
+inline const char *LabelMqttSettingsTitle() { return UiStrings::text(UiStrings::TextId::LabelMqttSettingsTitle); }
+inline const char *LabelMqttStatus() { return UiStrings::text(UiStrings::TextId::LabelMqttStatus); }
+inline const char *LabelMqttHelp() { return UiStrings::text(UiStrings::TextId::LabelMqttHelp); }
+inline const char *LabelMqttDeviceIp() { return UiStrings::text(UiStrings::TextId::LabelMqttDeviceIp); }
+inline const char *LabelMqttBroker() { return UiStrings::text(UiStrings::TextId::LabelMqttBroker); }
+inline const char *LabelMqttTopic() { return UiStrings::text(UiStrings::TextId::LabelMqttTopic); }
+inline const char *LabelMqttReconnect() { return UiStrings::text(UiStrings::TextId::LabelMqttReconnect); }
+inline const char *LabelDateTimeTitle() { return UiStrings::text(UiStrings::TextId::LabelDateTimeTitle); }
+inline const char *LabelTimeZone() { return UiStrings::text(UiStrings::TextId::LabelTimeZone); }
+inline const char *LabelNtpAutoSync() { return UiStrings::text(UiStrings::TextId::LabelNtpAutoSync); }
+inline const char *LabelSetTime() { return UiStrings::text(UiStrings::TextId::LabelSetTime); }
+inline const char *LabelSetTimeHours() { return UiStrings::text(UiStrings::TextId::LabelSetTimeHours); }
+inline const char *LabelSetTimeMinutes() { return UiStrings::text(UiStrings::TextId::LabelSetTimeMinutes); }
+inline const char *LabelSetDate() { return UiStrings::text(UiStrings::TextId::LabelSetDate); }
+inline const char *LabelSetDateDay() { return UiStrings::text(UiStrings::TextId::LabelSetDateDay); }
+inline const char *LabelSetDateMonth() { return UiStrings::text(UiStrings::TextId::LabelSetDateMonth); }
+inline const char *LabelSetDateYear() { return UiStrings::text(UiStrings::TextId::LabelSetDateYear); }
+inline const char *LabelTimeCard() { return UiStrings::text(UiStrings::TextId::LabelTimeCard); }
+inline const char *LabelApplyNow() { return UiStrings::text(UiStrings::TextId::LabelApplyNow); }
+inline const char *LabelRtc() { return UiStrings::text(UiStrings::TextId::LabelRtc); }
+inline const char *LabelWifiChip() { return UiStrings::text(UiStrings::TextId::LabelWifiChip); }
+inline const char *LabelNtpChip() { return UiStrings::text(UiStrings::TextId::LabelNtpChip); }
 
 } // namespace UiText

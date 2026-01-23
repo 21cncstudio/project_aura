@@ -1345,6 +1345,9 @@ void UiController::init_ui_defaults() {
     UiStrings::setLanguage(ui_language);
     update_language_label();
     update_settings_texts();
+    update_wifi_texts();
+    update_mqtt_texts();
+    update_datetime_texts();
 
     update_clock_labels();
     timeManager.syncInputsFromSystem(set_hour, set_minute, set_day, set_month, set_year);

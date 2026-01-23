@@ -147,6 +147,19 @@ void UiController::update_datetime_ui() {
     }
 }
 
+void UiController::update_wifi_texts() {
+    if (objects.label_wifi_title) safe_label_set_text(objects.label_wifi_title, UiText::LabelWifiSettingsTitle());
+    if (objects.label_wifi_status) safe_label_set_text(objects.label_wifi_status, UiText::LabelWifiStatus());
+    if (objects.label_wifi_help) safe_label_set_text(objects.label_wifi_help, UiText::LabelWifiHelp());
+    if (objects.label_wifi_ssid) safe_label_set_text(objects.label_wifi_ssid, UiText::LabelWifiSsid());
+    if (objects.label_wifi_ip) safe_label_set_text(objects.label_wifi_ip, UiText::LabelWifiIp());
+    if (objects.label_btn_wifi_toggle) safe_label_set_text(objects.label_btn_wifi_toggle, UiText::MqttToggleLabel());
+    if (objects.label_btn_wifi_forget) safe_label_set_text(objects.label_btn_wifi_forget, UiText::LabelWifiForget());
+    if (objects.label_btn_wifi_reconnect) safe_label_set_text(objects.label_btn_wifi_reconnect, UiText::LabelWifiReconnect());
+    if (objects.label_btn_wifi_start_ap) safe_label_set_text(objects.label_btn_wifi_start_ap, UiText::LabelWifiStartAp());
+    if (objects.label_btn_wifi_back) safe_label_set_text(objects.label_btn_wifi_back, UiText::LabelSettingsBack());
+}
+
 void UiController::update_wifi_ui() {
     bool wifi_enabled = networkManager.isEnabled();
     AuraNetworkManager::WifiState wifi_state = networkManager.state();
@@ -457,4 +470,36 @@ void UiController::update_mqtt_ui() {
             lv_obj_add_state(objects.btn_mqtt_reconnect, LV_STATE_DISABLED);
         }
     }
+}
+
+void UiController::update_mqtt_texts() {
+    if (objects.label_mqtt_title) safe_label_set_text(objects.label_mqtt_title, UiText::LabelMqttSettingsTitle());
+    if (objects.label_mqtt_status) safe_label_set_text(objects.label_mqtt_status, UiText::LabelMqttStatus());
+    if (objects.label_mqtt_help) safe_label_set_text(objects.label_mqtt_help, UiText::LabelMqttHelp());
+    if (objects.label_mqtt_device_ip) safe_label_set_text(objects.label_mqtt_device_ip, UiText::LabelMqttDeviceIp());
+    if (objects.label_mqtt_broker) safe_label_set_text(objects.label_mqtt_broker, UiText::LabelMqttBroker());
+    if (objects.label_mqtt_topic) safe_label_set_text(objects.label_mqtt_topic, UiText::LabelMqttTopic());
+    if (objects.label_btn_mqtt_toggle) safe_label_set_text(objects.label_btn_mqtt_toggle, UiText::MqttToggleLabel());
+    if (objects.label_btn_mqtt_reconnect) safe_label_set_text(objects.label_btn_mqtt_reconnect, UiText::LabelMqttReconnect());
+    if (objects.label_btn_mqtt_back) safe_label_set_text(objects.label_btn_mqtt_back, UiText::LabelSettingsBack());
+}
+
+void UiController::update_datetime_texts() {
+    if (objects.label_datetime_title) safe_label_set_text(objects.label_datetime_title, UiText::LabelDateTimeTitle());
+    if (objects.label_btn_datetime_back) safe_label_set_text(objects.label_btn_datetime_back, UiText::LabelSettingsBack());
+    if (objects.label_timezone_title) safe_label_set_text(objects.label_timezone_title, UiText::LabelTimeZone());
+    if (objects.label_ntp_title) safe_label_set_text(objects.label_ntp_title, UiText::LabelNtpAutoSync());
+    if (objects.label_btn_ntp_toggle) safe_label_set_text(objects.label_btn_ntp_toggle, UiText::MqttToggleLabel());
+    if (objects.label_set_time_title) safe_label_set_text(objects.label_set_time_title, UiText::LabelSetTime());
+    if (objects.label_set_time_hours_title) safe_label_set_text(objects.label_set_time_hours_title, UiText::LabelSetTimeHours());
+    if (objects.label_set_time_minutes_title) safe_label_set_text(objects.label_set_time_minutes_title, UiText::LabelSetTimeMinutes());
+    if (objects.label_set_date_title) safe_label_set_text(objects.label_set_date_title, UiText::LabelSetDate());
+    if (objects.label_set_date_day_title) safe_label_set_text(objects.label_set_date_day_title, UiText::LabelSetDateDay());
+    if (objects.label_set_date_month_title) safe_label_set_text(objects.label_set_date_month_title, UiText::LabelSetDateMonth());
+    if (objects.label_set_date_year_title) safe_label_set_text(objects.label_set_date_year_title, UiText::LabelSetDateYear());
+    if (objects.label_time_title_1) safe_label_set_text(objects.label_time_title_1, UiText::LabelTimeCard());
+    if (objects.label_btn_datetime_apply) safe_label_set_text(objects.label_btn_datetime_apply, UiText::LabelApplyNow());
+    if (objects.label_rtc_title) safe_label_set_text(objects.label_rtc_title, UiText::LabelRtc());
+    if (objects.label_wifi_title_1) safe_label_set_text(objects.label_wifi_title_1, UiText::LabelWifiChip());
+    if (objects.label_chip_ntp_title) safe_label_set_text(objects.label_chip_ntp_title, UiText::LabelNtpChip());
 }

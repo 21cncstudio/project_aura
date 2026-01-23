@@ -160,6 +160,9 @@ void UiController::on_language_event(lv_event_t *e) {
     language_dirty = (ui_language != storage.config().language);
     update_language_label();
     update_settings_texts();
+    update_wifi_texts();
+    update_mqtt_texts();
+    update_datetime_texts();
     update_ui();
     update_wifi_ui();
     update_mqtt_ui();
