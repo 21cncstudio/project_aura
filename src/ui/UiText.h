@@ -57,4 +57,25 @@ inline const char *WifiPortalUrl() { return UiStrings::text(UiStrings::TextId::W
 inline const char *MqttPortalUrl() { return UiStrings::text(UiStrings::TextId::MqttPortalUrl); }
 inline const char *ThemePortalUrl() { return UiStrings::text(UiStrings::TextId::ThemePortalUrl); }
 
+inline const char *LabelSettingsTitle() { return UiStrings::text(UiStrings::TextId::LabelSettingsTitle); }
+inline const char *LabelSettingsBack() { return UiStrings::text(UiStrings::TextId::LabelSettingsBack); }
+inline const char *LabelTempOffsetTitle() { return UiStrings::text(UiStrings::TextId::LabelTempOffsetTitle); }
+inline const char *LabelHumOffsetTitle() { return UiStrings::text(UiStrings::TextId::LabelHumOffsetTitle); }
+inline const char *LabelNightMode() { return UiStrings::text(UiStrings::TextId::LabelNightMode); }
+inline const char *LabelUnitsCF() { return UiStrings::text(UiStrings::TextId::LabelUnitsCF); }
+inline const char *LabelHeadStatus() { return UiStrings::text(UiStrings::TextId::LabelHeadStatus); }
+inline const char *LabelWifi() { return UiStrings::text(UiStrings::TextId::LabelWifi); }
+inline const char *LabelTimeDate() { return UiStrings::text(UiStrings::TextId::LabelTimeDate); }
+inline const char *LabelThemeColor() { return UiStrings::text(UiStrings::TextId::LabelThemeColor); }
+inline const char *LabelMqtt() { return UiStrings::text(UiStrings::TextId::LabelMqtt); }
+inline const char *LabelAutoNight() { return UiStrings::text(UiStrings::TextId::LabelAutoNight); }
+inline const char *LabelRestart() { return UiStrings::text(UiStrings::TextId::LabelRestart); }
+inline const char *LabelFactoryReset() { return UiStrings::text(UiStrings::TextId::LabelFactoryReset); }
+inline const char *LabelCo2Calibration() { return UiStrings::text(UiStrings::TextId::LabelCo2Calibration); }
+inline const char *LabelAbout() { return UiStrings::text(UiStrings::TextId::LabelAbout); }
+inline const char *LabelLedIndicators() { return UiStrings::text(UiStrings::TextId::LabelLedIndicators); }
+inline const char *LabelAlertBlink() { return UiStrings::text(UiStrings::TextId::LabelAlertBlink); }
+inline const char *LabelVocRelearn() { return UiStrings::text(UiStrings::TextId::LabelVocRelearn); }
+inline const char *LabelBacklight() { return UiStrings::text(UiStrings::TextId::LabelBacklight); }
+
 } // namespace UiText

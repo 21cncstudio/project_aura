@@ -173,6 +173,9 @@ typedef struct _objects_t {
     lv_obj_t *label_voc_reset;
     lv_obj_t *btn_head_status_1;
     lv_obj_t *label_btn_head_status_1;
+    lv_obj_t *btn_language;
+    lv_obj_t *label_language_value;
+    lv_obj_t *label_language_title;
     lv_obj_t *container_confirm;
     lv_obj_t *container_confirm_card;
     lv_obj_t *btn_confirm_ok;

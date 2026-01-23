@@ -8,6 +8,7 @@
 
 #include <Arduino.h>
 #include "config/AppData.h"
+#include "config/AppConfig.h"
 #include <lvgl.h>
 #include "modules/SensorManager.h"
 #include "modules/TimeManager.h"
@@ -73,6 +74,9 @@ private:
     void update_datetime_ui();
     void update_boot_diag(uint32_t now_ms);
     bool boot_diag_has_errors(uint32_t now_ms);
+    void update_language_label();
+    Config::Language next_language(Config::Language current);
+    void update_settings_texts();
     void update_led_indicators();
     void update_co2_bar(int co2, bool valid);
     void init_ui_defaults();
@@ -175,6 +179,7 @@ private:
     void on_backlight_wake_hours_plus_event(lv_event_t *e);
     void on_backlight_wake_minutes_minus_event(lv_event_t *e);
     void on_backlight_wake_minutes_plus_event(lv_event_t *e);
+    void on_language_event(lv_event_t *e);
     void on_datetime_back_event(lv_event_t *e);
     void on_datetime_apply_event(lv_event_t *e);
     void on_ntp_toggle_event(lv_event_t *e);
@@ -253,6 +258,7 @@ private:
     static void on_backlight_wake_hours_plus_event_cb(lv_event_t *e);
     static void on_backlight_wake_minutes_minus_event_cb(lv_event_t *e);
     static void on_backlight_wake_minutes_plus_event_cb(lv_event_t *e);
+    static void on_language_event_cb(lv_event_t *e);
     static void on_datetime_back_event_cb(lv_event_t *e);
     static void on_datetime_apply_event_cb(lv_event_t *e);
     static void on_ntp_toggle_event_cb(lv_event_t *e);
@@ -327,6 +333,8 @@ private:
     float hum_offset_saved = 0.0f;
     bool hum_offset_dirty = false;
     bool hum_offset_ui_dirty = false;
+    Config::Language ui_language = Config::Language::EN;
+    bool language_dirty = false;
     bool blink_state = true;
     uint32_t last_blink_ms = 0;
     uint32_t last_ui_update_ms = 0;

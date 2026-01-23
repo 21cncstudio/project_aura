@@ -19,6 +19,7 @@
 #include "ui/BacklightManager.h"
 #include "ui/NightModeManager.h"
 #include "ui/ThemeManager.h"
+#include "ui/UiStrings.h"
 #include "ui/ui.h"
 
 using namespace Config;
@@ -77,6 +78,7 @@ void UiController::on_backlight_wake_hours_minus_event_cb(lv_event_t *e) { if (i
 void UiController::on_backlight_wake_hours_plus_event_cb(lv_event_t *e) { if (instance_) instance_->on_backlight_wake_hours_plus_event(e); }
 void UiController::on_backlight_wake_minutes_minus_event_cb(lv_event_t *e) { if (instance_) instance_->on_backlight_wake_minutes_minus_event(e); }
 void UiController::on_backlight_wake_minutes_plus_event_cb(lv_event_t *e) { if (instance_) instance_->on_backlight_wake_minutes_plus_event(e); }
+void UiController::on_language_event_cb(lv_event_t *e) { if (instance_) instance_->on_language_event(e); }
 void UiController::on_datetime_back_event_cb(lv_event_t *e) { if (instance_) instance_->on_datetime_back_event(e); }
 void UiController::on_datetime_apply_event_cb(lv_event_t *e) { if (instance_) instance_->on_datetime_apply_event(e); }
 void UiController::on_ntp_toggle_event_cb(lv_event_t *e) { if (instance_) instance_->on_ntp_toggle_event(e); }
@@ -117,22 +119,51 @@ void UiController::on_back_event(lv_event_t *e) {
         return;
     }
     LOGD("UI", "back pressed");
-    if (temp_offset_dirty || hum_offset_dirty) {
-        auto &cfg = storage.config();
-        if (temp_offset_dirty) {
-            cfg.temp_offset = temp_offset;
-            temp_offset_saved = temp_offset;
-            temp_offset_dirty = false;
-        }
-        if (hum_offset_dirty) {
-            cfg.hum_offset = hum_offset;
-            hum_offset_saved = hum_offset;
-            hum_offset_dirty = false;
-        }
+    bool save_config = false;
+    bool offsets_saved = false;
+    bool language_saved = false;
+    auto &cfg = storage.config();
+    if (temp_offset_dirty) {
+        cfg.temp_offset = temp_offset;
+        temp_offset_saved = temp_offset;
+        temp_offset_dirty = false;
+        offsets_saved = true;
+        save_config = true;
+    }
+    if (hum_offset_dirty) {
+        cfg.hum_offset = hum_offset;
+        hum_offset_saved = hum_offset;
+        hum_offset_dirty = false;
+        offsets_saved = true;
+        save_config = true;
+    }
+    if (language_dirty) {
+        cfg.language = ui_language;
+        language_dirty = false;
+        save_config = true;
+        language_saved = true;
+    }
+    if (save_config) {
         storage.saveConfig(true);
-        LOGI("UI", "offsets saved");
+        if (offsets_saved) LOGI("UI", "offsets saved");
+        if (language_saved) LOGI("UI", "language saved");
     }
     pending_screen_id = SCREEN_ID_PAGE_MAIN;
+}
+
+void UiController::on_language_event(lv_event_t *e) {
+    if (lv_event_get_code(e) != LV_EVENT_CLICKED) {
+        return;
+    }
+    ui_language = next_language(ui_language);
+    UiStrings::setLanguage(ui_language);
+    language_dirty = (ui_language != storage.config().language);
+    update_language_label();
+    update_settings_texts();
+    update_ui();
+    update_wifi_ui();
+    update_mqtt_ui();
+    update_datetime_ui();
 }
 
 void UiController::on_wifi_settings_event(lv_event_t *e) {

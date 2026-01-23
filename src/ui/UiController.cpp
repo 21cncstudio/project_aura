@@ -68,6 +68,15 @@ bool is_crash_reset(esp_reset_reason_t reason) {
     }
 }
 
+const char *language_label(Language lang) {
+    switch (lang) {
+        case Language::DE: return "DEUTSCH";
+        case Language::EN:
+        default:
+            return "ENGLISH";
+    }
+}
+
 void set_visible(lv_obj_t *obj, bool visible) {
     if (!obj) {
         return;
@@ -185,6 +194,7 @@ void UiController::begin() {
         {objects.btn_time_date, on_time_date_event_cb, LV_EVENT_CLICKED},
         {objects.btn_auto_dim, on_auto_night_settings_event_cb, LV_EVENT_CLICKED},
         {objects.btn_head_status_1, on_backlight_settings_event_cb, LV_EVENT_CLICKED},
+        {objects.btn_language, on_language_event_cb, LV_EVENT_CLICKED},
         {objects.btn_backlight_back, on_backlight_back_event_cb, LV_EVENT_CLICKED},
         {objects.btn_auto_night_back, on_auto_night_back_event_cb, LV_EVENT_CLICKED},
         {objects.btn_auto_night_start_hours_minus, on_auto_night_start_hours_minus_event_cb, LV_EVENT_CLICKED},
@@ -1212,6 +1222,44 @@ void UiController::update_settings_header() {
     sync_auto_dim_button_state();
 }
 
+Config::Language UiController::next_language(Config::Language current) {
+    switch (current) {
+        case Config::Language::DE: return Config::Language::EN;
+        case Config::Language::EN:
+        default:
+            return Config::Language::DE;
+    }
+}
+
+void UiController::update_language_label() {
+    if (objects.label_language_value) {
+        safe_label_set_text(objects.label_language_value, language_label(ui_language));
+    }
+}
+
+void UiController::update_settings_texts() {
+    if (objects.label_settings_title) safe_label_set_text(objects.label_settings_title, UiText::LabelSettingsTitle());
+    if (objects.label_btn_back) safe_label_set_text(objects.label_btn_back, UiText::LabelSettingsBack());
+    if (objects.label_temp_offset_title) safe_label_set_text(objects.label_temp_offset_title, UiText::LabelTempOffsetTitle());
+    if (objects.label_hum_offset_title) safe_label_set_text(objects.label_hum_offset_title, UiText::LabelHumOffsetTitle());
+    if (objects.label_btn_night_mode) safe_label_set_text(objects.label_btn_night_mode, UiText::LabelNightMode());
+    if (objects.label_btn_units_c_f) safe_label_set_text(objects.label_btn_units_c_f, UiText::LabelUnitsCF());
+    if (objects.label_btn_head_status) safe_label_set_text(objects.label_btn_head_status, UiText::LabelHeadStatus());
+    if (objects.label_btn_wifi) safe_label_set_text(objects.label_btn_wifi, UiText::LabelWifi());
+    if (objects.label_btn_time_date) safe_label_set_text(objects.label_btn_time_date, UiText::LabelTimeDate());
+    if (objects.label_btn_theme_color) safe_label_set_text(objects.label_btn_theme_color, UiText::LabelThemeColor());
+    if (objects.label_btn_mqtt) safe_label_set_text(objects.label_btn_mqtt, UiText::LabelMqtt());
+    if (objects.label_btn_auto_dim) safe_label_set_text(objects.label_btn_auto_dim, UiText::LabelAutoNight());
+    if (objects.label_btn_restart) safe_label_set_text(objects.label_btn_restart, UiText::LabelRestart());
+    if (objects.label_btn_factory_reset) safe_label_set_text(objects.label_btn_factory_reset, UiText::LabelFactoryReset());
+    if (objects.label_btn_co2_calib) safe_label_set_text(objects.label_btn_co2_calib, UiText::LabelCo2Calibration());
+    if (objects.label_btn_about) safe_label_set_text(objects.label_btn_about, UiText::LabelAbout());
+    if (objects.label_btn_units_led_indicators) safe_label_set_text(objects.label_btn_units_led_indicators, UiText::LabelLedIndicators());
+    if (objects.label_btn_alert_blink) safe_label_set_text(objects.label_btn_alert_blink, UiText::LabelAlertBlink());
+    if (objects.label_voc_reset) safe_label_set_text(objects.label_voc_reset, UiText::LabelVocRelearn());
+    if (objects.label_btn_head_status_1) safe_label_set_text(objects.label_btn_head_status_1, UiText::LabelBacklight());
+}
+
 void UiController::update_theme_custom_info(bool presets) {
     set_visible(objects.container_theme_custom_info, !presets);
     if (!presets && objects.qrcode_theme_custom) {
@@ -1291,6 +1339,12 @@ void UiController::init_ui_defaults() {
     if (objects.label_btn_night_mode) {
         lv_obj_set_style_text_color(objects.label_btn_night_mode, color_inactive(), LV_PART_MAIN | LV_STATE_DISABLED);
     }
+
+    ui_language = storage.config().language;
+    language_dirty = false;
+    UiStrings::setLanguage(ui_language);
+    update_language_label();
+    update_settings_texts();
 
     update_clock_labels();
     timeManager.syncInputsFromSystem(set_hour, set_minute, set_day, set_month, set_year);
