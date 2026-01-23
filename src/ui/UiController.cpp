@@ -71,6 +71,7 @@ bool is_crash_reset(esp_reset_reason_t reason) {
 const char *language_label(Language lang) {
     switch (lang) {
         case Language::DE: return "DEUTSCH";
+        case Language::ES: return "ESPAÑOL";
         case Language::EN:
         default:
             return "ENGLISH";
@@ -1230,10 +1231,11 @@ void UiController::update_settings_header() {
 
 Config::Language UiController::next_language(Config::Language current) {
     switch (current) {
-        case Config::Language::DE: return Config::Language::EN;
-        case Config::Language::EN:
+        case Config::Language::EN: return Config::Language::DE;
+        case Config::Language::DE: return Config::Language::ES;
+        case Config::Language::ES: return Config::Language::EN;
         default:
-            return Config::Language::DE;
+            return Config::Language::EN;
     }
 }
 
