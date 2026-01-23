@@ -5,6 +5,7 @@
 // Purchase a Commercial License: see COMMERCIAL_LICENSE_SUMMARY.md
 
 #include "ui/UiController.h"
+#include "ui/UiText.h"
 
 #include <WiFi.h>
 #include <string.h>
@@ -20,7 +21,7 @@ using namespace Config;
 
 void UiController::update_datetime_ui() {
     if (objects.label_ntp_interval) {
-        safe_label_set_text(objects.label_ntp_interval, "Every 6h");
+        safe_label_set_text(objects.label_ntp_interval, UiText::kNtpInterval);
     }
 
     const TimeZoneEntry &tz = timeManager.getTimezone();
@@ -96,16 +97,16 @@ void UiController::update_datetime_ui() {
 
     TimeManager::NtpUiState ntp_state = timeManager.getNtpUiState(millis());
     lv_color_t ntp_color = color_yellow();
-    const char *ntp_label = "OFF";
+    const char *ntp_label = UiText::kStatusOff;
     if (ntp_state == TimeManager::NTP_UI_SYNCING) {
         ntp_color = color_blue();
-        ntp_label = "SYNC";
+        ntp_label = UiText::kStatusSync;
     } else if (ntp_state == TimeManager::NTP_UI_OK) {
         ntp_color = color_green();
-        ntp_label = "OK";
+        ntp_label = UiText::kStatusOk;
     } else if (ntp_state == TimeManager::NTP_UI_ERR) {
         ntp_color = color_red();
-        ntp_label = "ERR";
+        ntp_label = UiText::kStatusErr;
     }
     if (objects.dot_ntp_status) {
         set_dot_color(objects.dot_ntp_status, ntp_color);
@@ -119,13 +120,13 @@ void UiController::update_datetime_ui() {
 
     if (objects.label_rtc_status) {
         if (!timeManager.isRtcPresent()) {
-            safe_label_set_text(objects.label_rtc_status, "OFF");
+            safe_label_set_text(objects.label_rtc_status, UiText::kStatusOff);
             if (objects.chip_rtc_status) set_chip_color(objects.chip_rtc_status, color_yellow());
         } else if (!timeManager.isRtcValid()) {
-            safe_label_set_text(objects.label_rtc_status, "ERR");
+            safe_label_set_text(objects.label_rtc_status, UiText::kStatusErr);
             if (objects.chip_rtc_status) set_chip_color(objects.chip_rtc_status, color_red());
         } else {
-            safe_label_set_text(objects.label_rtc_status, "OK");
+            safe_label_set_text(objects.label_rtc_status, UiText::kStatusOk);
             if (objects.chip_rtc_status) set_chip_color(objects.chip_rtc_status, color_green());
         }
     }
@@ -134,13 +135,13 @@ void UiController::update_datetime_ui() {
         bool wifi_enabled = networkManager.isEnabled();
         AuraNetworkManager::WifiState wifi_state = networkManager.state();
         if (!wifi_enabled) {
-            safe_label_set_text(objects.label_wifi_status_1, "OFF");
+            safe_label_set_text(objects.label_wifi_status_1, UiText::kStatusOff);
             if (objects.chip_wifi_status) set_chip_color(objects.chip_wifi_status, color_yellow());
         } else if (wifi_state == AuraNetworkManager::WIFI_STATE_STA_CONNECTED) {
-            safe_label_set_text(objects.label_wifi_status_1, "ON");
+            safe_label_set_text(objects.label_wifi_status_1, UiText::kStatusOn);
             if (objects.chip_wifi_status) set_chip_color(objects.chip_wifi_status, color_green());
         } else {
-            safe_label_set_text(objects.label_wifi_status_1, "ON");
+            safe_label_set_text(objects.label_wifi_status_1, UiText::kStatusOn);
             if (objects.chip_wifi_status) set_chip_color(objects.chip_wifi_status, color_blue());
         }
     }
@@ -152,14 +153,14 @@ void UiController::update_wifi_ui() {
     const String &wifi_ssid = networkManager.ssid();
     uint8_t wifi_retry_count = networkManager.retryCount();
     if (objects.label_wifi_status_value) {
-        const char *status = "OFF";
+        const char *status = UiText::kStatusOff;
         if (wifi_enabled) {
-            if (wifi_state == AuraNetworkManager::WIFI_STATE_STA_CONNECTED) status = "Connected";
-            else if (wifi_state == AuraNetworkManager::WIFI_STATE_AP_CONFIG) status = "AP Mode";
+            if (wifi_state == AuraNetworkManager::WIFI_STATE_STA_CONNECTED) status = UiText::kWifiStatusConnected;
+            else if (wifi_state == AuraNetworkManager::WIFI_STATE_AP_CONFIG) status = UiText::kWifiStatusApMode;
             else if (wifi_state == AuraNetworkManager::WIFI_STATE_OFF &&
-                     wifi_retry_count >= WIFI_CONNECT_MAX_RETRIES) status = "Error";
+                     wifi_retry_count >= WIFI_CONNECT_MAX_RETRIES) status = UiText::kWifiStatusError;
             else if (wifi_state == AuraNetworkManager::WIFI_STATE_STA_CONNECTING ||
-                     wifi_state == AuraNetworkManager::WIFI_STATE_OFF) status = "Connecting";
+                     wifi_state == AuraNetworkManager::WIFI_STATE_OFF) status = UiText::kWifiStatusConnecting;
         }
         safe_label_set_text(objects.label_wifi_status_value, status);
     }
@@ -174,7 +175,7 @@ void UiController::update_wifi_ui() {
 
     if (objects.label_wifi_ssid_value) {
         String safe_ssid;
-        const char *ssid_text = "---";
+        const char *ssid_text = UiText::kValueMissing;
         if (wifi_state == AuraNetworkManager::WIFI_STATE_STA_CONNECTED && !wifi_ssid.isEmpty()) {
             safe_ssid = wifi_label_safe(wifi_ssid);
             ssid_text = safe_ssid.c_str();
@@ -188,7 +189,7 @@ void UiController::update_wifi_ui() {
     }
 
     if (objects.label_wifi_ip_value) {
-        String ip = "---";
+        String ip = UiText::kValueMissing;
         if (wifi_state == AuraNetworkManager::WIFI_STATE_STA_CONNECTED) {
             ip = WiFi.localIP().toString();
         } else if (wifi_state == AuraNetworkManager::WIFI_STATE_AP_CONFIG) {
@@ -198,9 +199,8 @@ void UiController::update_wifi_ui() {
     }
     if (objects.qrcode_wifi_portal) {
         if (wifi_state == AuraNetworkManager::WIFI_STATE_AP_CONFIG) {
-            static const char kWifiPortalUrl[] = "http://192.168.4.1";
             lv_obj_clear_flag(objects.qrcode_wifi_portal, LV_OBJ_FLAG_HIDDEN);
-            lv_qrcode_update(objects.qrcode_wifi_portal, kWifiPortalUrl, strlen(kWifiPortalUrl));
+            lv_qrcode_update(objects.qrcode_wifi_portal, UiText::kWifiPortalUrl, strlen(UiText::kWifiPortalUrl));
         } else {
             lv_obj_add_flag(objects.qrcode_wifi_portal, LV_OBJ_FLAG_HIDDEN);
         }
@@ -369,23 +369,23 @@ void UiController::update_mqtt_ui() {
 
     // Update MQTT status label
     if (objects.label_mqtt_status_value) {
-        const char *status = "Disabled";
+        const char *status = UiText::kMqttStatusDisabled;
         if (mqttManager.isUserEnabled()) {
             if (!wifi_ready) {
-                status = "No WiFi";
+                status = UiText::kMqttStatusNoWifi;
             } else if (mqttManager.isConnected()) {
-                status = "Connected";
+                status = UiText::kMqttStatusConnected;
             } else {
                 uint32_t attempts = mqttManager.connectAttempts();
                 const uint32_t stage_limit = static_cast<uint32_t>(MQTT_CONNECT_MAX_FAILS);
                 if (mqttManager.retryExhausted()) {
-                    status = "Error";
+                    status = UiText::kMqttStatusError;
                 } else if (attempts >= stage_limit * 2) {
-                    status = "Retrying (1h)";
+                    status = UiText::kMqttStatusRetry1h;
                 } else if (attempts >= stage_limit) {
-                    status = "Retrying (10m)";
+                    status = UiText::kMqttStatusRetry10m;
                 } else {
-                    status = "Connecting...";
+                    status = UiText::kMqttStatusConnecting;
                 }
             }
         }
@@ -404,7 +404,7 @@ void UiController::update_mqtt_ui() {
 
     // Update Broker IP
     if (objects.label_mqtt_broker_value) {
-        String broker_addr = "---";
+        String broker_addr = UiText::kValueMissing;
         if (mqttManager.isUserEnabled() && !mqttManager.host().isEmpty()) {
             broker_addr = mqttManager.host() + ":" + String(mqttManager.port());
         }
@@ -413,7 +413,7 @@ void UiController::update_mqtt_ui() {
 
     // Update Device IP
     if (objects.label_mqtt_device_ip_value) {
-        String device_ip = "---";
+        String device_ip = UiText::kValueMissing;
         if (networkManager.isConnected()) {
             device_ip = WiFi.localIP().toString();
         }
@@ -422,7 +422,7 @@ void UiController::update_mqtt_ui() {
 
     // Update Topic
     if (objects.label_mqtt_topic_value) {
-        String topic = "---";
+        String topic = UiText::kValueMissing;
         if (mqttManager.isUserEnabled() && !mqttManager.baseTopic().isEmpty()) {
             topic = mqttManager.baseTopic();
         }
@@ -432,7 +432,7 @@ void UiController::update_mqtt_ui() {
     // Update QR code - show only when WiFi is connected.
     if (objects.qrcode_mqtt_portal) {
         if (wifi_ready) {
-            String mqtt_url = "http://aura.local/mqtt";
+            String mqtt_url = UiText::kMqttPortalUrl;
             lv_obj_clear_flag(objects.qrcode_mqtt_portal, LV_OBJ_FLAG_HIDDEN);
             lv_qrcode_update(objects.qrcode_mqtt_portal, mqtt_url.c_str(), mqtt_url.length());
         } else {
@@ -442,7 +442,7 @@ void UiController::update_mqtt_ui() {
 
     // Update toggle button text and state
     if (objects.label_btn_mqtt_toggle) {
-        safe_label_set_text(objects.label_btn_mqtt_toggle, "ON / OFF");
+        safe_label_set_text(objects.label_btn_mqtt_toggle, UiText::kMqttToggleLabel);
     }
     sync_mqtt_toggle_state();
     set_button_enabled(objects.btn_mqtt_toggle, wifi_ready);

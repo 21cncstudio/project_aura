@@ -5,6 +5,7 @@
 // Purchase a Commercial License: see COMMERCIAL_LICENSE_SUMMARY.md
 
 #include "ui/UiController.h"
+#include "ui/UiText.h"
 #include "ui/ui.h"
 #include "core/MathUtils.h"
 
@@ -18,7 +19,7 @@ void UiController::update_sensor_cards(const AirQuality &aq, bool gas_warmup, bo
     if (currentData.co2_valid) {
         snprintf(buf, sizeof(buf), "%d", currentData.co2);
     } else {
-        strcpy(buf, "---");
+        strcpy(buf, UiText::kValueMissing);
     }
     safe_label_set_text(objects.label_co2_value, buf);
     if (objects.co2_bar_wrap) {
@@ -39,13 +40,13 @@ void UiController::update_sensor_cards(const AirQuality &aq, bool gas_warmup, bo
         }
         snprintf(buf, sizeof(buf), "%.1f", temp_display);
     } else {
-        strcpy(buf, "---");
+        strcpy(buf, UiText::kValueMissing);
     }
     if (objects.label_temp_value) {
         safe_label_set_text(objects.label_temp_value, buf);
     }
     if (objects.label_temp_unit) {
-        safe_label_set_text(objects.label_temp_unit, temp_units_c ? "C" : "F");
+        safe_label_set_text(objects.label_temp_unit, temp_units_c ? UiText::kUnitC : UiText::kUnitF);
     }
     lv_color_t temp_col = currentData.temp_valid ? getTempColor(currentData.temperature) : color_inactive();
     set_dot_color(objects.dot_temp, alert_color_for_mode(temp_col));
@@ -53,7 +54,7 @@ void UiController::update_sensor_cards(const AirQuality &aq, bool gas_warmup, bo
     if (currentData.hum_valid) {
         snprintf(buf, sizeof(buf), "%.0f", currentData.humidity);
     } else {
-        strcpy(buf, "---");
+        strcpy(buf, UiText::kValueMissing);
     }
     safe_label_set_text(objects.label_hum_value, buf);
     lv_color_t hum_col = currentData.hum_valid ? getHumidityColor(currentData.humidity) : color_inactive();
@@ -71,12 +72,12 @@ void UiController::update_sensor_cards(const AirQuality &aq, bool gas_warmup, bo
             }
             snprintf(buf, sizeof(buf), "%.1f", dew_display);
         } else {
-            strcpy(buf, "---");
+            strcpy(buf, UiText::kValueMissing);
         }
         safe_label_set_text(objects.label_dew_value, buf);
     }
     if (objects.label_dew_unit) {
-        safe_label_set_text(objects.label_dew_unit, temp_units_c ? "C" : "F");
+        safe_label_set_text(objects.label_dew_unit, temp_units_c ? UiText::kUnitC : UiText::kUnitF);
     }
     if (objects.dot_dp) {
         lv_color_t dp_col = getDewPointColor(dew_c);
@@ -87,7 +88,7 @@ void UiController::update_sensor_cards(const AirQuality &aq, bool gas_warmup, bo
         if (currentData.pm25 < 10.0f) snprintf(buf, sizeof(buf), "%.1f", currentData.pm25);
         else snprintf(buf, sizeof(buf), "%.0f", currentData.pm25);
     } else {
-        strcpy(buf, "---");
+        strcpy(buf, UiText::kValueMissing);
     }
     safe_label_set_text(objects.label_pm25_value, buf);
     lv_color_t pm25_col = currentData.pm25_valid ? getPM25Color(currentData.pm25) : color_inactive();
@@ -97,7 +98,7 @@ void UiController::update_sensor_cards(const AirQuality &aq, bool gas_warmup, bo
         if (currentData.pm10 < 10.0f) snprintf(buf, sizeof(buf), "%.1f", currentData.pm10);
         else snprintf(buf, sizeof(buf), "%.0f", currentData.pm10);
     } else {
-        strcpy(buf, "---");
+        strcpy(buf, UiText::kValueMissing);
     }
     safe_label_set_text(objects.label_pm10_value, buf);
     lv_color_t pm10_col = currentData.pm10_valid ? getPM10Color(currentData.pm10) : color_inactive();
@@ -106,7 +107,7 @@ void UiController::update_sensor_cards(const AirQuality &aq, bool gas_warmup, bo
     if (currentData.voc_valid) {
         snprintf(buf, sizeof(buf), "%d", currentData.voc_index);
     } else {
-        strcpy(buf, "---");
+        strcpy(buf, UiText::kValueMissing);
     }
     if (objects.label_voc_value) {
         safe_label_set_text(objects.label_voc_value, buf);
@@ -130,7 +131,7 @@ void UiController::update_sensor_cards(const AirQuality &aq, bool gas_warmup, bo
     if (currentData.nox_valid) {
         snprintf(buf, sizeof(buf), "%d", currentData.nox_index);
     } else {
-        strcpy(buf, "---");
+        strcpy(buf, UiText::kValueMissing);
     }
     if (objects.label_nox_value) {
         safe_label_set_text(objects.label_nox_value, buf);
@@ -153,10 +154,10 @@ void UiController::update_sensor_cards(const AirQuality &aq, bool gas_warmup, bo
 
     const bool hcho_available = currentData.hcho_valid;
     if (objects.label_hcho_title) {
-        safe_label_set_text(objects.label_hcho_title, hcho_available ? "HCHO" : "AQI");
+        safe_label_set_text(objects.label_hcho_title, hcho_available ? UiText::kLabelHcho : UiText::kLabelAqi);
     }
     if (objects.label_hcho_unit) {
-        safe_label_set_text(objects.label_hcho_unit, hcho_available ? "ppb" : "Index");
+        safe_label_set_text(objects.label_hcho_unit, hcho_available ? UiText::kUnitPpb : UiText::kUnitIndex);
     }
     if (objects.label_hcho_value) {
         if (hcho_available) {
@@ -174,7 +175,7 @@ void UiController::update_sensor_cards(const AirQuality &aq, bool gas_warmup, bo
     if (currentData.pressure_valid) {
         snprintf(buf, sizeof(buf), "%.0f", currentData.pressure);
     } else {
-        strcpy(buf, "---");
+        strcpy(buf, UiText::kValueMissing);
     }
     safe_label_set_text(objects.label_pressure_value, buf);
 
@@ -185,7 +186,7 @@ void UiController::update_sensor_cards(const AirQuality &aq, bool gas_warmup, bo
             snprintf(buf, sizeof(buf), "%.1f", currentData.pressure_delta_3h);
         }
     } else {
-        strcpy(buf, "--");
+        strcpy(buf, UiText::kValueMissingShort);
     }
     safe_label_set_text(objects.label_delta_3h_value, buf);
 
@@ -196,7 +197,7 @@ void UiController::update_sensor_cards(const AirQuality &aq, bool gas_warmup, bo
             snprintf(buf, sizeof(buf), "%.1f", currentData.pressure_delta_24h);
         }
     } else {
-        strcpy(buf, "--");
+        strcpy(buf, UiText::kValueMissingShort);
     }
     safe_label_set_text(objects.label_delta_24h_value, buf);
 

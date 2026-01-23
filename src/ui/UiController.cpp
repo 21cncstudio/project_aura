@@ -5,6 +5,7 @@
 // Purchase a Commercial License: see COMMERCIAL_LICENSE_SUMMARY.md
 
 #include "ui/UiController.h"
+#include "ui/UiText.h"
 
 #include <math.h>
 #include <string.h>
@@ -777,7 +778,7 @@ AirQuality UiController::getAirQuality(const SensorData &data) {
     }
 
     if (!has_valid) {
-        aq.status = "Initializing";
+        aq.status = UiText::kStatusInitializing;
         aq.score = 0;
         aq.color = color_blue();
         return aq;
@@ -785,10 +786,10 @@ AirQuality UiController::getAirQuality(const SensorData &data) {
 
     aq.score = max_score;
 
-    if (aq.score <= 25)      { aq.status = "Excellent"; aq.color = color_green(); }
-    else if (aq.score <= 50) { aq.status = "Good";      aq.color = color_green(); }
-    else if (aq.score <= 75) { aq.status = "Moderate";  aq.color = color_yellow(); }
-    else                     { aq.status = "Poor";      aq.color = color_red(); }
+    if (aq.score <= 25)      { aq.status = UiText::kQualityExcellent; aq.color = color_green(); }
+    else if (aq.score <= 50) { aq.status = UiText::kQualityGood;      aq.color = color_green(); }
+    else if (aq.score <= 75) { aq.status = UiText::kQualityModerate;  aq.color = color_yellow(); }
+    else                     { aq.status = UiText::kQualityPoor;      aq.color = color_red(); }
 
     return aq;
 }
@@ -846,10 +847,10 @@ void UiController::update_clock_labels() {
     char buf[16];
     tm local_tm = {};
     if (!timeManager.getLocalTime(local_tm)) {
-        if (objects.label_time_value) safe_label_set_text(objects.label_time_value, "--:--");
-        if (objects.label_date_value) safe_label_set_text(objects.label_date_value, "--.--.----");
-        if (objects.label_time_value_1) safe_label_set_text(objects.label_time_value_1, "--:--");
-        if (objects.label_date_value_1) safe_label_set_text(objects.label_date_value_1, "--.--.----");
+        if (objects.label_time_value) safe_label_set_text(objects.label_time_value, UiText::kTimeMissing);
+        if (objects.label_date_value) safe_label_set_text(objects.label_date_value, UiText::kDateMissing);
+        if (objects.label_time_value_1) safe_label_set_text(objects.label_time_value_1, UiText::kTimeMissing);
+        if (objects.label_date_value_1) safe_label_set_text(objects.label_date_value_1, UiText::kDateMissing);
         return;
     }
     snprintf(buf, sizeof(buf), "%02d:%02d", local_tm.tm_hour, local_tm.tm_min);
@@ -1231,7 +1232,7 @@ void UiController::update_hum_offset_label() {
     } else if (val < 0.0f) {
         snprintf(buf, sizeof(buf), "%.0f%%", val);
     } else {
-        strcpy(buf, "0%");
+        strcpy(buf, UiText::kValueZeroPercent);
     }
     safe_label_set_text(objects.label_hum_offset_value, buf);
 }
@@ -1353,8 +1354,7 @@ void UiController::update_settings_header() {
 void UiController::update_theme_custom_info(bool presets) {
     set_visible(objects.container_theme_custom_info, !presets);
     if (!presets && objects.qrcode_theme_custom) {
-        static const char kThemeUrl[] = "http://aura.local/theme";
-        lv_qrcode_update(objects.qrcode_theme_custom, kThemeUrl, strlen(kThemeUrl));
+        lv_qrcode_update(objects.qrcode_theme_custom, UiText::kThemePortalUrl, strlen(UiText::kThemePortalUrl));
     }
 }
 
@@ -1387,15 +1387,15 @@ void UiController::update_status_message(uint32_t now_ms, bool gas_warmup) {
 
     const char *status_text = nullptr;
     if (!has_valid) {
-        status_text = "Initializing";
+        status_text = UiText::kStatusInitializing;
     } else if (count == 0) {
-        status_text = "Fresh Air - All Good";
+        status_text = UiText::kStatusAllGood;
     } else {
         status_text = messages[status_msg_index].text;
     }
 
     if (objects.label_status_value) {
-        safe_label_set_text(objects.label_status_value, status_text ? status_text : "---");
+        safe_label_set_text(objects.label_status_value, status_text ? status_text : UiText::kValueMissing);
     }
 }
 
