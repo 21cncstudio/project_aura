@@ -816,26 +816,29 @@ void UiController::update_boot_diag(uint32_t now_ms) {
         safe_label_set_text(objects.lbl_diag_heap, buf);
     }
     if (objects.lbl_diag_storage) {
-        const char *status = "ERR";
+        const char *status = UiText::StatusErr();
         if (storage.isMounted()) {
-            status = storage.isConfigLoaded() ? "OK (config)" : "OK (defaults)";
+            status = storage.isConfigLoaded() ? UiText::BootDiagStorageOkConfig()
+                                              : UiText::BootDiagStorageOkDefaults();
         }
         safe_label_set_text(objects.lbl_diag_storage, status);
     }
     if (objects.lbl_diag_i2c) {
-        safe_label_set_text(objects.lbl_diag_i2c, boot_i2c_recovered ? "RECOVERED" : "FAIL");
+        safe_label_set_text(objects.lbl_diag_i2c,
+                            boot_i2c_recovered ? UiText::BootDiagRecovered() : UiText::BootDiagFail());
     }
     if (objects.lbl_diag_touch) {
-        safe_label_set_text(objects.lbl_diag_touch, boot_touch_detected ? "DETECTED" : "FAIL");
+        safe_label_set_text(objects.lbl_diag_touch,
+                            boot_touch_detected ? UiText::BootDiagDetected() : UiText::BootDiagFail());
     }
     if (objects.lbl_diag_sen) {
-        const char *status = "ERR";
+        const char *status = UiText::StatusErr();
         if (sensorManager.isOk()) {
-            status = "OK";
+            status = UiText::StatusOk();
         } else {
             uint32_t retry_at = sensorManager.retryAtMs();
             if (retry_at != 0 && now_ms < retry_at) {
-                status = "STARTING";
+                status = UiText::BootDiagStarting();
             }
         }
         safe_label_set_text(objects.lbl_diag_sen, status);
@@ -844,20 +847,22 @@ void UiController::update_boot_diag(uint32_t now_ms) {
         safe_label_set_text(objects.lbl_diag_dps_label, sensorManager.pressureSensorLabel());
     }
     if (objects.lbl_diag_dps) {
-        safe_label_set_text(objects.lbl_diag_dps, sensorManager.isDpsOk() ? "OK" : "ERR");
+        safe_label_set_text(objects.lbl_diag_dps,
+                            sensorManager.isDpsOk() ? UiText::StatusOk() : UiText::StatusErr());
     }
     if (objects.lbl_diag_sfa) {
-        safe_label_set_text(objects.lbl_diag_sfa, sensorManager.isSfaOk() ? "OK" : "ERR");
+        safe_label_set_text(objects.lbl_diag_sfa,
+                            sensorManager.isSfaOk() ? UiText::StatusOk() : UiText::StatusErr());
     }
     if (objects.lbl_diag_rtc) {
-        const char *status = "NOT FOUND";
+        const char *status = UiText::BootDiagNotFound();
         if (timeManager.isRtcPresent()) {
             if (timeManager.isRtcLostPower()) {
-                status = "LOST";
+                status = UiText::BootDiagLost();
             } else if (timeManager.isRtcValid()) {
-                status = "OK";
+                status = UiText::StatusOk();
             } else {
-                status = "ERR";
+                status = UiText::StatusErr();
             }
         }
         safe_label_set_text(objects.lbl_diag_rtc, status);
@@ -1260,6 +1265,100 @@ void UiController::update_settings_texts() {
     if (objects.label_btn_head_status_1) safe_label_set_text(objects.label_btn_head_status_1, UiText::LabelBacklight());
 }
 
+void UiController::update_main_texts() {
+    if (objects.label_status_title) safe_label_set_text(objects.label_status_title, UiText::LabelStatusTitle());
+    if (objects.label_btn_settings) safe_label_set_text(objects.label_btn_settings, UiText::LabelSettingsTitle());
+    if (objects.label_temp_title) safe_label_set_text(objects.label_temp_title, UiText::LabelTemperatureTitle());
+    if (objects.label_hum_title) safe_label_set_text(objects.label_hum_title, UiText::LabelHumidityTitle());
+    if (objects.label_pressure_title) safe_label_set_text(objects.label_pressure_title, UiText::LabelPressureTitle());
+    if (objects.label_time_title) safe_label_set_text(objects.label_time_title, UiText::LabelTimeCard());
+    if (objects.label_voc_warmup) safe_label_set_text(objects.label_voc_warmup, UiText::LabelWarmup());
+    if (objects.label_nox_warmup) safe_label_set_text(objects.label_nox_warmup, UiText::LabelWarmup());
+    if (objects.label_voc_unit) safe_label_set_text(objects.label_voc_unit, UiText::UnitIndex());
+    if (objects.label_nox_unit) safe_label_set_text(objects.label_nox_unit, UiText::UnitIndex());
+}
+
+void UiController::update_confirm_texts() {
+    if (objects.label_btn_confirm_voc) safe_label_set_text(objects.label_btn_confirm_voc, UiText::LabelConfirmVocButton());
+    if (objects.label_btn_confirm_restart) safe_label_set_text(objects.label_btn_confirm_restart, UiText::LabelConfirmRestartButton());
+    if (objects.label_btn_confirm_reset) safe_label_set_text(objects.label_btn_confirm_reset, UiText::LabelConfirmResetButton());
+    if (objects.label_btn_confirm_cancel) safe_label_set_text(objects.label_btn_confirm_cancel, UiText::LabelConfirmCancelButton());
+    if (objects.label_confirm_title_voc) safe_label_set_text(objects.label_confirm_title_voc, UiText::LabelConfirmTitleVoc());
+    if (objects.container_confirm_voc_text) safe_label_set_text(objects.container_confirm_voc_text, UiText::LabelConfirmTextVoc());
+    if (objects.label_confirm_title_restart) safe_label_set_text(objects.label_confirm_title_restart, UiText::LabelConfirmTitleRestart());
+    if (objects.container_confirm_restart_text) safe_label_set_text(objects.container_confirm_restart_text, UiText::LabelConfirmTextRestart());
+    if (objects.label_confirm_title_reset) safe_label_set_text(objects.label_confirm_title_reset, UiText::LabelConfirmTitleReset());
+    if (objects.container_confirm_reset_text) safe_label_set_text(objects.container_confirm_reset_text, UiText::LabelConfirmTextReset());
+}
+
+void UiController::update_theme_texts() {
+    if (objects.label_theme_title) safe_label_set_text(objects.label_theme_title, UiText::LabelThemeTitle());
+    if (objects.label_btn_theme_back) safe_label_set_text(objects.label_btn_theme_back, UiText::LabelSettingsBack());
+    if (objects.label_btn_theme_custom) safe_label_set_text(objects.label_btn_theme_custom, UiText::LabelThemeCustom());
+    if (objects.label_btn_theme_presets) safe_label_set_text(objects.label_btn_theme_presets, UiText::LabelThemePresets());
+    if (objects.label_theme_preview_title) safe_label_set_text(objects.label_theme_preview_title, UiText::LabelThemeExample());
+    if (objects.label_theme_custom_text) safe_label_set_text(objects.label_theme_custom_text, UiText::LabelThemeCustomInfo());
+    if (objects.label_theme_preview_hum_title) safe_label_set_text(objects.label_theme_preview_hum_title, UiText::LabelHumidityTitle());
+}
+
+void UiController::update_auto_night_texts() {
+    if (objects.label_auto_night_title) safe_label_set_text(objects.label_auto_night_title, UiText::LabelAutoNightTitle());
+    if (objects.label_btn_auto_night_back) safe_label_set_text(objects.label_btn_auto_night_back, UiText::LabelSettingsBack());
+    if (objects.label_auto_night_hint) safe_label_set_text(objects.label_auto_night_hint, UiText::LabelAutoNightHint());
+    if (objects.label_auto_night_start_title) safe_label_set_text(objects.label_auto_night_start_title, UiText::LabelAutoNightStartTitle());
+    if (objects.label_auto_night_end_title) safe_label_set_text(objects.label_auto_night_end_title, UiText::LabelAutoNightEndTitle());
+    if (objects.label_auto_night_start_hours) safe_label_set_text(objects.label_auto_night_start_hours, UiText::LabelSetTimeHours());
+    if (objects.label_auto_night_start_minutes) safe_label_set_text(objects.label_auto_night_start_minutes, UiText::LabelSetTimeMinutes());
+    if (objects.label_auto_night_end_hours) safe_label_set_text(objects.label_auto_night_end_hours, UiText::LabelSetTimeHours());
+    if (objects.label_auto_night_end_minutes) safe_label_set_text(objects.label_auto_night_end_minutes, UiText::LabelSetTimeMinutes());
+    if (objects.label_btn_auto_night_toggle) safe_label_set_text(objects.label_btn_auto_night_toggle, UiText::MqttToggleLabel());
+}
+
+void UiController::update_backlight_texts() {
+    if (objects.label_backlight_title) safe_label_set_text(objects.label_backlight_title, UiText::LabelBacklightTitle());
+    if (objects.label_backlight_hint) safe_label_set_text(objects.label_backlight_hint, UiText::LabelBacklightHint());
+    if (objects.label_backlight_schedule_title) safe_label_set_text(objects.label_backlight_schedule_title, UiText::LabelBacklightScheduleTitle());
+    if (objects.label_backlight_presets_title) safe_label_set_text(objects.label_backlight_presets_title, UiText::LabelBacklightPresetsTitle());
+    if (objects.label_backlight_sleep_title) safe_label_set_text(objects.label_backlight_sleep_title, UiText::LabelBacklightSleepTitle());
+    if (objects.label_backlight_wake_title) safe_label_set_text(objects.label_backlight_wake_title, UiText::LabelBacklightWakeTitle());
+    if (objects.label_backlight_sleep_hours) safe_label_set_text(objects.label_backlight_sleep_hours, UiText::LabelSetTimeHours());
+    if (objects.label_backlight_sleep_minutes) safe_label_set_text(objects.label_backlight_sleep_minutes, UiText::LabelSetTimeMinutes());
+    if (objects.label_backlight_wake_hours) safe_label_set_text(objects.label_backlight_wake_hours, UiText::LabelSetTimeHours());
+    if (objects.label_backlight_wake_minutes) safe_label_set_text(objects.label_backlight_wake_minutes, UiText::LabelSetTimeMinutes());
+    if (objects.label_btn_backlight_back) safe_label_set_text(objects.label_btn_backlight_back, UiText::LabelSettingsBack());
+    if (objects.label_btn_backlight_schedule_toggle) safe_label_set_text(objects.label_btn_backlight_schedule_toggle, UiText::MqttToggleLabel());
+    if (objects.label_btn_backlight_always_on) safe_label_set_text(objects.label_btn_backlight_always_on, UiText::LabelBacklightAlwaysOn());
+    if (objects.label_btn_backlight_30s) safe_label_set_text(objects.label_btn_backlight_30s, UiText::LabelBacklight30s());
+    if (objects.label_btn_backlight_1m) safe_label_set_text(objects.label_btn_backlight_1m, UiText::LabelBacklight1m());
+    if (objects.label_btn_backlight_5m) safe_label_set_text(objects.label_btn_backlight_5m, UiText::LabelBacklight5m());
+}
+
+void UiController::update_co2_calib_texts() {
+    if (objects.label_co2_calib_title) safe_label_set_text(objects.label_co2_calib_title, UiText::LabelCo2CalibTitle());
+    if (objects.label_btn_co2_calib_back) safe_label_set_text(objects.label_btn_co2_calib_back, UiText::LabelSettingsBack());
+    if (objects.label_btn_co2_calib_start) safe_label_set_text(objects.label_btn_co2_calib_start, UiText::LabelCo2CalibStart());
+    if (objects.label_co2_calib_asc_text) safe_label_set_text(objects.label_co2_calib_asc_text, UiText::LabelCo2CalibAscInfo());
+    if (objects.label_co2_calib_fresh_text) safe_label_set_text(objects.label_co2_calib_fresh_text, UiText::LabelCo2CalibFreshInfo());
+}
+
+void UiController::update_boot_diag_texts() {
+    if (objects.label_btn_diag_continue) safe_label_set_text(objects.label_btn_diag_continue, UiText::LabelBootTapToContinue());
+    if (objects.lbl_diag_title) safe_label_set_text(objects.lbl_diag_title, UiText::LabelBootDiagTitle());
+    if (objects.lbl_diag_system_title) safe_label_set_text(objects.lbl_diag_system_title, UiText::LabelBootDiagSystemTitle());
+    if (objects.lbl_diag_sensors_title) safe_label_set_text(objects.lbl_diag_sensors_title, UiText::LabelBootDiagSensorsTitle());
+    if (objects.lbl_diag_app_label) safe_label_set_text(objects.lbl_diag_app_label, UiText::LabelBootDiagAppLabel());
+    if (objects.lbl_diag_mac_label) safe_label_set_text(objects.lbl_diag_mac_label, UiText::LabelBootDiagMacLabel());
+    if (objects.lbl_diag_reason_label) safe_label_set_text(objects.lbl_diag_reason_label, UiText::LabelBootDiagResetLabel());
+    if (objects.lbl_diag_heap_label) safe_label_set_text(objects.lbl_diag_heap_label, UiText::LabelBootDiagHeapLabel());
+    if (objects.lbl_diag_storage_label) safe_label_set_text(objects.lbl_diag_storage_label, UiText::LabelBootDiagStorageLabel());
+    if (objects.lbl_diag_i2c_label) safe_label_set_text(objects.lbl_diag_i2c_label, UiText::LabelBootDiagI2cLabel());
+    if (objects.lbl_diag_touch_label) safe_label_set_text(objects.lbl_diag_touch_label, UiText::LabelBootDiagTouchLabel());
+    if (objects.lbl_diag_sen_label) safe_label_set_text(objects.lbl_diag_sen_label, UiText::LabelBootDiagSenLabel());
+    if (objects.lbl_diag_sfa_label) safe_label_set_text(objects.lbl_diag_sfa_label, UiText::LabelBootDiagSfaLabel());
+    if (objects.lbl_diag_rtc_label) safe_label_set_text(objects.lbl_diag_rtc_label, UiText::LabelBootDiagRtcLabel());
+    if (objects.lbl_diag_error) safe_label_set_text(objects.lbl_diag_error, UiText::LabelBootDiagErrorsDetected());
+}
+
 void UiController::update_theme_custom_info(bool presets) {
     set_visible(objects.container_theme_custom_info, !presets);
     if (!presets && objects.qrcode_theme_custom) {
@@ -1345,9 +1444,16 @@ void UiController::init_ui_defaults() {
     UiStrings::setLanguage(ui_language);
     update_language_label();
     update_settings_texts();
+    update_main_texts();
+    update_confirm_texts();
     update_wifi_texts();
     update_mqtt_texts();
     update_datetime_texts();
+    update_theme_texts();
+    update_auto_night_texts();
+    update_backlight_texts();
+    update_co2_calib_texts();
+    update_boot_diag_texts();
 
     update_clock_labels();
     timeManager.syncInputsFromSystem(set_hour, set_minute, set_day, set_month, set_year);

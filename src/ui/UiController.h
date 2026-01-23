@@ -77,9 +77,16 @@ private:
     void update_language_label();
     Config::Language next_language(Config::Language current);
     void update_settings_texts();
+    void update_main_texts();
+    void update_confirm_texts();
     void update_wifi_texts();
     void update_mqtt_texts();
     void update_datetime_texts();
+    void update_theme_texts();
+    void update_auto_night_texts();
+    void update_backlight_texts();
+    void update_co2_calib_texts();
+    void update_boot_diag_texts();
     void update_led_indicators();
     void update_co2_bar(int co2, bool valid);
     void init_ui_defaults();
