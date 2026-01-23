@@ -522,15 +522,6 @@ void tick_screen_page_backlight();
 void create_screen_page_mqtt();
 void tick_screen_page_mqtt();
 
-void create_user_widget_card_simple(lv_obj_t *parent_obj, int startWidgetIndex);
-void tick_user_widget_card_simple(int startWidgetIndex);
-
-void create_user_widget_card_split(lv_obj_t *parent_obj, int startWidgetIndex);
-void tick_user_widget_card_split(int startWidgetIndex);
-
-void create_user_widget_card_pressure(lv_obj_t *parent_obj, int startWidgetIndex);
-void tick_user_widget_card_pressure(int startWidgetIndex);
-
 void tick_screen_by_id(enum ScreensEnum screenId);
 void tick_screen(int screen_index);
 

@@ -7,9 +7,6 @@
 extern "C" {
 #endif
 
-extern const lv_font_t ui_font_montserrat_96_digits;
-extern const lv_font_t ui_font_montserrat_medium_96_digits;
-extern const lv_font_t ui_font_montserrat_medium_72_digits;
 extern const lv_font_t ui_font_jet_med_72;
 extern const lv_font_t ui_font_jet_med_48;
 extern const lv_font_t ui_font_jet_reg_14;
