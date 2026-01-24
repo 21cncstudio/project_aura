@@ -10,6 +10,7 @@
 #include <string.h>
 #include <WiFi.h>
 #include "core/Logger.h"
+#include "core/MathUtils.h"
 #include "modules/StorageManager.h"
 #include "modules/NetworkManager.h"
 
@@ -297,6 +298,8 @@ void MqttManager::publishDiscovery() {
                            "humidity", "measurement", "{{ value_json.humidity }}", "");
     publishDiscoverySensor("dew_point", "Dew Point", "\\u00b0C",
                            "temperature", "measurement", "{{ value_json.dew_point }}", "mdi:thermometer-water");
+    publishDiscoverySensor("absolute_humidity", "Absolute Humidity", "g/m\\u00b3",
+                           "", "measurement", "{{ value_json.absolute_humidity }}", "mdi:water");
     publishDiscoverySensor("co2", "CO2", "ppm",
                            "carbon_dioxide", "measurement", "{{ value_json.co2 }}", "");
     publishDiscoverySensor("voc_index", "VOC Index", "index",
@@ -338,7 +341,7 @@ void MqttManager::publishState(const SensorData &data, bool night_mode, bool ale
         return;
     }
     String payload;
-    payload.reserve(512);
+    payload.reserve(560);
     payload += "{";
     bool first = true;
     auto add_int = [&](const char *key, bool valid, int value) {
@@ -375,10 +378,17 @@ void MqttManager::publishState(const SensorData &data, bool night_mode, bool ale
         dew_c = computeDewPointC(data.temperature, data.humidity);
         dew_valid = isfinite(dew_c);
     }
+    float ah_gm3 = NAN;
+    bool ah_valid = data.temp_valid && data.hum_valid;
+    if (ah_valid) {
+        ah_gm3 = MathUtils::compute_absolute_humidity_gm3(data.temperature, data.humidity);
+        ah_valid = isfinite(ah_gm3);
+    }
 
     add_float("temp", data.temp_valid, data.temperature, 1);
     add_float("humidity", data.hum_valid, data.humidity, 1);
     add_float("dew_point", dew_valid, dew_c, 1);
+    add_float("absolute_humidity", ah_valid, ah_gm3, 1);
     add_int("co2", data.co2_valid, data.co2);
     add_int("voc_index", data.voc_valid, data.voc_index);
     add_int("nox_index", data.nox_valid, data.nox_index);
