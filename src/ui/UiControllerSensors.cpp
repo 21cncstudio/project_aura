@@ -61,9 +61,13 @@ void UiController::update_sensor_cards(const AirQuality &aq, bool gas_warmup, bo
     set_dot_color(objects.dot_hum, alert_color_for_mode(hum_col));
 
     float dew_c = NAN;
+    float dew_c_rounded = NAN;
     float ah_gm3 = NAN;
     if (currentData.temp_valid && currentData.hum_valid) {
         dew_c = MathUtils::compute_dew_point_c(currentData.temperature, currentData.humidity);
+        if (isfinite(dew_c)) {
+            dew_c_rounded = roundf(dew_c);
+        }
         ah_gm3 = MathUtils::compute_absolute_humidity_gm3(currentData.temperature, currentData.humidity);
     }
     if (objects.label_dew_value) {
@@ -71,6 +75,8 @@ void UiController::update_sensor_cards(const AirQuality &aq, bool gas_warmup, bo
             float dew_display = dew_c;
             if (!temp_units_c) {
                 dew_display = (dew_display * 9.0f / 5.0f) + 32.0f;
+            } else if (isfinite(dew_c_rounded)) {
+                dew_display = dew_c_rounded;
             }
             snprintf(buf, sizeof(buf), "%.0f", dew_display);
         } else {
@@ -82,7 +88,8 @@ void UiController::update_sensor_cards(const AirQuality &aq, bool gas_warmup, bo
         safe_label_set_text(objects.label_dew_unit, temp_units_c ? UiText::UnitC() : UiText::UnitF());
     }
     if (objects.dot_dp) {
-        lv_color_t dp_col = getDewPointColor(dew_c);
+        float dp_color_c = isfinite(dew_c_rounded) ? dew_c_rounded : dew_c;
+        lv_color_t dp_col = getDewPointColor(dp_color_c);
         set_dot_color(objects.dot_dp, alert_color_for_mode(dp_col));
     }
     if (objects.label_ah_value) {
