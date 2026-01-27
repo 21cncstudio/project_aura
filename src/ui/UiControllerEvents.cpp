@@ -26,6 +26,8 @@ using namespace Config;
 
 void UiController::on_settings_event_cb(lv_event_t *e) { if (instance_) instance_->on_settings_event(e); }
 void UiController::on_back_event_cb(lv_event_t *e) { if (instance_) instance_->on_back_event(e); }
+void UiController::on_about_event_cb(lv_event_t *e) { if (instance_) instance_->on_about_event(e); }
+void UiController::on_about_back_event_cb(lv_event_t *e) { if (instance_) instance_->on_about_back_event(e); }
 void UiController::on_wifi_settings_event_cb(lv_event_t *e) { if (instance_) instance_->on_wifi_settings_event(e); }
 void UiController::on_wifi_back_event_cb(lv_event_t *e) { if (instance_) instance_->on_wifi_back_event(e); }
 void UiController::on_mqtt_settings_event_cb(lv_event_t *e) { if (instance_) instance_->on_mqtt_settings_event(e); }
@@ -149,6 +151,27 @@ void UiController::on_back_event(lv_event_t *e) {
         if (language_saved) LOGI("UI", "language saved");
     }
     pending_screen_id = SCREEN_ID_PAGE_MAIN;
+}
+
+void UiController::on_about_event(lv_event_t *e) {
+    if (lv_event_get_code(e) != LV_EVENT_CLICKED) {
+        return;
+    }
+    LOGD("UI", "about pressed");
+    if (objects.container_about) {
+        lv_obj_clear_flag(objects.container_about, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_add_flag(objects.container_about, LV_OBJ_FLAG_CLICKABLE);
+    }
+}
+
+void UiController::on_about_back_event(lv_event_t *e) {
+    if (lv_event_get_code(e) != LV_EVENT_CLICKED) {
+        return;
+    }
+    LOGD("UI", "about back pressed");
+    if (objects.container_about) {
+        lv_obj_add_flag(objects.container_about, LV_OBJ_FLAG_HIDDEN);
+    }
 }
 
 void UiController::on_language_event(lv_event_t *e) {

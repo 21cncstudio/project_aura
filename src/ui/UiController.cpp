@@ -207,6 +207,8 @@ void UiController::begin() {
     const EventBinding click_bindings[] = {
         {objects.btn_settings, on_settings_event_cb, LV_EVENT_CLICKED},
         {objects.btn_back, on_back_event_cb, LV_EVENT_CLICKED},
+        {objects.btn_about, on_about_event_cb, LV_EVENT_CLICKED},
+        {objects.btn_about_back, on_about_back_event_cb, LV_EVENT_CLICKED},
         {objects.btn_wifi, on_wifi_settings_event_cb, LV_EVENT_CLICKED},
         {objects.btn_wifi_back, on_wifi_back_event_cb, LV_EVENT_CLICKED},
         {objects.btn_mqtt, on_mqtt_settings_event_cb, LV_EVENT_CLICKED},
@@ -1326,6 +1328,13 @@ void UiController::update_settings_texts() {
     if (objects.label_btn_factory_reset) safe_label_set_text(objects.label_btn_factory_reset, UiText::LabelFactoryReset());
     if (objects.label_btn_co2_calib) safe_label_set_text(objects.label_btn_co2_calib, UiText::LabelCo2Calibration());
     if (objects.label_btn_about) safe_label_set_text(objects.label_btn_about, UiText::LabelAbout());
+    if (objects.label_btn_about_back) {
+        const char *back_label = UiText::LabelSettingsBack();
+        if (ui_language == Language::EN) {
+            back_label = "BACK";
+        }
+        safe_label_set_text(objects.label_btn_about_back, back_label);
+    }
     if (objects.label_btn_units_led_indicators) safe_label_set_text(objects.label_btn_units_led_indicators, UiText::LabelLedIndicators());
     if (objects.label_btn_alert_blink) safe_label_set_text(objects.label_btn_alert_blink, UiText::LabelAlertBlink());
     if (objects.label_voc_reset) safe_label_set_text(objects.label_voc_reset, UiText::LabelVocRelearn());
@@ -1478,6 +1487,8 @@ void UiController::init_ui_defaults() {
         lv_obj_clear_flag(objects.co2_bar_mask, LV_OBJ_FLAG_OVERFLOW_VISIBLE);
         lv_obj_clear_flag(objects.co2_bar_mask, LV_OBJ_FLAG_SCROLLABLE);
     }
+
+    set_visible(objects.container_about, false);
 
     if (objects.wifi_status_icon) lv_obj_add_flag(objects.wifi_status_icon, LV_OBJ_FLAG_HIDDEN);
     if (objects.wifi_status_icon_1) lv_obj_add_flag(objects.wifi_status_icon_1, LV_OBJ_FLAG_HIDDEN);
