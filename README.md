@@ -29,6 +29,9 @@ This repository contains the firmware and configuration needed to flash and cust
 ![Internal wiring](docs/assets/device-internals.jpg)
 ![Boot and live dashboard](docs/assets/device-boot-ui.jpg)
 
+## Video Demo
+[![Project Aura demo video](https://img.youtube.com/vi/TNsyDGNrN-w/maxresdefault.jpg)](https://www.youtube.com/watch?v=TNsyDGNrN-w)
+
 ## UI Screens
 ![Dashboard](docs/assets/ui-dashboard.png)
 ![Settings](docs/assets/ui-settings.png)
