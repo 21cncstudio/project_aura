@@ -32,9 +32,18 @@ Video Demo — click the image.
 [![Project Aura demo video](https://img.youtube.com/vi/TNsyDGNrN-w/maxresdefault.jpg)](https://www.youtube.com/watch?v=TNsyDGNrN-w)
 
 ## UI Screens
-![Dashboard](docs/assets/ui-dashboard.png)
-![Settings](docs/assets/ui-settings.png)
-![Theme presets](docs/assets/ui-theme-presets.png)
+<table>
+  <tr>
+    <td align="center"><img src="docs/assets/ui-dashboard.jpg" alt="Dashboard"/><br/>Dashboard</td>
+    <td align="center"><img src="docs/assets/ui-settings.jpg" alt="Settings"/><br/>Settings</td>
+    <td align="center"><img src="docs/assets/ui-theme-presets.jpg" alt="Theme Presets"/><br/>Theme Presets</td>
+  </tr>
+  <tr>
+    <td align="center"><img src="docs/assets/ui-mqtt.jpg" alt="MQTT"/><br/>MQTT</td>
+    <td align="center"><img src="docs/assets/ui-time-date.jpg" alt="Date & Time"/><br/>Date &amp; Time</td>
+    <td align="center"><img src="docs/assets/ui-backlight.jpg" alt="Backlight"/><br/>Backlight</td>
+  </tr>
+</table>
 
 ## Highlights
 - Multi-sensor telemetry (temp, humidity, CO2, VOC, NOx, PM, pressure, HCHO).
