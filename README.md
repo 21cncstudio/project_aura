@@ -70,6 +70,10 @@ Video Demo - click the image.
 
 Note: SEN66 gas indices (VOC/NOx) require ~5 minutes of warmup for reliable readings; the UI shows WARMUP during this period.
 
+⚡ Wiring Notice
+Please pay close attention to the cabling. The pin order on the board is custom and requires modification of standard cables.
+Supporters and backers have access to the comprehensive Build Guide, which covers this step in detail to ensure a trouble-free assembly.
+
 ## Pin Configuration (Wiring)
 | Component | Pin (ESP32-S3) | Notes |
 | :--- | :--- | :--- |
@@ -164,6 +168,8 @@ easy local setup.
 - Availability topic: `<base>/status`
 - Commands: `<base>/command/*` (night_mode, alert_blink, backlight, restart)
 - Home Assistant discovery: `homeassistant/*/config`
+- Dashboard YAML: `docs/home_assistant/dashboard.yaml` (standard cards only).
+- Setup guide: `docs/home_assistant/README.md`.
 
 MQTT stays idle until configured and enabled.
 
