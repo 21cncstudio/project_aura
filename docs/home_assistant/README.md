@@ -3,8 +3,7 @@
 This folder contains a ready-to-use YAML configuration to visualize your Aura data.
 It uses only standard Home Assistant cards. No HACS or external dependencies required.
 
-![Dashboard Preview](preview.png)
-(Add a screenshot named preview.png in this folder.)
+![Dashboard Preview](../assets/preview.png)
 
 ## How to Add
 You can add this as a new view (tab) to your existing dashboard.
