@@ -14,6 +14,11 @@ reliable device rather than a bare sensor board. It combines a touch-friendly LV
 setup portal, and MQTT with Home Assistant discovery, all wrapped in a 3D-printable enclosure.
 This repository contains the firmware and configuration needed to flash and customize the device.
 
+## Video Demo
+Video Demo - click the image.
+[![Project Aura demo video](https://img.youtube.com/vi/TNsyDGNrN-w/maxresdefault.jpg)](https://www.youtube.com/watch?v=TNsyDGNrN-w)
+
+
 ## What you get
 - Firmware source code (GPL-3.0-or-later).
 - A ready-to-build PlatformIO project for ESP32-S3.
@@ -26,10 +31,6 @@ This repository contains the firmware and configuration needed to flash and cust
 ![Assembly overview](docs/assets/device-assembly.jpg)
 ![Internal wiring](docs/assets/device-internals.jpg)
 ![Boot and live dashboard](docs/assets/device-boot-ui.jpg)
-
-## Video Demo
-Video Demo — click the image.
-[![Project Aura demo video](https://img.youtube.com/vi/TNsyDGNrN-w/maxresdefault.jpg)](https://www.youtube.com/watch?v=TNsyDGNrN-w)
 
 ## UI Screens
 <table>
