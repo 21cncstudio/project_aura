@@ -176,6 +176,8 @@ namespace Config {
     constexpr uint32_t NTP_FRESH_MS = 12UL * 60UL * 60UL * 1000UL;
     constexpr uint32_t NTP_SYNC_TIMEOUT_MS = 10000;
     constexpr uint32_t NTP_RETRY_MS = 5UL * 60UL * 1000UL;
+    constexpr uint8_t RTC_INIT_ATTEMPTS = 3;
+    constexpr uint32_t RTC_INIT_RETRY_MS = 250;
     constexpr uint32_t RTC_RESTORE_INTERVAL_MS = 5000;
     constexpr time_t TIME_VALID_EPOCH = 1577836800;
     constexpr uint32_t MQTT_PUBLISH_MS = 30000;

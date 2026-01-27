@@ -11,6 +11,8 @@
 #include <string.h>
 #include <sys/time.h>
 
+#include "core/Logger.h"
+
 void TimeManager::begin(StorageManager &storage) {
     storage_ = &storage;
     const auto &cfg = storage.config();
@@ -32,7 +34,21 @@ bool TimeManager::initRtc() {
     tm utc_tm = {};
     bool osc_stop = false;
     bool time_valid = false;
-    if (!rtc_.readTime(utc_tm, osc_stop, time_valid)) {
+    bool read_ok = false;
+    for (uint8_t attempt = 0; attempt < Config::RTC_INIT_ATTEMPTS; ++attempt) {
+        if (attempt > 0) {
+            delay(Config::RTC_INIT_RETRY_MS);
+            LOGD("RTC", "retry %u", attempt);
+        }
+        if (!rtc_.readTime(utc_tm, osc_stop, time_valid)) {
+            continue;
+        }
+        read_ok = true;
+        if (!osc_stop && time_valid) {
+            break;
+        }
+    }
+    if (!read_ok) {
         return false;
     }
     rtc_present_ = true;
