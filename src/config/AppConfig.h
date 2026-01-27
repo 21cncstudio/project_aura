@@ -140,7 +140,7 @@ namespace Config {
     constexpr uint16_t SEN66_PRESSURE_MAX_HPA = 1200;
     constexpr uint32_t SEN66_VOC_STATE_SAVE_MS = 60UL * 60UL * 1000UL;
     constexpr size_t SEN66_VOC_STATE_LEN = 8;
-    constexpr uint32_t SEN66_GAS_WARMUP_MS = 120UL * 1000UL;
+    constexpr uint32_t SEN66_GAS_WARMUP_MS = 300UL * 1000UL;
     constexpr float SEN66_TEMP_OFFSET_SLOPE = 0.0f;
     constexpr uint16_t SEN66_TEMP_OFFSET_TIME_S = 0;
     constexpr uint16_t SEN66_TEMP_OFFSET_SLOT = 0;
