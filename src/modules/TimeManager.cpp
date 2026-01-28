@@ -31,6 +31,7 @@ bool TimeManager::initRtc() {
     rtc_lost_power_ = false;
 
     rtc_.begin();
+    delay(500);
     tm utc_tm = {};
     bool osc_stop = false;
     bool time_valid = false;
