@@ -60,8 +60,11 @@ bool TimeManager::initRtc() {
     time_t epoch = makeUtcEpoch(utc_tm);
     if (epoch > Config::TIME_VALID_EPOCH) {
         if (osc_stop) {
-            rtc_.clearOscillatorStop();
-            rtc_lost_power_ = false;
+            if (rtc_.clearOscillatorStop()) {
+                rtc_lost_power_ = false;
+            } else {
+                LOGW("RTC", "failed to clear OS bit");
+            }
         }
         rtc_valid_ = true;
         setSystemTime(epoch);
