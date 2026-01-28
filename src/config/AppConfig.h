@@ -91,6 +91,7 @@ namespace Config {
     constexpr uint16_t SFA3X_CMD_STOP = 0x0104;
     constexpr uint16_t SFA3X_CMD_READ_VALUES = 0x0327;
     constexpr uint8_t PCF8523_ADDR = 0x68;
+    constexpr uint8_t PCF8523_REG_CONTROL_3 = 0x02;
     constexpr uint8_t PCF8523_REG_SECONDS = 0x03;
     constexpr uint8_t DPS310_ADDR_PRIMARY = 0x77;
     constexpr uint8_t DPS310_ADDR_ALT = 0x76;

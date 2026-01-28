@@ -10,7 +10,11 @@
 #include "config/AppConfig.h"
 
 bool Pcf8523::begin() {
-    return true;
+    // Enable battery switch-over (standard mode, battery low detection on).
+    // Default after POR is 0xE0 (switch-over disabled) which causes
+    // spurious OS bit on any VCC glitch or software restart.
+    uint8_t ctrl3 = 0x00;
+    return write(Config::PCF8523_REG_CONTROL_3, &ctrl3, 1);
 }
 
 uint8_t Pcf8523::bcd2bin(uint8_t val) {
