@@ -139,16 +139,7 @@ int score_from_thresholds(float value, float min_val, float t_good, float t_mod,
 }
 
 int score_from_voc(float value) {
-    if (value <= 100.0f) {
-        return static_cast<int>(lroundf(map_float_clamped(value, 0.0f, 100.0f, 0.0f, 25.0f)));
-    }
-    if (value <= 150.0f) {
-        return static_cast<int>(lroundf(map_float_clamped(value, 100.0f, 150.0f, 25.0f, 50.0f)));
-    }
-    float score = map_float_clamped(value, 150.0f, 500.0f, 50.0f, 75.0f);
-    if (score < 50.0f) score = 50.0f;
-    if (score > 75.0f) score = 75.0f;
-    return static_cast<int>(lroundf(score));
+    return score_from_thresholds(value, 0.0f, 150.0f, 250.0f, 350.0f);
 }
 
 } // namespace
