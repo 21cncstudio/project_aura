@@ -228,7 +228,7 @@ namespace Config {
     constexpr uint32_t PRESSURE_HISTORY_FILL_LONG_S = 4UL * 60UL * 60UL;
     constexpr size_t THEME_SWATCH_COUNT = 12;
 
-    constexpr float BASE_TEMP_OFFSET = 0.0f;
+    constexpr float BASE_TEMP_OFFSET = 2.7f;
     constexpr float HUM_OFFSET_STEP = 1.0f;
     constexpr float HUM_OFFSET_MIN = -10.0f;
     constexpr float HUM_OFFSET_MAX = 10.0f;
