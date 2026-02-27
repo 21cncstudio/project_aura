@@ -14,6 +14,7 @@
 #include "core/Logger.h"
 #include "config/AppConfig.h"
 #include "ui/ThemeManager.h"
+#include "web/PrometheusExporter.h"
 
 namespace {
 
@@ -107,6 +108,7 @@ void AuraNetworkManager::begin(StorageManager &storage) {
     web_ctx_.mqtt_ui_open = &mqtt_ui_open_;
     web_ctx_.theme_ui_open = &theme_ui_open_;
     WebHandlersInit(&web_ctx_);
+    PrometheusExporterInit(&web_ctx_);
     registerServerRoutes();
 
     storage_->loadWiFiSettings(wifi_ssid_, wifi_pass_, wifi_enabled_);
@@ -212,6 +214,7 @@ void AuraNetworkManager::registerServerRoutes() {
     server_.on("/api/events", HTTP_GET, events_handle_data);
     server_.on("/api/settings", HTTP_POST, settings_handle_update);
     server_.on("/api/ota", HTTP_POST, ota_handle_update, ota_handle_upload);
+    server_.on("/metrics", HTTP_GET, prometheus_handle_metrics);
     server_.onNotFound(wifi_handle_not_found);
     server_routes_registered_ = true;
 }
