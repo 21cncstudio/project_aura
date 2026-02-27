@@ -30,6 +30,7 @@ This repository contains the firmware source code and configuration needed to fl
 - [Build and Flash](#build-and-flash-platformio)
 - [Configuration](#configuration)
 - [MQTT + Home Assistant](#mqtt--home-assistant)
+- [Prometheus Metrics](#prometheus-metrics)
 - [Contributing](#contributing)
 - [AI Assistance](#ai-assistance)
 - [License and Commercial Use](#license-and-commercial-use)
@@ -206,6 +207,22 @@ copy include/secrets.h.example include/secrets.h
 MQTT stays idle until configured and enabled.
 
 ![Home Assistant dashboard](docs/assets/ha-dashboard.jpg)
+
+## Prometheus Metrics
+The device exposes a Prometheus-compatible endpoint at `GET /metrics` with ~60 metrics
+covering all sensors, derived values, fan control, network status, and ESP32 system
+diagnostics (heap, PSRAM, chip temperature, flash, FreeRTOS).
+
+Add to your `prometheus.yml`:
+```yaml
+scrape_configs:
+  - job_name: "project_aura"
+    scrape_interval: 30s
+    static_configs:
+      - targets: ["aura.local:80"]
+```
+
+Full metric reference and Grafana tips: [`docs/prometheus/README.md`](docs/prometheus/README.md).
 
 ## Contributing
 Contributions are welcome! Please read [`CONTRIBUTING.md`](CONTRIBUTING.md) for details on the process for submitting pull requests and the Contributor License Agreement (CLA).
