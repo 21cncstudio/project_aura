@@ -101,6 +101,7 @@ void ChartsHistory::load(StorageManager &storage) {
                 static_cast<unsigned>(state_.count),
                 static_cast<unsigned>(state_.index),
                 static_cast<unsigned>(state_.epoch));
+    MqttPublishSystemEvent("CHARTS", "info", "Charts history restored");
 }
 
 void ChartsHistory::saveIfDue(StorageManager &storage, uint32_t now_ms) {

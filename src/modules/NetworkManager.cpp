@@ -519,6 +519,12 @@ void AuraNetworkManager::poll() {
             Logger::log(Logger::Info, "WiFi",
                         "connected, IP: %s",
                         WiFi.localIP().toString().c_str());
+            {
+                char msg[48];
+                snprintf(msg, sizeof(msg), "WiFi connected, IP: %s",
+                         WiFi.localIP().toString().c_str());
+                MqttPublishSystemEvent("WIFI", "info", msg);
+            }
         } else if (st == WL_CONNECT_FAILED ||
                    (millis() - wifi_connect_start_ms_ > Config::WIFI_CONNECT_TIMEOUT_MS)) {
             esp_wifi_disconnect();
@@ -764,6 +770,12 @@ void AuraNetworkManager::startMdns() {
         Logger::log(Logger::Info, "mDNS",
                     "responder started: %s.local",
                     hostname_.c_str());
+        {
+            char msg[64];
+            snprintf(msg, sizeof(msg), "mDNS responder started: %s.local",
+                     hostname_.c_str());
+            MqttPublishSystemEvent("WIFI", "info", msg);
+        }
         MDNS.addService("http", "tcp", 80);
         mdns_started_ = true;
     } else {

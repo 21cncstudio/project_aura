@@ -500,16 +500,25 @@ void SensorManager::begin(StorageManager &storage, float temp_offset, float hum_
     if (bmp580_.start()) {
         pressure_sensor_ = PRESSURE_BMP58X;
         Logger::log(Logger::Info, "Sensors", "%s OK", bmp580_.variantLabel());
+        #ifdef ARDUINO
+        { char msg[32]; snprintf(msg, sizeof(msg), "%s OK", bmp580_.variantLabel()); MqttPublishSystemEvent("SENSORS", "info", msg); }
+        #endif
     } else {
         bmp3xx_.begin();
         if (bmp3xx_.start()) {
             pressure_sensor_ = PRESSURE_BMP3XX;
             Logger::log(Logger::Info, "Sensors", "%s OK", bmp3xx_.variantLabel());
+            #ifdef ARDUINO
+            { char msg[32]; snprintf(msg, sizeof(msg), "%s OK", bmp3xx_.variantLabel()); MqttPublishSystemEvent("SENSORS", "info", msg); }
+            #endif
         } else {
             dps310_.begin();
             if (dps310_.start()) {
                 pressure_sensor_ = PRESSURE_DPS310;
                 LOGI("Sensors", "DPS310 OK");
+                #ifdef ARDUINO
+                MqttPublishSystemEvent("SENSORS", "info", "DPS310 OK");
+                #endif
             } else {
                 pressure_sensor_ = PRESSURE_NONE;
                 LOGW("Sensors", "Pressure sensor not found");
@@ -547,6 +556,9 @@ void SensorManager::begin(StorageManager &storage, float temp_offset, float hum_
     if (sen0466_.start()) {
         Logger::log(Logger::Info, "Sensors", "SEN0466 CO OK at 0x%02X",
                     static_cast<unsigned>(Config::SEN0466_ADDR));
+        #ifdef ARDUINO
+        { char msg[32]; snprintf(msg, sizeof(msg), "SEN0466 CO OK at 0x%02X", static_cast<unsigned>(Config::SEN0466_ADDR)); MqttPublishSystemEvent("SENSORS", "info", msg); }
+        #endif
     } else {
         LOGI("Sensors", "SEN0466 CO not installed");
     }

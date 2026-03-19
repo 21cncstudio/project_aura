@@ -542,6 +542,13 @@ bool TimeManager::requestNtpSync() {
     char posix_tz[32] = { 0 };
     buildTimezonePosix(tz, posix_tz, sizeof(posix_tz));
     LOGI("Time", "NTP sync start (tz=%s, wifi=ON)", tz.name ? tz.name : "unknown");
+    #ifndef UNIT_TEST
+    {
+        char msg[64];
+        snprintf(msg, sizeof(msg), "NTP sync start (tz=%s)", tz.name ? tz.name : "unknown");
+        MqttPublishSystemEvent("TIME", "info", msg);
+    }
+    #endif
     sntp_set_sync_status(SNTP_SYNC_STATUS_RESET);
     configTzTime(posix_tz, "pool.ntp.org", "time.nist.gov", "time.google.com");
     return true;

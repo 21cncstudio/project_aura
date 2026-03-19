@@ -112,6 +112,7 @@ void PressureHistory::load(StorageManager &storage, SensorData &data) {
     Logger::log(Logger::Info, "PressureHistory",
                 "restored count=%d idx=%d epoch=%u",
                 count_, index_, epoch_);
+    MqttPublishSystemEvent("PRESSURE", "info", "Pressure history restored");
 }
 
 void PressureHistory::saveIfDue(StorageManager &storage, uint32_t now_ms) {

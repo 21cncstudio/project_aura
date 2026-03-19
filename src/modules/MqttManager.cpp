@@ -517,6 +517,16 @@ void MqttManager::publishDiscovery() {
     build_discovery_topic(legacy_topic, sizeof(legacy_topic), "sensor", mqtt_device_id_, "pm4_0");
     client_.publish(legacy_topic, "", true);
 
+    // [NEW] Remove the two legacy event-type entities that were registered in
+    // earlier firmware builds. Publishing an empty retained payload tells HA
+    // to delete the entity from the device registry.
+    // "air_events" — first iteration object_id before it was renamed to "events".
+    build_discovery_topic(legacy_topic, sizeof(legacy_topic), "event", mqtt_device_id_, "air_events");
+    client_.publish(legacy_topic, "", true);
+    // "events" as the old "event" component type — now replaced by "sensor".
+    build_discovery_topic(legacy_topic, sizeof(legacy_topic), "event", mqtt_device_id_, "events");
+    client_.publish(legacy_topic, "", true);
+
     publishDiscoverySensor("temperature", "Temperature", "\\u00b0C",
                            "temperature", "measurement", "{{ value_json.temp }}", "");
     publishDiscoverySensor("humidity", "Humidity", "%",
@@ -789,6 +799,8 @@ bool MqttManager::connectClient(const SensorData &data, bool night_mode, bool al
         return false;
     }
     LOGI("MQTT", "connected");
+    // [NEW] Mirrors the "connected" log entry to HA.
+    publishSystemEvent("MQTT", "info", "MQTT connected");
     mqtt_fail_count_ = 0;
     mqtt_connect_attempts_ = 0;
     ui_dirty_ = true;
