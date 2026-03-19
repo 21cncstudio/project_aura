@@ -356,7 +356,15 @@ void UiBootFlow::updateBootDiag(UiController &owner, uint32_t now_ms) {
     }
 
     bool has_errors = bootDiagHasErrors(owner, now_ms);
-    owner.boot_diag_has_error = has_errors;
+    // Block auto-advance while SEN66 is still in its startup grace period.
+    // This is not treated as a real error — no error button is shown — but the
+    // screen stays visible until the final sensor state is known.
+    bool sen66_pending = !owner.sensorManager.isOk() &&
+                         owner.sensorManager.retryAtMs() != 0 &&
+                         now_ms < owner.sensorManager.retryAtMs();
+    owner.boot_diag_has_error = has_errors || sen66_pending;
+
+    // Show error UI only for confirmed errors, not for pending startup state.
     owner.set_visible(objects.lbl_diag_error, has_errors);
     owner.set_visible(objects.btn_diag_continue, has_errors);
     owner.set_visible(objects.btn_diag_errors, has_errors);
