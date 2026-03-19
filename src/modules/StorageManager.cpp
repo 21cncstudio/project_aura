@@ -12,6 +12,8 @@
 #ifndef UNIT_TEST
 #include <LittleFS.h>
 #include <ArduinoJson.h>
+// [NEW] Only include in the real firmware build — not in native unit tests.
+#include "modules/MqttManager.h"
 #else
 #include <map>
 #include <string>
@@ -121,18 +123,26 @@ void StorageManager::begin(BootAction action) {
 #else
     if (!LittleFS.begin(true, "/littlefs", 10, "littlefs")) {
         LOGE("Storage", "LittleFS mount failed");
+        // [NEW] Critical storage failure — always warn regardless of MQTT state.
+        MqttPublishSystemEvent("STORAGE", "warning", "LittleFS mount failed");
         return;
     }
     mounted_ = true;
     if (action == BootAction::SafeRollback) {
         if (!restoreLastGood()) {
             LOGW("Storage", "last good config missing, factory reset");
+            // [NEW] Safe rollback had no last-good config — mirrors web dashboard entry.
+            MqttPublishSystemEvent("STORAGE", "warning", "last good config missing, factory reset");
             clearAll();
         } else {
             LOGW("Storage", "restored last good config");
+            // [NEW] Successful safe rollback — matches "restored last good config" in Events tab.
+            MqttPublishSystemEvent("STORAGE", "warning", "restored last good config");
         }
     } else if (action == BootAction::SafeFactoryReset) {
         LOGW("Storage", "factory reset requested");
+        // [NEW] Factory reset — matches "factory reset requested" in Events tab.
+        MqttPublishSystemEvent("STORAGE", "warning", "factory reset requested");
         clearAll();
     }
     bool loaded = loadConfig();
@@ -169,8 +179,16 @@ void StorageManager::poll(uint32_t now_ms) {
             (now_ms - lkg_start_ms_) >= Config::LAST_GOOD_COMMIT_DELAY_MS) {
             if (commitLastGood()) {
                 LOGI("Storage", "config committed as last known good");
+                // [NEW] Matches "config committed as last known good" in web dashboard Events tab.
+#ifndef UNIT_TEST
+                MqttPublishSystemEvent("STORAGE", "info", "config committed as last known good");
+#endif
             } else {
                 LOGW("Storage", "last known good commit failed");
+                // [NEW] LKG commit failure — important for diagnosing boot-loop scenarios.
+#ifndef UNIT_TEST
+                MqttPublishSystemEvent("STORAGE", "warning", "last known good commit failed");
+#endif
             }
             lkg_pending_ = false;
         }

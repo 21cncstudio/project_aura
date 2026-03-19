@@ -346,7 +346,7 @@ void MqttManager::publishDiscoverySwitch(const char *object_id, const char *name
         return;
     }
     String payload;
-    payload.reserve(640); // Switch payload includes availability array; keep headroom.
+    payload.reserve(640);
     payload = "{";
     payload += "\"name\":\"";
     append_json_escaped(payload, name);
@@ -417,7 +417,7 @@ void MqttManager::publishDiscoveryButton(const char *object_id, const char *name
         return;
     }
     String payload;
-    payload.reserve(420); // Button payload is smaller but still avoid reallocs.
+    payload.reserve(420);
     payload = "{";
     payload += "\"name\":\"";
     append_json_escaped(payload, name);
@@ -448,6 +448,63 @@ void MqttManager::publishDiscoveryButton(const char *object_id, const char *name
     payload += "}";
 
     build_discovery_topic(topic, sizeof(topic), "button", mqtt_device_id_, object_id);
+    client_.publish(topic, payload.c_str(), true);
+}
+
+// [NEW] Registers the "Events" sensor entity via HA MQTT Discovery.
+//
+// Uses component type "sensor" instead of "event" so the state value —
+// the "message" field from the payload — appears directly in the HA logbook
+// and history as readable text, e.g.:
+//   "CO2 worsened to bad: 1480 ppm"
+//   "NTP sync completed, local time=2026-03-19 09:41:28"
+//   "SEN66 start attempts exhausted, stop probing until reboot"
+//
+// The value_template extracts the "message" key from the JSON payload that
+// publishEvent() and publishSystemEvent() both send.
+// For HA automations the full payload (event_type, category, value, unit)
+// is still available via trigger.to_state.attributes.
+void MqttManager::publishDiscoveryEvent() {
+    if (!client_.connected()) {
+        return;
+    }
+
+    char topic[kTopicBufferSize];
+    // [NEW] "sensor" instead of "event" — state is the message text, not an event_type key.
+    build_discovery_topic(topic, sizeof(topic), "sensor", mqtt_device_id_, "events");
+
+    char state_topic[kTopicBufferSize];
+    snprintf(state_topic, sizeof(state_topic), "%s/events", mqtt_base_topic_.c_str());
+    char avail_topic[kTopicBufferSize];
+    build_availability_topic(avail_topic, sizeof(avail_topic), mqtt_base_topic_);
+
+    String payload;
+    payload.reserve(512);
+    payload = "{\"name\":\"Events\"";
+    payload += ",\"unique_id\":\"";
+    append_json_escaped(payload, mqtt_device_id_);
+    payload += "_events\"";
+    payload += ",\"state_topic\":\"";
+    append_json_escaped(payload, state_topic);
+    payload += "\"";
+    // [NEW] value_template extracts the human-readable message from the JSON payload.
+    // This is what HA displays in the logbook and history graph label.
+    payload += ",\"value_template\":\"{{ value_json.message }}\"";
+    payload += ",\"icon\":\"mdi:bell-alert\"";
+    payload += ",\"availability_topic\":\"";
+    append_json_escaped(payload, avail_topic);
+    payload += "\",\"payload_available\":\"";
+    payload += Config::MQTT_AVAIL_ONLINE;
+    payload += "\",\"payload_not_available\":\"";
+    payload += Config::MQTT_AVAIL_OFFLINE;
+    payload += "\"";
+    payload += ",\"device\":{\"identifiers\":[\"";
+    append_json_escaped(payload, mqtt_device_id_);
+    payload += "\"],\"name\":\"";
+    append_json_escaped(payload, mqtt_device_name_);
+    payload += "\",\"manufacturer\":\"21CNCStudio\",\"model\":\"Project Aura\"}";
+    payload += "}";
+
     client_.publish(topic, payload.c_str(), true);
 }
 
@@ -499,6 +556,10 @@ void MqttManager::publishDiscovery() {
     publishDiscoverySwitch("alert_blink", "Alert Blink", "{{ value_json.alert_blink }}", "mdi:alarm-light");
     publishDiscoverySwitch("backlight", "Backlight", "{{ value_json.backlight }}", "mdi:television");
     publishDiscoveryButton("restart", "Restart", "PRESS", "mdi:restart");
+
+    // [NEW] Register the combined air quality + system events entity.
+    publishDiscoveryEvent();
+
     mqtt_discovery_sent_ = true;
     publishNightModeAvailability();
 }
@@ -548,6 +609,86 @@ void MqttManager::publishState(const SensorData &data, bool night_mode, bool ale
     }
 }
 
+// [NEW] Publishes an air quality band-change event to "<base_topic>/events".
+//
+// Payload example:
+//   {"event_type":"co2_bad","message":"CO2 worsened to bad: 1480 ppm",
+//    "value":1480.00,"unit":"ppm"}
+//
+// The "message" field is the same human-readable string already written to the
+// serial log, so HA shows exactly what the web dashboard Events tab would show.
+// retain=false — events are transient, not persistent state.
+void MqttManager::publishEvent(const char *metric_key, const char *band,
+                                float value, const char *unit,
+                                const char *message) {
+    if (!client_.connected()) {
+        return;
+    }
+
+    char event_type[48];
+    snprintf(event_type, sizeof(event_type), "%s_%s", metric_key, band);
+
+    char topic[kTopicBufferSize];
+    snprintf(topic, sizeof(topic), "%s/events", mqtt_base_topic_.c_str());
+
+    // Build the payload with append_json_escaped for the message field
+    // to handle any special characters that might appear in log strings.
+    String payload;
+    payload.reserve(256);
+    payload = "{\"event_type\":\"";
+    payload += event_type;
+    payload += "\",\"message\":\"";
+    append_json_escaped(payload, message ? message : "");
+    payload += "\",\"value\":";
+    char val_buf[24];
+    snprintf(val_buf, sizeof(val_buf), "%.2f", value);
+    payload += val_buf;
+    payload += ",\"unit\":\"";
+    append_json_escaped(payload, unit ? unit : "");
+    payload += "\"}";
+
+    client_.publish(topic, payload.c_str(), false);
+}
+
+// [NEW] Publishes a system log event to "<base_topic>/events".
+//
+// Mirrors the system log entries visible in the web dashboard Events tab so
+// HA sees the same events (sensor errors, NTP sync, boot milestones, etc.).
+//
+// Payload example:
+//   {"event_type":"system_warning","message":"SEN66 not found (1/3)",
+//    "category":"SENSORS"}
+//
+// severity "info"    -> event_type "system_info"
+// severity "warning" -> event_type "system_warning"
+// retain=false — same as air quality events.
+void MqttManager::publishSystemEvent(const char *category, const char *severity,
+                                      const char *message) {
+    if (!client_.connected()) {
+        return;
+    }
+
+    // Map severity string to the declared event_type values.
+    const char *event_type = (severity && strcmp(severity, "warning") == 0)
+                             ? "system_warning"
+                             : "system_info";
+
+    char topic[kTopicBufferSize];
+    snprintf(topic, sizeof(topic), "%s/events", mqtt_base_topic_.c_str());
+
+    String payload;
+    payload.reserve(256);
+    payload = "{\"event_type\":\"";
+    payload += event_type;
+    payload += "\",\"message\":\"";
+    append_json_escaped(payload, message ? message : "");
+    payload += "\",\"category\":\"";
+    append_json_escaped(payload, category ? category : "");
+    payload += "\"}";
+
+    client_.publish(topic, payload.c_str(), false);
+}
+
 bool MqttManager::connectClient(const SensorData &data, bool night_mode, bool alert_blink, bool backlight_on) {
     if (!mqtt_enabled_) {
         return false;
@@ -580,7 +721,6 @@ bool MqttManager::connectClient(const SensorData &data, bool night_mode, bool al
         return false;
     }
 
-    // Diagnostics: check network state before MQTT connect.
     bool network_ready = network_ && network_->isEnabled() && network_->isConnected();
     wl_status_t wifi_status = WiFi.status();
     IPAddress local_ip = WiFi.localIP();
@@ -612,8 +752,6 @@ bool MqttManager::connectClient(const SensorData &data, bool night_mode, bool al
     const uint16_t connect_socket_timeout_sec =
         connect_socket_timeout_for_attempts(mqtt_connect_attempts_);
     client_.setSocketTimeout(connect_socket_timeout_sec);
-    // PubSubClient does not stop the underlying transport for every failed connect path.
-    // Reset it explicitly before starting a new connect window to avoid stale TCP state.
     net_.stop();
     bool ok = false;
     int last_state = MQTT_DISCONNECTED;
@@ -918,4 +1056,20 @@ bool MqttManager::takePending(PendingCommands &out) {
     out = pending_;
     pending_ = PendingCommands{};
     return true;
+}
+
+// [NEW] Free function for air quality events — avoids circular header deps.
+void MqttPublishEvent(const char *metric_key, const char *band,
+                      float value, const char *unit, const char *message) {
+    if (g_mqtt) {
+        g_mqtt->publishEvent(metric_key, band, value, unit, message);
+    }
+}
+
+// [NEW] Free function for system log events — avoids circular header deps.
+void MqttPublishSystemEvent(const char *category, const char *severity,
+                            const char *message) {
+    if (g_mqtt) {
+        g_mqtt->publishSystemEvent(category, severity, message);
+    }
 }

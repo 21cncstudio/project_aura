@@ -14,6 +14,11 @@
 #include <esp_sntp.h>
 
 #include "core/Logger.h"
+// [NEW] Included only for the real firmware build — TimeManager is also
+// compiled in native unit tests which have no WiFi.h / MqttManager.
+#ifndef UNIT_TEST
+#include "modules/MqttManager.h"
+#endif
 #ifdef UNIT_TEST
 #include "TimeMock.h"
 #endif
@@ -161,6 +166,14 @@ bool TimeManager::initRtc() {
     rtc_present_ = true;
     if (!rtcBegin()) {
         LOGW("RTC", "%s init failed", rtcLabel());
+        // [NEW] RTC hardware failed to initialise — mirrors "RTC init failed" in Events tab.
+#ifndef UNIT_TEST
+        {
+            char msg[48];
+            snprintf(msg, sizeof(msg), "%s init failed", rtcLabel());
+            MqttPublishSystemEvent("RTC", "warning", msg);
+        }
+#endif
         return false;
     }
     delay(500);
@@ -590,6 +603,14 @@ TimeManager::PollResult TimeManager::ntpPoll(uint32_t now_ms) {
                          local_tm.tm_min,
                          local_tm.tm_sec);
                 LOGI("Time", "NTP sync completed, local time=%s", buf);
+                // [NEW] Mirrors "NTP sync completed, local time=..." in web dashboard Events tab.
+#ifndef UNIT_TEST
+                {
+                    char msg[64];
+                    snprintf(msg, sizeof(msg), "NTP sync completed, local time=%s", buf);
+                    MqttPublishSystemEvent("TIME", "info", msg);
+                }
+#endif
                 ntp_syncing_ = false;
                 ntp_err_ = false;
                 ntp_last_sync_ms_ = now_ms;
@@ -600,9 +621,17 @@ TimeManager::PollResult TimeManager::ntpPoll(uint32_t now_ms) {
             }
         }
         const uint32_t elapsed = now_ms - ntp_sync_start_ms_;
-        // Guard against sampling-order inversion where now_ms is taken before ntp_sync_start_ms_ is updated.
         if (static_cast<int32_t>(elapsed) > static_cast<int32_t>(Config::NTP_SYNC_TIMEOUT_MS)) {
             LOGW("Time", "NTP sync timeout after %lu ms", static_cast<unsigned long>(elapsed));
+            // [NEW] NTP timeout — mirrors "NTP sync timeout" in Events tab.
+#ifndef UNIT_TEST
+            {
+                char msg[48];
+                snprintf(msg, sizeof(msg), "NTP sync timeout after %lu ms",
+                         static_cast<unsigned long>(elapsed));
+                MqttPublishSystemEvent("TIME", "warning", msg);
+            }
+#endif
             ntp_syncing_ = false;
             ntp_err_ = true;
             result.state_changed = true;
@@ -671,6 +700,14 @@ void TimeManager::noteRtcReadSuccess(bool log_transition) {
     rtc_read_fail_count_ = 0;
     if (had_comm_fault && log_transition) {
         LOGI("RTC", "%s communication restored", rtcLabel());
+        // [NEW] RTC comm restored after repeated failures.
+#ifndef UNIT_TEST
+        {
+            char msg[48];
+            snprintf(msg, sizeof(msg), "%s communication restored", rtcLabel());
+            MqttPublishSystemEvent("RTC", "info", msg);
+        }
+#endif
     }
 }
 
@@ -688,6 +725,14 @@ bool TimeManager::noteRtcReadFailure(bool log_transition) {
     const bool crossed_threshold = rtc_read_fail_count_ == Config::RTC_STATUS_READ_FAIL_LIMIT;
     if (crossed_threshold && log_transition) {
         LOGW("RTC", "%s read failed repeatedly", rtcLabel());
+        // [NEW] RTC repeated read failure — matches "RTC read failed repeatedly" in Events tab.
+#ifndef UNIT_TEST
+        {
+            char msg[48];
+            snprintf(msg, sizeof(msg), "%s read failed repeatedly", rtcLabel());
+            MqttPublishSystemEvent("RTC", "warning", msg);
+        }
+#endif
     }
 
     const bool state_changed = rtc_valid_;
@@ -724,7 +769,6 @@ bool TimeManager::detectRtc() {
         return false;
     }
 
-    // Prefer the explicit PCF8523 signature first on the shared 0x68 address.
     if (pcf8523_.probe()) {
         rtc_type_ = RtcType::Pcf8523;
         LOGI("RTC", "%s found at 0x%02X", rtcLabel(), Config::PCF8523_ADDR);
@@ -823,8 +867,16 @@ bool TimeManager::applyRtcBatteryLowState(bool battery_low, bool log_transition)
     if (log_transition) {
         if (battery_low) {
             LOGW("RTC", "battery low");
+            // [NEW] RTC battery low — useful for maintenance reminders in HA.
+#ifndef UNIT_TEST
+            MqttPublishSystemEvent("RTC", "warning", "RTC battery low");
+#endif
         } else if (had_low) {
             LOGI("RTC", "battery status OK");
+            // [NEW] Battery replaced / recovered.
+#ifndef UNIT_TEST
+            MqttPublishSystemEvent("RTC", "info", "RTC battery status OK");
+#endif
         }
     }
     return true;

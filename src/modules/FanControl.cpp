@@ -11,6 +11,9 @@
 #include "config/AppConfig.h"
 #include "config/AppData.h"
 #include "core/Logger.h"
+// [NEW] Include MqttManager for system event publishing to Home Assistant.
+// FanControl runs only on the ESP32 target, so no UNIT_TEST guard is needed.
+#include "modules/MqttManager.h"
 
 namespace {
 
@@ -243,6 +246,8 @@ void FanControl::begin(bool auto_mode_preference, bool auto_armed_preference) {
     switch (tryInitialize(now_ms, init_failure_reason)) {
         case InitStatus::Ok:
             LOGI("FanControl", "DAC ready at 0x%02X", Config::DAC_I2C_ADDR_DEFAULT);
+            // [NEW] DAC hardware found and initialised — mirrors "DAC ready" in web dashboard Events tab.
+            MqttPublishSystemEvent("FAN", "info", "DAC ready");
             break;
         case InitStatus::Absent:
             LOGI("FanControl", "DAC not installed");
@@ -305,6 +310,8 @@ void FanControl::poll(uint32_t now_ms, const SensorData *sensor_data, bool gas_w
             const char *init_failure_reason = nullptr;
             if (tryInitialize(now_ms, init_failure_reason) == InitStatus::Ok) {
                 LOGI("FanControl", "DAC recovered");
+                // [NEW] DAC recovered after a fault — mirrors "DAC recovered" in Events tab.
+                MqttPublishSystemEvent("FAN", "info", "DAC recovered");
             }
         }
     } else if (!running_ &&
@@ -657,6 +664,12 @@ bool FanControl::applyOutputMillivolts(uint16_t millivolts) {
 
 void FanControl::handleDacFault(const char *reason) {
     LOGW("FanControl", "DAC error: %s", reason ? reason : "unknown");
+    // [NEW] DAC hardware fault — mirrors "DAC error: <reason>" in web dashboard Events tab.
+    {
+        char msg[64];
+        snprintf(msg, sizeof(msg), "DAC error: %s", reason ? reason : "unknown");
+        MqttPublishSystemEvent("FAN", "warning", msg);
+    }
     available_ = false;
     faulted_ = true;
     applyStopState(false);

@@ -71,6 +71,21 @@ public:
     bool &discoveryRef() { return mqtt_discovery_; }
     bool &anonymousRef() { return mqtt_anonymous_; }
 
+    // [NEW] Publishes an air quality band-change event to "<base_topic>/events".
+    // Payload includes event_type, a human-readable message, the numeric value
+    // and unit so HA displays full context — not just the event type key.
+    // retain=false — events are transient signals, not persistent state.
+    void publishEvent(const char *metric_key, const char *band,
+                      float value, const char *unit, const char *message);
+
+    // [NEW] Publishes a system log event to "<base_topic>/events".
+    // Mirrors the entries shown in the web dashboard Events tab (SENSORS,
+    // STORAGE, TIME, UI, SEN66, …) so HA sees the same system events.
+    // event_type is always "system_info" or "system_warning".
+    // retain=false — same reasoning as air quality events.
+    void publishSystemEvent(const char *category, const char *severity,
+                            const char *message);
+
 private:
     void loadPrefs();
     void initDeviceId();
@@ -88,6 +103,11 @@ private:
                                 const char *value_template, const char *icon);
     void publishDiscoveryButton(const char *object_id, const char *name,
                                 const char *payload_press, const char *icon);
+    // [NEW] Registers the "Events" entity as a sensor (not event) via HA MQTT
+    // Discovery. The sensor state is the human-readable message text so it
+    // appears directly in the HA logbook. Also cleans up legacy "event"-type
+    // entities from earlier firmware builds by publishing empty retained payloads.
+    void publishDiscoveryEvent();
     void publishNightModeAvailability();
     void publishState(const SensorData &data, bool night_mode, bool alert_blink, bool backlight_on);
 
@@ -134,3 +154,17 @@ private:
     bool auto_night_enabled_ = false;
     PendingCommands pending_;
 };
+
+// [NEW] Free function for air quality band-change events.
+// Called from SensorManager without creating a circular header dependency.
+// message is the same human-readable string already written to the serial log,
+// e.g. "CO2 worsened to bad: 1480 ppm".
+void MqttPublishEvent(const char *metric_key, const char *band,
+                      float value, const char *unit, const char *message);
+
+// [NEW] Free function for system log events.
+// Called from SensorManager (and any other module) to mirror system log
+// entries into HA, matching what the web dashboard Events tab shows.
+// severity: "info" or "warning"
+void MqttPublishSystemEvent(const char *category, const char *severity,
+                            const char *message);
