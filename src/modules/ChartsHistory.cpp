@@ -10,6 +10,8 @@
 #include <string.h>
 #include "core/Logger.h"
 #include "modules/StorageManager.h"
+// [NEW] Included for system event publishing to Home Assistant.
+#include "modules/MqttManager.h"
 
 namespace {
 
@@ -72,12 +74,14 @@ void ChartsHistory::load(StorageManager &storage) {
 
     if (state_.magic != kChartsHistoryMagic || state_.version != kChartsHistoryVersion) {
         LOGW("ChartsHistory", "invalid stored history header, reset");
+        MqttPublishSystemEvent("CHARTS", "warning", "Charts history: invalid header, reset");
         reset(storage, true);
         return;
     }
 
     if (state_.index >= kCapacity || state_.count > kCapacity) {
         LOGW("ChartsHistory", "invalid stored index/count, reset");
+        MqttPublishSystemEvent("CHARTS", "warning", "Charts history: invalid index/count, reset");
         reset(storage, true);
         return;
     }
@@ -85,6 +89,7 @@ void ChartsHistory::load(StorageManager &storage) {
     uint32_t now_epoch = 0;
     if (getNowEpoch(now_epoch) && isStale(now_epoch)) {
         LOGW("ChartsHistory", "stored history stale, reset");
+        MqttPublishSystemEvent("CHARTS", "warning", "Charts history: stale, reset");
         reset(storage, true);
         return;
     }
@@ -226,6 +231,7 @@ void ChartsHistory::update(const SensorData &data, StorageManager &storage) {
     bool time_valid = getNowEpoch(now_epoch);
     if (time_valid && isStale(now_epoch)) {
         LOGW("ChartsHistory", "history stale, reset");
+        MqttPublishSystemEvent("CHARTS", "warning", "Charts history: stale, reset");
         reset(storage, true);
         last_sample_ms_ = now_ms - step_ms;
     }
@@ -235,6 +241,7 @@ void ChartsHistory::update(const SensorData &data, StorageManager &storage) {
     if (time_valid && state_.epoch != 0) {
         if (now_epoch < state_.epoch) {
             LOGW("ChartsHistory", "epoch moved backwards, reset");
+            MqttPublishSystemEvent("CHARTS", "warning", "Charts history: epoch moved backwards, reset");
             reset(storage, true);
             last_sample_ms_ = now_ms - step_ms;
         } else {

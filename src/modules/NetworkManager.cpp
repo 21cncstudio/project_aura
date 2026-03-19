@@ -12,6 +12,8 @@
 #include <esp_wifi.h>
 #include <PubSubClient.h>
 #include "core/Logger.h"
+// [NEW] Included for system event publishing to Home Assistant.
+#include "modules/MqttManager.h"
 #include "config/AppConfig.h"
 #include "ui/ThemeManager.h"
 #include "web/WebInputValidation.h"
@@ -531,6 +533,8 @@ void AuraNetworkManager::poll() {
                             static_cast<unsigned>(Config::WIFI_CONNECT_MAX_RETRIES));
             } else {
                 LOGW("WiFi", "connect failed, enter error state");
+                // [NEW] WiFi failed to connect after all retries.
+                MqttPublishSystemEvent("WIFI", "warning", "WiFi connect failed");
                 wifi_state_ = WIFI_STATE_OFF;
                 wifi_retry_at_ms_ = 0;
                 wifi_ui_dirty_ = true;
@@ -718,6 +722,8 @@ void AuraNetworkManager::startAp() {
     const char *ap_ssid = ap_ssid_.isEmpty() ? Config::WIFI_AP_SSID : ap_ssid_.c_str();
     if (!WiFi.softAP(ap_ssid)) {
         LOGW("WiFi", "failed to start AP: %s", ap_ssid);
+        // [NEW] AP mode failed to start.
+        MqttPublishSystemEvent("WIFI", "warning", "WiFi AP failed to start");
         if (WiFi.status() == WL_CONNECTED) {
             wifi_state_ = WIFI_STATE_STA_CONNECTED;
             sta_link_fail_streak_ = 0;
@@ -762,6 +768,8 @@ void AuraNetworkManager::startMdns() {
         mdns_started_ = true;
     } else {
         LOGW("mDNS", "start failed");
+        // [NEW] mDNS responder failed to start.
+        MqttPublishSystemEvent("WIFI", "warning", "mDNS start failed");
     }
 }
 
