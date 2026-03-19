@@ -154,10 +154,9 @@ void loop()
         LOGI("OTA", "restarting now (main loop)");
         esp_wifi_stop();
         lvgl_port_prepare_restart();
-        delay(50);
-        // Delegate restart to a dedicated Core 0 task so Core 0 is the initiator.
-        // This avoids using the small IPC task stack and reduces restart races.
-        // This eliminates the RUNSTALL timing race that caused "Cache disabled" panics.
+        delay(250);  // increased from 50ms — gives WiFi/TCP stack time to
+                     // fully shut down so the MQTT broker cleanly closes the
+                     // old session before the device reconnects after reboot
         safe_restart_via_core0();
     }
 
