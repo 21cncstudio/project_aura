@@ -9,6 +9,8 @@
 #include <time.h>
 #include "core/Logger.h"
 #include "modules/StorageManager.h"
+// [NEW] Included for system event publishing to Home Assistant.
+#include "modules/MqttManager.h"
 
 namespace {
 
@@ -80,6 +82,7 @@ void PressureHistory::load(StorageManager &storage, SensorData &data) {
 
     if (blob.magic != kPressureHistoryMagic || blob.version != kPressureHistoryVersion) {
         LOGW("PressureHistory", "invalid stored history header, reset");
+        MqttPublishSystemEvent("PRESSURE", "warning", "Pressure history: invalid header, reset");
         reset(data, storage, true);
         return;
     }
@@ -92,6 +95,7 @@ void PressureHistory::load(StorageManager &storage, SensorData &data) {
     if (index_ >= Config::PRESSURE_HISTORY_24H_SAMPLES ||
         count_ > Config::PRESSURE_HISTORY_24H_SAMPLES) {
         LOGW("PressureHistory", "invalid stored index/count, reset");
+        MqttPublishSystemEvent("PRESSURE", "warning", "Pressure history: invalid index/count, reset");
         reset(data, storage, true);
         return;
     }
@@ -99,6 +103,7 @@ void PressureHistory::load(StorageManager &storage, SensorData &data) {
     uint32_t now_epoch = 0;
     if (getNowEpoch(now_epoch) && isStale(now_epoch)) {
         LOGW("PressureHistory", "stored history stale, reset");
+        MqttPublishSystemEvent("PRESSURE", "warning", "Pressure history: stale, reset");
         reset(data, storage, true);
         return;
     }
@@ -137,10 +142,12 @@ void PressureHistory::append(float pressure, SensorData &data) {
     if (prev_count < Config::PRESSURE_HISTORY_3H_STEPS + 1 &&
         count_ == Config::PRESSURE_HISTORY_3H_STEPS + 1) {
         LOGI("PressureHistory", "3h delta ready");
+        MqttPublishSystemEvent("PRESSURE", "info", "Pressure history: 3h delta ready");
     }
     if (prev_count < Config::PRESSURE_HISTORY_24H_SAMPLES &&
         count_ == Config::PRESSURE_HISTORY_24H_SAMPLES) {
         LOGI("PressureHistory", "24h delta ready");
+        MqttPublishSystemEvent("PRESSURE", "info", "Pressure history: 24h delta ready");
     }
 
     int latest_index = (index_ + Config::PRESSURE_HISTORY_24H_SAMPLES - 1) %
@@ -171,6 +178,7 @@ void PressureHistory::update(float pressure, SensorData &data, StorageManager &s
     if (time_valid) {
         if (isStale(now_epoch)) {
             LOGW("PressureHistory", "history stale, reset");
+            MqttPublishSystemEvent("PRESSURE", "warning", "Pressure history: stale, reset");
             reset(data, storage, true);
             last_sample_ms_ = now_ms - Config::PRESSURE_HISTORY_STEP_MS;
         }
@@ -182,12 +190,24 @@ void PressureHistory::update(float pressure, SensorData &data, StorageManager &s
             Logger::log(Logger::Warn, "PressureHistory",
                         "gap %us, reset",
                         static_cast<unsigned>(gap_s));
+            {
+                char msg[48];
+                snprintf(msg, sizeof(msg), "Pressure history: gap %us, reset",
+                         static_cast<unsigned>(gap_s));
+                MqttPublishSystemEvent("PRESSURE", "warning", msg);
+            }
             reset(data, storage, true);
             last_sample_ms_ = now_ms - Config::PRESSURE_HISTORY_STEP_MS;
         } else if (gap_s >= Config::PRESSURE_HISTORY_FILL_SHORT_S) {
             Logger::log(Logger::Info, "PressureHistory",
                         "filling gap %us",
                         static_cast<unsigned>(gap_s));
+            {
+                char msg[48];
+                snprintf(msg, sizeof(msg), "Pressure history: filling gap %us",
+                         static_cast<unsigned>(gap_s));
+                MqttPublishSystemEvent("PRESSURE", "info", msg);
+            }
             uint32_t step_s = Config::PRESSURE_HISTORY_STEP_MS / 1000UL;
             uint32_t steps = gap_s / step_s;
             int latest_index = (index_ + Config::PRESSURE_HISTORY_24H_SAMPLES - 1) %
