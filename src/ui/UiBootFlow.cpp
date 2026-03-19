@@ -17,6 +17,8 @@
 #include "ui/UiController.h"
 #include "ui/UiText.h"
 #include "ui/ui.h"
+// [NEW] Included for system event publishing to Home Assistant.
+#include "modules/MqttManager.h"
 
 namespace {
 
@@ -144,6 +146,8 @@ void UiBootFlow::releaseBootScreens(UiController &owner) {
     owner.boot_ui_released = true;
 
     LOGI("UI", "boot screens released");
+    // [NEW] Mirrors "boot screens released" from the web dashboard Events tab.
+    MqttPublishSystemEvent("UI", "info", "boot screens released");
 }
 
 bool UiBootFlow::bootDiagHasErrors(UiController &owner, uint32_t now_ms) {
