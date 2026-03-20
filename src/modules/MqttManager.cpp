@@ -587,7 +587,7 @@ void MqttManager::publishDiscoveryButton(const char *object_id, const char *name
 // For HA automations the full payload (event_type, category, value, unit)
 // is still available via trigger.to_state.attributes.
 void MqttManager::publishDiscoveryEvent() {
-    if (!client_.connected()) {
+    if (!mqtt_connected_) {
         return;
     }
 
@@ -627,7 +627,7 @@ void MqttManager::publishDiscoveryEvent() {
     payload += "\",\"manufacturer\":\"21CNCStudio\",\"model\":\"Project Aura\"}";
     payload += "}";
 
-    client_.publish(topic, payload.c_str(), true);
+    publishMessage(topic, payload.c_str(), true);
 }
 
 void MqttManager::publishDiscovery() {
@@ -644,10 +644,10 @@ void MqttManager::publishDiscovery() {
     // to delete the entity from the device registry.
     // "air_events" — first iteration object_id before it was renamed to "events".
     build_discovery_topic(legacy_topic, sizeof(legacy_topic), "event", mqtt_device_id_, "air_events");
-    client_.publish(legacy_topic, "", true);
+    publishMessage(legacy_topic, "", true);
     // "events" as the old "event" component type — now replaced by "sensor".
     build_discovery_topic(legacy_topic, sizeof(legacy_topic), "event", mqtt_device_id_, "events");
-    client_.publish(legacy_topic, "", true);
+    publishMessage(legacy_topic, "", true);
 
     publishDiscoverySensor("temperature", "Temperature", "\\u00b0C",
                            "temperature", "measurement", "{{ value_json.temp }}", "");
@@ -753,7 +753,7 @@ void MqttManager::publishState(const MqttRuntimeSnapshot &runtime) {
 void MqttManager::publishEvent(const char *metric_key, const char *band,
                                 float value, const char *unit,
                                 const char *message) {
-    if (!client_.connected()) {
+    if (!mqtt_connected_) {
         return;
     }
 
@@ -779,7 +779,7 @@ void MqttManager::publishEvent(const char *metric_key, const char *band,
     append_json_escaped(payload, unit ? unit : "");
     payload += "\"}";
 
-    client_.publish(topic, payload.c_str(), false);
+    publishMessage(topic, payload.c_str(), false);
 }
 
 // [NEW] Publishes a system log event to "<base_topic>/events".
@@ -796,7 +796,7 @@ void MqttManager::publishEvent(const char *metric_key, const char *band,
 // retain=false — same as air quality events.
 void MqttManager::publishSystemEvent(const char *category, const char *severity,
                                       const char *message) {
-    if (!client_.connected()) {
+    if (!mqtt_connected_) {
         return;
     }
 
@@ -818,10 +818,9 @@ void MqttManager::publishSystemEvent(const char *category, const char *severity,
     append_json_escaped(payload, category ? category : "");
     payload += "\"}";
 
-    client_.publish(topic, payload.c_str(), false);
+    publishMessage(topic, payload.c_str(), false);
 }
 
-bool MqttManager::connectClient(const SensorData &data, bool night_mode, bool alert_blink, bool backlight_on) {
 bool MqttManager::connectClient() {
     if (!mqtt_enabled_) {
         return false;
