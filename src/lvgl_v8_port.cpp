@@ -1237,7 +1237,7 @@ bool lvgl_port_pause(void)
     lvgl_vsync_notify_enabled = false;
 #if LVGL_PORT_AVOID_TEAR
     if (lvgl_port_lcd != nullptr) {
-        lvgl_port_lcd->attachRefreshFinishCallback(nullptr, nullptr);
+        lvgl_port_lcd->attachRefreshFinishCallback(nullptr, (void *)lvgl_task_handle);
     }
 #endif
 #if !LV_TICK_CUSTOM
@@ -1321,7 +1321,7 @@ bool lvgl_port_prepare_restart(void)
     lvgl_vsync_notify_enabled = false;
 #if LVGL_PORT_AVOID_TEAR
     if (lvgl_port_lcd != nullptr) {
-        lvgl_port_lcd->attachRefreshFinishCallback(nullptr, nullptr);
+        lvgl_port_lcd->attachRefreshFinishCallback(nullptr, (void *)lvgl_task_handle);
     }
 #endif
 #if !LV_TICK_CUSTOM

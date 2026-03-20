@@ -7,7 +7,6 @@
 #include "ui/UiRenderLoop.h"
 
 #include "config/AppConfig.h"
-#include "modules/MqttManager.h"
 #include "modules/NetworkManager.h"
 #include "ui/BacklightManager.h"
 #include "ui/NightModeManager.h"
@@ -26,7 +25,7 @@ constexpr uint32_t SETTINGS_HEADER_UPDATE_MS = 750;
 
 void UiRenderLoop::process(UiController &owner, uint32_t now_ms) {
     bool allow_ui_update = true;
-    if (owner.networkManager.state() == AuraNetworkManager::WIFI_STATE_AP_CONFIG &&
+    if (owner.connectivity_.wifi_state == static_cast<int>(AuraNetworkManager::WIFI_STATE_AP_CONFIG) &&
         (now_ms - owner.last_ui_update_ms) < WIFI_UI_UPDATE_MS) {
         allow_ui_update = false;
     }
@@ -53,14 +52,12 @@ void UiRenderLoop::process(UiController &owner, uint32_t now_ms) {
         owner.hum_offset_ui_dirty = false;
         did_update = true;
     }
-    if (owner.networkManager.isUiDirty()) {
+    if (owner.consumeNetworkUiDirty()) {
         owner.update_wifi_ui();
-        owner.networkManager.clearUiDirty();
         did_update = true;
     }
-    if (owner.mqttManager.isUiDirty()) {
+    if (owner.consumeMqttUiDirty()) {
         owner.update_mqtt_ui();
-        owner.mqttManager.clearUiDirty();
         did_update = true;
     }
     if (owner.clock_ui_dirty) {

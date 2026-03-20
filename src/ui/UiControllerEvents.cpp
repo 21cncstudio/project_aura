@@ -13,6 +13,7 @@
 #include "config/AppConfig.h"
 #include "core/Logger.h"
 #include "core/SafeRestart.h"
+#include "web/WebRuntime.h"
 #include "lvgl_v8_port.h"
 #include "modules/NetworkManager.h"
 #include "modules/MqttManager.h"
@@ -108,6 +109,7 @@ void UiController::on_confirm_ok_event_cb(lv_event_t *e) { if (instance_) instan
 void UiController::on_confirm_cancel_event_cb(lv_event_t *e) { if (instance_) instance_->on_confirm_cancel_event(e); }
 void UiController::on_night_mode_event_cb(lv_event_t *e) { if (instance_) instance_->on_night_mode_event(e); }
 void UiController::on_units_c_f_event_cb(lv_event_t *e) { if (instance_) instance_->on_units_c_f_event(e); }
+void UiController::on_time_format_toggle_event_cb(lv_event_t *e) { if (instance_) instance_->on_time_format_toggle_event(e); }
 void UiController::on_units_mdy_event_cb(lv_event_t *e) { if (instance_) instance_->on_units_mdy_event(e); }
 void UiController::on_led_indicators_event_cb(lv_event_t *e) { if (instance_) instance_->on_led_indicators_event(e); }
 void UiController::on_alert_blink_event_cb(lv_event_t *e) { if (instance_) instance_->on_alert_blink_event(e); }
@@ -305,22 +307,16 @@ void UiController::on_about_back_event(lv_event_t *e) {
 }
 
 void UiController::update_web_page_panel() {
-    const bool wifi_enabled = networkManager.isEnabled();
-    const AuraNetworkManager::WifiState wifi_state = networkManager.state();
-    const bool ap_mode = wifi_enabled && wifi_state == AuraNetworkManager::WIFI_STATE_AP_CONFIG;
-    const bool sta_mode = wifi_enabled && wifi_state == AuraNetworkManager::WIFI_STATE_STA_CONNECTED;
+    refreshConnectivitySnapshot();
+    const bool ap_mode = connectivity_.wifi_enabled &&
+                         connectivity_.wifi_state == static_cast<int>(AuraNetworkManager::WIFI_STATE_AP_CONFIG);
+    const bool sta_mode = connectivity_.wifi_enabled &&
+                          connectivity_.wifi_state == static_cast<int>(AuraNetworkManager::WIFI_STATE_STA_CONNECTED);
     const bool off_mode = !ap_mode && !sta_mode;
-    const String local_url = networkManager.localUrl("/dashboard");
+    const String &local_url = connectivity_.dashboard_local_url;
     String ip_url = "http://<device-ip>/dashboard";
     if (sta_mode) {
-        const IPAddress ip = WiFi.localIP();
-        if (ip[0] != 0 || ip[1] != 0 || ip[2] != 0 || ip[3] != 0) {
-            ip_url = "http://";
-            ip_url += ip.toString();
-            ip_url += "/dashboard";
-        } else {
-            ip_url = local_url;
-        }
+        ip_url = connectivity_.dashboard_sta_url;
     }
 
     if (objects.container_web_page_text_ap) {
@@ -408,7 +404,7 @@ void UiController::on_wifi_back_event(lv_event_t *e) {
     if (lv_event_get_code(e) != LV_EVENT_CLICKED) {
         return;
     }
-    networkManager.applyEnabledIfDirty();
+    applyPendingWifiEnabled();
     pending_screen_id = SCREEN_ID_PAGE_SETTINGS;
 }
 
@@ -416,8 +412,7 @@ void UiController::on_mqtt_settings_event(lv_event_t *e) {
     if (lv_event_get_code(e) != LV_EVENT_CLICKED) {
         return;
     }
-    mqttManager.markUiDirty();
-    networkManager.setMqttScreenOpen(true);
+    setMqttScreenOpenState(true);
     pending_screen_id = SCREEN_ID_PAGE_MQTT;
 }
 
@@ -425,7 +420,7 @@ void UiController::on_mqtt_back_event(lv_event_t *e) {
     if (lv_event_get_code(e) != LV_EVENT_CLICKED) {
         return;
     }
-    networkManager.setMqttScreenOpen(false);
+    setMqttScreenOpenState(false);
     pending_screen_id = SCREEN_ID_PAGE_SETTINGS;
 }
 
@@ -450,8 +445,7 @@ void UiController::on_theme_color_event(lv_event_t *e) {
         else lv_obj_add_state(objects.btn_theme_custom, LV_STATE_CHECKED);
     }
     update_theme_custom_info(presets);
-    themeManager.setThemeScreenOpen(true);
-    networkManager.setThemeScreenOpen(true);
+    setThemeScreenOpenState(true);
     themeManager.setCustomTabSelected(!presets);
     pending_screen_id = SCREEN_ID_PAGE_THEME;
 }
@@ -463,9 +457,7 @@ void UiController::on_theme_back_event(lv_event_t *e) {
     if (themeManager.hasUnsavedPreview()) {
         themeManager.applyPreviewAsCurrent(storage, night_mode, datetime_ui_dirty);
     }
-    themeManager.setThemeScreenOpen(false);
-    networkManager.setThemeScreenOpen(false);
-    themeManager.setCustomTabSelected(false);
+    setThemeScreenOpenState(false);
     pending_screen_id = SCREEN_ID_PAGE_SETTINGS;
 }
 
@@ -502,42 +494,31 @@ void UiController::on_wifi_toggle_event(lv_event_t *e) {
     if (lv_event_get_code(e) != LV_EVENT_VALUE_CHANGED) {
         return;
     }
-    lv_obj_t *btn = lv_event_get_target(e);
-    bool enabled = lv_obj_has_state(btn, LV_STATE_CHECKED);
-    if (enabled == networkManager.isEnabled()) {
+    if (wifi_toggle_syncing_) {
         return;
     }
-    networkManager.setEnabled(enabled);
-    update_wifi_ui();
-    if (timeManager.updateWifiState(networkManager.isEnabled(), networkManager.isConnected())) {
-        datetime_ui_dirty = true;
-    }
-    mqtt_sync_with_wifi();
-    datetime_ui_dirty = true;
+    lv_obj_t *btn = lv_event_get_target(e);
+    bool enabled = lv_obj_has_state(btn, LV_STATE_CHECKED);
+    setWifiEnabledFromUi(enabled);
 }
 
 void UiController::on_mqtt_toggle_event(lv_event_t *e) {
     if (lv_event_get_code(e) != LV_EVENT_VALUE_CHANGED) {
         return;
     }
-    lv_obj_t *btn = lv_event_get_target(e);
-    bool enabled = lv_obj_has_state(btn, LV_STATE_CHECKED);
-    if (enabled == mqttManager.isUserEnabled()) {
+    if (mqtt_toggle_syncing_) {
         return;
     }
-    mqttManager.setUserEnabled(enabled);
-    mqtt_sync_with_wifi();
+    lv_obj_t *btn = lv_event_get_target(e);
+    bool enabled = lv_obj_has_state(btn, LV_STATE_CHECKED);
+    setMqttUserEnabledFromUi(enabled);
 }
 
 void UiController::on_mqtt_reconnect_event(lv_event_t *e) {
     if (lv_event_get_code(e) != LV_EVENT_CLICKED) {
         return;
     }
-    if (!mqttManager.isEnabled() || !networkManager.isEnabled() || !networkManager.isConnected()) {
-        return;
-    }
-    mqttManager.requestReconnect();
-    mqttManager.markUiDirty();
+    requestMqttReconnectFromUi();
 }
 
 void UiController::on_wifi_reconnect_event(lv_event_t *e) {
@@ -546,35 +527,14 @@ void UiController::on_wifi_reconnect_event(lv_event_t *e) {
     }
     lv_obj_t *btn = lv_event_get_target(e);
     show_wifi_action_feedback(btn);
-    if (!networkManager.isEnabled()) {
-        networkManager.setEnabled(true);
-    } else if (networkManager.ssid().isEmpty()) {
-        networkManager.startApOnDemand();
-    } else {
-        networkManager.connectSta();
-    }
-    update_wifi_ui();
-    mqtt_sync_with_wifi();
-    datetime_ui_dirty = true;
+    requestWifiReconnectFromUi();
 }
 
 void UiController::on_wifi_start_ap_event(lv_event_t *e) {
     if (lv_event_get_code(e) != LV_EVENT_CLICKED) {
         return;
     }
-    const AuraNetworkManager::WifiState wifi_state = networkManager.state();
-    if (wifi_state == AuraNetworkManager::WIFI_STATE_AP_CONFIG) {
-        if (!networkManager.ssid().isEmpty()) {
-            networkManager.connectSta();
-        } else {
-            networkManager.setEnabled(false);
-        }
-    } else {
-        networkManager.startApOnDemand();
-    }
-    update_wifi_ui();
-    mqtt_sync_with_wifi();
-    datetime_ui_dirty = true;
+    toggleWifiApModeFromUi();
 }
 
 void UiController::on_wifi_forget_event(lv_event_t *e) {
@@ -586,8 +546,7 @@ void UiController::on_wifi_forget_event(lv_event_t *e) {
         lv_obj_clear_state(btn, LV_STATE_CHECKED);
     }
     LOGI("UI", "WiFi credentials cleared");
-    networkManager.clearCredentials();
-    datetime_ui_dirty = true;
+    clearWifiCredentialsFromUi();
 }
 
 void UiController::on_head_status_event(lv_event_t *e) {
@@ -644,7 +603,6 @@ void UiController::on_auto_night_toggle_event(lv_event_t *e) {
         // return to normal mode immediately and restore blink state.
         set_night_mode_state(false, true);
     }
-    mqttManager.updateNightModeAvailability(nightModeManager.isAutoEnabled());
     sync_night_mode_toggle_ui();
     sync_auto_dim_button_state();
     data_dirty = true;
@@ -738,17 +696,12 @@ void UiController::on_confirm_ok_event(lv_event_t *e) {
         LOGI("UI", "SEN66 device reset done");
     } else if (action == CONFIRM_RESTART) {
         LOGW("UI", "restart requested");
-        esp_wifi_stop();
-        lvgl_port_prepare_restart();
-        delay(100);
-        safe_restart_via_core0();
+        WebHandlersRequestRestart();
     } else if (action == CONFIRM_FACTORY_RESET) {
         LOGW("UI", "factory reset requested");
         storage.clearAll();
         WiFi.disconnect(true, true);
-        lvgl_port_prepare_restart();
-        delay(100);
-        safe_restart_via_core0();
+        WebHandlersRequestRestart();
     }
 }
 
@@ -790,6 +743,22 @@ void UiController::on_units_c_f_event(lv_event_t *e) {
     clock_ui_dirty = true;
     update_clock_labels();
     update_ui();
+}
+
+void UiController::on_time_format_toggle_event(lv_event_t *e) {
+    if (lv_event_get_code(e) != LV_EVENT_VALUE_CHANGED) {
+        return;
+    }
+    lv_obj_t *btn = lv_event_get_target(e);
+    const bool use_24h = lv_obj_has_state(btn, LV_STATE_CHECKED);
+    if (use_24h == time_format_24h_) {
+        return;
+    }
+    time_format_24h_ = use_24h;
+    storage.config().time_format_24h = time_format_24h_;
+    persist_ui_config(storage, "time format");
+    clock_ui_dirty = true;
+    update_clock_labels();
 }
 
 void UiController::on_units_mdy_event(lv_event_t *e) {
@@ -1838,10 +1807,7 @@ void UiController::on_datetime_back_event(lv_event_t *e) {
         LOGI("UI", "RTC mode set to %s, restart requested",
              TimeManager::rtcModeLabel(rtc_detection_pending_mode_));
         close_rtc_detection_overlay();
-        esp_wifi_stop();
-        lvgl_port_prepare_restart();
-        delay(100);
-        safe_restart_via_core0();
+        WebHandlersRequestRestart();
     }
     if (datetime_changed && !timeManager.isManualLocked(millis())) {
         if (timeManager.setLocalTime(set_year, set_month, set_day, set_hour, set_minute)) {

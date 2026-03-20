@@ -467,6 +467,7 @@ namespace Config {
 
         bool ntp_enabled = true;
         int tz_index = -1;
+        bool time_format_24h = true;
         RtcMode rtc_mode = RtcMode::Auto;
         bool dac_auto_mode = false;
         bool dac_auto_armed = false;

@@ -12,9 +12,15 @@
 
 #include "core/AppInit.h"
 #include "core/BootPolicy.h"
+#include "core/ChartsRuntimeState.h"
+#include "core/ConnectivityRuntime.h"
 #include "core/Logger.h"
 #include "core/MemoryMonitor.h"
+#include "core/MqttRuntimeState.h"
+#include "core/NetworkCommandQueue.h"
+#include "core/NetworkPlane.h"
 #include "core/SafeRestart.h"
+#include "core/WebRuntimeState.h"
 #include "core/Watchdog.h"
 
 #include "modules/StorageManager.h"
@@ -25,6 +31,8 @@
 #include "modules/SensorManager.h"
 #include "modules/TimeManager.h"
 #include "modules/FanControl.h"
+#include "web/WebRuntime.h"
+#include "web/WebUiBridge.h"
 
 #include "core/BootState.h"
 
@@ -44,6 +52,12 @@ PressureHistory pressureHistory;
 ChartsHistory chartsHistory;
 AuraNetworkManager networkManager;
 MqttManager mqttManager;
+ConnectivityRuntime connectivityRuntime;
+MqttRuntimeState mqttRuntimeState;
+ChartsRuntimeState chartsRuntimeState;
+WebRuntimeState webRuntimeState;
+NetworkCommandQueue networkCommandQueue;
+WebUiBridge webUiBridge;
 SensorManager sensorManager;
 TimeManager timeManager;
 ThemeManager themeManager;
@@ -68,6 +82,10 @@ UiContext ui_context{
     storage,
     networkManager,
     mqttManager,
+    connectivityRuntime,
+    mqttRuntimeState,
+    webUiBridge,
+    networkCommandQueue,
     sensorManager,
     chartsHistory,
     timeManager,
@@ -86,9 +104,29 @@ UiContext ui_context{
 };
 
 UiController uiController(ui_context);
+NetworkPlane::Context network_plane_context{
+    networkManager,
+    mqttManager,
+    connectivityRuntime,
+    mqttRuntimeState,
+    networkCommandQueue,
+    webUiBridge
+};
 bool ota_window_active = false;
 bool ota_lvgl_quiesced = false;
 uint32_t ota_quiesce_due_ms = 0;
+bool network_plane_running = false;
+
+void quiesce_network_for_restart() {
+    const wifi_mode_t wifi_mode = WiFi.getMode();
+    if ((wifi_mode & (WIFI_MODE_STA | WIFI_MODE_AP)) == 0) {
+        return;
+    }
+
+    LOGI("OTA", "quiescing WiFi before restart");
+    WiFi.disconnect(true, false);
+    delay(250);
+}
 } // namespace
 
 void setup()
@@ -118,6 +156,12 @@ void setup()
         storage,
         networkManager,
         mqttManager,
+        connectivityRuntime,
+        mqttRuntimeState,
+        chartsRuntimeState,
+        webRuntimeState,
+        webUiBridge,
+        networkCommandQueue,
         sensorManager,
         timeManager,
         themeManager,
@@ -146,14 +190,20 @@ void setup()
     if (!safe_restart_init()) {
         LOGW("Restart", "Core0 restart task init failed; controlled restart requests will abort");
     }
+    webUiBridge.setDispatchMode(WebUiBridge::DispatchMode::DeferredReply);
+    network_plane_running = NetworkPlane::start(network_plane_context);
+    if (!network_plane_running) {
+        LOGW("Main", "network task unavailable, falling back to main-loop networking");
+    }
 }
 
 void loop()
 {
     if (WebHandlersConsumeRestartRequest()) {
         LOGI("OTA", "restarting now (main loop)");
-        esp_wifi_stop();
+        WebHandlersBeginRestartShutdown();
         lvgl_port_prepare_restart();
+        quiesce_network_for_restart();
         delay(50);
         // Delegate restart to a dedicated Core 0 task so Core 0 is the initiator.
         // This avoids using the small IPC task stack and reduces restart races.
@@ -188,7 +238,14 @@ void loop()
                 LOGW("OTA", "failed to pause LVGL during OTA transfer");
             }
         }
-        networkManager.poll();
+        if (!network_plane_running) {
+            networkCommandQueue.processAll(networkManager, mqttManager, connectivityRuntime);
+            networkManager.poll();
+            connectivityRuntime.update(networkManager, mqttManager);
+            mqttManager.poll(mqttRuntimeState);
+            connectivityRuntime.update(networkManager, mqttManager);
+        }
+        AppInit::pollDeferredRuntime();
         memoryMonitor.poll(loop_now);
         if (!ota_lvgl_quiesced) {
             uiController.poll(loop_now);
@@ -202,7 +259,14 @@ void loop()
         sensorManager.poll(currentData, storage, pressureHistory, co2_asc_enabled);
     uiController.onSensorPoll(sensor_poll);
     chartsHistory.update(currentData, storage);
-    networkManager.poll();
+    chartsRuntimeState.update(chartsHistory);
+    webRuntimeState.update(currentData, sensorManager.isWarmupActive(), fanControl);
+    if (!network_plane_running) {
+        networkCommandQueue.processAll(networkManager, mqttManager, connectivityRuntime);
+        networkManager.poll();
+        connectivityRuntime.update(networkManager, mqttManager);
+    }
+    AppInit::pollDeferredRuntime();
     const uint32_t now = millis();
     BootPolicy::markStable(now,
                            boot_start_ms,
@@ -213,7 +277,16 @@ void loop()
     TimeManager::PollResult time_poll = timeManager.poll(now);
     uiController.onTimePoll(time_poll);
     fanControl.poll(now, &currentData, sensorManager.isWarmupActive());
-    mqttManager.poll(currentData, night_mode, alert_blink_enabled, backlightManager.isOn());
+    webRuntimeState.update(currentData, sensorManager.isWarmupActive(), fanControl);
+    mqttRuntimeState.update(currentData,
+                            night_mode,
+                            alert_blink_enabled,
+                            backlightManager.isOn(),
+                            nightModeManager.isAutoEnabled());
+    if (!network_plane_running) {
+        mqttManager.poll(mqttRuntimeState);
+        connectivityRuntime.update(networkManager, mqttManager);
+    }
     storage.poll(now);
     memoryMonitor.poll(now);
     uiController.poll(now);

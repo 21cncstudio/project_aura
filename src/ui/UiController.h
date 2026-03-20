@@ -9,7 +9,11 @@
 #include <Arduino.h>
 #include "config/AppData.h"
 #include "config/AppConfig.h"
+#include "core/ConnectivityRuntime.h"
+#include "core/MqttRuntimeState.h"
+#include "core/NetworkCommandQueue.h"
 #include "ui/UiDeferredUnload.h"
+#include "web/WebUiBridge.h"
 #include <lvgl.h>
 #include "modules/SensorManager.h"
 #include "modules/TimeManager.h"
@@ -32,6 +36,10 @@ struct UiContext {
     StorageManager &storage;
     AuraNetworkManager &networkManager;
     MqttManager &mqttManager;
+    ConnectivityRuntime &connectivityRuntime;
+    MqttRuntimeState &mqttRuntimeState;
+    WebUiBridge &webUiBridge;
+    NetworkCommandQueue &networkCommandQueue;
     SensorManager &sensorManager;
     ChartsHistory &chartsHistory;
     TimeManager &timeManager;
@@ -145,13 +153,29 @@ private:
         float max_value = 0.0f;
         float latest_value = 0.0f;
     };
-
     void update_temp_offset_label();
     void update_hum_offset_label();
     void update_wifi_ui();
     void update_mqtt_ui();
     void update_status_icons();
     void update_ui();
+    void refreshConnectivitySnapshot();
+    void syncConnectivityRuntime();
+    void publishWebUiSnapshot();
+    void processWebUiBridgeCommands();
+    WebUiBridge::Snapshot buildWebUiSnapshot() const;
+    bool consumeNetworkUiDirty();
+    bool consumeMqttUiDirty();
+    void applyPendingWifiEnabled();
+    void setMqttScreenOpenState(bool open);
+    void setThemeScreenOpenState(bool open);
+    void setWifiEnabledFromUi(bool enabled);
+    void setMqttUserEnabledFromUi(bool enabled);
+    void requestMqttReconnectFromUi();
+    void requestWifiReconnectFromUi();
+    void toggleWifiApModeFromUi();
+    void clearWifiCredentialsFromUi();
+    void markWifiUiDirty();
     void update_sensor_info_ui();
     void restore_sensor_info_selection();
     void refresh_texts_for_screen(int screen_id);
@@ -462,6 +486,7 @@ private:
     void on_confirm_cancel_event(lv_event_t *e);
     void on_night_mode_event(lv_event_t *e);
     void on_units_c_f_event(lv_event_t *e);
+    void on_time_format_toggle_event(lv_event_t *e);
     void on_units_mdy_event(lv_event_t *e);
     void on_led_indicators_event(lv_event_t *e);
     void on_alert_blink_event(lv_event_t *e);
@@ -620,6 +645,7 @@ private:
     static void on_confirm_cancel_event_cb(lv_event_t *e);
     static void on_night_mode_event_cb(lv_event_t *e);
     static void on_units_c_f_event_cb(lv_event_t *e);
+    static void on_time_format_toggle_event_cb(lv_event_t *e);
     static void on_units_mdy_event_cb(lv_event_t *e);
     static void on_led_indicators_event_cb(lv_event_t *e);
     static void on_alert_blink_event_cb(lv_event_t *e);
@@ -743,12 +769,28 @@ private:
     static void on_dac_auto_stop_event_cb(lv_event_t *e);
     static void apply_toggle_style_cb(lv_obj_t *btn);
     static void mqtt_sync_with_wifi_cb();
+    static WebUiBridge::ApplyResult applyWebUiSettingsBridge(const WebUiBridge::SettingsUpdate &update,
+                                                             void *ctx);
+    static WebUiBridge::ApplyResult applyThemePreviewBridge(const WebUiBridge::ThemeUpdate &update,
+                                                            void *ctx);
+    static WebUiBridge::ApplyResult applyDacActionBridge(const WebUiBridge::DacActionUpdate &update,
+                                                         void *ctx);
+    static WebUiBridge::ApplyResult applyDacAutoBridge(const WebUiBridge::DacAutoUpdate &update,
+                                                       void *ctx);
+    static WebUiBridge::ApplyResult applyWifiSaveBridge(const WebUiBridge::WifiSaveUpdate &update,
+                                                        void *ctx);
+    static WebUiBridge::ApplyResult applyMqttSaveBridge(const WebUiBridge::MqttSaveUpdate &update,
+                                                        void *ctx);
 
     static UiController *instance_;
 
     StorageManager &storage;
     AuraNetworkManager &networkManager;
     MqttManager &mqttManager;
+    ConnectivityRuntime &connectivityRuntime;
+    MqttRuntimeState &mqttRuntimeState;
+    WebUiBridge &webUiBridge;
+    NetworkCommandQueue &networkCommandQueue;
     SensorManager &sensorManager;
     ChartsHistory &chartsHistory;
     TimeManager &timeManager;
@@ -812,6 +854,7 @@ private:
     bool hum_offset_ui_dirty = false;
     Config::Language ui_language = Config::Language::EN;
     bool date_units_mdy = false;
+    bool time_format_24h_ = true;
     bool language_dirty = false;
     bool blink_state = true;
     uint32_t last_blink_ms = 0;
@@ -828,6 +871,11 @@ private:
     bool co_status_alert_active = false;
     bool poor_gas_background_alert_active_ = false;
     bool high_co2_background_alert_active_ = false;
+    ConnectivityRuntimeSnapshot connectivity_;
+    bool wifi_toggle_syncing_ = false;
+    bool mqtt_toggle_syncing_ = false;
+    bool wifi_override_active_ = false;
+    bool wifi_override_enabled_ = false;
     uint32_t last_lvgl_lock_warn_ms = 0;
     uint16_t lvgl_lock_fail_streak = 0;
     uint32_t lvgl_diag_last_heartbeat_ms = 0;

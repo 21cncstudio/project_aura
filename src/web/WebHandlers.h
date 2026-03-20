@@ -6,72 +6,11 @@
 
 #pragma once
 
-#include <Arduino.h>
-
-class WebServer;
-class PubSubClient;
-class MqttManager;
-class StorageManager;
-class ThemeManager;
-class FanControl;
-class SensorManager;
-class ChartsHistory;
-class UiController;
-struct SensorData;
-
-struct WebHandlerContext {
-    WebServer *server = nullptr;
-    StorageManager *storage = nullptr;
-    ThemeManager *theme_manager = nullptr;
-    const String *hostname = nullptr;
-
-    String *wifi_ssid = nullptr;
-    String *wifi_pass = nullptr;
-    bool *wifi_enabled = nullptr;
-    bool *wifi_enabled_dirty = nullptr;
-    bool *wifi_ui_dirty = nullptr;
-    bool *wifi_scan_in_progress = nullptr;
-    String *wifi_scan_options = nullptr;
-    bool (*wifi_is_connected)() = nullptr;
-    uint32_t (*wifi_sta_connected_elapsed_ms)() = nullptr;
-    bool (*wifi_is_ap_mode)() = nullptr;
-    void (*wifi_start_scan)() = nullptr;
-    void (*wifi_stop_scan)() = nullptr;
-    void (*wifi_start_sta)() = nullptr;
-
-    PubSubClient *mqtt_client = nullptr;
-    MqttManager *mqtt_manager = nullptr;
-    bool *mqtt_user_enabled = nullptr;
-    String *mqtt_host = nullptr;
-    uint16_t *mqtt_port = nullptr;
-    String *mqtt_user = nullptr;
-    String *mqtt_pass = nullptr;
-    String *mqtt_device_name = nullptr;
-    String *mqtt_base_topic = nullptr;
-    String *mqtt_device_id = nullptr;
-    bool *mqtt_discovery = nullptr;
-    bool *mqtt_anonymous = nullptr;
-    void (*mqtt_sync_with_wifi)() = nullptr;
-    bool *mqtt_ui_open = nullptr;
-    bool *theme_ui_open = nullptr;
-
-    FanControl *fan_control = nullptr;
-    SensorManager *sensor_manager = nullptr;
-    ChartsHistory *charts_history = nullptr;
-    SensorData *sensor_data = nullptr;
-    UiController *ui_controller = nullptr;
-};
+#include "web/WebContext.h"
+#include "web/WebRuntime.h"
+#include "web/WebWifiUtils.h"
 
 void WebHandlersInit(WebHandlerContext *context);
-void WebHandlersPollDeferred();
-bool WebHandlersIsOtaBusy();
-bool WebHandlersConsumeRestartRequest();
-bool WebHandlersShouldPauseMqttConnect();
-bool WebHandlersShouldPauseMqttPublish();
-void WebHandlersNoteMqttConnectDeferred();
-void WebHandlersNoteMqttPublishDeferred();
-
-String wifi_label_safe(const String &value);
 void wifi_build_scan_items(int count);
 
 void wifi_handle_root();

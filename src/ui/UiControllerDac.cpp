@@ -8,7 +8,6 @@
 
 #include <math.h>
 #include <stdio.h>
-#include <WiFi.h>
 
 #include "core/Logger.h"
 #include "modules/FanControl.h"
@@ -37,6 +36,15 @@ void set_button_accent(lv_obj_t *obj, lv_color_t color, lv_opa_t shadow_opa) {
     lv_obj_set_style_border_color(obj, color, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_shadow_color(obj, color, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_shadow_opa(obj, shadow_opa, LV_PART_MAIN | LV_STATE_DEFAULT);
+}
+
+uint32_t hash_text(uint32_t seed, const String &text) {
+    uint32_t hash = seed;
+    for (size_t i = 0; i < text.length(); ++i) {
+        hash ^= static_cast<uint8_t>(text[i]);
+        hash *= 16777619UL;
+    }
+    return hash;
 }
 
 uint8_t manual_level_from_target(lv_obj_t *target) {
@@ -163,6 +171,8 @@ void update_reason_candidate(uint8_t percent,
 } // namespace
 
 void UiController::update_dac_ui(uint32_t now_ms) {
+    refreshConnectivitySnapshot();
+
     const bool available = fanControl.isAvailable();
     const bool faulted = fanControl.isFaulted();
     set_button_enabled(objects.btn_dac_settings, available);
@@ -362,33 +372,30 @@ void UiController::update_dac_ui(uint32_t now_ms) {
         }
     }
 
-    const bool wifi_enabled = networkManager.isEnabled();
-    const AuraNetworkManager::WifiState wifi_state = networkManager.state();
-    const bool ap_mode = wifi_enabled && (wifi_state == AuraNetworkManager::WIFI_STATE_AP_CONFIG);
-    const bool wifi_connected = wifi_enabled && (wifi_state == AuraNetworkManager::WIFI_STATE_STA_CONNECTED);
-    const uint32_t ip_raw = wifi_connected ? static_cast<uint32_t>(WiFi.localIP()) : 0U;
-    const uint32_t network_sig =
+    const bool wifi_enabled = connectivity_.wifi_enabled;
+    const int wifi_state = connectivity_.wifi_state;
+    const bool ap_mode =
+        wifi_enabled && wifi_state == static_cast<int>(AuraNetworkManager::WIFI_STATE_AP_CONFIG);
+    const bool wifi_connected =
+        wifi_enabled && wifi_state == static_cast<int>(AuraNetworkManager::WIFI_STATE_STA_CONNECTED);
+    uint32_t network_sig =
         (wifi_enabled ? 0x80000000UL : 0UL) ^
-        (static_cast<uint32_t>(wifi_state) << 24) ^
-        ip_raw;
+        (static_cast<uint32_t>(wifi_state) << 24);
+    network_sig = hash_text(network_sig, connectivity_.ap_ip);
+    network_sig = hash_text(network_sig, connectivity_.sta_ip);
     if (network_sig != dac_network_ui_signature_) {
         dac_network_ui_signature_ = network_sig;
 
-        const String local_url = networkManager.localUrl("/dac");
+        const String local_url = connectivity_.dac_local_url;
         String ip_url = "http://<device-ip>/dac";
         if (wifi_connected) {
-            const IPAddress ip = WiFi.localIP();
-            if (ip[0] != 0 || ip[1] != 0 || ip[2] != 0 || ip[3] != 0) {
-                ip_url = "http://";
-                ip_url += ip.toString();
-                ip_url += "/dac";
-            } else {
-                ip_url = local_url;
-            }
+            ip_url = connectivity_.sta_ip.isEmpty() ? local_url : connectivity_.dac_sta_url;
         }
         String dac_url;
         if (ap_mode) {
-            dac_url = "http://192.168.4.1/dac";
+            dac_url = connectivity_.ap_ip.isEmpty()
+                          ? "http://192.168.4.1/dac"
+                          : String("http://") + connectivity_.ap_ip + "/dac";
         } else if (wifi_connected) {
             dac_url = ip_url;
         }
@@ -430,6 +437,16 @@ bool persist_dac_auto_state(StorageManager &storage, bool auto_mode, bool auto_a
     }
     LOGE("UI", "failed to persist DAC auto state");
     return false;
+}
+
+WebUiBridge::ApplyResult finalize_dac_bridge_result(bool success,
+                                                    uint16_t status_code,
+                                                    const char *message) {
+    WebUiBridge::ApplyResult result{};
+    result.success = success;
+    result.status_code = status_code;
+    result.error_message = message ? message : "";
+    return result;
 }
 
 void UiController::on_dac_settings_event(lv_event_t *e) {
@@ -567,3 +584,85 @@ void UiController::on_dac_manual_stop_event_cb(lv_event_t *e) { if (instance_) i
 void UiController::on_dac_manual_auto_event_cb(lv_event_t *e) { if (instance_) instance_->on_dac_manual_auto_event(e); }
 void UiController::on_dac_auto_start_event_cb(lv_event_t *e) { if (instance_) instance_->on_dac_auto_start_event(e); }
 void UiController::on_dac_auto_stop_event_cb(lv_event_t *e) { if (instance_) instance_->on_dac_auto_stop_event(e); }
+
+WebUiBridge::ApplyResult UiController::applyDacActionBridge(
+    const WebUiBridge::DacActionUpdate &update,
+    void *ctx) {
+    auto *controller = static_cast<UiController *>(ctx);
+    if (!controller) {
+        return finalize_dac_bridge_result(false, 503, "DAC bridge unavailable");
+    }
+
+    switch (update.type) {
+        case WebUiBridge::DacActionUpdate::Type::SetMode: {
+            const bool auto_mode = update.auto_mode;
+            bool auto_armed = false;
+            if (auto_mode && controller->fanControl.mode() == FanControl::Mode::Auto) {
+                auto_armed = controller->storage.config().dac_auto_armed;
+            }
+            if (!persist_dac_auto_state(controller->storage, auto_mode, auto_armed)) {
+                return finalize_dac_bridge_result(false, 500, "Failed to persist DAC mode");
+            }
+            controller->fanControl.setMode(auto_mode ? FanControl::Mode::Auto : FanControl::Mode::Manual);
+            break;
+        }
+        case WebUiBridge::DacActionUpdate::Type::SetManualStep:
+            controller->fanControl.setManualStep(update.manual_step);
+            break;
+        case WebUiBridge::DacActionUpdate::Type::SetTimerSeconds:
+            controller->fanControl.setTimerSeconds(update.timer_seconds);
+            break;
+        case WebUiBridge::DacActionUpdate::Type::Start:
+            if (!persist_dac_auto_state(controller->storage, false, false)) {
+                return finalize_dac_bridge_result(false, 500, "Failed to persist DAC auto state");
+            }
+            if (controller->fanControl.mode() != FanControl::Mode::Manual) {
+                controller->fanControl.setMode(FanControl::Mode::Manual);
+            }
+            controller->fanControl.requestStart();
+            break;
+        case WebUiBridge::DacActionUpdate::Type::Stop: {
+            const bool auto_mode = (controller->fanControl.mode() == FanControl::Mode::Auto);
+            if (!persist_dac_auto_state(controller->storage, auto_mode, false)) {
+                return finalize_dac_bridge_result(false, 500, "Failed to persist DAC auto state");
+            }
+            controller->fanControl.requestStop();
+            break;
+        }
+        case WebUiBridge::DacActionUpdate::Type::StartAuto:
+            if (!persist_dac_auto_state(controller->storage, true, true)) {
+                return finalize_dac_bridge_result(false, 500, "Failed to persist DAC auto mode");
+            }
+            controller->fanControl.requestAutoStart();
+            break;
+        default:
+            return finalize_dac_bridge_result(false, 400, "Unsupported action");
+    }
+
+    controller->data_dirty = true;
+    return finalize_dac_bridge_result(true, 200, nullptr);
+}
+
+WebUiBridge::ApplyResult UiController::applyDacAutoBridge(
+    const WebUiBridge::DacAutoUpdate &update,
+    void *ctx) {
+    auto *controller = static_cast<UiController *>(ctx);
+    if (!controller) {
+        return finalize_dac_bridge_result(false, 503, "DAC auto bridge unavailable");
+    }
+
+    String serialized = DacAutoConfigJson::serialize(update.config);
+    if (!controller->storage.saveTextAtomic(StorageManager::kDacAutoPath, serialized)) {
+        return finalize_dac_bridge_result(false, 500, "Failed to persist auto config");
+    }
+    if (update.rearm && !persist_dac_auto_state(controller->storage, true, true)) {
+        return finalize_dac_bridge_result(false, 500, "Failed to persist DAC auto mode");
+    }
+
+    controller->fanControl.setAutoConfig(update.config);
+    if (update.rearm) {
+        controller->fanControl.requestAutoStart();
+    }
+    controller->data_dirty = true;
+    return finalize_dac_bridge_result(true, 200, nullptr);
+}

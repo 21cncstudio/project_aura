@@ -28,6 +28,21 @@ public:
         Fault,
     };
 
+    struct Snapshot {
+        bool available = false;
+        bool running = false;
+        bool faulted = false;
+        bool output_known = true;
+        bool manual_override_active = false;
+        bool auto_resume_blocked = false;
+        Mode mode = Mode::Manual;
+        uint8_t manual_step = 1;
+        uint32_t selected_timer_s = 0;
+        uint16_t output_mv = 0;
+        uint32_t stop_at_ms = 0;
+        DacAutoConfig auto_config{};
+    };
+
     void begin(bool auto_mode_preference, bool auto_armed_preference);
     void poll(uint32_t now_ms, const SensorData *sensor_data, bool gas_warmup);
 
@@ -52,6 +67,7 @@ public:
     uint16_t outputMillivolts() const;
     uint8_t outputPercent() const;
     uint32_t remainingSeconds(uint32_t now_ms) const;
+    Snapshot snapshot() const;
 
 private:
     struct PendingCommands {
@@ -69,21 +85,6 @@ private:
         };
         StartStopRequest start_stop_request = StartStopRequest::None;
         bool has_auto_config = false;
-        DacAutoConfig auto_config{};
-    };
-
-    struct Snapshot {
-        bool available = false;
-        bool running = false;
-        bool faulted = false;
-        bool output_known = true;
-        bool manual_override_active = false;
-        bool auto_resume_blocked = false;
-        Mode mode = Mode::Manual;
-        uint8_t manual_step = 1;
-        uint32_t selected_timer_s = 0;
-        uint16_t output_mv = 0;
-        uint32_t stop_at_ms = 0;
         DacAutoConfig auto_config{};
     };
 

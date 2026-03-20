@@ -203,6 +203,15 @@ uint32_t FanControl::remainingSeconds(uint32_t now_ms) const {
     return (stop_at_ms - now_ms + 999UL) / 1000UL;
 }
 
+FanControl::Snapshot FanControl::snapshot() const {
+    Snapshot value = snapshot_;
+    if (lockSync()) {
+        value = snapshot_;
+        unlockSync();
+    }
+    return value;
+}
+
 void FanControl::begin(bool auto_mode_preference, bool auto_armed_preference) {
     ensureSyncPrimitives();
 

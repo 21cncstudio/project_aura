@@ -11,12 +11,13 @@
 #include <string.h>
 #include <ESPmDNS.h>
 #include <WiFi.h>
+#include <esp_event.h>
 #include "core/Logger.h"
 #include "core/WifiPowerSaveGuard.h"
 #include "modules/MqttPayloadBuilder.h"
 #include "modules/StorageManager.h"
 #include "modules/NetworkManager.h"
-#include "web/WebHandlers.h"
+#include "web/WebRuntime.h"
 
 namespace {
 
@@ -25,11 +26,8 @@ MqttManager *g_mqtt = nullptr;
 constexpr size_t kTopicBufferSize = 256;
 constexpr uint32_t kMqttMdnsSuccessCacheMs = 5UL * 60UL * 1000UL;
 constexpr uint32_t kMqttMdnsFailureCacheMs = 60UL * 1000UL;
-constexpr uint16_t kMqttDefaultSocketTimeoutSec = 1;
-constexpr uint16_t kMqttConnectSocketTimeoutShortSec = 3;
-constexpr uint16_t kMqttConnectSocketTimeoutSlowSec = 3;
-constexpr uint8_t kMqttConnectAttemptsPerWindow = 1;
-constexpr uint16_t kMqttConnectRetryDelayMs = 250;
+constexpr int kMqttConnectTimeoutShortMs = 3000;
+constexpr int kMqttConnectTimeoutSlowMs = 3000;
 constexpr uint8_t kMqttLongRetryLogEveryAttempts = 6;
 
 void append_json_escaped(String &out, const char *value) {
@@ -87,14 +85,19 @@ bool should_log_connect_failure(uint32_t failed_attempts) {
            (long_stage_attempt % kMqttLongRetryLogEveryAttempts) == 0;
 }
 
-uint16_t connect_socket_timeout_for_attempts(uint32_t failed_attempts) {
+int connect_timeout_ms_for_attempts(uint32_t failed_attempts) {
     return MqttManager::retryStageForAttempts(failed_attempts) >= 1
-               ? kMqttConnectSocketTimeoutSlowSec
-               : kMqttConnectSocketTimeoutShortSec;
+               ? kMqttConnectTimeoutSlowMs
+               : kMqttConnectTimeoutShortMs;
 }
 
-bool should_retry_connect_immediately(int mqtt_state) {
-    return mqtt_state == MQTT_CONNECT_FAILED || mqtt_state == MQTT_CONNECTION_TIMEOUT;
+void append_buffer_to_string(String &out, const char *data, size_t length) {
+    if (!data || length == 0) {
+        return;
+    }
+    for (size_t i = 0; i < length; ++i) {
+        out += data[i];
+    }
 }
 
 void build_state_topic(char *out, size_t out_size, const String &base) {
@@ -154,7 +157,9 @@ void trim_ascii(char *text) {
 
 } // namespace
 
-MqttManager::MqttManager() : client_(net_) {}
+MqttManager::MqttManager() {
+    command_context_mutex_ = xSemaphoreCreateMutexStatic(&command_context_mutex_buffer_);
+}
 
 uint8_t MqttManager::retryStageForAttempts(uint32_t failed_attempts) {
     if (failed_attempts <= Config::MQTT_RETRY_SHORT_ATTEMPTS) {
@@ -185,9 +190,12 @@ uint32_t MqttManager::retryDelayMs() const {
     return retryDelayMsForAttempts(mqtt_connect_attempts_);
 }
 
-void MqttManager::begin(StorageManager &storage, AuraNetworkManager &network) {
+void MqttManager::begin(StorageManager &storage,
+                        AuraNetworkManager &network,
+                        MqttRuntimeState &runtime_state) {
     storage_ = &storage;
     network_ = &network;
+    runtime_state_ = &runtime_state;
     g_mqtt = this;
     loadPrefs();
     initDeviceId();
@@ -247,18 +255,130 @@ void MqttManager::refreshHostBuffer() {
 
 void MqttManager::setupClient() {
     refreshHostBuffer();
-    client_.setServer(mqtt_host_buf_, mqtt_port_);
-    client_.setBufferSize(Config::MQTT_BUFFER_SIZE);
-    client_.setKeepAlive(30);
-    client_.setSocketTimeout(kMqttDefaultSocketTimeoutSec);
-    client_.setCallback(MqttManager::staticCallback);
+    snprintf(mqtt_broker_endpoint_buf_, sizeof(mqtt_broker_endpoint_buf_), "%s", mqtt_host_buf_);
 }
 
-bool MqttManager::prepareBrokerEndpoint(IPAddress &resolved_ip, bool &using_resolved_ip,
-                                        bool &is_mdns_host) {
-    using_resolved_ip = false;
-    is_mdns_host = false;
-    resolved_ip = IPAddress();
+void MqttManager::stopClient() {
+    if (mqtt_manual_stop_) {
+        return;
+    }
+    mqtt_manual_stop_ = true;
+    mqtt_connection_signal_.store(static_cast<uint8_t>(ConnectionSignal::None),
+                                  std::memory_order_release);
+    mqtt_connecting_ = false;
+    mqtt_connected_ = false;
+
+    if (!client_) {
+        mqtt_client_started_ = false;
+        return;
+    }
+
+    if (mqtt_client_started_) {
+        esp_mqtt_client_disconnect(client_);
+        return;
+    }
+    mqtt_client_needs_destroy_ = true;
+}
+
+void MqttManager::destroyClient() {
+    mqtt_connection_signal_.store(static_cast<uint8_t>(ConnectionSignal::None),
+                                  std::memory_order_release);
+    mqtt_active_client_.store(nullptr, std::memory_order_release);
+    if (client_) {
+        esp_mqtt_client_destroy(client_);
+        client_ = nullptr;
+    }
+    mqtt_client_started_ = false;
+    mqtt_client_needs_destroy_ = false;
+    mqtt_connecting_ = false;
+    mqtt_connected_ = false;
+    mqtt_manual_stop_ = false;
+    mqtt_event_topic_.clear();
+    mqtt_event_payload_.clear();
+}
+
+bool MqttManager::connectTransport(const char *client_id, const char *will_topic) {
+    destroyClient();
+
+    esp_mqtt_client_config_t config = {};
+    config.broker.address.hostname = mqtt_broker_endpoint_buf_;
+    config.broker.address.port = mqtt_port_;
+    config.broker.address.transport = MQTT_TRANSPORT_OVER_TCP;
+    config.credentials.client_id = client_id;
+    if (!mqtt_anonymous_ && mqtt_user_.length()) {
+        config.credentials.username = mqtt_user_.c_str();
+        config.credentials.authentication.password = mqtt_pass_.c_str();
+    }
+    config.session.last_will.topic = will_topic;
+    config.session.last_will.msg = Config::MQTT_AVAIL_OFFLINE;
+    config.session.last_will.msg_len = static_cast<int>(strlen(Config::MQTT_AVAIL_OFFLINE));
+    config.session.last_will.qos = 0;
+    config.session.last_will.retain = 1;
+    config.session.keepalive = 30;
+    config.network.timeout_ms = connect_timeout_ms_for_attempts(mqtt_connect_attempts_);
+    config.network.disable_auto_reconnect = true;
+    config.buffer.size = Config::MQTT_BUFFER_SIZE;
+    config.buffer.out_size = Config::MQTT_BUFFER_SIZE;
+
+    client_ = esp_mqtt_client_init(&config);
+    if (!client_) {
+        LOGW("MQTT", "esp_mqtt_client_init failed");
+        return false;
+    }
+    if (esp_mqtt_client_register_event(client_, MQTT_EVENT_ANY,
+                                       &MqttManager::staticEventHandler, this) != ESP_OK) {
+        LOGW("MQTT", "esp_mqtt_client_register_event failed");
+        destroyClient();
+        return false;
+    }
+    mqtt_active_client_.store(client_, std::memory_order_release);
+    if (esp_mqtt_client_start(client_) != ESP_OK) {
+        mqtt_active_client_.store(nullptr, std::memory_order_release);
+        LOGW("MQTT", "esp_mqtt_client_start failed");
+        destroyClient();
+        return false;
+    }
+
+    mqtt_client_started_ = true;
+    mqtt_connecting_ = true;
+    mqtt_manual_stop_ = false;
+    mqtt_last_error_rc_.store(0, std::memory_order_release);
+    return true;
+}
+
+bool MqttManager::publishMessage(const char *topic, const char *payload, bool retain) {
+    if (!client_ || !mqtt_connected_) {
+        return false;
+    }
+    return esp_mqtt_client_publish(client_,
+                                   topic,
+                                   payload ? payload : "",
+                                   0,
+                                   0,
+                                   retain ? 1 : 0) >= 0;
+}
+
+bool MqttManager::publishMessage(const char *topic, const uint8_t *payload, size_t length, bool retain) {
+    if (!client_ || !mqtt_connected_) {
+        return false;
+    }
+    return esp_mqtt_client_publish(client_,
+                                   topic,
+                                   reinterpret_cast<const char *>(payload),
+                                   static_cast<int>(length),
+                                   0,
+                                   retain ? 1 : 0) >= 0;
+}
+
+bool MqttManager::subscribeTopic(const char *topic) {
+    if (!client_ || !mqtt_connected_) {
+        return false;
+    }
+    return esp_mqtt_client_subscribe(client_, topic, 0) >= 0;
+}
+
+bool MqttManager::prepareBrokerEndpoint(BrokerEndpoint &endpoint) {
+    endpoint = BrokerEndpoint{};
 
     refreshHostBuffer();
     String broker_host = mqtt_host_;
@@ -268,9 +388,8 @@ bool MqttManager::prepareBrokerEndpoint(IPAddress &resolved_ip, bool &using_reso
 
     String host_lc = broker_host;
     host_lc.toLowerCase();
-    is_mdns_host = host_lc.endsWith(".local");
-    if (!is_mdns_host) {
-        client_.setServer(mqtt_host_buf_, mqtt_port_);
+    endpoint.is_mdns_host = host_lc.endsWith(".local");
+    if (!endpoint.is_mdns_host) {
         return true;
     }
 
@@ -281,11 +400,8 @@ bool MqttManager::prepareBrokerEndpoint(IPAddress &resolved_ip, bool &using_reso
             mqtt_mdns_cache_success_ ? kMqttMdnsSuccessCacheMs : kMqttMdnsFailureCacheMs;
         if (cache_age_ms < cache_ttl_ms) {
             if (mqtt_mdns_cache_success_) {
-                client_.setServer(mqtt_mdns_cache_ip_, mqtt_port_);
-                resolved_ip = mqtt_mdns_cache_ip_;
-                using_resolved_ip = true;
-            } else {
-                client_.setServer(mqtt_host_buf_, mqtt_port_);
+                endpoint.ip = mqtt_mdns_cache_ip_;
+                endpoint.use_ip = true;
             }
             return true;
         }
@@ -294,7 +410,6 @@ bool MqttManager::prepareBrokerEndpoint(IPAddress &resolved_ip, bool &using_reso
     String mdns_name = broker_host.substring(0, broker_host.length() - 6);
     mdns_name.trim();
     if (mdns_name.isEmpty()) {
-        client_.setServer(mqtt_host_buf_, mqtt_port_);
         return true;
     }
 
@@ -305,22 +420,29 @@ bool MqttManager::prepareBrokerEndpoint(IPAddress &resolved_ip, bool &using_reso
     if (static_cast<uint32_t>(mdns_ip) != 0U) {
         mqtt_mdns_cache_success_ = true;
         mqtt_mdns_cache_ip_ = mdns_ip;
-        client_.setServer(mdns_ip, mqtt_port_);
-        resolved_ip = mdns_ip;
-        using_resolved_ip = true;
+        endpoint.ip = mdns_ip;
+        endpoint.use_ip = true;
     } else {
         mqtt_mdns_cache_success_ = false;
         mqtt_mdns_cache_ip_ = IPAddress();
-        client_.setServer(mqtt_host_buf_, mqtt_port_);
     }
     return true;
+}
+
+void MqttManager::applyBrokerEndpoint(const BrokerEndpoint &endpoint) {
+    if (endpoint.use_ip) {
+        String ip = endpoint.ip.toString();
+        snprintf(mqtt_broker_endpoint_buf_, sizeof(mqtt_broker_endpoint_buf_), "%s", ip.c_str());
+        return;
+    }
+    snprintf(mqtt_broker_endpoint_buf_, sizeof(mqtt_broker_endpoint_buf_), "%s", mqtt_host_buf_);
 }
 
 void MqttManager::publishDiscoverySensor(const char *object_id, const char *name,
                                          const char *unit, const char *device_class,
                                          const char *state_class, const char *value_template,
                                          const char *icon) {
-    if (!client_.connected()) {
+    if (!mqtt_connected_) {
         return;
     }
     String payload = MqttPayloadBuilder::buildDiscoverySensorPayload(
@@ -337,12 +459,12 @@ void MqttManager::publishDiscoverySensor(const char *object_id, const char *name
 
     char topic[kTopicBufferSize];
     build_discovery_topic(topic, sizeof(topic), "sensor", mqtt_device_id_, object_id);
-    client_.publish(topic, payload.c_str(), true);
+    publishMessage(topic, payload.c_str(), true);
 }
 
 void MqttManager::publishDiscoverySwitch(const char *object_id, const char *name,
                                          const char *value_template, const char *icon) {
-    if (!client_.connected()) {
+    if (!mqtt_connected_) {
         return;
     }
     String payload;
@@ -408,12 +530,12 @@ void MqttManager::publishDiscoverySwitch(const char *object_id, const char *name
     payload += "}";
 
     build_discovery_topic(topic, sizeof(topic), "switch", mqtt_device_id_, object_id);
-    client_.publish(topic, payload.c_str(), true);
+    publishMessage(topic, payload.c_str(), true);
 }
 
 void MqttManager::publishDiscoveryButton(const char *object_id, const char *name,
                                          const char *payload_press, const char *icon) {
-    if (!client_.connected()) {
+    if (!mqtt_connected_) {
         return;
     }
     String payload;
@@ -448,7 +570,7 @@ void MqttManager::publishDiscoveryButton(const char *object_id, const char *name
     payload += "}";
 
     build_discovery_topic(topic, sizeof(topic), "button", mqtt_device_id_, object_id);
-    client_.publish(topic, payload.c_str(), true);
+    publishMessage(topic, payload.c_str(), true);
 }
 
 // [NEW] Registers the "Events" sensor entity via HA MQTT Discovery.
@@ -509,13 +631,13 @@ void MqttManager::publishDiscoveryEvent() {
 }
 
 void MqttManager::publishDiscovery() {
-    if (!mqtt_discovery_ || mqtt_discovery_sent_ || !client_.connected()) {
+    if (!mqtt_discovery_ || mqtt_discovery_sent_ || !mqtt_connected_) {
         return;
     }
     // Remove legacy PM4 discovery entity variant (retained) from older firmware versions.
     char legacy_topic[kTopicBufferSize];
     build_discovery_topic(legacy_topic, sizeof(legacy_topic), "sensor", mqtt_device_id_, "pm4_0");
-    client_.publish(legacy_topic, "", true);
+    publishMessage(legacy_topic, "", true);
 
     // [NEW] Remove the two legacy event-type entities that were registered in
     // earlier firmware builds. Publishing an empty retained payload tells HA
@@ -575,22 +697,22 @@ void MqttManager::publishDiscovery() {
 }
 
 void MqttManager::publishNightModeAvailability() {
-    if (!client_.connected()) {
+    if (!mqtt_connected_) {
         return;
     }
     char topic[kTopicBufferSize];
     build_night_mode_availability_topic(topic, sizeof(topic), mqtt_base_topic_);
     const char *payload = auto_night_enabled_ ? Config::MQTT_AVAIL_OFFLINE : Config::MQTT_AVAIL_ONLINE;
-    client_.publish(topic, payload, true);
+    publishMessage(topic, payload, true);
 }
 
-void MqttManager::publishState(const SensorData &data, bool night_mode, bool alert_blink, bool backlight_on) {
-    if (!client_.connected()) {
+void MqttManager::publishState(const MqttRuntimeSnapshot &runtime) {
+    if (!mqtt_connected_) {
         return;
     }
     const size_t payload_len = MqttPayloadBuilder::buildStatePayload(
         mqtt_state_payload_buf_, sizeof(mqtt_state_payload_buf_),
-        data, night_mode, alert_blink, backlight_on);
+        runtime.data, runtime.night_mode, runtime.alert_blink, runtime.backlight_on);
     if (payload_len == 0) {
         Logger::log(Logger::Warn, "MQTT", "state payload build failed");
         return;
@@ -598,10 +720,10 @@ void MqttManager::publishState(const SensorData &data, bool night_mode, bool ale
 
     char topic[kTopicBufferSize];
     build_state_topic(topic, sizeof(topic), mqtt_base_topic_);
-    bool published = client_.publish(topic,
-                                     reinterpret_cast<const uint8_t *>(mqtt_state_payload_buf_),
-                                     static_cast<unsigned int>(payload_len),
-                                     true);
+    bool published = publishMessage(topic,
+                                    reinterpret_cast<const uint8_t *>(mqtt_state_payload_buf_),
+                                    payload_len,
+                                    true);
 
     if (published) {
         mqtt_fail_count_ = 0;
@@ -613,7 +735,7 @@ void MqttManager::publishState(const SensorData &data, bool night_mode, bool ale
 
         if (mqtt_fail_count_ >= Config::MQTT_MAX_FAILS) {
             LOGW("MQTT", "too many failures, disconnecting");
-            client_.disconnect();
+            stopClient();
             mqtt_fail_count_ = 0;
         }
     }
@@ -700,15 +822,15 @@ void MqttManager::publishSystemEvent(const char *category, const char *severity,
 }
 
 bool MqttManager::connectClient(const SensorData &data, bool night_mode, bool alert_blink, bool backlight_on) {
+bool MqttManager::connectClient() {
     if (!mqtt_enabled_) {
         return false;
     }
-    IPAddress resolved_broker_ip;
-    bool using_resolved_ip = false;
-    bool is_mdns_host = false;
-    if (!prepareBrokerEndpoint(resolved_broker_ip, using_resolved_ip, is_mdns_host)) {
+    BrokerEndpoint broker_endpoint;
+    if (!prepareBrokerEndpoint(broker_endpoint)) {
         return false;
     }
+    applyBrokerEndpoint(broker_endpoint);
 
     auto note_connect_failure = [&](int rc, bool log_details) {
         if (mqtt_connect_attempts_ < UINT32_MAX) {
@@ -735,19 +857,19 @@ bool MqttManager::connectClient(const SensorData &data, bool night_mode, bool al
     wl_status_t wifi_status = WiFi.status();
     IPAddress local_ip = WiFi.localIP();
     int32_t rssi = WiFi.RSSI();
-    String broker_endpoint = mqtt_host_;
-    if (using_resolved_ip) {
-        broker_endpoint = resolved_broker_ip.toString();
+    String broker_target = mqtt_host_;
+    if (broker_endpoint.use_ip) {
+        broker_target = broker_endpoint.ip.toString();
         LOGI("MQTT", "resolved mDNS broker %s -> %s",
-             mqtt_host_.c_str(), broker_endpoint.c_str());
-    } else if (is_mdns_host) {
+             mqtt_host_.c_str(), broker_target.c_str());
+    } else if (broker_endpoint.is_mdns_host) {
         LOGW("MQTT", "mDNS resolve failed for %s, falling back to system DNS",
              mqtt_host_.c_str());
     }
 
     Logger::log(Logger::Info, "MQTT",
                 "connecting to %s:%u (NetworkMgr=%s, WiFi.status=%d, IP=%s, RSSI=%ld dBm)",
-                broker_endpoint.c_str(),
+                broker_target.c_str(),
                 static_cast<unsigned>(mqtt_port_),
                 network_ready ? "ready" : "NOT READY",
                 static_cast<int>(wifi_status),
@@ -759,57 +881,19 @@ bool MqttManager::connectClient(const SensorData &data, bool night_mode, bool al
     build_availability_topic(will_topic, sizeof(will_topic), mqtt_base_topic_);
     WifiPowerSaveGuard wifi_ps_guard;
     wifi_ps_guard.suspend();
-    const uint16_t connect_socket_timeout_sec =
-        connect_socket_timeout_for_attempts(mqtt_connect_attempts_);
-    client_.setSocketTimeout(connect_socket_timeout_sec);
-    net_.stop();
-    bool ok = false;
-    int last_state = MQTT_DISCONNECTED;
-    for (uint8_t attempt = 0; attempt < kMqttConnectAttemptsPerWindow; ++attempt) {
-        if (attempt > 0) {
-            net_.stop();
-            delay(kMqttConnectRetryDelayMs);
-        }
-        if (mqtt_anonymous_) {
-            ok = client_.connect(client_id, nullptr, nullptr,
-                                 will_topic, 0, true, Config::MQTT_AVAIL_OFFLINE);
-        } else if (mqtt_user_.length()) {
-            ok = client_.connect(client_id, mqtt_user_.c_str(), mqtt_pass_.c_str(),
-                                 will_topic, 0, true, Config::MQTT_AVAIL_OFFLINE);
-        } else {
-            ok = client_.connect(client_id, nullptr, nullptr,
-                                 will_topic, 0, true, Config::MQTT_AVAIL_OFFLINE);
-        }
-        if (ok) {
-            if (attempt > 0) {
-                LOGI("MQTT", "connected on immediate retry");
-            }
-            break;
-        }
-        last_state = client_.state();
-        if ((attempt + 1) >= kMqttConnectAttemptsPerWindow ||
-            !should_retry_connect_immediately(last_state)) {
-            break;
-        }
-    }
-    client_.setSocketTimeout(kMqttDefaultSocketTimeoutSec);
-    if (!ok) {
-        net_.stop();
-        note_connect_failure(last_state, true);
+    mqtt_connection_signal_.store(static_cast<uint8_t>(ConnectionSignal::None),
+                                  std::memory_order_release);
+    mqtt_client_needs_destroy_ = false;
+    if (!connectTransport(client_id, will_topic)) {
+        note_connect_failure(-1, true);
         return false;
     }
-    LOGI("MQTT", "connected");
-    // [NEW] Mirrors the "connected" log entry to HA.
-    publishSystemEvent("MQTT", "info", "MQTT connected");
-    mqtt_fail_count_ = 0;
-    mqtt_connect_attempts_ = 0;
+
+    LOGI("MQTT", "connect started");
+    // [NEW] Notify HA that a connection attempt is in progress.
+    // The async connect result will be confirmed via connectTransport callback.
+    publishSystemEvent("MQTT", "info", "MQTT connecting");
     ui_dirty_ = true;
-    char subscribe_topic[kTopicBufferSize];
-    snprintf(subscribe_topic, sizeof(subscribe_topic), "%s/command/#", mqtt_base_topic_.c_str());
-    client_.subscribe(subscribe_topic);
-    client_.publish(will_topic, Config::MQTT_AVAIL_ONLINE, true);
-    publishNightModeAvailability();
-    mqtt_publish_requested_ = true;
     return true;
 }
 
@@ -835,7 +919,14 @@ bool MqttManager::payloadIsOff(const char *payload) {
     return false;
 }
 
-void MqttManager::handleCallback(char *topic, uint8_t *payload, unsigned int length) {
+void MqttManager::handleIncomingMessage(const char *topic, const uint8_t *payload, size_t length) {
+    String base_topic;
+    bool auto_night_enabled = false;
+    lockCommandContext();
+    base_topic = mqtt_base_topic_;
+    auto_night_enabled = auto_night_enabled_;
+    unlockCommandContext();
+
     String t(topic ? topic : "");
     char msg[32];
     size_t copy_len = length < (sizeof(msg) - 1) ? length : (sizeof(msg) - 1);
@@ -844,64 +935,226 @@ void MqttManager::handleCallback(char *topic, uint8_t *payload, unsigned int len
     }
     msg[copy_len] = '\0';
     trim_ascii(msg);
-    if (!t.startsWith(mqtt_base_topic_)) {
+    if (!t.startsWith(base_topic)) {
         return;
     }
-    String suffix = t.substring(mqtt_base_topic_.length());
+    String suffix = t.substring(base_topic.length());
     if (!suffix.startsWith("/command/")) {
         return;
     }
     String cmd = suffix.substring(strlen("/command/"));
     bool is_on = payloadIsOn(msg);
     bool is_off = payloadIsOff(msg);
+    MqttPendingCommands pending_update;
+    bool has_pending_update = false;
 
     if (cmd == "night_mode") {
-        if (auto_night_enabled_) {
+        if (auto_night_enabled) {
             LOGI("MQTT", "night mode ignored (auto night enabled)");
             return;
         }
         if (is_on || is_off) {
-            pending_.night_mode_value = is_on;
-            pending_.night_mode = true;
+            pending_update.night_mode_value = is_on;
+            pending_update.night_mode = true;
+            has_pending_update = true;
         }
     } else if (cmd == "alert_blink") {
         if (is_on || is_off) {
-            pending_.alert_blink_value = is_on;
-            pending_.alert_blink = true;
+            pending_update.alert_blink_value = is_on;
+            pending_update.alert_blink = true;
+            has_pending_update = true;
         }
     } else if (cmd == "backlight") {
         if (is_on || is_off) {
-            pending_.backlight_value = is_on;
-            pending_.backlight = true;
+            pending_update.backlight_value = is_on;
+            pending_update.backlight = true;
+            has_pending_update = true;
         }
     } else if (cmd == "restart") {
         if (is_on) {
-            pending_.restart = true;
+            pending_update.restart = true;
+            has_pending_update = true;
         }
     }
-}
 
-void MqttManager::staticCallback(char *topic, uint8_t *payload, unsigned int length) {
-    if (g_mqtt) {
-        g_mqtt->handleCallback(topic, payload, length);
+    if (has_pending_update && runtime_state_) {
+        runtime_state_->mergePendingCommands(pending_update);
     }
 }
 
-void MqttManager::poll(const SensorData &data, bool night_mode, bool alert_blink, bool backlight_on) {
+void MqttManager::handleEvent(esp_mqtt_event_handle_t event) {
+    if (!event) {
+        return;
+    }
+    const esp_mqtt_client_handle_t active_client =
+        mqtt_active_client_.load(std::memory_order_acquire);
+    if (!active_client || event->client != active_client) {
+        return;
+    }
+
+    switch (event->event_id) {
+        case MQTT_EVENT_CONNECTED: {
+            mqtt_connection_signal_.store(static_cast<uint8_t>(ConnectionSignal::Connected),
+                                          std::memory_order_release);
+            break;
+        }
+        case MQTT_EVENT_DISCONNECTED: {
+            mqtt_connection_signal_.store(static_cast<uint8_t>(ConnectionSignal::Disconnected),
+                                          std::memory_order_release);
+            break;
+        }
+        case MQTT_EVENT_ERROR: {
+            int error_rc = -1;
+            if (event->error_handle) {
+                const esp_mqtt_error_codes_t *error = event->error_handle;
+                if (error->error_type == MQTT_ERROR_TYPE_CONNECTION_REFUSED) {
+                    error_rc = static_cast<int>(error->connect_return_code);
+                } else if (error->error_type == MQTT_ERROR_TYPE_TCP_TRANSPORT &&
+                           error->esp_transport_sock_errno != 0) {
+                    error_rc = -error->esp_transport_sock_errno;
+                }
+                mqtt_last_error_rc_.store(error_rc, std::memory_order_release);
+                Logger::log(Logger::Warn, "MQTT",
+                            "error event type=%d rc=%d tls=%d stack=%d sock=%d",
+                            static_cast<int>(error->error_type),
+                            error_rc,
+                            static_cast<int>(error->esp_tls_last_esp_err),
+                            static_cast<int>(error->esp_tls_stack_err),
+                            static_cast<int>(error->esp_transport_sock_errno));
+            } else {
+                mqtt_last_error_rc_.store(error_rc, std::memory_order_release);
+                LOGW("MQTT", "error event without details");
+            }
+            break;
+        }
+        case MQTT_EVENT_DATA: {
+            if (event->current_data_offset == 0) {
+                mqtt_event_topic_.clear();
+                mqtt_event_payload_.clear();
+                mqtt_event_topic_.reserve(event->topic_len > 0 ? static_cast<size_t>(event->topic_len) : 0);
+                mqtt_event_payload_.reserve(event->total_data_len > 0 ? static_cast<size_t>(event->total_data_len) : static_cast<size_t>(event->data_len));
+                append_buffer_to_string(mqtt_event_topic_, event->topic, static_cast<size_t>(event->topic_len));
+            }
+            append_buffer_to_string(mqtt_event_payload_, event->data, static_cast<size_t>(event->data_len));
+            const int received_end = event->current_data_offset + event->data_len;
+            if (event->total_data_len <= 0 || received_end >= event->total_data_len) {
+                handleIncomingMessage(mqtt_event_topic_.c_str(),
+                                      reinterpret_cast<const uint8_t *>(mqtt_event_payload_.c_str()),
+                                      mqtt_event_payload_.length());
+                mqtt_event_topic_.clear();
+                mqtt_event_payload_.clear();
+            }
+            break;
+        }
+        default:
+            break;
+    }
+}
+
+void MqttManager::staticEventHandler(void *handler_args, esp_event_base_t base, int32_t event_id,
+                                     void *event_data) {
+    (void)base;
+    (void)event_id;
+
+    MqttManager *manager = static_cast<MqttManager *>(handler_args);
+    if (!manager) {
+        manager = g_mqtt;
+    }
+    if (manager) {
+        manager->handleEvent(static_cast<esp_mqtt_event_handle_t>(event_data));
+    }
+}
+
+void MqttManager::poll(MqttRuntimeState &runtime_state) {
+    auto note_connect_failure = [&](int rc) {
+        if (mqtt_connect_attempts_ < UINT32_MAX) {
+            mqtt_connect_attempts_++;
+        }
+        if (should_log_connect_failure(mqtt_connect_attempts_)) {
+            uint32_t delay_ms = retryDelayMsForAttempts(mqtt_connect_attempts_);
+            Logger::log(Logger::Warn, "MQTT",
+                        "connect failed rc=%d (attempt %lu), retry in %s",
+                        rc,
+                        static_cast<unsigned long>(mqtt_connect_attempts_),
+                        retry_delay_label(delay_ms));
+        }
+        ui_dirty_ = true;
+    };
+
+    const ConnectionSignal connection_signal = static_cast<ConnectionSignal>(
+        mqtt_connection_signal_.exchange(static_cast<uint8_t>(ConnectionSignal::None),
+                                         std::memory_order_acq_rel));
+    if (connection_signal == ConnectionSignal::Connected) {
+        mqtt_connected_ = true;
+        mqtt_connecting_ = false;
+        mqtt_fail_count_ = 0;
+        mqtt_connect_attempts_ = 0;
+        mqtt_last_error_rc_.store(0, std::memory_order_release);
+        ui_dirty_ = true;
+
+        char subscribe_topic[kTopicBufferSize];
+        snprintf(subscribe_topic, sizeof(subscribe_topic), "%s/command/#", mqtt_base_topic_.c_str());
+        subscribeTopic(subscribe_topic);
+
+        char will_topic[kTopicBufferSize];
+        build_availability_topic(will_topic, sizeof(will_topic), mqtt_base_topic_);
+        publishMessage(will_topic, Config::MQTT_AVAIL_ONLINE, true);
+        publishNightModeAvailability();
+        mqtt_publish_requested_ = true;
+        LOGI("MQTT", "connected");
+    } else if (connection_signal == ConnectionSignal::Disconnected) {
+        const bool was_connecting = mqtt_connecting_;
+        const bool was_connected = mqtt_connected_;
+        mqtt_connected_ = false;
+        mqtt_connecting_ = false;
+        ui_dirty_ = true;
+
+        if (!mqtt_manual_stop_ && was_connecting) {
+            note_connect_failure(mqtt_last_error_rc_.load(std::memory_order_acquire));
+        }
+        mqtt_client_needs_destroy_ = true;
+
+        if (was_connected) {
+            LOGW("MQTT", "disconnected");
+        }
+        if (mqtt_manual_stop_) {
+            mqtt_manual_stop_ = false;
+        }
+    }
+    if (mqtt_client_needs_destroy_ && client_) {
+        if (mqtt_client_started_) {
+            esp_mqtt_client_stop(client_);
+            mqtt_client_started_ = false;
+        }
+        destroyClient();
+    }
+
+    const MqttRuntimeSnapshot runtime = runtime_state.snapshot();
+    if (runtime.auto_night_enabled != auto_night_enabled_) {
+        lockCommandContext();
+        auto_night_enabled_ = runtime.auto_night_enabled;
+        unlockCommandContext();
+        publishNightModeAvailability();
+    }
+    if (runtime_state.consumePublishRequest()) {
+        mqtt_publish_requested_ = true;
+    }
+
     if (!mqtt_enabled_) {
         mqtt_connect_deferred_by_web_ = false;
         mqtt_publish_deferred_by_web_ = false;
-        if (client_.connected()) {
+        if (mqtt_connected_) {
             char topic[kTopicBufferSize];
             build_availability_topic(topic, sizeof(topic), mqtt_base_topic_);
-            client_.publish(topic, Config::MQTT_AVAIL_OFFLINE, true);
-            client_.disconnect();
-            mqtt_fail_count_ = 0;
-            if (!mqtt_user_enabled_) {
-                mqtt_connect_attempts_ = 0;
-            }
+            publishMessage(topic, Config::MQTT_AVAIL_OFFLINE, true);
         }
-        net_.stop();
+        if (client_) {
+            stopClient();
+        }
+        mqtt_fail_count_ = 0;
+        if (!mqtt_user_enabled_) {
+            mqtt_connect_attempts_ = 0;
+        }
         if (mqtt_connected_last_) {
             mqtt_connected_last_ = false;
             ui_dirty_ = true;
@@ -911,15 +1164,16 @@ void MqttManager::poll(const SensorData &data, bool night_mode, bool alert_blink
     if (!network_ || !network_->isConnected()) {
         mqtt_connect_deferred_by_web_ = false;
         mqtt_publish_deferred_by_web_ = false;
-        if (client_.connected()) {
+        if (mqtt_connected_) {
             LOGW("MQTT", "network unavailable, disconnecting gracefully");
             char topic[kTopicBufferSize];
             build_availability_topic(topic, sizeof(topic), mqtt_base_topic_);
-            client_.publish(topic, Config::MQTT_AVAIL_OFFLINE, true);
-            client_.disconnect();
-            mqtt_fail_count_ = 0;
+            publishMessage(topic, Config::MQTT_AVAIL_OFFLINE, true);
         }
-        net_.stop();
+        if (client_) {
+            stopClient();
+        }
+        mqtt_fail_count_ = 0;
         if (mqtt_connected_last_) {
             mqtt_connected_last_ = false;
             ui_dirty_ = true;
@@ -928,14 +1182,15 @@ void MqttManager::poll(const SensorData &data, bool night_mode, bool alert_blink
         return;
     }
 
-    client_.loop();
-    bool connected = client_.connected();
-    if (connected != mqtt_connected_last_) {
-        mqtt_connected_last_ = connected;
+    if (mqtt_connected_ != mqtt_connected_last_) {
+        mqtt_connected_last_ = mqtt_connected_;
         ui_dirty_ = true;
     }
-    if (!connected) {
+    if (!mqtt_connected_) {
         mqtt_publish_deferred_by_web_ = false;
+        if (mqtt_connecting_) {
+            return;
+        }
         uint32_t now = millis();
         uint32_t retry_delay = retryDelayMsForAttempts(mqtt_connect_attempts_);
         const bool immediate_first_attempt =
@@ -950,7 +1205,7 @@ void MqttManager::poll(const SensorData &data, bool night_mode, bool alert_blink
             }
             mqtt_connect_deferred_by_web_ = false;
             mqtt_last_attempt_ms_ = now;
-            connectClient(data, night_mode, alert_blink, backlight_on);
+            connectClient();
         }
         return;
     }
@@ -976,7 +1231,7 @@ void MqttManager::poll(const SensorData &data, bool night_mode, bool alert_blink
     mqtt_connect_deferred_by_web_ = false;
     if (publish_due) {
         mqtt_publish_requested_ = false;
-        publishState(data, night_mode, alert_blink, backlight_on);
+        publishState(runtime);
         return;
     }
 }
@@ -992,16 +1247,18 @@ void MqttManager::syncWithWifi() {
             mqtt_fail_count_ = 0;
             setupClient();
             mqtt_last_attempt_ms_ = 0;
+            mqtt_last_error_rc_.store(0, std::memory_order_release);
         } else {
-            if (client_.connected()) {
+            if (mqtt_connected_) {
                 if (wifi_ready) {
                     char topic[kTopicBufferSize];
                     build_availability_topic(topic, sizeof(topic), mqtt_base_topic_);
-                    client_.publish(topic, Config::MQTT_AVAIL_OFFLINE, true);
+                    publishMessage(topic, Config::MQTT_AVAIL_OFFLINE, true);
                 }
-                client_.disconnect();
             }
-            net_.stop();
+            if (client_) {
+                stopClient();
+            }
             mqtt_fail_count_ = 0;
             if (!mqtt_user_enabled_) {
                 mqtt_connect_attempts_ = 0;
@@ -1009,18 +1266,6 @@ void MqttManager::syncWithWifi() {
         }
     }
     ui_dirty_ = true;
-}
-
-void MqttManager::serviceConnectedLoop() {
-    if (!mqtt_enabled_ || !client_.connected()) {
-        return;
-    }
-    client_.loop();
-    const bool connected = client_.connected();
-    if (connected != mqtt_connected_last_) {
-        mqtt_connected_last_ = connected;
-        ui_dirty_ = true;
-    }
 }
 
 void MqttManager::requestReconnect() {
@@ -1031,15 +1276,11 @@ void MqttManager::requestReconnect() {
     mqtt_discovery_sent_ = false;
     mqtt_last_attempt_ms_ = 0;
     mqtt_mdns_cache_valid_ = false;
-    if (client_.connected()) {
-        client_.disconnect();
+    mqtt_last_error_rc_.store(0, std::memory_order_release);
+    if (client_) {
+        stopClient();
     }
-    net_.stop();
     ui_dirty_ = true;
-}
-
-void MqttManager::requestPublish() {
-    mqtt_publish_requested_ = true;
 }
 
 void MqttManager::setUserEnabled(bool enabled) {
@@ -1056,18 +1297,69 @@ void MqttManager::setUserEnabled(bool enabled) {
     }
 }
 
-void MqttManager::updateNightModeAvailability(bool auto_night_enabled) {
-    auto_night_enabled_ = auto_night_enabled;
-    publishNightModeAvailability();
+void MqttManager::applySavedSettings(const String &host,
+                                     uint16_t port,
+                                     const String &user,
+                                     const String &pass,
+                                     const String &base_topic,
+                                     const String &device_name,
+                                     bool discovery,
+                                     bool anonymous) {
+    String next_host = host;
+    uint16_t next_port = port == 0 ? Config::MQTT_DEFAULT_PORT : port;
+    String next_user = user;
+    String next_pass = pass;
+    String next_base_topic = base_topic;
+    String next_device_name = device_name;
+
+    if (next_base_topic.endsWith("/")) {
+        next_base_topic.remove(next_base_topic.length() - 1);
+    }
+    if (next_base_topic.isEmpty()) {
+        next_base_topic = Config::MQTT_DEFAULT_BASE;
+    }
+    if (next_device_name.isEmpty()) {
+        next_device_name = Config::MQTT_DEFAULT_NAME;
+    }
+
+    lockCommandContext();
+    mqtt_host_ = next_host;
+    mqtt_port_ = next_port;
+    mqtt_user_ = next_user;
+    mqtt_pass_ = next_pass;
+    mqtt_base_topic_ = next_base_topic;
+    mqtt_device_name_ = next_device_name;
+    mqtt_discovery_ = discovery;
+    mqtt_anonymous_ = anonymous;
+    unlockCommandContext();
+
+    mqtt_discovery_sent_ = false;
+    mqtt_connect_attempts_ = 0;
+    mqtt_fail_count_ = 0;
+    mqtt_last_attempt_ms_ = 0;
+    mqtt_last_error_rc_.store(0, std::memory_order_release);
+    mqtt_mdns_cache_valid_ = false;
+    mqtt_connect_deferred_by_web_ = false;
+    mqtt_publish_deferred_by_web_ = false;
+    mqtt_publish_requested_ = false;
+    refreshHostBuffer();
+    setupClient();
+    if (client_) {
+        stopClient();
+    }
+    ui_dirty_ = true;
 }
 
-bool MqttManager::takePending(PendingCommands &out) {
-    if (!pending_.night_mode && !pending_.alert_blink && !pending_.backlight && !pending_.restart) {
-        return false;
+void MqttManager::lockCommandContext() const {
+    if (command_context_mutex_) {
+        xSemaphoreTake(command_context_mutex_, portMAX_DELAY);
     }
-    out = pending_;
-    pending_ = PendingCommands{};
-    return true;
+}
+
+void MqttManager::unlockCommandContext() const {
+    if (command_context_mutex_) {
+        xSemaphoreGive(command_context_mutex_);
+    }
 }
 
 // [NEW] Free function for air quality events — avoids circular header deps.

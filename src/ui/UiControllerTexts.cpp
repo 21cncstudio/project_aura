@@ -7,11 +7,9 @@
 #include "ui/UiController.h"
 
 #include <stdio.h>
-#include <WiFi.h>
 
 #include "core/AppVersion.h"
 #include "ui/UiText.h"
-#include "modules/NetworkManager.h"
 #include "ui/ui.h"
 
 void UiController::update_settings_texts() {
@@ -178,6 +176,8 @@ void UiController::update_confirm_texts() {
 }
 
 void UiController::update_theme_texts() {
+    refreshConnectivitySnapshot();
+
     if (objects.label_theme_title) safe_label_set_text(objects.label_theme_title, UiText::LabelThemeTitle());
     if (objects.label_btn_theme_back) safe_label_set_text(objects.label_btn_theme_back, UiText::LabelSettingsBack());
     if (objects.label_btn_theme_custom) safe_label_set_text(objects.label_btn_theme_custom, UiText::LabelThemeCustom());
@@ -185,18 +185,10 @@ void UiController::update_theme_texts() {
     if (objects.label_theme_preview_title) safe_label_set_text(objects.label_theme_preview_title, UiText::LabelThemeExample());
     if (objects.label_theme_custom_text) {
         String custom_info = UiText::LabelThemeCustomInfo();
-        const String theme_url = networkManager.localUrl("/theme");
+        const String theme_url = connectivity_.theme_local_url;
         String ip_url = "http://<device-ip>/theme";
-        const bool wifi_enabled = networkManager.isEnabled();
-        const AuraNetworkManager::WifiState wifi_state = networkManager.state();
-        const bool sta_mode = wifi_enabled && (wifi_state == AuraNetworkManager::WIFI_STATE_STA_CONNECTED);
-        if (sta_mode) {
-            const IPAddress ip = WiFi.localIP();
-            if (ip[0] != 0 || ip[1] != 0 || ip[2] != 0 || ip[3] != 0) {
-                ip_url = "http://";
-                ip_url += ip.toString();
-                ip_url += "/theme";
-            }
+        if (connectivity_.wifi_connected && !connectivity_.sta_ip.isEmpty()) {
+            ip_url = connectivity_.theme_sta_url;
         }
         custom_info.replace("{{LOCAL_URL}}", theme_url);
         custom_info.replace(UiText::ThemePortalUrl(), theme_url);

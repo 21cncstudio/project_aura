@@ -5,6 +5,7 @@
 // Purchase a Commercial License: see COMMERCIAL_LICENSE_SUMMARY.md
 
 #include "ui/UiController.h"
+#include "ui/BootDiagPolicy.h"
 #include "ui/UiLocalization.h"
 #include "ui/UiRenderLoop.h"
 #include "ui/UiScreenFlow.h"
@@ -13,7 +14,6 @@
 #include <math.h>
 #include <string.h>
 #include <time.h>
-#include <WiFi.h>
 #include <esp_system.h>
 #include <esp_wifi.h>
 
@@ -22,12 +22,12 @@
 #include "ui/styles.h"
 #include "ui/images.h"
 #include "ui/StatusMessages.h"
-#include "web/WebHandlers.h"
 #include "config/AppConfig.h"
 #include "core/BootState.h"
 #include "core/AppVersion.h"
 #include "core/Logger.h"
 #include "core/SafeRestart.h"
+#include "web/WebRuntime.h"
 #include "core/SystemLogFilter.h"
 #include "modules/StorageManager.h"
 #include "modules/NetworkManager.h"
@@ -193,6 +193,44 @@ char diag_log_level_char(Logger::Level level) {
     }
 }
 
+void set_label_hidden(lv_obj_t *label, bool hidden) {
+    if (!label) {
+        return;
+    }
+    if (hidden) {
+        lv_obj_add_flag(label, LV_OBJ_FLAG_HIDDEN);
+    } else {
+        lv_obj_clear_flag(label, LV_OBJ_FLAG_HIDDEN);
+    }
+}
+
+void format_clock_time_label(const tm &local_tm,
+                             bool time_format_24h,
+                             char *time_buf,
+                             size_t time_buf_size,
+                             char *ampm_buf,
+                             size_t ampm_buf_size) {
+    if (!time_buf || time_buf_size == 0) {
+        return;
+    }
+    if (time_format_24h) {
+        snprintf(time_buf, time_buf_size, "%02d:%02d", local_tm.tm_hour, local_tm.tm_min);
+        if (ampm_buf && ampm_buf_size > 0) {
+            ampm_buf[0] = '\0';
+        }
+        return;
+    }
+
+    int display_hour = local_tm.tm_hour % 12;
+    if (display_hour == 0) {
+        display_hour = 12;
+    }
+    snprintf(time_buf, time_buf_size, "%02d:%02d", display_hour, local_tm.tm_min);
+    if (ampm_buf && ampm_buf_size > 0) {
+        snprintf(ampm_buf, ampm_buf_size, "%s", local_tm.tm_hour >= 12 ? "PM" : "AM");
+    }
+}
+
 bool should_show_diag_log_entry(const Logger::RecentEntry &entry) {
     if (entry.level != Logger::Error && entry.level != Logger::Warn) {
         return false;
@@ -304,6 +342,10 @@ UiController::UiController(const UiContext &context)
     : storage(context.storage),
       networkManager(context.networkManager),
       mqttManager(context.mqttManager),
+      connectivityRuntime(context.connectivityRuntime),
+      mqttRuntimeState(context.mqttRuntimeState),
+      webUiBridge(context.webUiBridge),
+      networkCommandQueue(context.networkCommandQueue),
       sensorManager(context.sensorManager),
       chartsHistory(context.chartsHistory),
       timeManager(context.timeManager),
@@ -320,10 +362,404 @@ UiController::UiController(const UiContext &context)
       temp_offset(context.temp_offset),
       hum_offset(context.hum_offset) {
     instance_ = this;
+    webUiBridge.bindSettingsApplier(this, &UiController::applyWebUiSettingsBridge);
+    webUiBridge.bindThemeApplier(this, &UiController::applyThemePreviewBridge);
+    webUiBridge.bindDacActionApplier(this, &UiController::applyDacActionBridge);
+    webUiBridge.bindDacAutoApplier(this, &UiController::applyDacAutoBridge);
+    webUiBridge.bindWifiSaveApplier(this, &UiController::applyWifiSaveBridge);
+    webUiBridge.bindMqttSaveApplier(this, &UiController::applyMqttSaveBridge);
+    refreshConnectivitySnapshot();
+    publishWebUiSnapshot();
 }
 
 void UiController::setLvglReady(bool ready) {
     lvgl_ready = ready;
+}
+
+void UiController::refreshConnectivitySnapshot() {
+    connectivity_ = connectivityRuntime.snapshot();
+    if (!wifi_override_active_) {
+        return;
+    }
+    if (connectivity_.wifi_enabled == wifi_override_enabled_) {
+        wifi_override_active_ = false;
+        return;
+    }
+    connectivity_.wifi_enabled = wifi_override_enabled_;
+    connectivity_.wifi_connected = false;
+    connectivity_.sta_ip.clear();
+    if (wifi_override_enabled_) {
+        connectivity_.wifi_state = connectivity_.wifi_ssid.isEmpty()
+                                       ? static_cast<int>(AuraNetworkManager::WIFI_STATE_AP_CONFIG)
+                                       : static_cast<int>(AuraNetworkManager::WIFI_STATE_STA_CONNECTING);
+    } else {
+        connectivity_.wifi_state = static_cast<int>(AuraNetworkManager::WIFI_STATE_OFF);
+        connectivity_.wifi_retry_count = 0;
+    }
+}
+
+void UiController::syncConnectivityRuntime() {
+    refreshConnectivitySnapshot();
+}
+
+WebUiBridge::Snapshot UiController::buildWebUiSnapshot() const {
+    WebUiBridge::Snapshot snapshot;
+    snapshot.available = true;
+    snapshot.night_mode = night_mode;
+    snapshot.night_mode_locked = nightModeManager.isAutoEnabled();
+    snapshot.backlight_on = backlightManager.isOn();
+    snapshot.units_c = temp_units_c;
+    snapshot.temp_offset = temp_offset;
+    snapshot.hum_offset = hum_offset;
+    snapshot.display_name = storage.config().web_display_name;
+    snapshot.mqtt_screen_open = current_screen_id == SCREEN_ID_PAGE_MQTT ||
+                                pending_screen_id == SCREEN_ID_PAGE_MQTT;
+    const bool theme_screen_open = current_screen_id == SCREEN_ID_PAGE_THEME ||
+                                   pending_screen_id == SCREEN_ID_PAGE_THEME;
+    const bool custom_tab_selected =
+        objects.btn_theme_custom && lv_obj_is_valid(objects.btn_theme_custom) &&
+        lv_obj_has_state(objects.btn_theme_custom, LV_STATE_CHECKED);
+    snapshot.theme_screen_open = theme_screen_open;
+    snapshot.theme_custom_screen_open = theme_screen_open && custom_tab_selected;
+    snapshot.theme_preview_colors = themeManager.previewOrCurrent();
+    return snapshot;
+}
+
+void UiController::publishWebUiSnapshot() {
+    webUiBridge.publishSnapshot(buildWebUiSnapshot());
+}
+
+void UiController::processWebUiBridgeCommands() {
+    WebUiBridge::SettingsUpdate settings_update;
+    uint32_t settings_request_id = 0;
+    if (webUiBridge.consumePendingSettingsRequest(settings_update, settings_request_id)) {
+        webUiBridge.completePendingSettingsRequest(
+            settings_request_id,
+            applyWebUiSettingsBridge(settings_update, this));
+    }
+
+    WebUiBridge::ThemeUpdate theme_update;
+    uint32_t theme_request_id = 0;
+    if (webUiBridge.consumePendingThemeRequest(theme_update, theme_request_id)) {
+        webUiBridge.completePendingThemeRequest(
+            theme_request_id,
+            applyThemePreviewBridge(theme_update, this));
+    }
+
+    WebUiBridge::DacActionUpdate dac_action_update;
+    uint32_t dac_action_request_id = 0;
+    if (webUiBridge.consumePendingDacActionRequest(dac_action_update, dac_action_request_id)) {
+        webUiBridge.completePendingDacActionRequest(
+            dac_action_request_id,
+            applyDacActionBridge(dac_action_update, this));
+    }
+
+    WebUiBridge::DacAutoUpdate dac_auto_update;
+    uint32_t dac_auto_request_id = 0;
+    if (webUiBridge.consumePendingDacAutoRequest(dac_auto_update, dac_auto_request_id)) {
+        webUiBridge.completePendingDacAutoRequest(
+            dac_auto_request_id,
+            applyDacAutoBridge(dac_auto_update, this));
+    }
+
+    WebUiBridge::WifiSaveUpdate wifi_save_update;
+    uint32_t wifi_save_request_id = 0;
+    if (webUiBridge.consumePendingWifiSaveRequest(wifi_save_update, wifi_save_request_id)) {
+        webUiBridge.completePendingWifiSaveRequest(
+            wifi_save_request_id,
+            applyWifiSaveBridge(wifi_save_update, this));
+    }
+
+    WebUiBridge::MqttSaveUpdate mqtt_save_update;
+    uint32_t mqtt_save_request_id = 0;
+    if (webUiBridge.consumePendingMqttSaveRequest(mqtt_save_update, mqtt_save_request_id)) {
+        webUiBridge.completePendingMqttSaveRequest(
+            mqtt_save_request_id,
+            applyMqttSaveBridge(mqtt_save_update, this));
+    }
+
+    bool firmware_update_screen_active = false;
+    if (!webUiBridge.consumePendingFirmwareUpdateScreen(firmware_update_screen_active)) {
+        return;
+    }
+    webSetFirmwareUpdateScreen(firmware_update_screen_active);
+    publishWebUiSnapshot();
+}
+
+WebUiBridge::ApplyResult UiController::applyWebUiSettingsBridge(
+    const WebUiBridge::SettingsUpdate &update,
+    void *ctx) {
+    auto *controller = static_cast<UiController *>(ctx);
+    WebUiBridge::ApplyResult result{};
+    result.restart_requested = update.restart_requested;
+    if (!controller) {
+        result.success = false;
+        result.status_code = 503;
+        result.error_message = "UI bridge unavailable";
+        return result;
+    }
+
+    if (update.has_night_mode && controller->nightModeManager.isAutoEnabled()) {
+        result.success = false;
+        result.status_code = 409;
+        result.error_message = "night_mode is locked by auto mode";
+        result.snapshot = controller->buildWebUiSnapshot();
+        controller->publishWebUiSnapshot();
+        return result;
+    }
+
+    const bool previous_backlight = controller->webBacklightOn();
+    const bool previous_night_mode = controller->webNightModeEnabled();
+    const bool previous_units_c = controller->webUnitsC();
+    const float previous_temp_offset = controller->webTempOffset();
+    const float previous_hum_offset = controller->webHumOffset();
+    const String previous_display_name =
+        update.has_display_name ? controller->storage.config().web_display_name : String();
+
+    bool applied_backlight = false;
+    bool applied_night_mode = false;
+    bool applied_units = false;
+    bool applied_offsets = false;
+    bool applied_display_name = false;
+
+    auto finalize = [&](bool success, uint16_t status_code, const char *message) {
+        result.success = success;
+        result.status_code = status_code;
+        result.error_message = message ? message : "";
+        result.snapshot = controller->buildWebUiSnapshot();
+        controller->publishWebUiSnapshot();
+        return result;
+    };
+
+    auto rollback = [&]() -> bool {
+        bool rollback_failed = false;
+
+        if (applied_backlight && controller->webBacklightOn() != previous_backlight) {
+            if (!controller->webSetBacklight(previous_backlight)) {
+                rollback_failed = true;
+            }
+        }
+        if (applied_night_mode && controller->webNightModeEnabled() != previous_night_mode) {
+            if (!controller->webSetNightMode(previous_night_mode)) {
+                rollback_failed = true;
+            }
+        }
+        if (applied_units && controller->webUnitsC() != previous_units_c) {
+            if (!controller->webSetUnitsC(previous_units_c)) {
+                rollback_failed = true;
+            }
+        }
+        if (applied_offsets) {
+            const bool temp_changed =
+                fabsf(controller->webTempOffset() - previous_temp_offset) > 0.0001f;
+            const bool hum_changed =
+                fabsf(controller->webHumOffset() - previous_hum_offset) > 0.0001f;
+            if ((temp_changed || hum_changed) &&
+                !controller->webSetOffsets(previous_temp_offset, previous_hum_offset)) {
+                rollback_failed = true;
+            }
+        }
+        if (applied_display_name) {
+            controller->storage.config().web_display_name = previous_display_name;
+            if (!controller->storage.saveConfig(true)) {
+                controller->storage.requestSave();
+                rollback_failed = true;
+            }
+        }
+
+        return !rollback_failed;
+    };
+
+    auto fail = [&](uint16_t status_code, const char *message) {
+        if (!rollback()) {
+            LOGE("UI", "web settings rollback failed");
+            return finalize(false, 500, "Failed to apply settings atomically");
+        }
+        return finalize(false, status_code, message);
+    };
+
+    if (update.has_units_c) {
+        if (!controller->webSetUnitsC(update.units_c)) {
+            return fail(500, "Failed to persist units setting");
+        }
+        applied_units = true;
+    }
+
+    if (update.has_temp_offset || update.has_hum_offset) {
+        const float requested_temp_offset =
+            update.has_temp_offset ? update.temp_offset : previous_temp_offset;
+        const float requested_hum_offset =
+            update.has_hum_offset ? update.hum_offset : previous_hum_offset;
+        if (!controller->webSetOffsets(requested_temp_offset, requested_hum_offset)) {
+            return fail(500, "Failed to persist offsets");
+        }
+        applied_offsets = true;
+    }
+
+    if (update.has_display_name) {
+        controller->storage.config().web_display_name = update.display_name;
+        if (!controller->storage.saveConfig(true)) {
+            controller->storage.config().web_display_name = previous_display_name;
+            controller->storage.requestSave();
+            return fail(500, "Failed to persist display_name");
+        }
+        applied_display_name = true;
+    }
+
+    if (update.has_night_mode) {
+        if (!controller->webSetNightMode(update.night_mode)) {
+            return fail(409, "night_mode is locked by auto mode");
+        }
+        applied_night_mode = true;
+    }
+
+    if (update.has_backlight) {
+        if (!controller->webSetBacklight(update.backlight_on)) {
+            return fail(409, "backlight state could not be applied");
+        }
+        applied_backlight = true;
+    }
+
+    return finalize(true, 200, nullptr);
+}
+
+WebUiBridge::ApplyResult UiController::applyThemePreviewBridge(
+    const WebUiBridge::ThemeUpdate &update,
+    void *ctx) {
+    auto *controller = static_cast<UiController *>(ctx);
+    WebUiBridge::ApplyResult result{};
+    if (!controller) {
+        result.success = false;
+        result.status_code = 503;
+        result.error_message = "Theme bridge unavailable";
+        return result;
+    }
+
+    auto finalize = [&](bool success, uint16_t status_code, const char *message) {
+        result.success = success;
+        result.status_code = status_code;
+        result.error_message = message ? message : "";
+        result.snapshot = controller->buildWebUiSnapshot();
+        controller->publishWebUiSnapshot();
+        return result;
+    };
+
+    if (!controller->lvgl_ready) {
+        return finalize(false, 503, "LVGL unavailable");
+    }
+    if (!lvgl_port_lock(-1)) {
+        return finalize(false, 503, "LVGL unavailable");
+    }
+
+    controller->themeManager.applyPreviewCustom(update.colors);
+    const bool unlock_ok = lvgl_port_unlock();
+    if (!unlock_ok) {
+        return finalize(false, 500, "LVGL unlock failed");
+    }
+    controller->data_dirty = true;
+    return finalize(true, 200, nullptr);
+}
+
+bool UiController::consumeNetworkUiDirty() {
+    if (!networkManager.isUiDirty()) {
+        return false;
+    }
+    networkManager.clearUiDirty();
+    return true;
+}
+
+bool UiController::consumeMqttUiDirty() {
+    if (!mqttManager.isUiDirty()) {
+        return false;
+    }
+    mqttManager.clearUiDirty();
+    return true;
+}
+
+void UiController::applyPendingWifiEnabled() {
+    if (!networkCommandQueue.enqueue(NetworkCommandQueue::Type::ApplyPendingWifiEnabled)) {
+        LOGW("UI", "network command queue full: ApplyPendingWifiEnabled");
+    }
+}
+
+void UiController::setMqttScreenOpenState(bool open) {
+    if (open) {
+        mqttManager.markUiDirty();
+    }
+    webUiBridge.setMqttScreenOpen(open);
+    publishWebUiSnapshot();
+}
+
+void UiController::setThemeScreenOpenState(bool open) {
+    themeManager.setThemeScreenOpen(open);
+    if (!open) {
+        themeManager.setCustomTabSelected(false);
+    }
+    webUiBridge.setThemeScreenOpen(open, open && themeManager.isCustomScreenOpen());
+    publishWebUiSnapshot();
+}
+
+void UiController::setWifiEnabledFromUi(bool enabled) {
+    refreshConnectivitySnapshot();
+    if (enabled == connectivity_.wifi_enabled) {
+        return;
+    }
+    wifi_override_active_ = true;
+    wifi_override_enabled_ = enabled;
+    if (!networkCommandQueue.enqueue(NetworkCommandQueue::Type::SetWifiEnabled, enabled)) {
+        LOGW("UI", "network command queue full: SetWifiEnabled");
+        wifi_override_active_ = false;
+    } else {
+        refreshConnectivitySnapshot();
+        update_wifi_ui();
+        markWebPagePanelDirty();
+    }
+    datetime_ui_dirty = true;
+}
+
+void UiController::setMqttUserEnabledFromUi(bool enabled) {
+    refreshConnectivitySnapshot();
+    if (enabled == connectivity_.mqtt_user_enabled) {
+        return;
+    }
+    if (!networkCommandQueue.enqueue(NetworkCommandQueue::Type::SetMqttUserEnabled, enabled)) {
+        LOGW("UI", "network command queue full: SetMqttUserEnabled");
+    }
+}
+
+void UiController::requestMqttReconnectFromUi() {
+    refreshConnectivitySnapshot();
+    if (!connectivity_.mqtt_enabled || !connectivity_.wifi_enabled || !connectivity_.wifi_connected) {
+        return;
+    }
+    if (!networkCommandQueue.enqueue(NetworkCommandQueue::Type::RequestMqttReconnect)) {
+        LOGW("UI", "network command queue full: RequestMqttReconnect");
+    }
+}
+
+void UiController::requestWifiReconnectFromUi() {
+    if (!networkCommandQueue.enqueue(NetworkCommandQueue::Type::RequestWifiReconnect)) {
+        LOGW("UI", "network command queue full: RequestWifiReconnect");
+    }
+    datetime_ui_dirty = true;
+}
+
+void UiController::toggleWifiApModeFromUi() {
+    if (!networkCommandQueue.enqueue(NetworkCommandQueue::Type::ToggleWifiApMode)) {
+        LOGW("UI", "network command queue full: ToggleWifiApMode");
+    }
+    datetime_ui_dirty = true;
+}
+
+void UiController::clearWifiCredentialsFromUi() {
+    if (!networkCommandQueue.enqueue(NetworkCommandQueue::Type::ClearWifiCredentials)) {
+        LOGW("UI", "network command queue full: ClearWifiCredentials");
+    }
+    datetime_ui_dirty = true;
+}
+
+void UiController::markWifiUiDirty() {
+    networkManager.markUiDirty();
 }
 
 void UiController::bind_available_events(int screen_id) {
@@ -426,6 +862,7 @@ void UiController::begin() {
         LOGW("UI", "LVGL unlock failed in begin");
     }
     last_clock_tick_ms = millis();
+    publishWebUiSnapshot();
 }
 
 void UiController::onSensorPoll(const SensorManager::PollResult &poll) {
@@ -457,8 +894,9 @@ void UiController::markWebPagePanelDirty() {
 }
 
 void UiController::mqtt_sync_with_wifi() {
-    mqttManager.syncWithWifi();
-    // UI state is refreshed in UiRenderLoop under lvgl_port_lock.
+    if (!networkCommandQueue.enqueue(NetworkCommandQueue::Type::SyncMqttWithWifi)) {
+        LOGW("UI", "network command queue full: SyncMqttWithWifi");
+    }
 }
 
 bool UiController::webNightModeLocked() const {
@@ -479,7 +917,7 @@ bool UiController::webSetNightMode(bool enabled) {
     sync_night_mode_toggle_ui();
     if (night_mode != previous) {
         data_dirty = true;
-        mqttManager.requestPublish();
+        mqttRuntimeState.requestPublish();
     }
     return night_mode == enabled;
 }
@@ -490,7 +928,7 @@ bool UiController::webSetBacklight(bool enabled) {
     bool changed = backlightManager.isOn() != previous;
     if (changed) {
         data_dirty = true;
-        mqttManager.requestPublish();
+        mqttRuntimeState.requestPublish();
     }
     return backlightManager.isOn() == enabled;
 }
@@ -523,7 +961,7 @@ bool UiController::webSetUnitsC(bool units_c) {
     }
     clock_ui_dirty = true;
     data_dirty = true;
-    mqttManager.requestPublish();
+    mqttRuntimeState.requestPublish();
     return true;
 }
 
@@ -584,7 +1022,7 @@ bool UiController::webSetOffsets(float temp_offset_c, float hum_offset_pct) {
         return false;
     }
     data_dirty = true;
-    mqttManager.requestPublish();
+    mqttRuntimeState.requestPublish();
     return true;
 }
 
@@ -646,13 +1084,12 @@ void UiController::webSetFirmwareUpdateScreen(bool active) {
 
 void UiController::webRequestRestart() {
     LOGW("UI", "web restart requested");
-    esp_wifi_stop();
-    lvgl_port_prepare_restart();
-    delay(100);
-    safe_restart_via_core0();
+    WebHandlersRequestRestart();
 }
 
 void UiController::poll(uint32_t now) {
+    refreshConnectivitySnapshot();
+    processWebUiBridgeCommands();
     backlightManager.setAlarmWakeActive(
         should_wake_backlight_on_alert(currentData, sensorManager.isWarmupActive()));
     bool desired = false;
@@ -684,6 +1121,7 @@ void UiController::poll(uint32_t now) {
     }
 
     if (!lvgl_ready) {
+        publishWebUiSnapshot();
         return;
     }
 
@@ -814,8 +1252,12 @@ void UiController::poll(uint32_t now) {
     if (boot_diag_active &&
         current_screen_id == SCREEN_ID_PAGE_BOOT_DIAG &&
         pending_screen_id == 0 &&
-        !boot_diag_has_error &&
-        (now - boot_diag_start_ms) >= Config::BOOT_DIAG_MS) {
+        BootDiagPolicy::shouldAutoAdvance(boot_diag_has_error,
+                                          BootDiagPolicy::sen66Pending(sensorManager.isOk(),
+                                                                       sensorManager.retryAtMs(),
+                                                                       now),
+                                          now - boot_diag_start_ms,
+                                          Config::BOOT_DIAG_MS)) {
         pending_screen_id = SCREEN_ID_PAGE_MAIN_PRO;
         boot_diag_active = false;
         data_dirty = true;
@@ -833,6 +1275,7 @@ void UiController::poll(uint32_t now) {
                  backlightManager.isOn() ? "ON" : "OFF",
                  static_cast<unsigned>(lvgl_lock_fail_streak));
         }
+        publishWebUiSnapshot();
         return;
     }
     lvgl_lock_fail_streak = 0;
@@ -849,6 +1292,7 @@ void UiController::poll(uint32_t now) {
 
     UiRenderLoop::process(*this, now);
     lvgl_port_unlock();
+    publishWebUiSnapshot();
 }
 
 void UiController::safe_label_set_text(lv_obj_t *obj, const char *new_text) {
@@ -1291,17 +1735,31 @@ const char *UiController::pressure_display_unit() const {
 
 void UiController::update_clock_labels() {
     char buf[16];
+    char ampm_buf[4] = {};
     tm local_tm = {};
     if (!timeManager.getLocalTime(local_tm)) {
         if (objects.label_time_value_1) safe_label_set_text(objects.label_time_value_1, UiText::TimeMissing());
         if (objects.label_date_value_1) safe_label_set_text(objects.label_date_value_1, UiText::DateMissing());
         if (objects.label_time_value_2) safe_label_set_text(objects.label_time_value_2, UiText::TimeMissing());
         if (objects.label_date_value_2) safe_label_set_text(objects.label_date_value_2, UiText::DateMissing());
+        if (objects.label_time_ampm_title_1) safe_label_set_text(objects.label_time_ampm_title_1, "");
+        if (objects.label_time_ampm_title_2) safe_label_set_text(objects.label_time_ampm_title_2, "");
+        set_label_hidden(objects.label_time_ampm_title_1, true);
+        set_label_hidden(objects.label_time_ampm_title_2, true);
         return;
     }
-    snprintf(buf, sizeof(buf), "%02d:%02d", local_tm.tm_hour, local_tm.tm_min);
+    format_clock_time_label(local_tm, time_format_24h_, buf, sizeof(buf), ampm_buf, sizeof(ampm_buf));
     if (objects.label_time_value_1) safe_label_set_text(objects.label_time_value_1, buf);
     if (objects.label_time_value_2) safe_label_set_text(objects.label_time_value_2, buf);
+    const bool show_ampm = !time_format_24h_;
+    if (objects.label_time_ampm_title_1) {
+        safe_label_set_text(objects.label_time_ampm_title_1, show_ampm ? ampm_buf : "");
+        set_label_hidden(objects.label_time_ampm_title_1, !show_ampm);
+    }
+    if (objects.label_time_ampm_title_2) {
+        safe_label_set_text(objects.label_time_ampm_title_2, show_ampm ? ampm_buf : "");
+        set_label_hidden(objects.label_time_ampm_title_2, !show_ampm);
+    }
     if (date_units_mdy) {
         snprintf(buf, sizeof(buf), "%02d/%02d/%04d",
                  local_tm.tm_mon + 1,
@@ -1446,8 +1904,8 @@ void UiController::confirm_hide() {
 }
 
 void UiController::mqtt_apply_pending() {
-    MqttManager::PendingCommands pending;
-    if (!mqttManager.takePending(pending)) {
+    MqttPendingCommands pending;
+    if (!mqttRuntimeState.takePendingCommands(pending)) {
         return;
     }
     bool publish_needed = false;
@@ -1485,13 +1943,10 @@ void UiController::mqtt_apply_pending() {
     }
     if (pending.restart) {
         LOGI("UI", "MQTT restart requested");
-        esp_wifi_stop();
-        lvgl_port_prepare_restart();
-        delay(100);
-        safe_restart_via_core0();
+        WebHandlersRequestRestart();
     }
     if (publish_needed) {
-        mqttManager.requestPublish();
+        mqttRuntimeState.requestPublish();
     }
 }
 
@@ -1534,7 +1989,8 @@ void UiController::night_mode_on_exit() {
 }
 
 void UiController::sync_wifi_toggle_state() {
-    bool wifi_enabled = networkManager.isEnabled();
+    const bool wifi_enabled = connectivity_.wifi_enabled;
+    wifi_toggle_syncing_ = true;
     if (objects.btn_wifi) {
         if (wifi_enabled) lv_obj_add_state(objects.btn_wifi, LV_STATE_CHECKED);
         else lv_obj_clear_state(objects.btn_wifi, LV_STATE_CHECKED);
@@ -1543,17 +1999,20 @@ void UiController::sync_wifi_toggle_state() {
         if (wifi_enabled) lv_obj_add_state(objects.btn_wifi_toggle, LV_STATE_CHECKED);
         else lv_obj_clear_state(objects.btn_wifi_toggle, LV_STATE_CHECKED);
     }
+    wifi_toggle_syncing_ = false;
 }
 
 void UiController::sync_mqtt_toggle_state() {
+    mqtt_toggle_syncing_ = true;
     if (objects.btn_mqtt) {
-        if (mqttManager.isEnabled()) lv_obj_add_state(objects.btn_mqtt, LV_STATE_CHECKED);
+        if (connectivity_.mqtt_enabled) lv_obj_add_state(objects.btn_mqtt, LV_STATE_CHECKED);
         else lv_obj_clear_state(objects.btn_mqtt, LV_STATE_CHECKED);
     }
     if (objects.btn_mqtt_toggle) {
-        if (mqttManager.isEnabled()) lv_obj_add_state(objects.btn_mqtt_toggle, LV_STATE_CHECKED);
+        if (connectivity_.mqtt_enabled) lv_obj_add_state(objects.btn_mqtt_toggle, LV_STATE_CHECKED);
         else lv_obj_clear_state(objects.btn_mqtt_toggle, LV_STATE_CHECKED);
     }
+    mqtt_toggle_syncing_ = false;
 }
 
 void UiController::update_temp_offset_label() {
@@ -1751,20 +2210,12 @@ void UiController::update_settings_header() {
 }
 
 void UiController::update_theme_custom_info(bool presets) {
+    refreshConnectivitySnapshot();
     set_visible(objects.container_theme_custom_info, !presets);
     if (!presets && objects.qrcode_theme_custom) {
-        const bool wifi_enabled = networkManager.isEnabled();
-        const AuraNetworkManager::WifiState wifi_state = networkManager.state();
-        const bool sta_mode = wifi_enabled && (wifi_state == AuraNetworkManager::WIFI_STATE_STA_CONNECTED);
-        String theme_url = networkManager.localUrl("/theme");
-        if (sta_mode) {
-            const IPAddress ip = WiFi.localIP();
-            if (ip[0] != 0 || ip[1] != 0 || ip[2] != 0 || ip[3] != 0) {
-                theme_url = "http://";
-                theme_url += ip.toString();
-                theme_url += "/theme";
-            }
-        }
+        const bool sta_mode = connectivity_.wifi_enabled &&
+                              connectivity_.wifi_state == static_cast<int>(AuraNetworkManager::WIFI_STATE_STA_CONNECTED);
+        String theme_url = sta_mode ? connectivity_.theme_sta_url : connectivity_.theme_local_url;
         update_qrcode_if_needed(objects.qrcode_theme_custom,
                                 theme_url.c_str(),
                                 theme_custom_qr_cache_,
@@ -2038,6 +2489,7 @@ void UiController::init_ui_defaults() {
     }
     ui_language = storage.config().language;
     date_units_mdy = storage.config().units_mdy;
+    time_format_24h_ = storage.config().time_format_24h;
     rtc_detection_saved_mode_ = storage.config().rtc_mode;
     rtc_detection_pending_mode_ = rtc_detection_saved_mode_;
     const bool expected_units_mdy = !temp_units_c;

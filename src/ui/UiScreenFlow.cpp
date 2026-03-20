@@ -30,11 +30,9 @@ void UiScreenFlow::processPendingScreen(UiController &owner, uint32_t now_ms) {
         loadScreen(next_screen_enum);
         if (!UiEventBinder::screenRootById(next_screen)) {
             if (next_screen == SCREEN_ID_PAGE_MQTT) {
-                owner.networkManager.setMqttScreenOpen(false);
+                owner.setMqttScreenOpenState(false);
             } else if (next_screen == SCREEN_ID_PAGE_THEME) {
-                owner.themeManager.setThemeScreenOpen(false);
-                owner.networkManager.setThemeScreenOpen(false);
-                owner.themeManager.setCustomTabSelected(false);
+                owner.setThemeScreenOpenState(false);
             }
             LOGW("UI", "screen %d is unavailable after load request", next_screen);
             owner.pending_screen_id = 0;
@@ -69,7 +67,7 @@ void UiScreenFlow::processPendingScreen(UiController &owner, uint32_t now_ms) {
                 owner.datetime_ui_dirty = true;
                 owner.clock_ui_dirty = true;
             } else if (owner.current_screen_id == SCREEN_ID_PAGE_WIFI) {
-                owner.networkManager.markUiDirty();
+                owner.markWifiUiDirty();
             } else if (owner.current_screen_id == SCREEN_ID_PAGE_BACKLIGHT) {
                 owner.backlightManager.markUiDirty();
             } else if (owner.current_screen_id == SCREEN_ID_PAGE_AUTO_NIGHT_MODE) {

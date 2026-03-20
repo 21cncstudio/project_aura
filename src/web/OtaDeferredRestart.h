@@ -6,6 +6,7 @@
 
 #pragma once
 
+#include <atomic>
 #include <stdint.h>
 
 namespace OtaDeferredRestart {
@@ -27,9 +28,9 @@ public:
     uint32_t due_ms() const { return deferred_restart_due_ms_; }
 
 private:
-    bool deferred_restart_ = false;
-    bool restart_requested_ = false;
-    uint32_t deferred_restart_due_ms_ = 0;
+    std::atomic<bool> deferred_restart_{false};
+    std::atomic<bool> restart_requested_{false};
+    std::atomic<uint32_t> deferred_restart_due_ms_{0};
 };
 
 } // namespace OtaDeferredRestart

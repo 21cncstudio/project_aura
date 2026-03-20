@@ -9,6 +9,11 @@
 #include <driver/gpio.h>
 
 #include "config/AppData.h"
+#include "core/ChartsRuntimeState.h"
+#include "core/ConnectivityRuntime.h"
+#include "core/MqttRuntimeState.h"
+#include "core/NetworkCommandQueue.h"
+#include "core/WebRuntimeState.h"
 #include "modules/StorageManager.h"
 #include "modules/NetworkManager.h"
 #include "modules/MqttManager.h"
@@ -17,6 +22,7 @@
 #include "modules/PressureHistory.h"
 #include "modules/ChartsHistory.h"
 #include "modules/FanControl.h"
+#include "web/WebUiBridge.h"
 #include "ui/ThemeManager.h"
 #include "ui/BacklightManager.h"
 #include "ui/NightModeManager.h"
@@ -34,6 +40,12 @@ struct Context {
     StorageManager &storage;
     AuraNetworkManager &networkManager;
     MqttManager &mqttManager;
+    ConnectivityRuntime &connectivityRuntime;
+    MqttRuntimeState &mqttRuntimeState;
+    ChartsRuntimeState &chartsRuntimeState;
+    WebRuntimeState &webRuntimeState;
+    WebUiBridge &webUiBridge;
+    NetworkCommandQueue &networkCommandQueue;
     SensorManager &sensorManager;
     TimeManager &timeManager;
     ThemeManager &themeManager;
@@ -58,5 +70,6 @@ bool recoverI2cBus(gpio_num_t sda, gpio_num_t scl);
 void initManagersAndConfig(Context &ctx, StorageManager::BootAction boot_action);
 esp_panel::board::Board *initBoardAndPeripherals(Context &ctx);
 bool initLvglAndUi(Context &ctx, esp_panel::board::Board *board);
+void pollDeferredRuntime();
 
 } // namespace AppInit

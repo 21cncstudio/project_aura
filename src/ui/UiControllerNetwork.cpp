@@ -15,8 +15,7 @@
 #include "modules/MqttManager.h"
 #include "ui/ui.h"
 #include "ui/images.h"
-#include "web/WebHandlers.h"
-
+#include "web/WebWifiUtils.h"
 using namespace Config;
 
 namespace {
@@ -48,6 +47,16 @@ lv_color_t rtc_runtime_status_color(const TimeManager &timeManager) {
         return lv_color_hex(0xff1100);
     }
     return lv_color_hex(0x00c853);
+}
+
+WebUiBridge::ApplyResult finalize_network_bridge_result(bool success,
+                                                        uint16_t status_code,
+                                                        const char *message) {
+    WebUiBridge::ApplyResult result{};
+    result.success = success;
+    result.status_code = status_code;
+    result.error_message = message ? message : "";
+    return result;
 }
 
 } // namespace
@@ -130,7 +139,8 @@ void UiController::update_datetime_ui() {
         else lv_obj_clear_state(objects.btn_ntp_toggle, LV_STATE_CHECKED);
         ntp_toggle_syncing = false;
     }
-    set_button_enabled(objects.btn_ntp_toggle, networkManager.isEnabled());
+    refreshConnectivitySnapshot();
+    set_button_enabled(objects.btn_ntp_toggle, connectivity_.wifi_enabled);
 
     TimeManager::NtpUiState ntp_state = timeManager.getNtpUiState(millis());
     lv_color_t ntp_color = color_yellow();
@@ -174,12 +184,10 @@ void UiController::update_datetime_ui() {
     update_rtc_detection_ui();
 
     if (objects.label_wifi_status_1) {
-        bool wifi_enabled = networkManager.isEnabled();
-        AuraNetworkManager::WifiState wifi_state = networkManager.state();
-        if (!wifi_enabled) {
+        if (!connectivity_.wifi_enabled) {
             safe_label_set_text(objects.label_wifi_status_1, UiText::StatusOff());
             if (objects.chip_wifi_status) set_chip_color(objects.chip_wifi_status, color_yellow());
-        } else if (wifi_state == AuraNetworkManager::WIFI_STATE_STA_CONNECTED) {
+        } else if (connectivity_.wifi_state == static_cast<int>(AuraNetworkManager::WIFI_STATE_STA_CONNECTED)) {
             safe_label_set_text(objects.label_wifi_status_1, UiText::StatusOk());
             if (objects.chip_wifi_status) set_chip_color(objects.chip_wifi_status, color_green());
         } else {
@@ -187,6 +195,84 @@ void UiController::update_datetime_ui() {
             if (objects.chip_wifi_status) set_chip_color(objects.chip_wifi_status, color_blue());
         }
     }
+}
+
+WebUiBridge::ApplyResult UiController::applyWifiSaveBridge(
+    const WebUiBridge::WifiSaveUpdate &update,
+    void *ctx) {
+    auto *controller = static_cast<UiController *>(ctx);
+    if (!controller) {
+        return finalize_network_bridge_result(false, 503, "WiFi bridge unavailable");
+    }
+    if (!controller->storage.saveWiFiSettings(update.ssid, update.pass, update.enabled)) {
+        WebUiBridge::ApplyResult result =
+            finalize_network_bridge_result(false, 500, "Failed to persist WiFi settings");
+        result.snapshot = controller->buildWebUiSnapshot();
+        controller->publishWebUiSnapshot();
+        return result;
+    }
+    NetworkCommandQueue::WifiSettingsUpdate settings_update{};
+    settings_update.ssid = update.ssid;
+    settings_update.pass = update.pass;
+    settings_update.enabled = update.enabled;
+    if (!controller->networkCommandQueue.publishSavedWifiSettings(settings_update)) {
+        WebUiBridge::ApplyResult result =
+            finalize_network_bridge_result(false, 503, "Failed to apply WiFi settings");
+        result.snapshot = controller->buildWebUiSnapshot();
+        controller->publishWebUiSnapshot();
+        return result;
+    }
+    controller->markWebPagePanelDirty();
+    controller->data_dirty = true;
+    WebUiBridge::ApplyResult result = finalize_network_bridge_result(true, 200, nullptr);
+    result.snapshot = controller->buildWebUiSnapshot();
+    controller->publishWebUiSnapshot();
+    return result;
+}
+
+WebUiBridge::ApplyResult UiController::applyMqttSaveBridge(
+    const WebUiBridge::MqttSaveUpdate &update,
+    void *ctx) {
+    auto *controller = static_cast<UiController *>(ctx);
+    if (!controller) {
+        return finalize_network_bridge_result(false, 503, "MQTT bridge unavailable");
+    }
+    if (!controller->storage.saveMqttSettings(update.host,
+                                              update.port,
+                                              update.user,
+                                              update.pass,
+                                              update.base_topic,
+                                              update.device_name,
+                                              update.discovery,
+                                              update.anonymous)) {
+        WebUiBridge::ApplyResult result =
+            finalize_network_bridge_result(false, 500, "Failed to persist MQTT settings");
+        result.snapshot = controller->buildWebUiSnapshot();
+        controller->publishWebUiSnapshot();
+        return result;
+    }
+    NetworkCommandQueue::MqttSettingsUpdate settings_update{};
+    settings_update.host = update.host;
+    settings_update.port = update.port;
+    settings_update.user = update.user;
+    settings_update.pass = update.pass;
+    settings_update.base_topic = update.base_topic;
+    settings_update.device_name = update.device_name;
+    settings_update.discovery = update.discovery;
+    settings_update.anonymous = update.anonymous;
+    if (!controller->networkCommandQueue.publishSavedMqttSettings(settings_update)) {
+        WebUiBridge::ApplyResult result =
+            finalize_network_bridge_result(false, 503, "Failed to apply MQTT settings");
+        result.snapshot = controller->buildWebUiSnapshot();
+        controller->publishWebUiSnapshot();
+        return result;
+    }
+    controller->markWebPagePanelDirty();
+    controller->data_dirty = true;
+    WebUiBridge::ApplyResult result = finalize_network_bridge_result(true, 200, nullptr);
+    result.snapshot = controller->buildWebUiSnapshot();
+    controller->publishWebUiSnapshot();
+    return result;
 }
 
 bool UiController::rtc_detection_overlay_visible() const {
@@ -278,14 +364,12 @@ void UiController::update_rtc_detection_ui() {
 }
 
 void UiController::update_wifi_texts() {
+    refreshConnectivitySnapshot();
     if (objects.label_wifi_title) safe_label_set_text(objects.label_wifi_title, UiText::LabelWifiSettingsTitle());
     if (objects.label_wifi_status) safe_label_set_text(objects.label_wifi_status, UiText::LabelWifiStatus());
     if (objects.label_wifi_help) {
         String help_text = UiText::LabelWifiHelp();
-        String ap_ssid = networkManager.apSsid();
-        if (ap_ssid.isEmpty()) {
-            ap_ssid = Config::WIFI_AP_SSID;
-        }
+        const String &ap_ssid = connectivity_.ap_ssid;
         help_text.replace(Config::WIFI_AP_SSID, ap_ssid);
         help_text.replace("ProjectAura-Setup", ap_ssid);
         safe_label_set_text(objects.label_wifi_help, help_text.c_str());
@@ -300,10 +384,11 @@ void UiController::update_wifi_texts() {
 }
 
 void UiController::update_wifi_ui() {
-    bool wifi_enabled = networkManager.isEnabled();
-    AuraNetworkManager::WifiState wifi_state = networkManager.state();
-    const String &wifi_ssid = networkManager.ssid();
-    uint8_t wifi_retry_count = networkManager.retryCount();
+    refreshConnectivitySnapshot();
+    const bool wifi_enabled = connectivity_.wifi_enabled;
+    const int wifi_state = connectivity_.wifi_state;
+    const String &wifi_ssid = connectivity_.wifi_ssid;
+    const uint8_t wifi_retry_count = connectivity_.wifi_retry_count;
 
     // page_wifi is created lazily, so these runtime style/flag guards must be
     // applied here (not only in init_ui_defaults()) once objects actually exist.
@@ -345,12 +430,12 @@ void UiController::update_wifi_ui() {
     if (objects.label_wifi_status_value) {
         const char *status = UiText::StatusOff();
         if (wifi_enabled) {
-            if (wifi_state == AuraNetworkManager::WIFI_STATE_STA_CONNECTED) status = UiText::WifiStatusConnected();
-            else if (wifi_state == AuraNetworkManager::WIFI_STATE_AP_CONFIG) status = UiText::WifiStatusApMode();
-            else if (wifi_state == AuraNetworkManager::WIFI_STATE_OFF &&
+            if (wifi_state == static_cast<int>(AuraNetworkManager::WIFI_STATE_STA_CONNECTED)) status = UiText::WifiStatusConnected();
+            else if (wifi_state == static_cast<int>(AuraNetworkManager::WIFI_STATE_AP_CONFIG)) status = UiText::WifiStatusApMode();
+            else if (wifi_state == static_cast<int>(AuraNetworkManager::WIFI_STATE_OFF) &&
                      wifi_retry_count >= WIFI_CONNECT_MAX_RETRIES) status = UiText::WifiStatusError();
-            else if (wifi_state == AuraNetworkManager::WIFI_STATE_STA_CONNECTING ||
-                     wifi_state == AuraNetworkManager::WIFI_STATE_OFF) status = UiText::WifiStatusConnecting();
+            else if (wifi_state == static_cast<int>(AuraNetworkManager::WIFI_STATE_STA_CONNECTING) ||
+                     wifi_state == static_cast<int>(AuraNetworkManager::WIFI_STATE_OFF)) status = UiText::WifiStatusConnecting();
         }
         safe_label_set_text(objects.label_wifi_status_value, status);
     }
@@ -365,15 +450,12 @@ void UiController::update_wifi_ui() {
 
     if (objects.label_wifi_ssid_value) {
         String safe_ssid;
-        String ap_ssid = networkManager.apSsid();
-        if (ap_ssid.isEmpty()) {
-            ap_ssid = Config::WIFI_AP_SSID;
-        }
+        const String &ap_ssid = connectivity_.ap_ssid;
         const char *ssid_text = UiText::ValueMissing();
-        if (wifi_state == AuraNetworkManager::WIFI_STATE_STA_CONNECTED && !wifi_ssid.isEmpty()) {
+        if (wifi_state == static_cast<int>(AuraNetworkManager::WIFI_STATE_STA_CONNECTED) && !wifi_ssid.isEmpty()) {
             safe_ssid = wifi_label_safe(wifi_ssid);
             ssid_text = safe_ssid.c_str();
-        } else if (wifi_state == AuraNetworkManager::WIFI_STATE_AP_CONFIG) {
+        } else if (wifi_state == static_cast<int>(AuraNetworkManager::WIFI_STATE_AP_CONFIG)) {
             ssid_text = ap_ssid.c_str();
         } else if (wifi_enabled && !wifi_ssid.isEmpty()) {
             safe_ssid = wifi_label_safe(wifi_ssid);
@@ -384,15 +466,15 @@ void UiController::update_wifi_ui() {
 
     if (objects.label_wifi_ip_value) {
         String ip = UiText::ValueMissing();
-        if (wifi_state == AuraNetworkManager::WIFI_STATE_STA_CONNECTED) {
-            ip = WiFi.localIP().toString();
-        } else if (wifi_state == AuraNetworkManager::WIFI_STATE_AP_CONFIG) {
-            ip = WiFi.softAPIP().toString();
+        if (wifi_state == static_cast<int>(AuraNetworkManager::WIFI_STATE_STA_CONNECTED)) {
+            ip = connectivity_.sta_ip;
+        } else if (wifi_state == static_cast<int>(AuraNetworkManager::WIFI_STATE_AP_CONFIG)) {
+            ip = connectivity_.ap_ip;
         }
         safe_label_set_text(objects.label_wifi_ip_value, ip.c_str());
     }
     if (objects.qrcode_wifi_portal) {
-        if (wifi_state == AuraNetworkManager::WIFI_STATE_AP_CONFIG) {
+        if (wifi_state == static_cast<int>(AuraNetworkManager::WIFI_STATE_AP_CONFIG)) {
             lv_obj_clear_flag(objects.qrcode_wifi_portal, LV_OBJ_FLAG_HIDDEN);
             update_qrcode_if_needed(objects.qrcode_wifi_portal,
                                     UiText::WifiPortalUrl(),
@@ -411,7 +493,7 @@ void UiController::update_wifi_ui() {
         set_button_enabled(objects.label_btn_wifi_reconnect, can_reconnect);
     }
     if (objects.btn_wifi_start_ap) {
-        if (wifi_enabled && wifi_state == AuraNetworkManager::WIFI_STATE_AP_CONFIG) {
+        if (wifi_enabled && wifi_state == static_cast<int>(AuraNetworkManager::WIFI_STATE_AP_CONFIG)) {
             lv_obj_add_state(objects.btn_wifi_start_ap, LV_STATE_CHECKED);
         } else {
             lv_obj_clear_state(objects.btn_wifi_start_ap, LV_STATE_CHECKED);
@@ -423,21 +505,22 @@ void UiController::update_wifi_ui() {
 }
 
 void UiController::update_status_icons() {
+    refreshConnectivitySnapshot();
     // WiFi icon states: 0=hidden, 1=green, 2=blue, 3=yellow, 4=red
     int new_wifi_state = 0;
-    bool wifi_enabled = networkManager.isEnabled();
-    AuraNetworkManager::WifiState wifi_state = networkManager.state();
-    uint8_t wifi_retry_count = networkManager.retryCount();
+    const bool wifi_enabled = connectivity_.wifi_enabled;
+    const int wifi_state = connectivity_.wifi_state;
+    const uint8_t wifi_retry_count = connectivity_.wifi_retry_count;
 
     if (!wifi_enabled) {
         new_wifi_state = 0; // hidden
-    } else if (wifi_state == AuraNetworkManager::WIFI_STATE_STA_CONNECTED) {
+    } else if (wifi_state == static_cast<int>(AuraNetworkManager::WIFI_STATE_STA_CONNECTED)) {
         new_wifi_state = 1; // green
-    } else if (wifi_state == AuraNetworkManager::WIFI_STATE_STA_CONNECTING) {
+    } else if (wifi_state == static_cast<int>(AuraNetworkManager::WIFI_STATE_STA_CONNECTING)) {
         new_wifi_state = 2; // blue
-    } else if (wifi_state == AuraNetworkManager::WIFI_STATE_AP_CONFIG) {
+    } else if (wifi_state == static_cast<int>(AuraNetworkManager::WIFI_STATE_AP_CONFIG)) {
         new_wifi_state = 3; // yellow
-    } else if (wifi_state == AuraNetworkManager::WIFI_STATE_OFF &&
+    } else if (wifi_state == static_cast<int>(AuraNetworkManager::WIFI_STATE_OFF) &&
                wifi_retry_count >= WIFI_CONNECT_MAX_RETRIES) {
         new_wifi_state = 4; // red
     }
@@ -506,13 +589,13 @@ void UiController::update_status_icons() {
     // MQTT icon states: 0=hidden, 1=green, 2=blue, 3=red, 4=yellow
     int new_mqtt_state = 0;
 
-    if (!mqttManager.isEnabled() || !wifi_enabled ||
-        wifi_state != AuraNetworkManager::WIFI_STATE_STA_CONNECTED) {
+    if (!connectivity_.mqtt_enabled || !wifi_enabled ||
+        wifi_state != static_cast<int>(AuraNetworkManager::WIFI_STATE_STA_CONNECTED)) {
         new_mqtt_state = 0; // hidden - MQTT disabled or WiFi not ready
-    } else if (mqttManager.isConnected()) {
+    } else if (connectivity_.mqtt_connected) {
         new_mqtt_state = 1; // green
     } else {
-        const uint8_t retry_stage = mqttManager.retryStage();
+        const uint8_t retry_stage = connectivity_.mqtt_retry_stage;
         if (retry_stage >= 2) {
             new_mqtt_state = 3; // red
         } else if (retry_stage >= 1) {
@@ -585,30 +668,24 @@ void UiController::update_status_icons() {
 }
 
 void UiController::update_mqtt_ui() {
-    bool wifi_ready = networkManager.isEnabled() && networkManager.isConnected();
-    const String local_mqtt_url = networkManager.localUrl("/mqtt");
+    refreshConnectivitySnapshot();
+    const bool wifi_ready = connectivity_.wifi_enabled && connectivity_.wifi_connected;
+    const String &local_mqtt_url = connectivity_.mqtt_local_url;
     String ip_mqtt_url = "http://<device-ip>/mqtt";
     if (wifi_ready) {
-        const IPAddress ip = WiFi.localIP();
-        if (ip[0] != 0 || ip[1] != 0 || ip[2] != 0 || ip[3] != 0) {
-            ip_mqtt_url = "http://";
-            ip_mqtt_url += ip.toString();
-            ip_mqtt_url += "/mqtt";
-        } else {
-            ip_mqtt_url = local_mqtt_url;
-        }
+        ip_mqtt_url = connectivity_.mqtt_sta_url;
     }
 
     // Update MQTT status label
     if (objects.label_mqtt_status_value) {
         const char *status = UiText::MqttStatusDisabled();
-        if (mqttManager.isUserEnabled()) {
+        if (connectivity_.mqtt_user_enabled) {
             if (!wifi_ready) {
                 status = UiText::MqttStatusNoWifi();
-            } else if (mqttManager.isConnected()) {
+            } else if (connectivity_.mqtt_connected) {
                 status = UiText::MqttStatusConnected();
             } else {
-                const uint8_t retry_stage = mqttManager.retryStage();
+                const uint8_t retry_stage = connectivity_.mqtt_retry_stage;
                 if (retry_stage >= 2) {
                     status = UiText::MqttStatusRetry1h();
                 } else if (retry_stage >= 1) {
@@ -624,7 +701,7 @@ void UiController::update_mqtt_ui() {
     // Update MQTT status container style
     if (objects.container_mqtt_status) {
         apply_toggle_style(objects.container_mqtt_status);
-        if (mqttManager.isEnabled() && mqttManager.isConnected()) {
+        if (connectivity_.mqtt_enabled && connectivity_.mqtt_connected) {
             lv_obj_add_state(objects.container_mqtt_status, LV_STATE_CHECKED);
         } else {
             lv_obj_clear_state(objects.container_mqtt_status, LV_STATE_CHECKED);
@@ -634,8 +711,8 @@ void UiController::update_mqtt_ui() {
     // Update Broker IP
     if (objects.label_mqtt_broker_value) {
         String broker_addr = UiText::ValueMissing();
-        if (mqttManager.isUserEnabled() && !mqttManager.host().isEmpty()) {
-            broker_addr = mqttManager.host() + ":" + String(mqttManager.port());
+        if (connectivity_.mqtt_user_enabled && !connectivity_.mqtt_host.isEmpty()) {
+            broker_addr = connectivity_.mqtt_host + ":" + String(connectivity_.mqtt_port);
         }
         safe_label_set_text(objects.label_mqtt_broker_value, broker_addr.c_str());
     }
@@ -643,8 +720,8 @@ void UiController::update_mqtt_ui() {
     // Update Device IP
     if (objects.label_mqtt_device_ip_value) {
         String device_ip = UiText::ValueMissing();
-        if (networkManager.isConnected()) {
-            device_ip = WiFi.localIP().toString();
+        if (connectivity_.wifi_connected && !connectivity_.sta_ip.isEmpty()) {
+            device_ip = connectivity_.sta_ip;
         }
         safe_label_set_text(objects.label_mqtt_device_ip_value, device_ip.c_str());
     }
@@ -652,8 +729,8 @@ void UiController::update_mqtt_ui() {
     // Update Topic
     if (objects.label_mqtt_topic_value) {
         String topic = UiText::ValueMissing();
-        if (mqttManager.isUserEnabled() && !mqttManager.baseTopic().isEmpty()) {
-            topic = mqttManager.baseTopic();
+        if (connectivity_.mqtt_user_enabled && !connectivity_.mqtt_base_topic.isEmpty()) {
+            topic = connectivity_.mqtt_base_topic;
         }
         safe_label_set_text(objects.label_mqtt_topic_value, topic.c_str());
     }
@@ -681,7 +758,7 @@ void UiController::update_mqtt_ui() {
 
     // Update reconnect button state
     if (objects.btn_mqtt_reconnect) {
-        bool can_reconnect = mqttManager.isEnabled() && wifi_ready;
+        bool can_reconnect = connectivity_.mqtt_enabled && wifi_ready;
         if (can_reconnect) {
             lv_obj_clear_state(objects.btn_mqtt_reconnect, LV_STATE_DISABLED);
         } else {
@@ -691,24 +768,18 @@ void UiController::update_mqtt_ui() {
 }
 
 void UiController::update_mqtt_texts() {
+    refreshConnectivitySnapshot();
     if (objects.label_mqtt_title) safe_label_set_text(objects.label_mqtt_title, UiText::LabelMqttSettingsTitle());
     if (objects.label_mqtt_status) safe_label_set_text(objects.label_mqtt_status, UiText::LabelMqttStatus());
     if (objects.label_mqtt_help) {
         String help_text = UiText::LabelMqttHelp();
-        const String local_url = networkManager.localUrl("/mqtt");
+        const String &local_url = connectivity_.mqtt_local_url;
         String ip_url = "http://<device-ip>/mqtt";
-        const bool wifi_enabled = networkManager.isEnabled();
-        const AuraNetworkManager::WifiState wifi_state = networkManager.state();
-        const bool sta_mode = wifi_enabled && (wifi_state == AuraNetworkManager::WIFI_STATE_STA_CONNECTED);
+        const bool sta_mode =
+            connectivity_.wifi_enabled &&
+            connectivity_.wifi_state == static_cast<int>(AuraNetworkManager::WIFI_STATE_STA_CONNECTED);
         if (sta_mode) {
-            const IPAddress ip = WiFi.localIP();
-            if (ip[0] != 0 || ip[1] != 0 || ip[2] != 0 || ip[3] != 0) {
-                ip_url = "http://";
-                ip_url += ip.toString();
-                ip_url += "/mqtt";
-            } else {
-                ip_url = local_url;
-            }
+            ip_url = connectivity_.mqtt_sta_url;
         }
         help_text.replace("{{IP_URL}}", ip_url);
         help_text.replace("{{LOCAL_URL}}", local_url);

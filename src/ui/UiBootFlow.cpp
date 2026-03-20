@@ -14,6 +14,7 @@
 #include "core/Logger.h"
 #include "modules/FanControl.h"
 #include "modules/StorageManager.h"
+#include "ui/BootDiagPolicy.h"
 #include "ui/UiController.h"
 #include "ui/UiText.h"
 #include "ui/ui.h"
@@ -167,11 +168,11 @@ bool UiBootFlow::bootDiagHasErrors(UiController &owner, uint32_t now_ms) {
     if (is_crash_reset(boot_reset_reason) || is_brownout_reset(boot_reset_reason)) {
         has_error = true;
     }
-    if (!owner.sensorManager.isOk()) {
-        uint32_t retry_at = owner.sensorManager.retryAtMs();
-        if (retry_at == 0 || now_ms >= retry_at) {
-            has_error = true;
-        }
+    if (!owner.sensorManager.isOk() &&
+        !BootDiagPolicy::sen66Pending(owner.sensorManager.isOk(),
+                                      owner.sensorManager.retryAtMs(),
+                                      now_ms)) {
+        has_error = true;
     }
     if (!owner.sensorManager.isDpsOk()) {
         has_error = true;
@@ -192,6 +193,9 @@ void UiBootFlow::updateBootDiag(UiController &owner, uint32_t now_ms) {
     char buf[64];
     char error_lines[512] = {0};
     size_t error_len = 0;
+    const bool sen66_pending = BootDiagPolicy::sen66Pending(owner.sensorManager.isOk(),
+                                                            owner.sensorManager.retryAtMs(),
+                                                            now_ms);
 
     if (objects.lbl_diag_app_ver) {
         snprintf(buf, sizeof(buf), "v%s", AppVersion::fullVersion());
@@ -265,17 +269,13 @@ void UiBootFlow::updateBootDiag(UiController &owner, uint32_t now_ms) {
         const char *status = UiText::StatusErr();
         if (owner.sensorManager.isOk()) {
             status = UiText::StatusOk();
-        } else {
-            uint32_t retry_at = owner.sensorManager.retryAtMs();
-            if (retry_at != 0 && now_ms < retry_at) {
-                status = UiText::BootDiagStarting();
-            }
+        } else if (sen66_pending) {
+            status = UiText::BootDiagStarting();
         }
         owner.safe_label_set_text(objects.lbl_diag_sen, status);
     }
     if (!owner.sensorManager.isOk()) {
-        uint32_t retry_at = owner.sensorManager.retryAtMs();
-        if (retry_at != 0 && now_ms < retry_at) {
+        if (sen66_pending) {
             append_error_line(error_lines, sizeof(error_lines), error_len, "SEN66 starting...");
         } else {
             append_error_line(error_lines, sizeof(error_lines), error_len, "SEN66 not found/read failed");

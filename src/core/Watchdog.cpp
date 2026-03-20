@@ -64,8 +64,29 @@ bool Watchdog::setup(uint32_t timeout_ms) {
     return g_enabled;
 }
 
+bool Watchdog::subscribeCurrentTask() {
+    esp_err_t status = esp_task_wdt_status(nullptr);
+    if (status == ESP_OK) {
+        return true;
+    }
+    if (status != ESP_ERR_NOT_FOUND) {
+        LOGW("Main", "Task WDT status failed while subscribing current task: %d", status);
+        return false;
+    }
+
+    const esp_err_t add_err = esp_task_wdt_add(nullptr);
+    if (add_err != ESP_OK && add_err != ESP_ERR_INVALID_STATE) {
+        LOGW("Main", "Task WDT add failed for current task: %d", add_err);
+        return false;
+    }
+    return esp_task_wdt_status(nullptr) == ESP_OK;
+}
+
 void Watchdog::kick() {
     if (!g_enabled) {
+        return;
+    }
+    if (esp_task_wdt_status(nullptr) != ESP_OK) {
         return;
     }
     esp_task_wdt_reset();

@@ -6,6 +6,7 @@
 
 #include "core/AppInit.h"
 
+#include <atomic>
 #include <esp_display_panel.hpp>
 #include <esp_log.h>
 #include <esp_system.h>
@@ -22,7 +23,7 @@
 
 namespace {
 
-UiController *g_ui_controller = nullptr;
+MqttManager *g_mqtt_manager = nullptr;
 
 struct WifiStateContext {
     AuraNetworkManager *network = nullptr;
@@ -31,6 +32,14 @@ struct WifiStateContext {
 };
 
 WifiStateContext g_wifi_state_ctx;
+
+struct DeferredWifiRuntimeState {
+    std::atomic<bool> pending{false};
+    std::atomic<bool> wifi_enabled{false};
+    std::atomic<bool> wifi_connected{false};
+};
+
+DeferredWifiRuntimeState g_deferred_wifi_runtime;
 
 const char *resetReasonName(esp_reset_reason_t reason) {
     switch (reason) {
@@ -54,8 +63,8 @@ const char *resetReasonName(esp_reset_reason_t reason) {
 }
 
 void mqtt_sync_with_wifi_cb() {
-    if (g_ui_controller) {
-        g_ui_controller->mqtt_sync_with_wifi();
+    if (g_mqtt_manager) {
+        g_mqtt_manager->syncWithWifi();
     }
 }
 
@@ -67,10 +76,12 @@ void wifi_state_change_cb(AuraNetworkManager::WifiState,
     if (!state || !state->network || !state->time_manager || !state->ui_controller) {
         return;
     }
-    state->time_manager->updateWifiState(state->network->isEnabled(), connected);
-    state->ui_controller->markDatetimeDirty();
-    state->ui_controller->markWebPagePanelDirty();
-    state->ui_controller->mqtt_sync_with_wifi();
+    if (g_mqtt_manager) {
+        g_mqtt_manager->syncWithWifi();
+    }
+    g_deferred_wifi_runtime.wifi_enabled.store(state->network->isEnabled(), std::memory_order_relaxed);
+    g_deferred_wifi_runtime.wifi_connected.store(connected, std::memory_order_relaxed);
+    g_deferred_wifi_runtime.pending.store(true, std::memory_order_release);
 }
 
 } // namespace
@@ -113,12 +124,11 @@ bool AppInit::recoverI2cBus(gpio_num_t sda, gpio_num_t scl) {
 void AppInit::initManagersAndConfig(Context &ctx, StorageManager::BootAction boot_action) {
     ctx.storage.begin(boot_action);
     ctx.networkManager.begin(ctx.storage);
-    ctx.mqttManager.begin(ctx.storage, ctx.networkManager);
+    ctx.mqttManager.begin(ctx.storage, ctx.networkManager, ctx.mqttRuntimeState);
 
-    g_ui_controller = &ctx.uiController;
+    g_mqtt_manager = &ctx.mqttManager;
     ctx.networkManager.attachMqttContext(
         ctx.mqttManager,
-        ctx.mqttManager.client(),
         ctx.mqttManager.userEnabledRef(),
         ctx.mqttManager.hostRef(),
         ctx.mqttManager.portRef(),
@@ -131,9 +141,11 @@ void AppInit::initManagersAndConfig(Context &ctx, StorageManager::BootAction boo
         ctx.mqttManager.anonymousRef(),
         mqtt_sync_with_wifi_cb);
     ctx.networkManager.attachThemeContext(ctx.themeManager);
-    ctx.networkManager.attachChartsContext(ctx.chartsHistory);
-    ctx.networkManager.attachDacContext(ctx.fanControl, ctx.sensorManager, ctx.currentData);
-    ctx.networkManager.attachUiContext(ctx.uiController);
+    ctx.networkManager.attachChartsRuntime(ctx.chartsRuntimeState);
+    ctx.networkManager.attachConnectivityRuntime(ctx.connectivityRuntime);
+    ctx.networkManager.attachWebRuntime(ctx.webRuntimeState);
+    ctx.networkManager.attachWebUiBridge(ctx.webUiBridge);
+    ctx.networkManager.attachCommandQueue(ctx.networkCommandQueue);
     g_wifi_state_ctx.network = &ctx.networkManager;
     g_wifi_state_ctx.time_manager = &ctx.timeManager;
     g_wifi_state_ctx.ui_controller = &ctx.uiController;
@@ -155,8 +167,14 @@ void AppInit::initManagersAndConfig(Context &ctx, StorageManager::BootAction boo
     ctx.themeManager.loadFromPrefs(ctx.storage);
 
     ctx.timeManager.updateWifiState(ctx.networkManager.isEnabled(), ctx.networkManager.isConnected());
-    ctx.uiController.mqtt_sync_with_wifi();
-    ctx.mqttManager.updateNightModeAvailability(ctx.nightModeManager.isAutoEnabled());
+    ctx.mqttManager.syncWithWifi();
+    ctx.mqttRuntimeState.update(ctx.currentData,
+                                ctx.night_mode,
+                                ctx.alert_blink_enabled,
+                                ctx.backlightManager.isOn(),
+                                ctx.nightModeManager.isAutoEnabled());
+    ctx.chartsRuntimeState.update(ctx.chartsHistory);
+    ctx.connectivityRuntime.update(ctx.networkManager, ctx.mqttManager);
 }
 
 esp_panel::board::Board *AppInit::initBoardAndPeripherals(Context &ctx) {
@@ -185,6 +203,8 @@ esp_panel::board::Board *AppInit::initBoardAndPeripherals(Context &ctx) {
             LOGW("Main", "DAC auto config parse failed, using defaults");
         }
     }
+    ctx.webRuntimeState.update(ctx.currentData, ctx.sensorManager.isWarmupActive(), ctx.fanControl);
+    ctx.chartsRuntimeState.update(ctx.chartsHistory);
 
     return board;
 }
@@ -210,4 +230,19 @@ bool AppInit::initLvglAndUi(Context &ctx, esp_panel::board::Board *board) {
         esp_log_level_set("Panel", ESP_LOG_NONE);
     }
     return lvgl_ready;
+}
+
+void AppInit::pollDeferredRuntime() {
+    if (!g_deferred_wifi_runtime.pending.exchange(false, std::memory_order_acq_rel)) {
+        return;
+    }
+    if (g_wifi_state_ctx.time_manager) {
+        g_wifi_state_ctx.time_manager->updateWifiState(
+            g_deferred_wifi_runtime.wifi_enabled.load(std::memory_order_relaxed),
+            g_deferred_wifi_runtime.wifi_connected.load(std::memory_order_relaxed));
+    }
+    if (g_wifi_state_ctx.ui_controller) {
+        g_wifi_state_ctx.ui_controller->markDatetimeDirty();
+        g_wifi_state_ctx.ui_controller->markWebPagePanelDirty();
+    }
 }

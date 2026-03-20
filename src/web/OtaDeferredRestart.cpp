@@ -13,37 +13,36 @@ bool deadline_reached(uint32_t now_ms, uint32_t due_ms) {
 }
 
 void Controller::reset() {
-    deferred_restart_ = false;
-    restart_requested_ = false;
-    deferred_restart_due_ms_ = 0;
+    deferred_restart_.store(false, std::memory_order_release);
+    restart_requested_.store(false, std::memory_order_release);
+    deferred_restart_due_ms_.store(0, std::memory_order_release);
 }
 
 void Controller::schedule(uint32_t now_ms, uint32_t delay_ms) {
-    deferred_restart_ = true;
-    restart_requested_ = false;
-    deferred_restart_due_ms_ = now_ms + delay_ms;
+    restart_requested_.store(false, std::memory_order_release);
+    deferred_restart_due_ms_.store(now_ms + delay_ms, std::memory_order_release);
+    deferred_restart_.store(true, std::memory_order_release);
 }
 
 bool Controller::poll(uint32_t now_ms) {
-    if (!deferred_restart_ || !deadline_reached(now_ms, deferred_restart_due_ms_)) {
+    if (!deferred_restart_.load(std::memory_order_acquire) ||
+        !deadline_reached(now_ms, deferred_restart_due_ms_.load(std::memory_order_acquire))) {
         return false;
     }
-    deferred_restart_ = false;
-    deferred_restart_due_ms_ = 0;
-    restart_requested_ = true;
+    deferred_restart_.store(false, std::memory_order_release);
+    deferred_restart_due_ms_.store(0, std::memory_order_release);
+    restart_requested_.store(true, std::memory_order_release);
     return true;
 }
 
 bool Controller::consume_request() {
-    if (!restart_requested_) {
-        return false;
-    }
-    restart_requested_ = false;
-    return true;
+    return restart_requested_.exchange(false, std::memory_order_acq_rel);
 }
 
 bool Controller::is_busy(bool upload_active) const {
-    return upload_active || deferred_restart_ || restart_requested_;
+    return upload_active ||
+           deferred_restart_.load(std::memory_order_acquire) ||
+           restart_requested_.load(std::memory_order_acquire);
 }
 
 } // namespace OtaDeferredRestart

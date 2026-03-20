@@ -97,6 +97,7 @@ typedef struct _objects_t {
     lv_obj_t *label_time_value_2;
     lv_obj_t *label_date_value_2;
     lv_obj_t *label_time_title_2;
+    lv_obj_t *label_time_ampm_title_2;
     lv_obj_t *card_temp_pro;
     lv_obj_t *label_temp_unit_1;
     lv_obj_t *label_temp_value_1;
@@ -393,10 +394,13 @@ typedef struct _objects_t {
     lv_obj_t *label_btn_set_date_year_minus;
     lv_obj_t *btn_set_date_year_plus;
     lv_obj_t *label_btn_set_date_year_plus;
+    lv_obj_t *btn_1224_toggle;
+    lv_obj_t *label_btn_1224_toggle;
     lv_obj_t *card_time_1;
     lv_obj_t *label_time_value_1;
     lv_obj_t *label_date_value_1;
     lv_obj_t *label_time_title_1;
+    lv_obj_t *label_time_ampm_title_1;
     lv_obj_t *btn_datetime_apply;
     lv_obj_t *label_btn_datetime_apply;
     lv_obj_t *container_rtc_detection;

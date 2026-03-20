@@ -6,19 +6,21 @@
 
 #pragma once
 
-#include <Arduino.h>
-#include <WebServer.h>
-#include "modules/StorageManager.h"
-#include "web/WebHandlers.h"
+#include <atomic>
+#include <memory>
 
-class PubSubClient;
-class MqttManager;
+#include <Arduino.h>
+#include "modules/StorageManager.h"
+#include "web/WebContext.h"
+#include "web/WebTransport.h"
+
+class MqttRuntime;
+class NetworkCommandQueue;
 class ThemeManager;
-class FanControl;
-class SensorManager;
-class ChartsHistory;
-class UiController;
-struct SensorData;
+class ChartsRuntimeState;
+class ConnectivityRuntime;
+class WebUiBridge;
+class WebRuntimeState;
 
 class AuraNetworkManager {
 public:
@@ -27,8 +29,7 @@ public:
     using StateChangeCallback = void (*)(WifiState prev, WifiState curr, bool connected, void *ctx);
 
     void begin(StorageManager &storage);
-    void attachMqttContext(MqttManager &mqtt_manager,
-                           PubSubClient &client,
+    void attachMqttContext(MqttRuntime &mqtt_runtime,
                            bool &mqtt_user_enabled,
                            String &mqtt_host,
                            uint16_t &mqtt_port,
@@ -41,21 +42,23 @@ public:
                            bool &mqtt_anonymous,
                            void (*mqtt_sync_with_wifi)());
     void attachThemeContext(ThemeManager &themeManager);
-    void attachChartsContext(ChartsHistory &chartsHistory);
-    void attachDacContext(FanControl &fanControl, SensorManager &sensorManager, SensorData &sensorData);
-    void attachUiContext(UiController &uiController);
+    void attachChartsRuntime(ChartsRuntimeState &chartsRuntime);
+    void attachConnectivityRuntime(ConnectivityRuntime &connectivityRuntime);
+    void attachWebRuntime(WebRuntimeState &webRuntime);
+    void attachWebUiBridge(WebUiBridge &webUiBridge);
+    void attachCommandQueue(NetworkCommandQueue &commandQueue);
     void setStateChangeCallback(StateChangeCallback cb, void *ctx);
     void poll();
+    void noteStaConnectTransientFailure(uint32_t reason);
 
     bool setEnabled(bool enabled);
     bool applyEnabledIfDirty();
+    void applySavedWiFiSettings(const String &ssid, const String &pass, bool enabled);
     void clearCredentials();
     void connectSta();
     void startApOnDemand();
     void startScan();
     void stopScan();
-    void setMqttScreenOpen(bool open) { mqtt_ui_open_ = open; }
-    void setThemeScreenOpen(bool open) { theme_ui_open_ = open; }
 
     bool isEnabled() const { return wifi_enabled_; }
     bool isEnabledDirty() const { return wifi_enabled_dirty_; }
@@ -67,9 +70,9 @@ public:
         }
         return millis() - wifi_connected_since_ms_;
     }
-    bool isUiDirty() const { return wifi_ui_dirty_; }
-    void clearUiDirty() { wifi_ui_dirty_ = false; }
-    void markUiDirty() { wifi_ui_dirty_ = true; }
+    bool isUiDirty() const { return wifi_ui_dirty_.load(std::memory_order_acquire); }
+    void clearUiDirty() { wifi_ui_dirty_.store(false, std::memory_order_release); }
+    void markUiDirty() { wifi_ui_dirty_.store(true, std::memory_order_release); }
     const String &ssid() const { return wifi_ssid_; }
     const String &pass() const { return wifi_pass_; }
     const String &hostname() const { return hostname_; }
@@ -81,6 +84,13 @@ public:
 
 private:
     void registerServerRoutes();
+    void ensureServerBackend();
+    WebServerBackend &serverBackend();
+    void startServerIfNeeded();
+    void resetStaConnectAttemptState();
+    void scheduleStaRetry(const char *log_reason, bool warn = true);
+    void resetColdBootStaAssist();
+    bool resolveStaConnectTarget(int32_t &channel_out, uint8_t bssid_out[6], int32_t &rssi_out);
     void warmupIfDisabled();
     void startSta();
     void startAp();
@@ -90,7 +100,7 @@ private:
     void notifyStateChangeIfNeeded();
 
     StorageManager *storage_ = nullptr;
-    WebServer server_{80};
+    std::unique_ptr<WebServerBackend> server_backend_;
     WebHandlerContext web_ctx_{};
 
     WifiState wifi_state_ = WIFI_STATE_OFF;
@@ -109,9 +119,13 @@ private:
     uint32_t wifi_retry_at_ms_ = 0;
     bool wifi_enabled_ = false;
     bool wifi_enabled_dirty_ = false;
-    bool wifi_ui_dirty_ = false;
-    bool mqtt_ui_open_ = false;
-    bool theme_ui_open_ = false;
+    std::atomic<bool> wifi_ui_dirty_{false};
+    std::atomic<uint8_t> wifi_connect_transient_failures_{0};
+    std::atomic<uint32_t> wifi_connect_last_transient_reason_{0};
+    bool wifi_cold_boot_warmup_pending_ = false;
+    bool wifi_cold_boot_warmup_active_ = false;
+    uint8_t wifi_cold_boot_soft_connects_left_ = 0;
+    bool wifi_cold_boot_targeted_connect_active_ = false;
     bool server_routes_registered_ = false;
     bool mdns_started_ = false;
     StateChangeCallback state_change_cb_ = nullptr;

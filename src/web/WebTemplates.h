@@ -314,7 +314,7 @@ static const char kWifiPageTemplate[] PROGMEM = R"HTML(
 
                 <div class="label-row">
                     <label>Select Network</label>
-                    <a href="/?scan=1" class="rescan-btn" id="rescan-btn">
+                    <a href="/wifi?scan=1" class="rescan-btn" id="rescan-btn">
                         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 2v6h-6"></path><path d="M3 12a9 9 0 0 1 15-6.7L21 8"></path><path d="M3 22v-6h6"></path><path d="M21 12a9 9 0 0 1-15 6.7L3 16"></path></svg>
                         Rescan
                     </a>
@@ -396,7 +396,7 @@ static const char kWifiPageTemplate[] PROGMEM = R"HTML(
                     .then(function(payload) {
                         if (!payload || payload.success !== true) return;
                         if (payload.scan_in_progress === false) {
-                            window.location.replace('/');
+                            window.location.replace('/wifi');
                             return;
                         }
                         setTimeout(poll, 5000);

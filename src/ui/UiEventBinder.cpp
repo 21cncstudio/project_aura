@@ -258,6 +258,7 @@ void UiEventBinder::bindAvailableEvents(UiController &owner, int screen_id) {
         {objects.btn_backlight_alarm_wake, UiController::on_backlight_alarm_wake_event_cb, LV_EVENT_VALUE_CHANGED},
         {objects.btn_night_mode, UiController::on_night_mode_event_cb, LV_EVENT_VALUE_CHANGED},
         {objects.btn_units, UiController::on_units_c_f_event_cb, LV_EVENT_VALUE_CHANGED},
+        {objects.btn_1224_toggle, UiController::on_time_format_toggle_event_cb, LV_EVENT_VALUE_CHANGED},
         {objects.btn_led_indicators, UiController::on_led_indicators_event_cb, LV_EVENT_VALUE_CHANGED},
         {objects.btn_alert_blink, UiController::on_alert_blink_event_cb, LV_EVENT_VALUE_CHANGED},
         {objects.btn_co2_calib_asc, UiController::on_co2_calib_asc_event_cb, LV_EVENT_VALUE_CHANGED},
@@ -375,6 +376,7 @@ void UiEventBinder::applyToggleStylesForAvailableObjects(UiController &owner, in
         objects.btn_wifi_reconnect,
         objects.btn_wifi_start_ap,
         objects.btn_units,
+        objects.btn_1224_toggle,
         objects.btn_led_indicators,
         objects.btn_alert_blink,
         objects.btn_co2_calib_asc,
@@ -468,6 +470,7 @@ void UiEventBinder::applyCheckedStatesForAvailableObjects(UiController &owner, i
     if (!screen_root) {
         return;
     }
+    owner.refreshConnectivitySnapshot();
 
     auto set_checked = [screen_root](lv_obj_t *btn, bool checked) {
         if (!btn) {
@@ -487,10 +490,11 @@ void UiEventBinder::applyCheckedStatesForAvailableObjects(UiController &owner, i
     set_checked(objects.btn_head_status_1, owner.backlightManager.isScheduleEnabled());
     set_checked(objects.btn_backlight_alarm_wake, owner.backlightManager.isAlarmWakeEnabled());
     set_checked(objects.btn_wifi_start_ap,
-                owner.networkManager.isEnabled() &&
-                owner.networkManager.state() == AuraNetworkManager::WIFI_STATE_AP_CONFIG);
+                owner.connectivity_.wifi_enabled &&
+                owner.connectivity_.wifi_state == static_cast<int>(AuraNetworkManager::WIFI_STATE_AP_CONFIG));
     set_checked(objects.btn_night_mode, owner.night_mode);
     set_checked(objects.btn_units, owner.temp_units_c);
+    set_checked(objects.btn_1224_toggle, owner.time_format_24h_);
     set_checked(objects.btn_led_indicators, owner.led_indicators_enabled);
     set_checked(objects.btn_alert_blink, owner.alert_blink_enabled);
     set_checked(objects.btn_co2_calib_asc, owner.co2_asc_enabled);
