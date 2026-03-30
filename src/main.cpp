@@ -31,6 +31,7 @@
 #include "modules/SensorManager.h"
 #include "modules/TimeManager.h"
 #include "modules/FanControl.h"
+#include "modules/BatteryManager.h"
 #include "web/WebRuntime.h"
 #include "web/WebUiBridge.h"
 
@@ -293,6 +294,13 @@ void loop()
 
     SensorManager::PollResult sensor_poll =
         sensorManager.poll(currentData, storage, pressureHistory, co2_asc_enabled);
+    {
+    static uint32_t batt_last_ms = 0;
+    if (millis() - batt_last_ms >= 5000) {
+        BatteryManager::instance().update();
+        batt_last_ms = millis();
+    }
+    }
     uiController.onSensorPoll(sensor_poll);
     chartsHistory.update(currentData, storage);
     chartsRuntimeState.update(chartsHistory);

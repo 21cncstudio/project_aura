@@ -16,6 +16,8 @@
 #include "ui/ui.h"
 #include "ui/images.h"
 #include "web/WebWifiUtils.h"
+#include "modules/BatteryManager.h"
+void update_battery_icon();
 using namespace Config;
 
 namespace {
@@ -698,6 +700,7 @@ void UiController::update_status_icons() {
             }
         }
     }
+    update_battery_icon();
 }
 
 void UiController::update_mqtt_ui() {

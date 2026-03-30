@@ -21,6 +21,7 @@
 #include "modules/StorageManager.h"
 #include "modules/NetworkManager.h"
 #include "web/WebRuntime.h"
+#include "modules/BatteryManager.h"
 
 namespace {
 
@@ -1010,6 +1011,17 @@ void MqttManager::publishDiscovery(const MqttRuntimeSnapshot &runtime) {
     }
     publishDiscoveryButton("restart", "Restart", "PRESS", "mdi:restart");
     publishDiscoveryEventSensor();
+    if (BatteryManager::instance().isDetected()) {
+        publishDiscoverySensor("battery_pct", "Battery Level", "%",
+            "battery", "measurement",
+            "{{ value_json.battery_pct | int(0) }}", "mdi:battery");
+        publishDiscoverySensor("battery_voltage", "Battery Voltage", "V",
+            "voltage", "measurement",
+            "{{ value_json.battery_voltage | float(0) | round(2) }}", "mdi:flash");
+        publishDiscoveryBinarySensor("battery_charging", "Battery Charging",
+            "{{ value_json.battery_charging }}",
+            "battery_charging", "mdi:battery-charging");
+    }
     mqtt_discovery_sent_ = true;
     publishNightModeAvailability();
 }
@@ -1041,11 +1053,32 @@ void MqttManager::publishState(const MqttRuntimeSnapshot &runtime) {
         return;
     }
 
+    size_t final_len = payload_len;
+    if (BatteryManager::instance().isDetected() &&
+        mqtt_state_payload_buf_[payload_len - 1] == '}') {
+        const BatteryState& b   = BatteryManager::instance().state();
+        const size_t        rem = sizeof(mqtt_state_payload_buf_) - payload_len;
+        int added = 0;
+        if (b.battery_present) {
+            added = snprintf(
+                mqtt_state_payload_buf_ + payload_len - 1, rem,
+                ",\"battery_pct\":%d,\"battery_voltage\":%.2f,\"battery_charging\":\"%s\"}",
+                static_cast<int>(b.percent),
+                static_cast<double>(b.voltage_v),
+                b.is_charging ? "ON" : "OFF");
+        } else {
+            added = snprintf(
+                mqtt_state_payload_buf_ + payload_len - 1, rem,
+                ",\"battery_pct\":0,\"battery_charging\":\"OFF\"}");
+        }
+        if (added > 0) final_len = payload_len - 1 + added;
+    }
+
     char topic[kTopicBufferSize];
     build_state_topic(topic, sizeof(topic), mqtt_base_topic_);
     bool published = publishMessage(topic,
                                     reinterpret_cast<const uint8_t *>(mqtt_state_payload_buf_),
-                                    payload_len,
+                                    final_len,
                                     true);
 
     if (published) {
@@ -1777,4 +1810,3 @@ void MqttManager::unlockCommandContext() const {
         xSemaphoreGive(command_context_mutex_);
     }
 }
-

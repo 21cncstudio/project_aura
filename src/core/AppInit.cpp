@@ -20,6 +20,7 @@
 #include "core/Logger.h"
 #include "lvgl_v8_port.h"
 #include "ui/UiStrings.h"
+#include "modules/BatteryManager.h"
 
 namespace {
 
@@ -194,6 +195,7 @@ esp_panel::board::Board *AppInit::initBoardAndPeripherals(Context &ctx) {
 
     BootHelpers::logGt911Address();
     ctx.sensorManager.begin(ctx.storage, ctx.temp_offset, ctx.hum_offset);
+    BatteryManager::instance().begin(ctx.storage);
     ctx.fanControl.begin(ctx.storage.config().dac_auto_mode,
                          ctx.storage.config().dac_auto_armed);
     String dac_auto_json;
