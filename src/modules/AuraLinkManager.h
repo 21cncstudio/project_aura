@@ -80,6 +80,11 @@ private:
         Alert,
     };
 
+    enum class UploadReason : uint8_t {
+        Scheduled = 0,
+        AlertTransition,
+    };
+
     struct AlertSnapshot {
         AlertUploadLevel level = AlertUploadLevel::Normal;
         uint32_t active_mask = 0;
@@ -101,6 +106,7 @@ private:
         uint32_t free_psram = 0;
         uint32_t reset_reason = 0;
         AlertSnapshot alert_state{};
+        UploadReason upload_reason = UploadReason::Scheduled;
     };
 
     struct WorkerResult {
@@ -137,7 +143,8 @@ private:
                             const SensorData &data,
                             bool sensor_warmup_active,
                             const TimeManager &time_manager,
-                            const AlertSnapshot &alert_state);
+                            const AlertSnapshot &alert_state,
+                            UploadReason upload_reason);
     AlertSnapshot updateAlertState(uint32_t now_ms,
                                    const SensorData &data,
                                    bool sensor_warmup_active,

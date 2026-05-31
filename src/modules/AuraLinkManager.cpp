@@ -365,7 +365,8 @@ void AuraLinkManager::poll(uint32_t now_ms,
                             data,
                             sensor_warmup_active,
                             time_manager,
-                            alert_state)) {
+                            alert_state,
+                            urgent_upload_due ? UploadReason::AlertTransition : UploadReason::Scheduled)) {
         scheduleNextUpload(now_ms, Config::AURA_LINK_UPLOAD_RETRY_MS);
         return;
     }
@@ -553,6 +554,8 @@ AuraLinkManager::WorkerResult AuraLinkManager::executeCommand(const WorkerComman
         request["sequence"] = command.sequence;
         request["firmware_version"] = AppVersion::fullVersion();
         request["upload_interval_seconds"] = command.upload_interval_seconds;
+        request["upload_reason"] =
+            command.upload_reason == UploadReason::AlertTransition ? "alert_transition" : "scheduled";
 
         char recorded_at[32] = {};
         format_recorded_at(command.recorded_at, recorded_at, sizeof(recorded_at));
@@ -931,7 +934,8 @@ bool AuraLinkManager::buildIngestCommand(WorkerCommand &command,
                                          const SensorData &data,
                                          bool sensor_warmup_active,
                                          const TimeManager &time_manager,
-                                         const AlertSnapshot &alert_state) {
+                                         const AlertSnapshot &alert_state,
+                                         UploadReason upload_reason) {
     if (device_id_.isEmpty() || device_token_.isEmpty()) {
         return false;
     }
@@ -948,6 +952,7 @@ bool AuraLinkManager::buildIngestCommand(WorkerCommand &command,
     command.free_psram = ESP.getPsramSize() > 0 ? ESP.getFreePsram() : 0;
     command.reset_reason = static_cast<uint32_t>(esp_reset_reason());
     command.alert_state = alert_state;
+    command.upload_reason = upload_reason;
     return true;
 }
 
