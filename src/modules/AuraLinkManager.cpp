@@ -18,6 +18,7 @@
 #include "core/AppVersion.h"
 #include "core/Logger.h"
 #include "core/MathUtils.h"
+#include "drivers/DfrOptionalGasSensor.h"
 #include "modules/StorageManager.h"
 #include "modules/TimeManager.h"
 
@@ -509,6 +510,21 @@ AuraLinkManager::WorkerResult AuraLinkManager::executeCommand(const WorkerComman
         JsonObject sensor_status = request["sensor_status"].to<JsonObject>();
         sensor_status["co_present"] = command.data.co_sensor_present;
         sensor_status["co_warmup"] = command.data.co_sensor_present && command.data.co_warmup;
+        sensor_status["hcho_present"] = command.data.hcho_sensor_present;
+        sensor_status["hcho_warmup"] = command.data.hcho_sensor_present && command.data.hcho_warmup;
+
+        const auto optional_gas_type =
+            static_cast<DfrOptionalGasSensor::OptionalGasType>(command.data.optional_gas_type);
+        const bool optional_gas_present =
+            command.data.optional_gas_sensor_present &&
+            optional_gas_type != DfrOptionalGasSensor::OptionalGasType::None;
+        sensor_status["optional_gas_present"] = optional_gas_present;
+        sensor_status["optional_gas_warmup"] =
+            optional_gas_present && command.data.optional_gas_warmup;
+        if (optional_gas_present) {
+            sensor_status["optional_gas_type"] =
+                DfrOptionalGasSensor::optionalGasLabel(optional_gas_type);
+        }
 
         String body;
         serializeJson(request, body);
