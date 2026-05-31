@@ -81,13 +81,16 @@ void test_web_ui_bridge_adapters_to_ui_settings_update_copies_flags_and_values()
 
 void test_web_ui_bridge_adapters_to_ui_save_updates_copy_payloads() {
     WebWifiSaveUtils::SaveUpdate wifi{};
-    wifi.ssid = "AuraNet";
-    wifi.pass = "secret";
-    wifi.enabled = true;
+    wifi.settings.ssid = "AuraNet";
+    wifi.settings.pass = "secret";
+    wifi.settings.enabled = true;
+    wifi.settings.auth_mode = Config::WifiAuthMode::Enterprise;
     const WebUiBridge::WifiSaveUpdate wifi_result = WebUiBridgeAdapters::toUiWifiSaveUpdate(wifi);
-    TEST_ASSERT_EQUAL_STRING("AuraNet", wifi_result.ssid.c_str());
-    TEST_ASSERT_EQUAL_STRING("secret", wifi_result.pass.c_str());
-    TEST_ASSERT_TRUE(wifi_result.enabled);
+    TEST_ASSERT_EQUAL_STRING("AuraNet", wifi_result.settings.ssid.c_str());
+    TEST_ASSERT_EQUAL_STRING("secret", wifi_result.settings.pass.c_str());
+    TEST_ASSERT_TRUE(wifi_result.settings.enabled);
+    TEST_ASSERT_EQUAL_INT(static_cast<int>(Config::WifiAuthMode::Enterprise),
+                          static_cast<int>(wifi_result.settings.auth_mode));
 
     WebMqttSaveUtils::SaveUpdate mqtt{};
     mqtt.host = "broker";

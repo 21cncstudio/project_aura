@@ -9,12 +9,26 @@
 #include <Arduino.h>
 #include <stdint.h>
 
+#include "config/AppConfig.h"
+
 namespace WebWifiSaveUtils {
 
-struct SaveUpdate {
+struct SaveInput {
     String ssid;
     String pass;
-    bool enabled = true;
+    String auth_mode;
+    String eap_method;
+    String ttls_phase2;
+    String identity;
+    String username;
+    String enterprise_password;
+    String ca_cert_pem;
+    String client_cert_pem;
+    String client_key_pem;
+};
+
+struct SaveUpdate {
+    Config::WifiSettings settings{};
 };
 
 struct ParseResult {
@@ -25,5 +39,6 @@ struct ParseResult {
 };
 
 ParseResult parseSaveInput(const String &ssid, const String &pass);
+ParseResult parseSaveInput(const SaveInput &input);
 
 } // namespace WebWifiSaveUtils

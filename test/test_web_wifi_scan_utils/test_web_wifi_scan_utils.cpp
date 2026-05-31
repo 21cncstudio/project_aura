@@ -51,10 +51,21 @@ void test_web_wifi_scan_utils_render_network_items_html_escapes_ssid() {
     TEST_ASSERT_NOT_EQUAL(String::npos, html.find("Cafe&lt;&amp;&gt;&quot;&#39;"));
 }
 
+void test_web_wifi_scan_utils_render_network_items_html_marks_enterprise() {
+    WebWifiScanUtils::WifiScanRow rows[1] = {
+        {"CorpNet", -48, 99, false, true},
+    };
+
+    const String html = WebWifiScanUtils::renderNetworkItemsHtml(rows, 1);
+    TEST_ASSERT_NOT_EQUAL(String::npos, html.find("Enterprise | -48 dBm"));
+    TEST_ASSERT_NOT_EQUAL(String::npos, html.find("data-enterprise=\"1\""));
+}
+
 int main(int, char **) {
     UNITY_BEGIN();
     RUN_TEST(test_web_wifi_scan_utils_keeps_best_duplicate_and_caps_list);
     RUN_TEST(test_web_wifi_scan_utils_sort_orders_by_strongest_rssi);
     RUN_TEST(test_web_wifi_scan_utils_render_network_items_html_escapes_ssid);
+    RUN_TEST(test_web_wifi_scan_utils_render_network_items_html_marks_enterprise);
     return UNITY_END();
 }

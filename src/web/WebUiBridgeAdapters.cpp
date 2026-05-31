@@ -50,9 +50,7 @@ WebUiBridge::SettingsUpdate toUiSettingsUpdate(const WebSettingsUtils::SettingsU
 
 WebUiBridge::WifiSaveUpdate toUiWifiSaveUpdate(const WebWifiSaveUtils::SaveUpdate &update) {
     WebUiBridge::WifiSaveUpdate ui_update{};
-    ui_update.ssid = update.ssid;
-    ui_update.pass = update.pass;
-    ui_update.enabled = update.enabled;
+    ui_update.settings = update.settings;
     return ui_update;
 }
 

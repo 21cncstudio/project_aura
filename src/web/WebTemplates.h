@@ -234,11 +234,11 @@ static const char kWifiPageTemplate[] PROGMEM = R"HTML(
         .network-name { display: block; font-size: 14px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
         .network-meta { font-size: 11px; color: var(--text-dim); margin-top: 2px; }
 
-        .pass-section { flex-shrink: 0; margin-bottom: 8px; }
+        .pass-section, .auth-section, .enterprise-section, .field { flex-shrink: 0; margin-bottom: 8px; }
 
         .input-wrapper { position: relative; }
 
-        input[type="password"], input[type="text"] {
+        input[type="password"], input[type="text"], select, textarea {
             width: 100%;
             background: rgba(15, 23, 42, 0.8);
             border: 1px solid var(--border);
@@ -247,9 +247,21 @@ static const char kWifiPageTemplate[] PROGMEM = R"HTML(
             color: white; font-size: 15px;
             transition: all 0.2s; outline: none;
         }
-        input:focus {
+        select, textarea, .field input { padding-right: 14px; }
+        textarea { min-height: 82px; resize: vertical; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; }
+        input:focus, select:focus, textarea:focus {
             border-color: var(--primary);
         }
+
+        .mode-toggle { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+        .mode-btn {
+            border: 1px solid var(--border); background: rgba(15, 23, 42, 0.6);
+            color: var(--text-dim); border-radius: 14px; padding: 11px 10px;
+            font-weight: 700; cursor: pointer;
+        }
+        .mode-btn.active { border-color: var(--primary); color: var(--text); background: rgba(99, 102, 241, 0.2); }
+        .hidden { display: none; }
+        .warning { font-size: 11px; color: #fbbf24; line-height: 1.4; margin: 4px 0 8px; }
 
         .eye-btn {
             position: absolute; right: 8px; top: 50%; transform: translateY(-50%);
@@ -311,6 +323,17 @@ static const char kWifiPageTemplate[] PROGMEM = R"HTML(
 
             <form method="POST" action="/save" id="wifi-form">
                 <input type="hidden" name="ssid" id="selected-ssid">
+                <input type="hidden" name="auth_mode" id="auth-mode" value="personal">
+
+                <div class="auth-section">
+                    <div class="label-row">
+                        <label>Security</label>
+                    </div>
+                    <div class="mode-toggle">
+                        <button type="button" class="mode-btn active" id="mode-personal" onclick="setAuthMode('personal')">Personal</button>
+                        <button type="button" class="mode-btn" id="mode-enterprise" onclick="setAuthMode('enterprise')">Enterprise</button>
+                    </div>
+                </div>
 
                 <div class="label-row">
                     <label>Select Network</label>
@@ -335,7 +358,7 @@ static const char kWifiPageTemplate[] PROGMEM = R"HTML(
                     </div>
                 </div>
 
-                <div class="pass-section">
+                <div class="pass-section" id="personal-pass-section">
                     <div class="label-row">
                         <label for="pass">Password</label>
                     </div>
@@ -344,6 +367,59 @@ static const char kWifiPageTemplate[] PROGMEM = R"HTML(
                         <button type="button" class="eye-btn" onclick="togglePass()" title="Show password">
                             <svg id="eye-svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
                         </button>
+                    </div>
+                </div>
+
+                <div class="enterprise-section hidden" id="enterprise-section">
+                    <div class="field">
+                        <div class="label-row"><label for="eap-method">EAP Method</label></div>
+                        <select name="eap_method" id="eap-method" onchange="updateEnterpriseFields()">
+                            <option value="peap" selected>PEAP</option>
+                            <option value="ttls">TTLS</option>
+                            <option value="tls">TLS</option>
+                        </select>
+                    </div>
+                    <div class="field hidden" id="ttls-phase2-row">
+                        <div class="label-row"><label for="ttls-phase2">TTLS Phase 2</label></div>
+                        <select name="ttls_phase2" id="ttls-phase2">
+                            <option value="mschapv2" selected>MSCHAPv2</option>
+                            <option value="pap">PAP</option>
+                            <option value="chap">CHAP</option>
+                            <option value="mschap">MSCHAP</option>
+                            <option value="eap">EAP</option>
+                        </select>
+                    </div>
+                    <div class="field">
+                        <div class="label-row"><label for="identity">Identity</label></div>
+                        <input type="text" name="identity" id="identity" placeholder="Outer identity or username" autocomplete="username">
+                    </div>
+                    <div class="field" id="enterprise-user-row">
+                        <div class="label-row"><label for="username">Username</label></div>
+                        <input type="text" name="username" id="username" placeholder="Enterprise username" autocomplete="username">
+                    </div>
+                    <div class="field" id="enterprise-pass-row">
+                        <div class="label-row"><label for="enterprise-password">Enterprise Password</label></div>
+                        <div class="input-wrapper">
+                            <input type="password" name="enterprise_password" id="enterprise-password" placeholder="Enterprise password" autocomplete="current-password">
+                            <button type="button" class="eye-btn" onclick="toggleEnterprisePass()" title="Show password">
+                                <svg id="enterprise-eye-svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="warning">CA certificate is optional. Leaving it empty is less secure and should only be used when your network requires it.</div>
+                    <div class="field">
+                        <div class="label-row"><label for="ca-cert-pem">CA Certificate</label></div>
+                        <textarea name="ca_cert_pem" id="ca-cert-pem" placeholder="-----BEGIN CERTIFICATE-----"></textarea>
+                    </div>
+                    <div id="tls-fields" class="hidden">
+                        <div class="field">
+                            <div class="label-row"><label for="client-cert-pem">Client Certificate</label></div>
+                            <textarea name="client_cert_pem" id="client-cert-pem" placeholder="-----BEGIN CERTIFICATE-----"></textarea>
+                        </div>
+                        <div class="field">
+                            <div class="label-row"><label for="client-key-pem">Client Private Key</label></div>
+                            <textarea name="client_key_pem" id="client-key-pem" placeholder="-----BEGIN PRIVATE KEY-----"></textarea>
+                        </div>
                     </div>
                 </div>
 
@@ -357,6 +433,26 @@ static const char kWifiPageTemplate[] PROGMEM = R"HTML(
     </div>
 
     <script>
+        function setAuthMode(mode) {
+            var enterprise = mode === 'enterprise';
+            document.getElementById('auth-mode').value = enterprise ? 'enterprise' : 'personal';
+            document.getElementById('mode-personal').classList.toggle('active', !enterprise);
+            document.getElementById('mode-enterprise').classList.toggle('active', enterprise);
+            document.getElementById('personal-pass-section').classList.toggle('hidden', enterprise);
+            document.getElementById('enterprise-section').classList.toggle('hidden', !enterprise);
+            updateEnterpriseFields();
+        }
+
+        function updateEnterpriseFields() {
+            var methodEl = document.getElementById('eap-method');
+            var method = methodEl ? methodEl.value : 'peap';
+            var tls = method === 'tls';
+            document.getElementById('ttls-phase2-row').classList.toggle('hidden', method !== 'ttls');
+            document.getElementById('enterprise-user-row').classList.toggle('hidden', tls);
+            document.getElementById('enterprise-pass-row').classList.toggle('hidden', tls);
+            document.getElementById('tls-fields').classList.toggle('hidden', !tls);
+        }
+
         function selectNetwork(ssid, element) {
             if (!ssid) return;
             document.getElementById('selected-ssid').value = ssid;
@@ -369,7 +465,14 @@ static const char kWifiPageTemplate[] PROGMEM = R"HTML(
             submitBtn.disabled = false;
             submitBtn.textContent = 'Connect to ' + (ssid.length > 15 ? ssid.substring(0, 12) + '...' : ssid);
 
-            setTimeout(function() { document.getElementById('pass').focus(); }, 100);
+            if (element && element.getAttribute('data-enterprise') === '1') {
+                setAuthMode('enterprise');
+            }
+
+            setTimeout(function() {
+                var focusEl = document.getElementById(document.getElementById('auth-mode').value === 'enterprise' ? 'identity' : 'pass');
+                if (focusEl) focusEl.focus();
+            }, 100);
         }
 
         function handleManualEntry(element) {
@@ -446,6 +549,18 @@ static const char kWifiPageTemplate[] PROGMEM = R"HTML(
                 svg.innerHTML = '<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle>';
             }
         }
+
+        function toggleEnterprisePass() {
+            var x = document.getElementById("enterprise-password");
+            var svg = document.getElementById("enterprise-eye-svg");
+            if (x.type === "password") {
+                x.type = "text";
+                svg.innerHTML = '<path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"></path><line x1="1" y1="1" x2="23" y2="23"></line>';
+            } else {
+                x.type = "password";
+                svg.innerHTML = '<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle>';
+            }
+        }
     </script>
 </body>
 </html>
@@ -497,6 +612,7 @@ static const char kWifiSavePage[] PROGMEM = R"HTML(
             border: 1px solid var(--border); border-radius: 32px;
             box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
             text-align: center;
+            max-height: calc(100vh - 72px); overflow-y: auto;
         }
         .logo {
             width: 56px; height: 56px; background: rgba(99, 102, 241, 0.15);

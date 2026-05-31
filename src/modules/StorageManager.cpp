@@ -20,6 +20,11 @@
 
 namespace {
 
+struct TextSnapshot {
+    bool exists = false;
+    String text;
+};
+
 int16_t clampPressureAltitudeM(int value) {
     const int min_value = static_cast<int>(Config::PRESSURE_ALTITUDE_MIN_M);
     const int max_value = static_cast<int>(Config::PRESSURE_ALTITUDE_MAX_M);
@@ -111,6 +116,34 @@ void readValue(const ArduinoJson::JsonObject &obj, const char *key, T &out) {
     out = value.as<T>();
 }
 #endif
+
+TextSnapshot captureText(StorageManager &storage, const char *path) {
+    TextSnapshot snapshot{};
+    snapshot.exists = storage.loadText(path, snapshot.text);
+    return snapshot;
+}
+
+bool saveOrRemoveText(StorageManager &storage, const char *path, const String &text) {
+    if (text.length() > 0) {
+        return storage.saveTextAtomic(path, text);
+    }
+    String existing;
+    if (!storage.loadText(path, existing)) {
+        return true;
+    }
+    return storage.removeBlob(path);
+}
+
+void restoreText(StorageManager &storage, const char *path, const TextSnapshot &snapshot) {
+    if (snapshot.exists) {
+        storage.saveTextAtomic(path, snapshot.text);
+        return;
+    }
+    String existing;
+    if (storage.loadText(path, existing)) {
+        storage.removeBlob(path);
+    }
+}
 
 } // namespace
 
@@ -204,6 +237,9 @@ void StorageManager::clearAll() {
     LittleFS.remove(kDacAutoPath);
     LittleFS.remove(kDisplayThresholdsPath);
     LittleFS.remove(kMqttCaCertPath);
+    LittleFS.remove(kWifiEapCaCertPath);
+    LittleFS.remove(kWifiEapClientCertPath);
+    LittleFS.remove(kWifiEapClientKeyPath);
     LittleFS.remove(kAuraLinkPath);
 #else
     g_blob_store.clear();
@@ -254,13 +290,60 @@ void StorageManager::loadWiFiSettings(String &ssid, String &pass, bool &enabled)
     enabled = config_.wifi_enabled;
 }
 
+void StorageManager::loadWiFiSettings(Config::WifiSettings &settings) {
+    settings.ssid = config_.wifi_ssid;
+    settings.pass = config_.wifi_pass;
+    settings.enabled = config_.wifi_enabled;
+    settings.auth_mode = config_.wifi_auth_mode;
+    settings.eap_method = config_.wifi_eap_method;
+    settings.ttls_phase2 = config_.wifi_ttls_phase2;
+    settings.identity = config_.wifi_identity;
+    settings.username = config_.wifi_username;
+    settings.enterprise_password = config_.wifi_enterprise_pass;
+    loadWifiEapCaCertificate(settings.ca_cert_pem);
+    loadWifiEapClientCertificate(settings.client_cert_pem);
+    loadWifiEapClientKey(settings.client_key_pem);
+}
+
 bool StorageManager::saveWiFiSettings(const String &ssid, const String &pass, bool enabled) {
+    Config::WifiSettings settings{};
+    settings.ssid = ssid;
+    settings.pass = pass;
+    settings.enabled = enabled;
+    settings.auth_mode = Config::WifiAuthMode::Personal;
+    return saveWiFiSettings(settings);
+}
+
+bool StorageManager::saveWiFiSettings(const Config::WifiSettings &settings) {
     const Config::StoredConfig previous = config_;
-    config_.wifi_ssid = ssid;
-    config_.wifi_pass = pass;
-    config_.wifi_enabled = enabled;
+    const TextSnapshot previous_ca = captureText(*this, kWifiEapCaCertPath);
+    const TextSnapshot previous_client_cert = captureText(*this, kWifiEapClientCertPath);
+    const TextSnapshot previous_client_key = captureText(*this, kWifiEapClientKeyPath);
+
+    if (!saveOrRemoveText(*this, kWifiEapCaCertPath, settings.ca_cert_pem) ||
+        !saveOrRemoveText(*this, kWifiEapClientCertPath, settings.client_cert_pem) ||
+        !saveOrRemoveText(*this, kWifiEapClientKeyPath, settings.client_key_pem)) {
+        restoreText(*this, kWifiEapCaCertPath, previous_ca);
+        restoreText(*this, kWifiEapClientCertPath, previous_client_cert);
+        restoreText(*this, kWifiEapClientKeyPath, previous_client_key);
+        LOGE("Storage", "failed to persist WiFi EAP certificates");
+        return false;
+    }
+
+    config_.wifi_ssid = settings.ssid;
+    config_.wifi_pass = settings.pass;
+    config_.wifi_enabled = settings.enabled;
+    config_.wifi_auth_mode = settings.auth_mode;
+    config_.wifi_eap_method = settings.eap_method;
+    config_.wifi_ttls_phase2 = settings.ttls_phase2;
+    config_.wifi_identity = settings.identity;
+    config_.wifi_username = settings.username;
+    config_.wifi_enterprise_pass = settings.enterprise_password;
     if (!saveConfig(true)) {
         config_ = previous;
+        restoreText(*this, kWifiEapCaCertPath, previous_ca);
+        restoreText(*this, kWifiEapClientCertPath, previous_client_cert);
+        restoreText(*this, kWifiEapClientKeyPath, previous_client_key);
         LOGE("Storage", "failed to persist WiFi settings");
         return false;
     }
@@ -278,6 +361,15 @@ void StorageManager::saveWiFiEnabled(bool enabled) {
 void StorageManager::clearWiFiCredentials() {
     config_.wifi_ssid = "";
     config_.wifi_pass = "";
+    config_.wifi_auth_mode = Config::WifiAuthMode::Personal;
+    config_.wifi_eap_method = Config::WifiEapMethod::Peap;
+    config_.wifi_ttls_phase2 = Config::WifiTtlsPhase2::Mschapv2;
+    config_.wifi_identity = "";
+    config_.wifi_username = "";
+    config_.wifi_enterprise_pass = "";
+    saveOrRemoveText(*this, kWifiEapCaCertPath, "");
+    saveOrRemoveText(*this, kWifiEapClientCertPath, "");
+    saveOrRemoveText(*this, kWifiEapClientKeyPath, "");
     if (!saveConfig(true)) {
         requestSave();
         LOGE("Storage", "failed to clear WiFi credentials");
@@ -356,6 +448,21 @@ bool StorageManager::removeMqttCaCertificate() {
         return true;
     }
     return removeBlob(kMqttCaCertPath);
+}
+
+bool StorageManager::loadWifiEapCaCertificate(String &out) const {
+    out = "";
+    return loadText(kWifiEapCaCertPath, out);
+}
+
+bool StorageManager::loadWifiEapClientCertificate(String &out) const {
+    out = "";
+    return loadText(kWifiEapClientCertPath, out);
+}
+
+bool StorageManager::loadWifiEapClientKey(String &out) const {
+    out = "";
+    return loadText(kWifiEapClientKeyPath, out);
 }
 
 void StorageManager::saveMqttEnabled(bool enabled) {
@@ -556,6 +663,18 @@ bool StorageManager::loadConfig() {
         readValue(wifi, "enabled", loaded.wifi_enabled);
         readString(wifi, "ssid", loaded.wifi_ssid);
         readString(wifi, "pass", loaded.wifi_pass);
+        String auth_mode;
+        readString(wifi, "auth_mode", auth_mode);
+        loaded.wifi_auth_mode = Config::parseWifiAuthMode(auth_mode);
+        String eap_method;
+        readString(wifi, "eap_method", eap_method);
+        loaded.wifi_eap_method = Config::parseWifiEapMethod(eap_method);
+        String ttls_phase2;
+        readString(wifi, "ttls_phase2", ttls_phase2);
+        loaded.wifi_ttls_phase2 = Config::parseWifiTtlsPhase2(ttls_phase2);
+        readString(wifi, "identity", loaded.wifi_identity);
+        readString(wifi, "username", loaded.wifi_username);
+        readString(wifi, "enterprise_pass", loaded.wifi_enterprise_pass);
     }
 
     ArduinoJson::JsonObject mqtt = root["mqtt"].as<ArduinoJson::JsonObject>();
@@ -680,6 +799,12 @@ bool StorageManager::saveConfigInternal() {
     wifi["enabled"] = config_.wifi_enabled;
     wifi["ssid"] = config_.wifi_ssid;
     wifi["pass"] = config_.wifi_pass;
+    wifi["auth_mode"] = Config::wifiAuthModeToString(config_.wifi_auth_mode);
+    wifi["eap_method"] = Config::wifiEapMethodToString(config_.wifi_eap_method);
+    wifi["ttls_phase2"] = Config::wifiTtlsPhase2ToString(config_.wifi_ttls_phase2);
+    wifi["identity"] = config_.wifi_identity;
+    wifi["username"] = config_.wifi_username;
+    wifi["enterprise_pass"] = config_.wifi_enterprise_pass;
 
     ArduinoJson::JsonObject mqtt = root["mqtt"].to<ArduinoJson::JsonObject>();
     mqtt["host"] = config_.mqtt_host;

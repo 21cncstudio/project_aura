@@ -25,7 +25,8 @@ void addOrReplaceBestNetwork(WifiScanRow *rows,
                              size_t max_rows,
                              const String &ssid_raw,
                              int rssi,
-                             bool open) {
+                             bool open,
+                             bool enterprise) {
     if (!rows || max_rows == 0 || ssid_raw.length() == 0) {
         return;
     }
@@ -40,6 +41,7 @@ void addOrReplaceBestNetwork(WifiScanRow *rows,
             rows[i].rssi = rssi;
             rows[i].quality = quality;
             rows[i].open = open;
+            rows[i].enterprise = enterprise;
         }
         return;
     }
@@ -49,6 +51,7 @@ void addOrReplaceBestNetwork(WifiScanRow *rows,
         rows[row_count].rssi = rssi;
         rows[row_count].quality = quality;
         rows[row_count].open = open;
+        rows[row_count].enterprise = enterprise;
         ++row_count;
         return;
     }
@@ -67,6 +70,7 @@ void addOrReplaceBestNetwork(WifiScanRow *rows,
     rows[weakest_index].rssi = rssi;
     rows[weakest_index].quality = quality;
     rows[weakest_index].open = open;
+    rows[weakest_index].enterprise = enterprise;
 }
 
 void sortNetworksByRssiDesc(WifiScanRow *rows, size_t row_count) {
@@ -95,11 +99,13 @@ String renderNetworkItemsHtml(const WifiScanRow *rows, size_t row_count) {
     for (size_t i = 0; i < row_count; ++i) {
         const String ssid_label = WebTextUtils::wifiLabelSafe(rows[i].ssid);
         const String ssid_html = WebTextUtils::htmlEscape(ssid_label);
-        const char *security = rows[i].open ? "Open" : "Secure";
+        const char *security = rows[i].enterprise ? "Enterprise" : (rows[i].open ? "Open" : "Secure");
         const String rssi_text = int_to_string(rows[i].rssi) + " dBm";
 
         html += "<div class=\"network-item\" data-ssid=\"";
         html += ssid_html;
+        html += "\" data-enterprise=\"";
+        html += rows[i].enterprise ? "1" : "0";
         html += "\"><div class=\"network-icon\" aria-hidden=\"true\"></div>";
         html += "<div class=\"network-info\"><span class=\"network-name\">";
         html += ssid_html;

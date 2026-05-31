@@ -35,8 +35,20 @@ void handleSave(WebHandlerContext &context,
         return;
     }
 
+    WebWifiSaveUtils::SaveInput save_input{};
+    save_input.ssid = server.arg("ssid");
+    save_input.pass = server.arg("pass");
+    save_input.auth_mode = server.arg("auth_mode");
+    save_input.eap_method = server.arg("eap_method");
+    save_input.ttls_phase2 = server.arg("ttls_phase2");
+    save_input.identity = server.arg("identity");
+    save_input.username = server.arg("username");
+    save_input.enterprise_password = server.arg("enterprise_password");
+    save_input.ca_cert_pem = server.arg("ca_cert_pem");
+    save_input.client_cert_pem = server.arg("client_cert_pem");
+    save_input.client_key_pem = server.arg("client_key_pem");
     const WebWifiSaveUtils::ParseResult parse_result =
-        WebWifiSaveUtils::parseSaveInput(server.arg("ssid"), server.arg("pass"));
+        WebWifiSaveUtils::parseSaveInput(save_input);
     if (!parse_result.success) {
         WebResponseUtils::sendNoStoreText(
             server, parse_result.status_code, parse_result.error_message.c_str());

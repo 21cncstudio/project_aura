@@ -11,6 +11,7 @@
 #include <freertos/semphr.h>
 
 #include "config/AppData.h"
+#include "config/AppConfig.h"
 #include "modules/DacAutoConfig.h"
 
 class WebUiBridge {
@@ -98,9 +99,7 @@ public:
     };
 
     struct WifiSaveUpdate {
-        String ssid;
-        String pass;
-        bool enabled = true;
+        Config::WifiSettings settings{};
     };
 
     struct MqttSaveUpdate {

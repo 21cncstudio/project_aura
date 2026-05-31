@@ -29,7 +29,9 @@ public:
     bool isConfigLoaded() const { return config_loaded_; }
 
     void loadWiFiSettings(String &ssid, String &pass, bool &enabled);
+    void loadWiFiSettings(Config::WifiSettings &settings);
     bool saveWiFiSettings(const String &ssid, const String &pass, bool enabled);
+    bool saveWiFiSettings(const Config::WifiSettings &settings);
     void saveWiFiEnabled(bool enabled);
     void clearWiFiCredentials();
 
@@ -44,6 +46,9 @@ public:
     bool loadMqttCaCertificate(String &out) const;
     bool saveMqttCaCertificate(const String &pem);
     bool removeMqttCaCertificate();
+    bool loadWifiEapCaCertificate(String &out) const;
+    bool loadWifiEapClientCertificate(String &out) const;
+    bool loadWifiEapClientKey(String &out) const;
     bool saveRtcMode(Config::RtcMode mode);
     bool saveDacAutoState(bool auto_mode, bool auto_armed);
 
@@ -69,6 +74,9 @@ public:
     static constexpr const char *kDacAutoPath = "/dac_auto.json";
     static constexpr const char *kDisplayThresholdsPath = "/display_thresholds.json";
     static constexpr const char *kMqttCaCertPath = "/mqtt_ca.pem";
+    static constexpr const char *kWifiEapCaCertPath = "/wifi_eap_ca.pem";
+    static constexpr const char *kWifiEapClientCertPath = "/wifi_eap_client.crt";
+    static constexpr const char *kWifiEapClientKeyPath = "/wifi_eap_client.key";
     static constexpr const char *kAuraLinkPath = "/aura_link.json";
 
 private:

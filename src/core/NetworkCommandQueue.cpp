@@ -143,9 +143,7 @@ void NetworkCommandQueue::processAll(AuraNetworkManager &networkManager,
     WifiSettingsUpdate wifi_settings_update;
     if (takePendingWifiSettingsUpdate(wifi_settings_update)) {
         processed = true;
-        networkManager.applySavedWiFiSettings(wifi_settings_update.ssid,
-                                             wifi_settings_update.pass,
-                                             wifi_settings_update.enabled);
+        networkManager.applySavedWiFiSettings(wifi_settings_update.settings);
     }
 
     MqttSettingsUpdate mqtt_settings_update;

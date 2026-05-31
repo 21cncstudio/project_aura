@@ -244,7 +244,7 @@ WebUiBridge::ApplyResult UiController::applyWifiSaveBridge(
     if (!controller) {
         return finalize_network_bridge_result(false, 503, "WiFi bridge unavailable");
     }
-    if (!controller->storage.saveWiFiSettings(update.ssid, update.pass, update.enabled)) {
+    if (!controller->storage.saveWiFiSettings(update.settings)) {
         WebUiBridge::ApplyResult result =
             finalize_network_bridge_result(false, 500, "Failed to persist WiFi settings");
         result.snapshot = controller->buildWebUiSnapshot();
@@ -252,9 +252,7 @@ WebUiBridge::ApplyResult UiController::applyWifiSaveBridge(
         return result;
     }
     NetworkCommandQueue::WifiSettingsUpdate settings_update{};
-    settings_update.ssid = update.ssid;
-    settings_update.pass = update.pass;
-    settings_update.enabled = update.enabled;
+    settings_update.settings = update.settings;
     if (!controller->networkCommandQueue.publishSavedWifiSettings(settings_update)) {
         WebUiBridge::ApplyResult result =
             finalize_network_bridge_result(false, 503, "Failed to apply WiFi settings");

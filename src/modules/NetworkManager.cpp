@@ -13,6 +13,9 @@
 #include <WiFi.h>
 #include <esp_heap_caps.h>
 #include <esp_wifi.h>
+#if __has_include("esp_eap_client.h")
+#include "esp_eap_client.h"
+#endif
 #include "core/BootState.h"
 #include "core/NetworkCommandQueue.h"
 #include "core/Logger.h"
@@ -55,6 +58,50 @@ bool has_internal_heap_for_wifi_start(uint32_t &free_bytes, uint32_t &largest_bl
     largest_block_bytes = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
     return (free_bytes >= kWifiInternalHeapMinFreeForStart) &&
            (largest_block_bytes >= kWifiInternalHeapMinLargestForStart);
+}
+
+void clear_sta_enterprise_state() {
+#if __has_include("esp_eap_client.h")
+    esp_wifi_sta_enterprise_disable();
+    esp_eap_client_clear_identity();
+    esp_eap_client_clear_username();
+    esp_eap_client_clear_password();
+    esp_eap_client_clear_ca_cert();
+    esp_eap_client_clear_certificate_and_key();
+#endif
+}
+
+wpa2_auth_method_t to_wpa2_auth_method(Config::WifiEapMethod method) {
+    switch (method) {
+        case Config::WifiEapMethod::Ttls:
+            return WPA2_AUTH_TTLS;
+        case Config::WifiEapMethod::Tls:
+            return WPA2_AUTH_TLS;
+        case Config::WifiEapMethod::Peap:
+        default:
+            return WPA2_AUTH_PEAP;
+    }
+}
+
+int to_ttls_phase2_type(Config::WifiTtlsPhase2 phase2) {
+#if __has_include("esp_eap_client.h")
+    switch (phase2) {
+        case Config::WifiTtlsPhase2::Pap:
+            return ESP_EAP_TTLS_PHASE2_PAP;
+        case Config::WifiTtlsPhase2::Chap:
+            return ESP_EAP_TTLS_PHASE2_CHAP;
+        case Config::WifiTtlsPhase2::Mschap:
+            return ESP_EAP_TTLS_PHASE2_MSCHAP;
+        case Config::WifiTtlsPhase2::Eap:
+            return ESP_EAP_TTLS_PHASE2_EAP;
+        case Config::WifiTtlsPhase2::Mschapv2:
+        default:
+            return ESP_EAP_TTLS_PHASE2_MSCHAPV2;
+    }
+#else
+    (void)phase2;
+    return -1;
+#endif
 }
 
 uint32_t mac_suffix_24bit() {
@@ -279,7 +326,9 @@ void AuraNetworkManager::begin(StorageManager &storage) {
     WebHandlersInit(&web_ctx_);
     registerServerRoutes();
 
-    storage_->loadWiFiSettings(wifi_ssid_, wifi_pass_, wifi_enabled_);
+    Config::WifiSettings stored_wifi_settings{};
+    storage_->loadWiFiSettings(stored_wifi_settings);
+    applyRuntimeWiFiSettings(stored_wifi_settings);
     wifi_enabled_dirty_ = false;
     if (!wifi_ssid_.isEmpty() &&
         !WebInputValidation::isWifiSsidValid(wifi_ssid_, WebInputValidation::kWifiSsidMaxBytes)) {
@@ -287,6 +336,15 @@ void AuraNetworkManager::begin(StorageManager &storage) {
         storage_->clearWiFiCredentials();
         wifi_ssid_ = "";
         wifi_pass_ = "";
+        wifi_auth_mode_ = Config::WifiAuthMode::Personal;
+        wifi_eap_method_ = Config::WifiEapMethod::Peap;
+        wifi_ttls_phase2_ = Config::WifiTtlsPhase2::Mschapv2;
+        wifi_identity_ = "";
+        wifi_username_ = "";
+        wifi_enterprise_pass_ = "";
+        wifi_eap_ca_cert_pem_ = "";
+        wifi_eap_client_cert_pem_ = "";
+        wifi_eap_client_key_pem_ = "";
     }
 
     if (wifi_enabled_) {
@@ -587,10 +645,23 @@ bool AuraNetworkManager::applyEnabledIfDirty() {
     return true;
 }
 
-void AuraNetworkManager::applySavedWiFiSettings(const String &ssid, const String &pass, bool enabled) {
-    wifi_ssid_ = ssid;
-    wifi_pass_ = pass;
-    wifi_enabled_ = enabled;
+void AuraNetworkManager::applyRuntimeWiFiSettings(const Config::WifiSettings &settings) {
+    wifi_ssid_ = settings.ssid;
+    wifi_pass_ = settings.pass;
+    wifi_enabled_ = settings.enabled;
+    wifi_auth_mode_ = settings.auth_mode;
+    wifi_eap_method_ = settings.eap_method;
+    wifi_ttls_phase2_ = settings.ttls_phase2;
+    wifi_identity_ = settings.identity;
+    wifi_username_ = settings.username;
+    wifi_enterprise_pass_ = settings.enterprise_password;
+    wifi_eap_ca_cert_pem_ = settings.ca_cert_pem;
+    wifi_eap_client_cert_pem_ = settings.client_cert_pem;
+    wifi_eap_client_key_pem_ = settings.client_key_pem;
+}
+
+void AuraNetworkManager::applySavedWiFiSettings(const Config::WifiSettings &settings) {
+    applyRuntimeWiFiSettings(settings);
     wifi_enabled_dirty_ = false;
     wifi_retry_count_ = 0;
     wifi_retry_at_ms_ = 0;
@@ -607,6 +678,15 @@ void AuraNetworkManager::clearCredentials() {
     }
     wifi_ssid_ = "";
     wifi_pass_ = "";
+    wifi_auth_mode_ = Config::WifiAuthMode::Personal;
+    wifi_eap_method_ = Config::WifiEapMethod::Peap;
+    wifi_ttls_phase2_ = Config::WifiTtlsPhase2::Mschapv2;
+    wifi_identity_ = "";
+    wifi_username_ = "";
+    wifi_enterprise_pass_ = "";
+    wifi_eap_ca_cert_pem_ = "";
+    wifi_eap_client_cert_pem_ = "";
+    wifi_eap_client_key_pem_ = "";
     wifi_retry_count_ = 0;
     wifi_retry_at_ms_ = 0;
     wifi_connect_start_ms_ = 0;
@@ -814,8 +894,68 @@ void AuraNetworkManager::warmupIfDisabled() {
     WiFi.mode(WIFI_OFF);
 }
 
+bool AuraNetworkManager::enterpriseSettingsReadyForConnect() const {
+    if (wifi_auth_mode_ != Config::WifiAuthMode::Enterprise) {
+        return true;
+    }
+    if (wifi_eap_method_ == Config::WifiEapMethod::Peap ||
+        wifi_eap_method_ == Config::WifiEapMethod::Ttls) {
+        return !wifi_identity_.isEmpty() &&
+               !wifi_username_.isEmpty() &&
+               !wifi_enterprise_pass_.isEmpty();
+    }
+    return !wifi_identity_.isEmpty() &&
+           !wifi_eap_client_cert_pem_.isEmpty() &&
+           !wifi_eap_client_key_pem_.isEmpty();
+}
+
+void AuraNetworkManager::beginStaConnect(int32_t channel, const uint8_t *bssid) {
+    if (wifi_auth_mode_ != Config::WifiAuthMode::Enterprise) {
+        clear_sta_enterprise_state();
+        WiFi.begin(wifi_ssid_.c_str(), wifi_pass_.c_str(), channel, bssid, true);
+        return;
+    }
+
+#if CONFIG_ESP_WIFI_ENTERPRISE_SUPPORT
+    const wpa2_auth_method_t method = to_wpa2_auth_method(wifi_eap_method_);
+    const int phase2 = wifi_eap_method_ == Config::WifiEapMethod::Ttls
+                           ? to_ttls_phase2_type(wifi_ttls_phase2_)
+                           : -1;
+    const char *ca_pem = wifi_eap_ca_cert_pem_.isEmpty()
+                             ? nullptr
+                             : wifi_eap_ca_cert_pem_.c_str();
+    const char *client_crt = wifi_eap_client_cert_pem_.isEmpty()
+                                 ? nullptr
+                                 : wifi_eap_client_cert_pem_.c_str();
+    const char *client_key = wifi_eap_client_key_pem_.isEmpty()
+                                 ? nullptr
+                                 : wifi_eap_client_key_pem_.c_str();
+    WiFi.begin(wifi_ssid_.c_str(),
+               method,
+               wifi_identity_.c_str(),
+               wifi_username_.c_str(),
+               wifi_enterprise_pass_.c_str(),
+               ca_pem,
+               client_crt,
+               client_key,
+               phase2,
+               channel,
+               bssid,
+               true);
+#else
+    (void)channel;
+    (void)bssid;
+    LOGW("WiFi", "enterprise support is not enabled in SDK config");
+#endif
+}
+
 void AuraNetworkManager::startSta() {
     if (wifi_ssid_.isEmpty()) {
+        return;
+    }
+    if (!enterpriseSettingsReadyForConnect()) {
+        LOGW("WiFi", "enterprise settings incomplete, starting AP config mode");
+        startAp();
         return;
     }
 
@@ -932,14 +1072,14 @@ void AuraNetworkManager::startSta() {
                         static_cast<int>(target_channel),
                         static_cast<int>(target_rssi),
                         bssid_text);
-            WiFi.begin(wifi_ssid_.c_str(), wifi_pass_.c_str(), target_channel, target_bssid, true);
+            beginStaConnect(target_channel, target_bssid);
             targeted_connect = true;
         } else {
             LOGI("WiFi", "targeted connect fallback: SSID not found in scan");
         }
     }
     if (!targeted_connect) {
-        WiFi.begin(wifi_ssid_.c_str(), wifi_pass_.c_str());
+        beginStaConnect(0, nullptr);
     }
     startServerIfNeeded();
     wifi_state_ = WIFI_STATE_STA_CONNECTING;

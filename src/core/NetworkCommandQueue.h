@@ -11,6 +11,8 @@
 #include <freertos/queue.h>
 #include <freertos/semphr.h>
 
+#include "config/AppConfig.h"
+
 class AuraNetworkManager;
 class ConnectivityRuntime;
 class MqttManager;
@@ -36,9 +38,7 @@ public:
     };
 
     struct WifiSettingsUpdate {
-        String ssid;
-        String pass;
-        bool enabled = true;
+        Config::WifiSettings settings{};
     };
 
     struct MqttSettingsUpdate {

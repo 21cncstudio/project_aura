@@ -36,9 +36,12 @@ void buildWifiScanItems(WebHandlerContext &context, int count) {
     for (int i = 0; i < count; i++) {
         String ssid_raw = WiFi.SSID(i);
         const int rssi = WiFi.RSSI(i);
-        const bool open = (WiFi.encryptionType(i) == WIFI_AUTH_OPEN);
+        const wifi_auth_mode_t auth_mode = WiFi.encryptionType(i);
+        const bool open = (auth_mode == WIFI_AUTH_OPEN);
+        const bool enterprise = (auth_mode == WIFI_AUTH_WPA2_ENTERPRISE ||
+                                 auth_mode == WIFI_AUTH_WPA3_ENT_192);
         WebWifiScanUtils::addOrReplaceBestNetwork(
-            rows, row_count, kWifiScanMaxItems, ssid_raw, rssi, open);
+            rows, row_count, kWifiScanMaxItems, ssid_raw, rssi, open, enterprise);
     }
 
     WebWifiScanUtils::sortNetworksByRssiDesc(rows, row_count);

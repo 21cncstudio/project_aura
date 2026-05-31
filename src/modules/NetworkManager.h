@@ -57,7 +57,7 @@ public:
 
     bool setEnabled(bool enabled);
     bool applyEnabledIfDirty();
-    void applySavedWiFiSettings(const String &ssid, const String &pass, bool enabled);
+    void applySavedWiFiSettings(const Config::WifiSettings &settings);
     void clearCredentials();
     void connectSta();
     void startApOnDemand();
@@ -94,8 +94,11 @@ private:
     void resetStaConnectAttemptState();
     void scheduleStaRetry(const char *log_reason, bool warn = true);
     void resetColdBootStaAssist();
+    void applyRuntimeWiFiSettings(const Config::WifiSettings &settings);
     bool resolveStaConnectTarget(int32_t &channel_out, uint8_t bssid_out[6], int32_t &rssi_out);
     void warmupIfDisabled();
+    bool enterpriseSettingsReadyForConnect() const;
+    void beginStaConnect(int32_t channel, const uint8_t *bssid);
     void startSta();
     void startAp();
     void stopAp();
@@ -114,6 +117,15 @@ private:
     uint8_t sta_link_fail_streak_ = 0;
     String wifi_ssid_;
     String wifi_pass_;
+    Config::WifiAuthMode wifi_auth_mode_ = Config::WifiAuthMode::Personal;
+    Config::WifiEapMethod wifi_eap_method_ = Config::WifiEapMethod::Peap;
+    Config::WifiTtlsPhase2 wifi_ttls_phase2_ = Config::WifiTtlsPhase2::Mschapv2;
+    String wifi_identity_;
+    String wifi_username_;
+    String wifi_enterprise_pass_;
+    String wifi_eap_ca_cert_pem_;
+    String wifi_eap_client_cert_pem_;
+    String wifi_eap_client_key_pem_;
     String hostname_;
     String ap_ssid_;
     String wifi_scan_options_;

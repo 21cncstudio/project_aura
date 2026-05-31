@@ -16,6 +16,7 @@ struct WifiScanRow {
     int rssi = 0;
     int quality = 0;
     bool open = false;
+    bool enterprise = false;
 };
 
 void addOrReplaceBestNetwork(WifiScanRow *rows,
@@ -23,7 +24,8 @@ void addOrReplaceBestNetwork(WifiScanRow *rows,
                              size_t max_rows,
                              const String &ssid_raw,
                              int rssi,
-                             bool open);
+                             bool open,
+                             bool enterprise = false);
 
 void sortNetworksByRssiDesc(WifiScanRow *rows, size_t row_count);
 String renderNetworkItemsHtml(const WifiScanRow *rows, size_t row_count);

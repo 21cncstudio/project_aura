@@ -1,6 +1,8 @@
 #pragma once
 #include <Arduino.h>
+#include <ctype.h>
 #include <driver/i2c.h>
+#include <string.h>
 #include <time.h>
 
 // Optional local secrets (ignored by git). See include/secrets.h.example.
@@ -95,6 +97,121 @@ namespace Config {
                 return RtcMode::Auto;
         }
     }
+
+    enum class WifiAuthMode : uint8_t {
+        Personal = 0,
+        Enterprise = 1,
+    };
+
+    enum class WifiEapMethod : uint8_t {
+        Peap = 0,
+        Ttls = 1,
+        Tls = 2,
+    };
+
+    enum class WifiTtlsPhase2 : uint8_t {
+        Mschapv2 = 0,
+        Pap = 1,
+        Chap = 2,
+        Mschap = 3,
+        Eap = 4,
+    };
+
+    inline const char *wifiAuthModeToString(WifiAuthMode mode) {
+        return mode == WifiAuthMode::Enterprise ? "enterprise" : "personal";
+    }
+
+    inline bool configStringEqualsIgnoreCase(const String &value, const char *expected) {
+        const char *lhs = value.c_str();
+        const char *rhs = expected;
+        if (!lhs || !rhs) {
+            return false;
+        }
+        while (*lhs != '\0' && *rhs != '\0') {
+            const unsigned char lhs_ch = static_cast<unsigned char>(*lhs);
+            const unsigned char rhs_ch = static_cast<unsigned char>(*rhs);
+            if (tolower(lhs_ch) != tolower(rhs_ch)) {
+                return false;
+            }
+            ++lhs;
+            ++rhs;
+        }
+        return *lhs == '\0' && *rhs == '\0';
+    }
+
+    inline WifiAuthMode parseWifiAuthMode(const String &value) {
+        return configStringEqualsIgnoreCase(value, "enterprise") ? WifiAuthMode::Enterprise
+                                                                 : WifiAuthMode::Personal;
+    }
+
+    inline const char *wifiEapMethodToString(WifiEapMethod method) {
+        switch (method) {
+            case WifiEapMethod::Ttls:
+                return "ttls";
+            case WifiEapMethod::Tls:
+                return "tls";
+            case WifiEapMethod::Peap:
+            default:
+                return "peap";
+        }
+    }
+
+    inline WifiEapMethod parseWifiEapMethod(const String &value) {
+        if (configStringEqualsIgnoreCase(value, "ttls")) {
+            return WifiEapMethod::Ttls;
+        }
+        if (configStringEqualsIgnoreCase(value, "tls")) {
+            return WifiEapMethod::Tls;
+        }
+        return WifiEapMethod::Peap;
+    }
+
+    inline const char *wifiTtlsPhase2ToString(WifiTtlsPhase2 phase2) {
+        switch (phase2) {
+            case WifiTtlsPhase2::Pap:
+                return "pap";
+            case WifiTtlsPhase2::Chap:
+                return "chap";
+            case WifiTtlsPhase2::Mschap:
+                return "mschap";
+            case WifiTtlsPhase2::Eap:
+                return "eap";
+            case WifiTtlsPhase2::Mschapv2:
+            default:
+                return "mschapv2";
+        }
+    }
+
+    inline WifiTtlsPhase2 parseWifiTtlsPhase2(const String &value) {
+        if (configStringEqualsIgnoreCase(value, "pap")) {
+            return WifiTtlsPhase2::Pap;
+        }
+        if (configStringEqualsIgnoreCase(value, "chap")) {
+            return WifiTtlsPhase2::Chap;
+        }
+        if (configStringEqualsIgnoreCase(value, "mschap")) {
+            return WifiTtlsPhase2::Mschap;
+        }
+        if (configStringEqualsIgnoreCase(value, "eap")) {
+            return WifiTtlsPhase2::Eap;
+        }
+        return WifiTtlsPhase2::Mschapv2;
+    }
+
+    struct WifiSettings {
+        String ssid = Secrets::WIFI_SSID;
+        String pass = Secrets::WIFI_PASS;
+        bool enabled = Secrets::WIFI_ENABLED;
+        WifiAuthMode auth_mode = WifiAuthMode::Personal;
+        WifiEapMethod eap_method = WifiEapMethod::Peap;
+        WifiTtlsPhase2 ttls_phase2 = WifiTtlsPhase2::Mschapv2;
+        String identity = "";
+        String username = "";
+        String enterprise_password = "";
+        String ca_cert_pem = "";
+        String client_cert_pem = "";
+        String client_key_pem = "";
+    };
 
     constexpr uint8_t SEN66_ADDR = 0x6B;
     constexpr uint16_t SEN66_CMD_START = 0x0021;
@@ -485,6 +602,12 @@ namespace Config {
         String wifi_ssid = Secrets::WIFI_SSID;
         String wifi_pass = Secrets::WIFI_PASS;
         bool wifi_enabled = Secrets::WIFI_ENABLED;
+        WifiAuthMode wifi_auth_mode = WifiAuthMode::Personal;
+        WifiEapMethod wifi_eap_method = WifiEapMethod::Peap;
+        WifiTtlsPhase2 wifi_ttls_phase2 = WifiTtlsPhase2::Mschapv2;
+        String wifi_identity = "";
+        String wifi_username = "";
+        String wifi_enterprise_pass = "";
 
         String mqtt_host = MQTT_DEFAULT_HOST;
         uint16_t mqtt_port = MQTT_DEFAULT_PORT;
