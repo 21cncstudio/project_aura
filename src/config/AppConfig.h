@@ -21,6 +21,9 @@ namespace Secrets {
     constexpr bool MQTT_USER_ENABLED = false;
     constexpr bool MQTT_DISCOVERY = true;
     constexpr bool MQTT_ANONYMOUS = false;
+    constexpr const char *AURA_LINK_BASE_URL = "";
+    constexpr const char *AURA_LINK_ROOT_CA_PEM = "";
+    constexpr bool AURA_LINK_ALLOW_INSECURE_TLS = false;
 } // namespace Secrets
 #endif
 #else
@@ -37,6 +40,9 @@ namespace Secrets {
     constexpr bool MQTT_USER_ENABLED = false;
     constexpr bool MQTT_DISCOVERY = true;
     constexpr bool MQTT_ANONYMOUS = false;
+    constexpr const char *AURA_LINK_BASE_URL = "";
+    constexpr const char *AURA_LINK_ROOT_CA_PEM = "";
+    constexpr bool AURA_LINK_ALLOW_INSECURE_TLS = false;
 } // namespace Secrets
 #endif
 
@@ -381,6 +387,13 @@ namespace Config {
     constexpr uint32_t MQTT_RETRY_MS = 30000;
     constexpr uint32_t MQTT_RETRY_MEDIUM_MS = 2UL * 60UL * 1000UL;
     constexpr uint32_t MQTT_RETRY_LONG_MS = 10UL * 60UL * 1000UL;
+    constexpr const char *AURA_LINK_BASE_URL = Secrets::AURA_LINK_BASE_URL;
+    constexpr const char *AURA_LINK_ROOT_CA_PEM = Secrets::AURA_LINK_ROOT_CA_PEM;
+    constexpr bool AURA_LINK_ALLOW_INSECURE_TLS = Secrets::AURA_LINK_ALLOW_INSECURE_TLS;
+    constexpr uint32_t AURA_LINK_DEFAULT_UPLOAD_INTERVAL_SECONDS = 300;
+    constexpr uint32_t AURA_LINK_DEFAULT_OFFLINE_AFTER_SECONDS = 900;
+    constexpr uint32_t AURA_LINK_HTTP_TIMEOUT_MS = 8000;
+    constexpr uint32_t AURA_LINK_UPLOAD_RETRY_MS = 30000;
     constexpr uint16_t MQTT_BUFFER_SIZE = 1024;
     constexpr uint16_t MQTT_DEFAULT_PORT = Secrets::MQTT_PORT;
     constexpr uint16_t MQTT_TLS_DEFAULT_PORT = 8883;

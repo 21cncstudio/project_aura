@@ -204,6 +204,7 @@ void StorageManager::clearAll() {
     LittleFS.remove(kDacAutoPath);
     LittleFS.remove(kDisplayThresholdsPath);
     LittleFS.remove(kMqttCaCertPath);
+    LittleFS.remove(kAuraLinkPath);
 #else
     g_blob_store.clear();
 #endif

@@ -69,6 +69,7 @@ public:
     static constexpr const char *kDacAutoPath = "/dac_auto.json";
     static constexpr const char *kDisplayThresholdsPath = "/display_thresholds.json";
     static constexpr const char *kMqttCaCertPath = "/mqtt_ca.pem";
+    static constexpr const char *kAuraLinkPath = "/aura_link.json";
 
 private:
     bool loadConfig();

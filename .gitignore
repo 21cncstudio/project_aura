@@ -18,12 +18,15 @@ tmpclaude-*
 build_*.log
 envdump_*.log
 nul
+.local-notes/
 
 # Local web installer artifacts and site files
 web-installer/
 
 # Local release bundles
 release-assets/
+src/ui/.eez-project-build
+docs/makerworld/
 
 # Generated web assets
 src/web/generated/*.inc

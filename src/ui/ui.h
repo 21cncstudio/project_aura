@@ -3,28 +3,16 @@
 
 #include <lvgl.h>
 
-
-
-#if defined(EEZ_FOR_LVGL)
-#include <eez/flow/lvgl_api.h>
-#endif
-
-#if !defined(EEZ_FOR_LVGL)
 #include "screens.h"
-#endif
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-
-
 void ui_init();
 void ui_tick();
 
-#if !defined(EEZ_FOR_LVGL)
 void loadScreen(enum ScreensEnum screenId);
-#endif
 
 #ifdef __cplusplus
 }

@@ -19,6 +19,7 @@
 #include <lvgl.h>
 #include "modules/SensorManager.h"
 #include "modules/TimeManager.h"
+#include "modules/AuraLinkManager.h"
 
 class StorageManager;
 class AuraNetworkManager;
@@ -49,6 +50,7 @@ struct UiContext {
     ThemeManager &themeManager;
     BacklightManager &backlightManager;
     NightModeManager &nightModeManager;
+    AuraLinkManager &auraLinkManager;
     FanControl &fanControl;
     SensorData &currentData;
     bool &night_mode;
@@ -102,6 +104,11 @@ private:
         CONFIRM_VOC_RESET,
         CONFIRM_RESTART,
         CONFIRM_FACTORY_RESET,
+    };
+    enum class AuraLinkModal : uint8_t {
+        None = 0,
+        Pairing,
+        Reset,
     };
     using Co2CalibOverlayMode = UiCo2Workflow::OverlayMode;
     enum InfoSensor {
@@ -541,6 +548,13 @@ private:
     void set_button_enabled(lv_obj_t *btn, bool enabled);
     void confirm_show(ConfirmAction action);
     void confirm_hide();
+    void update_aura_link_ui();
+    void set_aura_link_modal(AuraLinkModal modal);
+    void reset_aura_link_pairing_code();
+    void update_aura_link_pairing_ui();
+    void append_aura_link_pairing_digit(char digit);
+    void delete_aura_link_pairing_digit();
+    void start_aura_link_claim();
 
     void night_mode_on_enter();
     void night_mode_on_exit();
@@ -564,6 +578,15 @@ private:
     void on_wifi_back_event(lv_event_t *e);
     void on_mqtt_settings_event(lv_event_t *e);
     void on_mqtt_back_event(lv_event_t *e);
+    void on_aura_aq_link_settings_event(lv_event_t *e);
+    void on_aura_aq_link_back_event(lv_event_t *e);
+    void on_aura_aq_link_activate_event(lv_event_t *e);
+    void on_aura_aq_link_reset_event(lv_event_t *e);
+    void on_aura_aq_link_pairing_activate_event(lv_event_t *e);
+    void on_aura_aq_link_pairing_cancel_event(lv_event_t *e);
+    void on_aura_aq_link_reset_confirm_event(lv_event_t *e);
+    void on_aura_aq_link_reset_cancel_event(lv_event_t *e);
+    void on_aura_aq_link_keypad_event(lv_event_t *e);
     void on_theme_color_event(lv_event_t *e);
     void on_theme_back_event(lv_event_t *e);
     void on_theme_tab_event(lv_event_t *e);
@@ -739,6 +762,15 @@ private:
     static void on_wifi_back_event_cb(lv_event_t *e);
     static void on_mqtt_settings_event_cb(lv_event_t *e);
     static void on_mqtt_back_event_cb(lv_event_t *e);
+    static void on_aura_aq_link_settings_event_cb(lv_event_t *e);
+    static void on_aura_aq_link_back_event_cb(lv_event_t *e);
+    static void on_aura_aq_link_activate_event_cb(lv_event_t *e);
+    static void on_aura_aq_link_reset_event_cb(lv_event_t *e);
+    static void on_aura_aq_link_pairing_activate_event_cb(lv_event_t *e);
+    static void on_aura_aq_link_pairing_cancel_event_cb(lv_event_t *e);
+    static void on_aura_aq_link_reset_confirm_event_cb(lv_event_t *e);
+    static void on_aura_aq_link_reset_cancel_event_cb(lv_event_t *e);
+    static void on_aura_aq_link_keypad_event_cb(lv_event_t *e);
     static void on_theme_color_event_cb(lv_event_t *e);
     static void on_theme_back_event_cb(lv_event_t *e);
     static void on_theme_tab_event_cb(lv_event_t *e);
@@ -935,6 +967,7 @@ private:
     ThemeManager &themeManager;
     BacklightManager &backlightManager;
     NightModeManager &nightModeManager;
+    AuraLinkManager &auraLinkManager;
     FanControl &fanControl;
     SensorData &currentData;
 
@@ -948,7 +981,7 @@ private:
 
     bool data_dirty = true;
     bool lvgl_ready = false;
-    static constexpr size_t kScreenSlotCount = 16; // screen ids are 1..15
+    static constexpr size_t kScreenSlotCount = 17; // screen ids are 1..16
     bool screen_events_bound_[kScreenSlotCount] = {};
     bool theme_events_bound_ = false;
     int pending_screen_id = 0;
@@ -964,6 +997,7 @@ private:
     char mqtt_portal_qr_cache_[kQrUrlCacheSize] = {};
     char theme_custom_qr_cache_[kQrUrlCacheSize] = {};
     char dac_portal_qr_cache_[kQrUrlCacheSize] = {};
+    char aura_link_qr_cache_[kQrUrlCacheSize] = {};
     uint32_t dac_network_ui_signature_ = UINT32_MAX;
     bool clock_ui_dirty = true;
     bool datetime_ui_dirty = true;
@@ -1007,6 +1041,13 @@ private:
     uint32_t last_diag_log_update_ms = 0;
     uint32_t last_settings_header_update_ms = 0;
     uint32_t last_ui_tick_ms = 0;
+    AuraLinkModal aura_link_modal_ = AuraLinkModal::None;
+    char aura_link_pairing_code_[7] = {};
+    uint8_t aura_link_pairing_len_ = 0;
+    AuraLinkManager::ClaimStatus aura_link_last_claim_status_ = AuraLinkManager::ClaimStatus::Idle;
+    bool aura_link_claim_was_pending_ = false;
+    uint32_t aura_link_close_modal_at_ms_ = 0;
+    uint32_t aura_link_last_ui_update_ms_ = 0;
     uint32_t status_msg_last_ms = 0;
     uint32_t status_msg_signature = 0;
     uint8_t status_msg_index = 0;

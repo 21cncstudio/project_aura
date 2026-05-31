@@ -336,6 +336,7 @@ UiController::UiController(const UiContext &context)
       themeManager(context.themeManager),
       backlightManager(context.backlightManager),
       nightModeManager(context.nightModeManager),
+      auraLinkManager(context.auraLinkManager),
       fanControl(context.fanControl),
       currentData(context.currentData),
       night_mode(context.night_mode),
@@ -821,6 +822,9 @@ void UiController::bind_screen_events_once(int screen_id) {
     bind_available_events(screen_id);
     apply_toggle_styles_for_available_objects(screen_id);
     apply_checked_states_for_available_objects(screen_id);
+    if (screen_id == SCREEN_ID_PAGE_AUTO_NIGHT_MODE) {
+        sync_night_mode_toggle_ui();
+    }
     refresh_texts_for_screen(screen_id);
     init_theme_controls_if_available();
     if (screen_id == SCREEN_ID_PAGE_SENSORS_INFO) {
@@ -1361,6 +1365,9 @@ void UiController::poll(uint32_t now) {
     UiScreenFlow::processPendingScreen(*this, now);
     UiScreenFlow::processBootRelease(*this, now);
     UiScreenFlow::processDeferredUnloads(*this, now);
+    if (current_screen_id == SCREEN_ID_PAGE_AURA_AQ_LINK) {
+        update_aura_link_ui();
+    }
 
     UiRenderLoop::process(*this, now);
     lvgl_port_unlock();
@@ -1421,6 +1428,7 @@ void UiController::reset_dynamic_url_caches() {
     mqtt_portal_qr_cache_[0] = '\0';
     theme_custom_qr_cache_[0] = '\0';
     dac_portal_qr_cache_[0] = '\0';
+    aura_link_qr_cache_[0] = '\0';
     dac_network_ui_signature_ = UINT32_MAX;
 }
 
@@ -2222,7 +2230,20 @@ void UiController::sync_night_mode_toggle_ui() {
     if (!objects.btn_night_mode) {
         return;
     }
-    set_button_enabled(objects.btn_night_mode, !nightModeManager.isAutoEnabled());
+    lv_obj_set_style_bg_color(objects.btn_night_mode, color_inactive(), LV_PART_MAIN | LV_STATE_DISABLED);
+    lv_obj_set_style_border_color(objects.btn_night_mode, color_inactive(), LV_PART_MAIN | LV_STATE_DISABLED);
+    lv_obj_set_style_shadow_color(objects.btn_night_mode, color_inactive(), LV_PART_MAIN | LV_STATE_DISABLED);
+    lv_obj_set_style_bg_color(objects.btn_night_mode, color_inactive(), LV_PART_MAIN | LV_STATE_DISABLED | LV_STATE_CHECKED);
+    lv_obj_set_style_border_color(objects.btn_night_mode, color_inactive(), LV_PART_MAIN | LV_STATE_DISABLED | LV_STATE_CHECKED);
+    lv_obj_set_style_shadow_color(objects.btn_night_mode, color_inactive(), LV_PART_MAIN | LV_STATE_DISABLED | LV_STATE_CHECKED);
+    lv_obj_set_style_opa(objects.btn_night_mode, LV_OPA_60, LV_PART_MAIN | LV_STATE_DISABLED);
+    lv_obj_set_style_opa(objects.btn_night_mode, LV_OPA_60, LV_PART_MAIN | LV_STATE_DISABLED | LV_STATE_CHECKED);
+    if (objects.label_btn_night_mode) {
+        lv_obj_set_style_text_color(objects.label_btn_night_mode, color_inactive(), LV_PART_MAIN | LV_STATE_DISABLED);
+    }
+    const bool manual_enabled = !nightModeManager.isAutoEnabled();
+    set_button_enabled(objects.btn_night_mode, manual_enabled);
+    set_button_enabled(objects.label_btn_night_mode, manual_enabled);
     if (night_mode) {
         lv_obj_add_state(objects.btn_night_mode, LV_STATE_CHECKED);
     } else {
@@ -2948,9 +2969,13 @@ void UiController::init_ui_defaults() {
         lv_obj_set_style_bg_color(objects.btn_night_mode, color_inactive(), LV_PART_MAIN | LV_STATE_DISABLED);
         lv_obj_set_style_border_color(objects.btn_night_mode, color_inactive(), LV_PART_MAIN | LV_STATE_DISABLED);
         lv_obj_set_style_shadow_color(objects.btn_night_mode, color_inactive(), LV_PART_MAIN | LV_STATE_DISABLED);
+        lv_obj_set_style_bg_color(objects.btn_night_mode, color_inactive(), LV_PART_MAIN | LV_STATE_DISABLED | LV_STATE_CHECKED);
+        lv_obj_set_style_border_color(objects.btn_night_mode, color_inactive(), LV_PART_MAIN | LV_STATE_DISABLED | LV_STATE_CHECKED);
+        lv_obj_set_style_shadow_color(objects.btn_night_mode, color_inactive(), LV_PART_MAIN | LV_STATE_DISABLED | LV_STATE_CHECKED);
     }
     if (objects.label_btn_night_mode) {
         lv_obj_set_style_text_color(objects.label_btn_night_mode, color_inactive(), LV_PART_MAIN | LV_STATE_DISABLED);
+        lv_obj_set_style_text_color(objects.label_btn_night_mode, color_inactive(), LV_PART_MAIN | LV_STATE_DISABLED | LV_STATE_CHECKED);
     }
     ui_language = storage.config().language;
     date_units_mdy = storage.config().units_mdy;
