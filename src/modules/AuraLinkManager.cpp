@@ -357,6 +357,13 @@ void AuraLinkManager::poll(uint32_t now_ms,
     const bool alert_state_changed = !sameAlertSnapshot(alert_state, reported_alert_state_);
     const bool urgent_upload_due =
         !regular_upload_due && shouldTriggerUrgentUpload(now_ms, data, alert_state);
+    const UrgentDiagnostics urgent_diagnostics =
+        buildUrgentDiagnostics(now_ms,
+                               data,
+                               alert_state,
+                               regular_upload_due,
+                               urgent_upload_due,
+                               alert_state_changed);
     if (!regular_upload_due && !urgent_upload_due) {
         return;
     }
@@ -367,7 +374,8 @@ void AuraLinkManager::poll(uint32_t now_ms,
                             sensor_warmup_active,
                             time_manager,
                             alert_state,
-                            alert_state_changed ? UploadReason::AlertTransition : UploadReason::Scheduled)) {
+                            alert_state_changed ? UploadReason::AlertTransition : UploadReason::Scheduled,
+                            urgent_diagnostics)) {
         scheduleNextUpload(now_ms, Config::AURA_LINK_UPLOAD_RETRY_MS);
         return;
     }
@@ -555,8 +563,9 @@ AuraLinkManager::WorkerResult AuraLinkManager::executeCommand(const WorkerComman
         request["sequence"] = command.sequence;
         request["firmware_version"] = AppVersion::fullVersion();
         request["upload_interval_seconds"] = command.upload_interval_seconds;
-        request["upload_reason"] =
+        const char *upload_reason =
             command.upload_reason == UploadReason::AlertTransition ? "alert_transition" : "scheduled";
+        request["upload_reason"] = upload_reason;
 
         char recorded_at[32] = {};
         format_recorded_at(command.recorded_at, recorded_at, sizeof(recorded_at));
@@ -643,12 +652,55 @@ AuraLinkManager::WorkerResult AuraLinkManager::executeCommand(const WorkerComman
         }
         JsonObject alert_state = request["alert_state"].to<JsonObject>();
         alert_state["level"] = alert_level;
+        alert_state["upload_reason"] = upload_reason;
         JsonArray active_alerts = alert_state["active"].to<JsonArray>();
         for (const AlertMetricName &metric : kAlertMetricNames) {
             if ((command.alert_state.active_mask & metric.mask) != 0) {
                 active_alerts.add(metric.name);
             }
         }
+
+        JsonObject alert_debug = alert_state["debug"].to<JsonObject>();
+        alert_debug["urgent_block_reason"] =
+            urgentBlockReasonName(command.urgent_diagnostics.block_reason);
+        alert_debug["regular_upload_due"] = command.urgent_diagnostics.regular_upload_due;
+        alert_debug["urgent_upload_due"] = command.urgent_diagnostics.urgent_upload_due;
+        alert_debug["alert_state_changed"] = command.urgent_diagnostics.alert_state_changed;
+        alert_debug["candidate_level"] =
+            alertLevelName(command.urgent_diagnostics.candidate_state.level);
+        JsonArray candidate_active = alert_debug["candidate_active"].to<JsonArray>();
+        for (const AlertMetricName &metric : kAlertMetricNames) {
+            if ((command.urgent_diagnostics.candidate_state.active_mask & metric.mask) != 0) {
+                candidate_active.add(metric.name);
+            }
+        }
+        alert_debug["stable_level"] =
+            alertLevelName(command.urgent_diagnostics.stable_state.level);
+        JsonArray stable_active = alert_debug["stable_active"].to<JsonArray>();
+        for (const AlertMetricName &metric : kAlertMetricNames) {
+            if ((command.urgent_diagnostics.stable_state.active_mask & metric.mask) != 0) {
+                stable_active.add(metric.name);
+            }
+        }
+        alert_debug["reported_level"] =
+            alertLevelName(command.urgent_diagnostics.reported_state.level);
+        JsonArray reported_active = alert_debug["reported_active"].to<JsonArray>();
+        for (const AlertMetricName &metric : kAlertMetricNames) {
+            if ((command.urgent_diagnostics.reported_state.active_mask & metric.mask) != 0) {
+                reported_active.add(metric.name);
+            }
+        }
+        alert_debug["candidate_age_ms"] = command.urgent_diagnostics.candidate_age_ms;
+        alert_debug["candidate_sustain_ms"] = command.urgent_diagnostics.candidate_sustain_ms;
+        alert_debug["boot_grace_remaining_ms"] =
+            command.urgent_diagnostics.boot_grace_remaining_ms;
+        alert_debug["urgent_cooldown_remaining_ms"] =
+            command.urgent_diagnostics.urgent_cooldown_remaining_ms;
+        alert_debug["urgent_quota_remaining"] =
+            command.urgent_diagnostics.urgent_quota_remaining;
+        alert_debug["next_regular_upload_in_ms"] =
+            command.urgent_diagnostics.next_regular_upload_in_ms;
+        alert_debug["last_success_age_ms"] = command.urgent_diagnostics.last_success_age_ms;
 
         String body;
         serializeJson(request, body);
@@ -931,12 +983,119 @@ bool AuraLinkManager::shouldTriggerUrgentUpload(uint32_t now_ms,
                                   urgent_uploads_in_window_);
 }
 
+AuraLinkManager::UrgentBlockReason AuraLinkManager::evaluateUrgentBlockReason(
+    uint32_t now_ms,
+    const SensorData &data,
+    const AlertSnapshot &alert_state,
+    bool regular_upload_due,
+    bool urgent_upload_due) const {
+    if (urgent_upload_due) {
+        return UrgentBlockReason::None;
+    }
+    if (regular_upload_due) {
+        return UrgentBlockReason::RegularDue;
+    }
+    if (!enabled_) {
+        return UrgentBlockReason::Disabled;
+    }
+    if (upload_paused_) {
+        return UrgentBlockReason::UploadPaused;
+    }
+    if (device_id_.isEmpty() || device_token_.isEmpty()) {
+        return UrgentBlockReason::NotLinked;
+    }
+    if (!base_url_configured()) {
+        return UrgentBlockReason::NotConfigured;
+    }
+    if (WiFi.status() != WL_CONNECTED) {
+        return UrgentBlockReason::NoWifi;
+    }
+    if (!hasAnyValidSensor(data)) {
+        return UrgentBlockReason::NoValidSensor;
+    }
+    if (last_upload_success_ms_ == 0) {
+        return UrgentBlockReason::NoSuccessfulUpload;
+    }
+    if (now_ms < kUrgentUploadBootGraceMs) {
+        return UrgentBlockReason::BootGrace;
+    }
+    if (sameAlertSnapshot(alert_state, reported_alert_state_)) {
+        if (!sameAlertSnapshot(alert_candidate_state_, reported_alert_state_)) {
+            return UrgentBlockReason::NotStable;
+        }
+        return UrgentBlockReason::SameState;
+    }
+    if (last_urgent_upload_ms_ != 0 &&
+        static_cast<uint32_t>(now_ms - last_urgent_upload_ms_) < kUrgentUploadMinIntervalMs) {
+        return UrgentBlockReason::Cooldown;
+    }
+    if (!urgent_quota_available(now_ms,
+                                urgent_upload_window_started_ms_,
+                                urgent_uploads_in_window_)) {
+        return UrgentBlockReason::Quota;
+    }
+    return UrgentBlockReason::None;
+}
+
+AuraLinkManager::UrgentDiagnostics AuraLinkManager::buildUrgentDiagnostics(
+    uint32_t now_ms,
+    const SensorData &data,
+    const AlertSnapshot &alert_state,
+    bool regular_upload_due,
+    bool urgent_upload_due,
+    bool alert_state_changed) const {
+    UrgentDiagnostics diagnostics{};
+    diagnostics.block_reason =
+        evaluateUrgentBlockReason(now_ms, data, alert_state, regular_upload_due, urgent_upload_due);
+    diagnostics.regular_upload_due = regular_upload_due;
+    diagnostics.urgent_upload_due = urgent_upload_due;
+    diagnostics.alert_state_changed = alert_state_changed;
+    diagnostics.candidate_state = alert_candidate_state_;
+    diagnostics.stable_state = stable_alert_state_;
+    diagnostics.reported_state = reported_alert_state_;
+    diagnostics.candidate_age_ms =
+        alert_candidate_since_ms_ == 0 ? 0 : static_cast<uint32_t>(now_ms - alert_candidate_since_ms_);
+    diagnostics.candidate_sustain_ms =
+        alert_candidate_state_.level == AlertUploadLevel::Alert
+            ? kUrgentAlertSustainMs
+            : kUrgentWatchSustainMs;
+    diagnostics.boot_grace_remaining_ms =
+        now_ms < kUrgentUploadBootGraceMs ? kUrgentUploadBootGraceMs - now_ms : 0;
+    diagnostics.urgent_cooldown_remaining_ms = 0;
+    if (last_urgent_upload_ms_ != 0) {
+        const uint32_t urgent_age_ms =
+            static_cast<uint32_t>(now_ms - last_urgent_upload_ms_);
+        if (urgent_age_ms < kUrgentUploadMinIntervalMs) {
+            diagnostics.urgent_cooldown_remaining_ms =
+                kUrgentUploadMinIntervalMs - urgent_age_ms;
+        }
+    }
+    diagnostics.urgent_quota_remaining = kUrgentUploadMaxPerWindow;
+    if (urgent_upload_window_started_ms_ != 0 &&
+        static_cast<uint32_t>(now_ms - urgent_upload_window_started_ms_) <
+            kUrgentUploadQuotaWindowMs) {
+        diagnostics.urgent_quota_remaining =
+            urgent_uploads_in_window_ >= kUrgentUploadMaxPerWindow
+                ? 0
+                : kUrgentUploadMaxPerWindow - urgent_uploads_in_window_;
+    }
+    diagnostics.next_regular_upload_in_ms = 0;
+    if (next_upload_due_ms_ != 0 && static_cast<int32_t>(now_ms - next_upload_due_ms_) < 0) {
+        diagnostics.next_regular_upload_in_ms =
+            static_cast<uint32_t>(next_upload_due_ms_ - now_ms);
+    }
+    diagnostics.last_success_age_ms =
+        last_upload_success_ms_ == 0 ? 0 : static_cast<uint32_t>(now_ms - last_upload_success_ms_);
+    return diagnostics;
+}
+
 bool AuraLinkManager::buildIngestCommand(WorkerCommand &command,
                                          const SensorData &data,
                                          bool sensor_warmup_active,
                                          const TimeManager &time_manager,
                                          const AlertSnapshot &alert_state,
-                                         UploadReason upload_reason) {
+                                         UploadReason upload_reason,
+                                         const UrgentDiagnostics &urgent_diagnostics) {
     if (device_id_.isEmpty() || device_token_.isEmpty()) {
         return false;
     }
@@ -954,6 +1113,7 @@ bool AuraLinkManager::buildIngestCommand(WorkerCommand &command,
     command.reset_reason = static_cast<uint32_t>(esp_reset_reason());
     command.alert_state = alert_state;
     command.upload_reason = upload_reason;
+    command.urgent_diagnostics = urgent_diagnostics;
     return true;
 }
 
@@ -1111,6 +1271,52 @@ AuraLinkManager::AlertSnapshot AuraLinkManager::evaluateAlertState(
 
 bool AuraLinkManager::sameAlertSnapshot(const AlertSnapshot &left, const AlertSnapshot &right) {
     return left.level == right.level && left.active_mask == right.active_mask;
+}
+
+const char *AuraLinkManager::alertLevelName(AlertUploadLevel level) {
+    switch (level) {
+        case AlertUploadLevel::Alert:
+            return "alert";
+        case AlertUploadLevel::Watch:
+            return "watch";
+        case AlertUploadLevel::Normal:
+        default:
+            return "normal";
+    }
+}
+
+const char *AuraLinkManager::urgentBlockReasonName(UrgentBlockReason reason) {
+    switch (reason) {
+        case UrgentBlockReason::RegularDue:
+            return "regular_due";
+        case UrgentBlockReason::Disabled:
+            return "disabled";
+        case UrgentBlockReason::UploadPaused:
+            return "upload_paused";
+        case UrgentBlockReason::NotLinked:
+            return "not_linked";
+        case UrgentBlockReason::NotConfigured:
+            return "not_configured";
+        case UrgentBlockReason::NoWifi:
+            return "no_wifi";
+        case UrgentBlockReason::NoValidSensor:
+            return "no_valid_sensor";
+        case UrgentBlockReason::NoSuccessfulUpload:
+            return "no_successful_upload";
+        case UrgentBlockReason::BootGrace:
+            return "boot_grace";
+        case UrgentBlockReason::NotStable:
+            return "not_stable";
+        case UrgentBlockReason::SameState:
+            return "same_state";
+        case UrgentBlockReason::Cooldown:
+            return "cooldown";
+        case UrgentBlockReason::Quota:
+            return "quota";
+        case UrgentBlockReason::None:
+        default:
+            return "none";
+    }
 }
 
 bool AuraLinkManager::hasAnyValidSensor(const SensorData &data) {

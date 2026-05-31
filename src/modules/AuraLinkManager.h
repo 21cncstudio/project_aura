@@ -85,9 +85,43 @@ private:
         AlertTransition,
     };
 
+    enum class UrgentBlockReason : uint8_t {
+        None = 0,
+        RegularDue,
+        Disabled,
+        UploadPaused,
+        NotLinked,
+        NotConfigured,
+        NoWifi,
+        NoValidSensor,
+        NoSuccessfulUpload,
+        BootGrace,
+        NotStable,
+        SameState,
+        Cooldown,
+        Quota,
+    };
+
     struct AlertSnapshot {
         AlertUploadLevel level = AlertUploadLevel::Normal;
         uint32_t active_mask = 0;
+    };
+
+    struct UrgentDiagnostics {
+        UrgentBlockReason block_reason = UrgentBlockReason::None;
+        bool regular_upload_due = false;
+        bool urgent_upload_due = false;
+        bool alert_state_changed = false;
+        AlertSnapshot candidate_state{};
+        AlertSnapshot stable_state{};
+        AlertSnapshot reported_state{};
+        uint32_t candidate_age_ms = 0;
+        uint32_t candidate_sustain_ms = 0;
+        uint32_t boot_grace_remaining_ms = 0;
+        uint32_t urgent_cooldown_remaining_ms = 0;
+        uint32_t urgent_quota_remaining = 0;
+        uint32_t next_regular_upload_in_ms = 0;
+        uint32_t last_success_age_ms = 0;
     };
 
     struct WorkerCommand {
@@ -107,6 +141,7 @@ private:
         uint32_t reset_reason = 0;
         AlertSnapshot alert_state{};
         UploadReason upload_reason = UploadReason::Scheduled;
+        UrgentDiagnostics urgent_diagnostics{};
     };
 
     struct WorkerResult {
@@ -139,12 +174,24 @@ private:
     bool shouldTriggerUrgentUpload(uint32_t now_ms,
                                    const SensorData &data,
                                    const AlertSnapshot &alert_state) const;
+    UrgentBlockReason evaluateUrgentBlockReason(uint32_t now_ms,
+                                                const SensorData &data,
+                                                const AlertSnapshot &alert_state,
+                                                bool regular_upload_due,
+                                                bool urgent_upload_due) const;
+    UrgentDiagnostics buildUrgentDiagnostics(uint32_t now_ms,
+                                             const SensorData &data,
+                                             const AlertSnapshot &alert_state,
+                                             bool regular_upload_due,
+                                             bool urgent_upload_due,
+                                             bool alert_state_changed) const;
     bool buildIngestCommand(WorkerCommand &command,
                             const SensorData &data,
                             bool sensor_warmup_active,
                             const TimeManager &time_manager,
                             const AlertSnapshot &alert_state,
-                            UploadReason upload_reason);
+                            UploadReason upload_reason,
+                            const UrgentDiagnostics &urgent_diagnostics);
     AlertSnapshot updateAlertState(uint32_t now_ms,
                                    const SensorData &data,
                                    bool sensor_warmup_active,
@@ -156,6 +203,8 @@ private:
                                             bool sensor_warmup_active,
                                             const DisplayThresholds::Config &thresholds);
     static bool sameAlertSnapshot(const AlertSnapshot &left, const AlertSnapshot &right);
+    static const char *alertLevelName(AlertUploadLevel level);
+    static const char *urgentBlockReasonName(UrgentBlockReason reason);
     static ClaimStatus mapClaimError(int http_status, const String &body);
 
     StorageManager *storage_ = nullptr;
