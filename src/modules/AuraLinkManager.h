@@ -122,6 +122,9 @@ private:
         uint32_t urgent_quota_remaining = 0;
         uint32_t next_regular_upload_in_ms = 0;
         uint32_t last_success_age_ms = 0;
+        uint32_t active_alert_age_ms = 0;
+        uint32_t planned_next_upload_delay_ms = 0;
+        uint8_t startup_fast_uploads_remaining = 0;
     };
 
     struct WorkerCommand {
@@ -168,7 +171,11 @@ private:
     bool loadState();
     bool saveState();
     void clearLocalState();
+    void beginFastUploadPhase(uint32_t now_ms);
     void scheduleNextUpload(uint32_t now_ms, uint32_t delay_ms);
+    void updateActiveAlertWindow(uint32_t now_ms, const AlertSnapshot &alert_state);
+    uint32_t plannedNextUploadDelay(uint32_t now_ms, const AlertSnapshot &alert_state) const;
+    void recordSubmittedUploadForScheduling();
     bool shouldUpload(uint32_t now_ms, const SensorData &data) const;
     bool shouldRetryUpload(uint32_t now_ms) const;
     bool shouldTriggerUrgentUpload(uint32_t now_ms,
@@ -241,4 +248,6 @@ private:
     uint32_t last_urgent_upload_ms_ = 0;
     uint32_t urgent_upload_window_started_ms_ = 0;
     uint8_t urgent_uploads_in_window_ = 0;
+    uint8_t startup_fast_uploads_remaining_ = 0;
+    uint32_t active_alert_started_ms_ = 0;
 };

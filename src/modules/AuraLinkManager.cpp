@@ -30,10 +30,14 @@ constexpr uint32_t kAuraLinkTaskStackSize = 12288;
 constexpr UBaseType_t kAuraLinkTaskPriority = 1;
 constexpr BaseType_t kAuraLinkTaskCore = 0;
 constexpr uint32_t kInitialUploadDelayMs = 60UL * 1000UL;
+constexpr uint8_t kInitialFastUploadCount = 3;
+constexpr uint32_t kFastUploadIntervalMs = 60UL * 1000UL;
 constexpr uint32_t kUrgentUploadBootGraceMs = kInitialUploadDelayMs;
 constexpr uint32_t kUrgentUploadMinIntervalMs = 60UL * 1000UL;
 constexpr uint32_t kUrgentWatchSustainMs = 30UL * 1000UL;
 constexpr uint32_t kUrgentAlertSustainMs = 10UL * 1000UL;
+constexpr uint32_t kActiveAlertFastWindowMs = 5UL * 60UL * 1000UL;
+constexpr uint32_t kActiveAlertFollowupIntervalMs = 60UL * 1000UL;
 constexpr uint32_t kUrgentUploadQuotaWindowMs = 60UL * 60UL * 1000UL;
 constexpr uint8_t kUrgentUploadMaxPerWindow = 6;
 constexpr uint32_t kMinUploadIntervalSeconds = 30;
@@ -305,7 +309,7 @@ void AuraLinkManager::begin(StorageManager &storage) {
     storage_ = &storage;
     loadState();
     if (enabled_ && !device_token_.isEmpty()) {
-        scheduleNextUpload(millis(), kInitialUploadDelayMs);
+        beginFastUploadPhase(millis());
     }
 
     if (worker_task_ != nullptr) {
@@ -342,6 +346,7 @@ void AuraLinkManager::poll(uint32_t now_ms,
 
     const AlertSnapshot alert_state =
         updateAlertState(now_ms, data, sensor_warmup_active, thresholds);
+    updateActiveAlertWindow(now_ms, alert_state);
 
     if (shouldRetryUpload(now_ms)) {
         if (submitCommand(retry_ingest_command_)) {
@@ -364,18 +369,21 @@ void AuraLinkManager::poll(uint32_t now_ms,
                                regular_upload_due,
                                urgent_upload_due,
                                alert_state_changed);
+    const uint32_t next_upload_delay_ms = plannedNextUploadDelay(now_ms, alert_state);
     if (!regular_upload_due && !urgent_upload_due) {
         return;
     }
 
     WorkerCommand command;
+    UrgentDiagnostics command_diagnostics = urgent_diagnostics;
+    command_diagnostics.planned_next_upload_delay_ms = next_upload_delay_ms;
     if (!buildIngestCommand(command,
                             data,
                             sensor_warmup_active,
                             time_manager,
                             alert_state,
                             alert_state_changed ? UploadReason::AlertTransition : UploadReason::Scheduled,
-                            urgent_diagnostics)) {
+                            command_diagnostics)) {
         scheduleNextUpload(now_ms, Config::AURA_LINK_UPLOAD_RETRY_MS);
         return;
     }
@@ -391,11 +399,12 @@ void AuraLinkManager::poll(uint32_t now_ms,
     retry_ingest_pending_ = false;
     sequence_ = next_sequence;
     last_upload_attempt_ms_ = now_ms;
+    recordSubmittedUploadForScheduling();
     if (urgent_upload_due) {
         recordUrgentUpload(now_ms);
     }
     saveState();
-    scheduleNextUpload(now_ms, upload_interval_seconds_ * 1000UL);
+    scheduleNextUpload(now_ms, next_upload_delay_ms);
 }
 
 bool AuraLinkManager::claim(const char *pairing_code) {
@@ -701,6 +710,11 @@ AuraLinkManager::WorkerResult AuraLinkManager::executeCommand(const WorkerComman
         alert_debug["next_regular_upload_in_ms"] =
             command.urgent_diagnostics.next_regular_upload_in_ms;
         alert_debug["last_success_age_ms"] = command.urgent_diagnostics.last_success_age_ms;
+        alert_debug["active_alert_age_ms"] = command.urgent_diagnostics.active_alert_age_ms;
+        alert_debug["planned_next_upload_delay_ms"] =
+            command.urgent_diagnostics.planned_next_upload_delay_ms;
+        alert_debug["startup_fast_uploads_remaining"] =
+            command.urgent_diagnostics.startup_fast_uploads_remaining;
 
         String body;
         serializeJson(request, body);
@@ -784,7 +798,7 @@ void AuraLinkManager::consumeWorkerResult(uint32_t now_ms) {
         urgent_upload_window_started_ms_ = 0;
         urgent_uploads_in_window_ = 0;
         saveState();
-        scheduleNextUpload(now_ms, kInitialUploadDelayMs);
+        beginFastUploadPhase(now_ms);
         LOGI("AuraLink", "device linked");
         return;
     }
@@ -916,6 +930,8 @@ void AuraLinkManager::clearLocalState() {
     last_urgent_upload_ms_ = 0;
     urgent_upload_window_started_ms_ = 0;
     urgent_uploads_in_window_ = 0;
+    startup_fast_uploads_remaining_ = 0;
+    active_alert_started_ms_ = 0;
     if (storage_) {
         storage_->removeBlob(StorageManager::kAuraLinkPath);
     }
@@ -923,6 +939,46 @@ void AuraLinkManager::clearLocalState() {
 
 void AuraLinkManager::scheduleNextUpload(uint32_t now_ms, uint32_t delay_ms) {
     next_upload_due_ms_ = now_ms + delay_ms;
+}
+
+void AuraLinkManager::beginFastUploadPhase(uint32_t now_ms) {
+    startup_fast_uploads_remaining_ = kInitialFastUploadCount;
+    active_alert_started_ms_ = 0;
+    scheduleNextUpload(now_ms, kInitialUploadDelayMs);
+}
+
+void AuraLinkManager::updateActiveAlertWindow(uint32_t now_ms, const AlertSnapshot &alert_state) {
+    if (alert_state.level == AlertUploadLevel::Alert) {
+        if (active_alert_started_ms_ == 0) {
+            active_alert_started_ms_ = now_ms;
+        }
+        return;
+    }
+
+    active_alert_started_ms_ = 0;
+}
+
+uint32_t AuraLinkManager::plannedNextUploadDelay(uint32_t now_ms,
+                                                 const AlertSnapshot &alert_state) const {
+    if (startup_fast_uploads_remaining_ > 1) {
+        return kFastUploadIntervalMs;
+    }
+
+    if (alert_state.level == AlertUploadLevel::Alert && active_alert_started_ms_ != 0) {
+        const uint32_t active_alert_age_ms =
+            static_cast<uint32_t>(now_ms - active_alert_started_ms_);
+        if (active_alert_age_ms < kActiveAlertFastWindowMs) {
+            return kActiveAlertFollowupIntervalMs;
+        }
+    }
+
+    return upload_interval_seconds_ * 1000UL;
+}
+
+void AuraLinkManager::recordSubmittedUploadForScheduling() {
+    if (startup_fast_uploads_remaining_ > 0) {
+        --startup_fast_uploads_remaining_;
+    }
 }
 
 bool AuraLinkManager::shouldUpload(uint32_t now_ms, const SensorData &data) const {
@@ -1086,6 +1142,9 @@ AuraLinkManager::UrgentDiagnostics AuraLinkManager::buildUrgentDiagnostics(
     }
     diagnostics.last_success_age_ms =
         last_upload_success_ms_ == 0 ? 0 : static_cast<uint32_t>(now_ms - last_upload_success_ms_);
+    diagnostics.active_alert_age_ms =
+        active_alert_started_ms_ == 0 ? 0 : static_cast<uint32_t>(now_ms - active_alert_started_ms_);
+    diagnostics.startup_fast_uploads_remaining = startup_fast_uploads_remaining_;
     return diagnostics;
 }
 
