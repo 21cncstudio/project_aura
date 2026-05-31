@@ -27,7 +27,7 @@ namespace {
 constexpr uint32_t kAuraLinkTaskStackSize = 12288;
 constexpr UBaseType_t kAuraLinkTaskPriority = 1;
 constexpr BaseType_t kAuraLinkTaskCore = 0;
-constexpr uint32_t kInitialUploadDelayMs = 5000;
+constexpr uint32_t kInitialUploadDelayMs = 60UL * 1000UL;
 constexpr uint32_t kMinUploadIntervalSeconds = 30;
 constexpr uint32_t kMaxUploadIntervalSeconds = 24UL * 60UL * 60UL;
 
