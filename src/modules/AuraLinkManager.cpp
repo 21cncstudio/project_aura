@@ -354,6 +354,7 @@ void AuraLinkManager::poll(uint32_t now_ms,
     }
 
     const bool regular_upload_due = shouldUpload(now_ms, data);
+    const bool alert_state_changed = !sameAlertSnapshot(alert_state, reported_alert_state_);
     const bool urgent_upload_due =
         !regular_upload_due && shouldTriggerUrgentUpload(now_ms, data, alert_state);
     if (!regular_upload_due && !urgent_upload_due) {
@@ -366,7 +367,7 @@ void AuraLinkManager::poll(uint32_t now_ms,
                             sensor_warmup_active,
                             time_manager,
                             alert_state,
-                            urgent_upload_due ? UploadReason::AlertTransition : UploadReason::Scheduled)) {
+                            alert_state_changed ? UploadReason::AlertTransition : UploadReason::Scheduled)) {
         scheduleNextUpload(now_ms, Config::AURA_LINK_UPLOAD_RETRY_MS);
         return;
     }
