@@ -16,6 +16,9 @@
 
 class StorageManager;
 class TimeManager;
+namespace DisplayThresholds {
+struct Config;
+}
 
 class AuraLinkManager {
 public:
@@ -51,7 +54,8 @@ public:
     void poll(uint32_t now_ms,
               const SensorData &data,
               bool sensor_warmup_active,
-              const TimeManager &time_manager);
+              const TimeManager &time_manager,
+              const DisplayThresholds::Config &thresholds);
 
     bool claim(const char *pairing_code);
     void reset();
@@ -70,6 +74,17 @@ private:
         Ingest,
     };
 
+    enum class AlertUploadLevel : uint8_t {
+        Normal = 0,
+        Watch,
+        Alert,
+    };
+
+    struct AlertSnapshot {
+        AlertUploadLevel level = AlertUploadLevel::Normal;
+        uint32_t active_mask = 0;
+    };
+
     struct WorkerCommand {
         WorkerOp op = WorkerOp::None;
         char pairing_code[7] = {};
@@ -85,6 +100,7 @@ private:
         uint32_t free_heap = 0;
         uint32_t free_psram = 0;
         uint32_t reset_reason = 0;
+        AlertSnapshot alert_state{};
     };
 
     struct WorkerResult {
@@ -114,12 +130,25 @@ private:
     void scheduleNextUpload(uint32_t now_ms, uint32_t delay_ms);
     bool shouldUpload(uint32_t now_ms, const SensorData &data) const;
     bool shouldRetryUpload(uint32_t now_ms) const;
+    bool shouldTriggerUrgentUpload(uint32_t now_ms,
+                                   const SensorData &data,
+                                   const AlertSnapshot &alert_state) const;
     bool buildIngestCommand(WorkerCommand &command,
                             const SensorData &data,
                             bool sensor_warmup_active,
-                            const TimeManager &time_manager);
+                            const TimeManager &time_manager,
+                            const AlertSnapshot &alert_state);
+    AlertSnapshot updateAlertState(uint32_t now_ms,
+                                   const SensorData &data,
+                                   bool sensor_warmup_active,
+                                   const DisplayThresholds::Config &thresholds);
+    void recordUrgentUpload(uint32_t now_ms);
 
     static bool hasAnyValidSensor(const SensorData &data);
+    static AlertSnapshot evaluateAlertState(const SensorData &data,
+                                            bool sensor_warmup_active,
+                                            const DisplayThresholds::Config &thresholds);
+    static bool sameAlertSnapshot(const AlertSnapshot &left, const AlertSnapshot &right);
     static ClaimStatus mapClaimError(int http_status, const String &body);
 
     StorageManager *storage_ = nullptr;
@@ -149,4 +178,11 @@ private:
     bool worker_busy_ = false;
     bool inflight_ingest_valid_ = false;
     bool retry_ingest_pending_ = false;
+    AlertSnapshot alert_candidate_state_{};
+    AlertSnapshot stable_alert_state_{};
+    AlertSnapshot reported_alert_state_{};
+    uint32_t alert_candidate_since_ms_ = 0;
+    uint32_t last_urgent_upload_ms_ = 0;
+    uint32_t urgent_upload_window_started_ms_ = 0;
+    uint8_t urgent_uploads_in_window_ = 0;
 };

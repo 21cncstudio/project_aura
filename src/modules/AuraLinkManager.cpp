@@ -19,8 +19,10 @@
 #include "core/Logger.h"
 #include "core/MathUtils.h"
 #include "drivers/DfrOptionalGasSensor.h"
+#include "modules/DisplayThresholds.h"
 #include "modules/StorageManager.h"
 #include "modules/TimeManager.h"
+#include "ui/UiOptionalGasProfile.h"
 
 namespace {
 
@@ -28,8 +30,53 @@ constexpr uint32_t kAuraLinkTaskStackSize = 12288;
 constexpr UBaseType_t kAuraLinkTaskPriority = 1;
 constexpr BaseType_t kAuraLinkTaskCore = 0;
 constexpr uint32_t kInitialUploadDelayMs = 60UL * 1000UL;
+constexpr uint32_t kUrgentUploadBootGraceMs = kInitialUploadDelayMs;
+constexpr uint32_t kUrgentUploadMinIntervalMs = 60UL * 1000UL;
+constexpr uint32_t kUrgentWatchSustainMs = 30UL * 1000UL;
+constexpr uint32_t kUrgentAlertSustainMs = 10UL * 1000UL;
+constexpr uint32_t kUrgentUploadQuotaWindowMs = 60UL * 60UL * 1000UL;
+constexpr uint8_t kUrgentUploadMaxPerWindow = 6;
 constexpr uint32_t kMinUploadIntervalSeconds = 30;
 constexpr uint32_t kMaxUploadIntervalSeconds = 24UL * 60UL * 60UL;
+
+constexpr uint32_t kAlertMetricTemp = 1UL << 0;
+constexpr uint32_t kAlertMetricHumidity = 1UL << 1;
+constexpr uint32_t kAlertMetricDewPoint = 1UL << 2;
+constexpr uint32_t kAlertMetricAbsoluteHumidity = 1UL << 3;
+constexpr uint32_t kAlertMetricCo2 = 1UL << 4;
+constexpr uint32_t kAlertMetricPm05 = 1UL << 5;
+constexpr uint32_t kAlertMetricPm1 = 1UL << 6;
+constexpr uint32_t kAlertMetricPm25 = 1UL << 7;
+constexpr uint32_t kAlertMetricPm4 = 1UL << 8;
+constexpr uint32_t kAlertMetricPm10 = 1UL << 9;
+constexpr uint32_t kAlertMetricVoc = 1UL << 10;
+constexpr uint32_t kAlertMetricNox = 1UL << 11;
+constexpr uint32_t kAlertMetricHcho = 1UL << 12;
+constexpr uint32_t kAlertMetricCo = 1UL << 13;
+constexpr uint32_t kAlertMetricOptionalGas = 1UL << 14;
+
+struct AlertMetricName {
+    uint32_t mask = 0;
+    const char *name = "";
+};
+
+constexpr AlertMetricName kAlertMetricNames[] = {
+    {kAlertMetricTemp, "temperature"},
+    {kAlertMetricHumidity, "humidity"},
+    {kAlertMetricDewPoint, "dew_point"},
+    {kAlertMetricAbsoluteHumidity, "absolute_humidity"},
+    {kAlertMetricCo2, "co2"},
+    {kAlertMetricPm05, "pm05"},
+    {kAlertMetricPm1, "pm1"},
+    {kAlertMetricPm25, "pm25"},
+    {kAlertMetricPm4, "pm4"},
+    {kAlertMetricPm10, "pm10"},
+    {kAlertMetricVoc, "voc"},
+    {kAlertMetricNox, "nox"},
+    {kAlertMetricHcho, "hcho"},
+    {kAlertMetricCo, "co"},
+    {kAlertMetricOptionalGas, "optional_gas"},
+};
 
 bool base_url_configured() {
     return Config::AURA_LINK_BASE_URL && Config::AURA_LINK_BASE_URL[0] != '\0';
@@ -215,6 +262,43 @@ bool add_int(JsonObject obj, const char *key, int value, bool valid) {
     return true;
 }
 
+uint8_t alert_level_from_display_band(DisplayThresholds::Band band) {
+    switch (band) {
+        case DisplayThresholds::Band::Red:
+            return 2;
+        case DisplayThresholds::Band::Orange:
+            return 1;
+        case DisplayThresholds::Band::Green:
+        case DisplayThresholds::Band::Yellow:
+        case DisplayThresholds::Band::Invalid:
+        default:
+            return 0;
+    }
+}
+
+uint8_t alert_level_from_high(float value, float yellow_max, float orange_max) {
+    if (!isfinite(value) || value < 0.0f) {
+        return 0;
+    }
+    if (value > orange_max) {
+        return 2;
+    }
+    if (value > yellow_max) {
+        return 1;
+    }
+    return 0;
+}
+
+bool urgent_quota_available(uint32_t now_ms, uint32_t window_started_ms, uint8_t count) {
+    if (window_started_ms == 0) {
+        return true;
+    }
+    if (static_cast<uint32_t>(now_ms - window_started_ms) >= kUrgentUploadQuotaWindowMs) {
+        return true;
+    }
+    return count < kUrgentUploadMaxPerWindow;
+}
+
 } // namespace
 
 void AuraLinkManager::begin(StorageManager &storage) {
@@ -249,11 +333,15 @@ void AuraLinkManager::begin(StorageManager &storage) {
 void AuraLinkManager::poll(uint32_t now_ms,
                            const SensorData &data,
                            bool sensor_warmup_active,
-                           const TimeManager &time_manager) {
+                           const TimeManager &time_manager,
+                           const DisplayThresholds::Config &thresholds) {
     consumeWorkerResult(now_ms);
     if (!started_) {
         return;
     }
+
+    const AlertSnapshot alert_state =
+        updateAlertState(now_ms, data, sensor_warmup_active, thresholds);
 
     if (shouldRetryUpload(now_ms)) {
         if (submitCommand(retry_ingest_command_)) {
@@ -265,12 +353,19 @@ void AuraLinkManager::poll(uint32_t now_ms,
         return;
     }
 
-    if (!shouldUpload(now_ms, data)) {
+    const bool regular_upload_due = shouldUpload(now_ms, data);
+    const bool urgent_upload_due =
+        !regular_upload_due && shouldTriggerUrgentUpload(now_ms, data, alert_state);
+    if (!regular_upload_due && !urgent_upload_due) {
         return;
     }
 
     WorkerCommand command;
-    if (!buildIngestCommand(command, data, sensor_warmup_active, time_manager)) {
+    if (!buildIngestCommand(command,
+                            data,
+                            sensor_warmup_active,
+                            time_manager,
+                            alert_state)) {
         scheduleNextUpload(now_ms, Config::AURA_LINK_UPLOAD_RETRY_MS);
         return;
     }
@@ -286,6 +381,9 @@ void AuraLinkManager::poll(uint32_t now_ms,
     retry_ingest_pending_ = false;
     sequence_ = next_sequence;
     last_upload_attempt_ms_ = now_ms;
+    if (urgent_upload_due) {
+        recordUrgentUpload(now_ms);
+    }
     saveState();
     scheduleNextUpload(now_ms, upload_interval_seconds_ * 1000UL);
 }
@@ -526,6 +624,28 @@ AuraLinkManager::WorkerResult AuraLinkManager::executeCommand(const WorkerComman
                 DfrOptionalGasSensor::optionalGasLabel(optional_gas_type);
         }
 
+        const char *alert_level = "normal";
+        switch (command.alert_state.level) {
+            case AlertUploadLevel::Alert:
+                alert_level = "alert";
+                break;
+            case AlertUploadLevel::Watch:
+                alert_level = "watch";
+                break;
+            case AlertUploadLevel::Normal:
+            default:
+                alert_level = "normal";
+                break;
+        }
+        JsonObject alert_state = request["alert_state"].to<JsonObject>();
+        alert_state["level"] = alert_level;
+        JsonArray active_alerts = alert_state["active"].to<JsonArray>();
+        for (const AlertMetricName &metric : kAlertMetricNames) {
+            if ((command.alert_state.active_mask & metric.mask) != 0) {
+                active_alerts.add(metric.name);
+            }
+        }
+
         String body;
         serializeJson(request, body);
         String response;
@@ -600,6 +720,13 @@ void AuraLinkManager::consumeWorkerResult(uint32_t now_ms) {
         sequence_ = 0;
         last_upload_success_ms_ = 0;
         last_upload_attempt_ms_ = 0;
+        alert_candidate_state_ = {};
+        stable_alert_state_ = {};
+        reported_alert_state_ = {};
+        alert_candidate_since_ms_ = now_ms;
+        last_urgent_upload_ms_ = 0;
+        urgent_upload_window_started_ms_ = 0;
+        urgent_uploads_in_window_ = 0;
         saveState();
         scheduleNextUpload(now_ms, kInitialUploadDelayMs);
         LOGI("AuraLink", "device linked");
@@ -614,6 +741,9 @@ void AuraLinkManager::consumeWorkerResult(uint32_t now_ms) {
         }
         if (result.ok) {
             upload_paused_ = false;
+            if (inflight_ingest_valid_) {
+                reported_alert_state_ = inflight_ingest_command_.alert_state;
+            }
             inflight_ingest_valid_ = false;
             retry_ingest_pending_ = false;
             upload_interval_seconds_ = result.upload_interval_seconds;
@@ -723,6 +853,13 @@ void AuraLinkManager::clearLocalState() {
     inflight_ingest_valid_ = false;
     retry_ingest_pending_ = false;
     claim_status_ = ClaimStatus::Idle;
+    alert_candidate_state_ = {};
+    stable_alert_state_ = {};
+    reported_alert_state_ = {};
+    alert_candidate_since_ms_ = 0;
+    last_urgent_upload_ms_ = 0;
+    urgent_upload_window_started_ms_ = 0;
+    urgent_uploads_in_window_ = 0;
     if (storage_) {
         storage_->removeBlob(StorageManager::kAuraLinkPath);
     }
@@ -763,10 +900,38 @@ bool AuraLinkManager::shouldRetryUpload(uint32_t now_ms) const {
            static_cast<int32_t>(now_ms - next_upload_due_ms_) >= 0;
 }
 
+bool AuraLinkManager::shouldTriggerUrgentUpload(uint32_t now_ms,
+                                                const SensorData &data,
+                                                const AlertSnapshot &alert_state) const {
+    if (!enabled_ || upload_paused_ || device_id_.isEmpty() || device_token_.isEmpty()) {
+        return false;
+    }
+    if (!base_url_configured() || WiFi.status() != WL_CONNECTED) {
+        return false;
+    }
+    if (!hasAnyValidSensor(data) || last_upload_success_ms_ == 0) {
+        return false;
+    }
+    if (now_ms < kUrgentUploadBootGraceMs) {
+        return false;
+    }
+    if (sameAlertSnapshot(alert_state, reported_alert_state_)) {
+        return false;
+    }
+    if (last_urgent_upload_ms_ != 0 &&
+        static_cast<uint32_t>(now_ms - last_urgent_upload_ms_) < kUrgentUploadMinIntervalMs) {
+        return false;
+    }
+    return urgent_quota_available(now_ms,
+                                  urgent_upload_window_started_ms_,
+                                  urgent_uploads_in_window_);
+}
+
 bool AuraLinkManager::buildIngestCommand(WorkerCommand &command,
                                          const SensorData &data,
                                          bool sensor_warmup_active,
-                                         const TimeManager &time_manager) {
+                                         const TimeManager &time_manager,
+                                         const AlertSnapshot &alert_state) {
     if (device_id_.isEmpty() || device_token_.isEmpty()) {
         return false;
     }
@@ -782,7 +947,164 @@ bool AuraLinkManager::buildIngestCommand(WorkerCommand &command,
     command.free_heap = ESP.getFreeHeap();
     command.free_psram = ESP.getPsramSize() > 0 ? ESP.getFreePsram() : 0;
     command.reset_reason = static_cast<uint32_t>(esp_reset_reason());
+    command.alert_state = alert_state;
     return true;
+}
+
+AuraLinkManager::AlertSnapshot AuraLinkManager::updateAlertState(
+    uint32_t now_ms,
+    const SensorData &data,
+    bool sensor_warmup_active,
+    const DisplayThresholds::Config &thresholds) {
+    const AlertSnapshot evaluated = evaluateAlertState(data, sensor_warmup_active, thresholds);
+    if (!sameAlertSnapshot(evaluated, alert_candidate_state_)) {
+        alert_candidate_state_ = evaluated;
+        alert_candidate_since_ms_ = now_ms;
+        return stable_alert_state_;
+    }
+
+    const uint32_t sustain_ms = evaluated.level == AlertUploadLevel::Alert
+                                    ? kUrgentAlertSustainMs
+                                    : kUrgentWatchSustainMs;
+    if (alert_candidate_since_ms_ == 0) {
+        alert_candidate_since_ms_ = now_ms;
+    }
+    if (static_cast<uint32_t>(now_ms - alert_candidate_since_ms_) >= sustain_ms) {
+        stable_alert_state_ = evaluated;
+    }
+    return stable_alert_state_;
+}
+
+void AuraLinkManager::recordUrgentUpload(uint32_t now_ms) {
+    last_urgent_upload_ms_ = now_ms;
+    if (urgent_upload_window_started_ms_ == 0 ||
+        static_cast<uint32_t>(now_ms - urgent_upload_window_started_ms_) >=
+            kUrgentUploadQuotaWindowMs) {
+        urgent_upload_window_started_ms_ = now_ms;
+        urgent_uploads_in_window_ = 0;
+    }
+    if (urgent_uploads_in_window_ < UINT8_MAX) {
+        ++urgent_uploads_in_window_;
+    }
+}
+
+AuraLinkManager::AlertSnapshot AuraLinkManager::evaluateAlertState(
+    const SensorData &data,
+    bool sensor_warmup_active,
+    const DisplayThresholds::Config &thresholds) {
+    AlertSnapshot snapshot{};
+
+    auto include_level = [&snapshot](uint32_t mask, uint8_t raw_level) {
+        if (raw_level == 0) {
+            return;
+        }
+        snapshot.active_mask |= mask;
+        const AlertUploadLevel level =
+            raw_level >= 2 ? AlertUploadLevel::Alert : AlertUploadLevel::Watch;
+        if (static_cast<uint8_t>(level) > static_cast<uint8_t>(snapshot.level)) {
+            snapshot.level = level;
+        }
+    };
+
+    if (data.temp_valid && isfinite(data.temperature)) {
+        include_level(kAlertMetricTemp,
+                      alert_level_from_display_band(
+                          DisplayThresholds::classifyRange(data.temperature, thresholds.temp)));
+    }
+    if (data.hum_valid && isfinite(data.humidity)) {
+        include_level(kAlertMetricHumidity,
+                      alert_level_from_display_band(
+                          DisplayThresholds::classifyRange(data.humidity, thresholds.rh)));
+    }
+    if (data.temp_valid && data.hum_valid) {
+        const float dew_point =
+            MathUtils::compute_dew_point_c(data.temperature, data.humidity);
+        const float absolute_humidity =
+            MathUtils::compute_absolute_humidity_gm3(data.temperature, data.humidity);
+        include_level(kAlertMetricDewPoint,
+                      alert_level_from_display_band(
+                          DisplayThresholds::classifyRange(dew_point, thresholds.dew_point)));
+        include_level(kAlertMetricAbsoluteHumidity,
+                      alert_level_from_display_band(
+                          DisplayThresholds::classifyRange(absolute_humidity, thresholds.ah)));
+    }
+    if (data.co2_valid && data.co2 > 0) {
+        include_level(kAlertMetricCo2,
+                      alert_level_from_display_band(DisplayThresholds::classifyHigh(
+                          static_cast<float>(data.co2), thresholds.co2)));
+    }
+    if (data.pm05_valid && isfinite(data.pm05)) {
+        include_level(kAlertMetricPm05,
+                      alert_level_from_high(data.pm05,
+                                            Config::AQ_PM05_YELLOW_MAX_PPCM3,
+                                            Config::AQ_PM05_ORANGE_MAX_PPCM3));
+    }
+    if (data.pm1_valid && isfinite(data.pm1)) {
+        include_level(kAlertMetricPm1,
+                      alert_level_from_high(data.pm1,
+                                            Config::AQ_PM1_YELLOW_MAX_UGM3,
+                                            Config::AQ_PM1_ORANGE_MAX_UGM3));
+    }
+    if (data.pm25_valid && isfinite(data.pm25)) {
+        include_level(kAlertMetricPm25,
+                      alert_level_from_high(data.pm25,
+                                            Config::AQ_PM25_YELLOW_MAX_UGM3,
+                                            Config::AQ_PM25_ORANGE_MAX_UGM3));
+    }
+    if (data.pm4_valid && isfinite(data.pm4)) {
+        include_level(kAlertMetricPm4,
+                      alert_level_from_high(data.pm4,
+                                            Config::AQ_PM4_YELLOW_MAX_UGM3,
+                                            Config::AQ_PM4_ORANGE_MAX_UGM3));
+    }
+    if (data.pm10_valid && isfinite(data.pm10)) {
+        include_level(kAlertMetricPm10,
+                      alert_level_from_high(data.pm10,
+                                            Config::AQ_PM10_YELLOW_MAX_UGM3,
+                                            Config::AQ_PM10_ORANGE_MAX_UGM3));
+    }
+    if (!sensor_warmup_active && data.voc_valid && data.voc_index >= 0) {
+        include_level(kAlertMetricVoc,
+                      alert_level_from_high(static_cast<float>(data.voc_index),
+                                            static_cast<float>(Config::AQ_VOC_YELLOW_MAX_INDEX),
+                                            static_cast<float>(Config::AQ_VOC_ORANGE_MAX_INDEX)));
+    }
+    if (!sensor_warmup_active && data.nox_valid && data.nox_index >= 0) {
+        include_level(kAlertMetricNox,
+                      alert_level_from_high(static_cast<float>(data.nox_index),
+                                            static_cast<float>(Config::AQ_NOX_YELLOW_MAX_INDEX),
+                                            static_cast<float>(Config::AQ_NOX_ORANGE_MAX_INDEX)));
+    }
+    if (data.hcho_valid && !data.hcho_warmup && isfinite(data.hcho)) {
+        include_level(kAlertMetricHcho,
+                      alert_level_from_display_band(
+                          DisplayThresholds::classifyHigh(data.hcho, thresholds.hcho)));
+    }
+    if (data.co_sensor_present && data.co_valid && !data.co_warmup && isfinite(data.co_ppm)) {
+        include_level(kAlertMetricCo,
+                      alert_level_from_display_band(
+                          DisplayThresholds::classifyHigh(data.co_ppm, thresholds.co)));
+    }
+    if (data.optional_gas_sensor_present &&
+        data.optional_gas_valid &&
+        !data.optional_gas_warmup &&
+        isfinite(data.optional_gas_ppm)) {
+        const auto optional_type =
+            static_cast<DfrOptionalGasSensor::OptionalGasType>(data.optional_gas_type);
+        if (UiOptionalGasProfile::isKnown(optional_type)) {
+            const auto &profile = UiOptionalGasProfile::forType(optional_type);
+            include_level(kAlertMetricOptionalGas,
+                          alert_level_from_high(data.optional_gas_ppm,
+                                                profile.yellow_max_ppm,
+                                                profile.orange_max_ppm));
+        }
+    }
+
+    return snapshot;
+}
+
+bool AuraLinkManager::sameAlertSnapshot(const AlertSnapshot &left, const AlertSnapshot &right) {
+    return left.level == right.level && left.active_mask == right.active_mask;
 }
 
 bool AuraLinkManager::hasAnyValidSensor(const SensorData &data) {

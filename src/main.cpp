@@ -322,7 +322,11 @@ void loop()
     mqttManager.setSystemTimeValid(timeManager.isSystemTimeValid());
     uiController.onTimePoll(time_poll);
     fanControl.poll(now, &currentData, sensorManager.isWarmupActive());
-    auraLinkManager.poll(now, currentData, sensorManager.isWarmupActive(), timeManager);
+    auraLinkManager.poll(now,
+                         currentData,
+                         sensorManager.isWarmupActive(),
+                         timeManager,
+                         displayThresholds.snapshot());
     const FanControl::Snapshot fan_snapshot = fanControl.snapshot();
     webRuntimeState.update(currentData, sensorManager.isWarmupActive(), fanControl);
     mqttRuntimeState.update(currentData,
