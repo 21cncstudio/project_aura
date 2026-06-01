@@ -515,6 +515,8 @@ namespace Config {
     constexpr uint16_t MQTT_DEFAULT_PORT = Secrets::MQTT_PORT;
     constexpr uint16_t MQTT_TLS_DEFAULT_PORT = 8883;
     constexpr size_t MQTT_CA_CERT_MAX_BYTES = 16UL * 1024UL;
+    constexpr size_t WIFI_EAP_PEM_MAX_BYTES = 8UL * 1024UL;
+    constexpr size_t WIFI_EAP_PRIVATE_KEY_MAX_BYTES = 4096UL;
     constexpr const char *MQTT_DEFAULT_HOST = Secrets::MQTT_HOST;
     constexpr const char *MQTT_DEFAULT_USER = Secrets::MQTT_USER;
     constexpr const char *MQTT_DEFAULT_BASE = Secrets::MQTT_BASE;

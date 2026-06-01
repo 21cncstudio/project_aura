@@ -359,18 +359,9 @@ void StorageManager::saveWiFiEnabled(bool enabled) {
 }
 
 void StorageManager::clearWiFiCredentials() {
-    config_.wifi_ssid = "";
-    config_.wifi_pass = "";
-    config_.wifi_auth_mode = Config::WifiAuthMode::Personal;
-    config_.wifi_eap_method = Config::WifiEapMethod::Peap;
-    config_.wifi_ttls_phase2 = Config::WifiTtlsPhase2::Mschapv2;
-    config_.wifi_identity = "";
-    config_.wifi_username = "";
-    config_.wifi_enterprise_pass = "";
-    saveOrRemoveText(*this, kWifiEapCaCertPath, "");
-    saveOrRemoveText(*this, kWifiEapClientCertPath, "");
-    saveOrRemoveText(*this, kWifiEapClientKeyPath, "");
-    if (!saveConfig(true)) {
+    Config::WifiSettings empty_settings{};
+    empty_settings.enabled = config_.wifi_enabled;
+    if (!saveWiFiSettings(empty_settings)) {
         requestSave();
         LOGE("Storage", "failed to clear WiFi credentials");
     }

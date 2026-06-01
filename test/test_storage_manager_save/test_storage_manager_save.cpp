@@ -104,6 +104,38 @@ void test_save_wifi_enterprise_settings_rolls_back_config_and_certs_on_failure()
     TEST_ASSERT_EQUAL_STRING("", loaded.client_key_pem.c_str());
 }
 
+void test_clear_wifi_credentials_rolls_back_config_and_certs_on_failure() {
+    StorageManager storage;
+    storage.begin();
+
+    Config::WifiSettings old_settings{};
+    old_settings.ssid = "CorpNet";
+    old_settings.enabled = true;
+    old_settings.auth_mode = Config::WifiAuthMode::Enterprise;
+    old_settings.eap_method = Config::WifiEapMethod::Tls;
+    old_settings.identity = "device-1";
+    old_settings.client_cert_pem = "old-client";
+    old_settings.client_key_pem = "old-key";
+    old_settings.ca_cert_pem = "old-ca";
+    TEST_ASSERT_TRUE(storage.saveWiFiSettings(old_settings));
+
+    StorageManager::setTestForceSaveFailure(true);
+    storage.clearWiFiCredentials();
+
+    TEST_ASSERT_EQUAL_STRING("CorpNet", storage.config().wifi_ssid.c_str());
+    TEST_ASSERT_TRUE(storage.config().wifi_enabled);
+    TEST_ASSERT_EQUAL_INT(static_cast<int>(Config::WifiAuthMode::Enterprise),
+                          static_cast<int>(storage.config().wifi_auth_mode));
+    TEST_ASSERT_EQUAL_INT(static_cast<int>(Config::WifiEapMethod::Tls),
+                          static_cast<int>(storage.config().wifi_eap_method));
+    TEST_ASSERT_EQUAL_STRING("device-1", storage.config().wifi_identity.c_str());
+    Config::WifiSettings loaded{};
+    storage.loadWiFiSettings(loaded);
+    TEST_ASSERT_EQUAL_STRING("old-ca", loaded.ca_cert_pem.c_str());
+    TEST_ASSERT_EQUAL_STRING("old-client", loaded.client_cert_pem.c_str());
+    TEST_ASSERT_EQUAL_STRING("old-key", loaded.client_key_pem.c_str());
+}
+
 void test_save_mqtt_settings_preserves_spaces() {
     StorageManager storage;
     storage.begin();
@@ -227,6 +259,7 @@ int main(int, char **) {
     RUN_TEST(test_save_wifi_settings_rolls_back_on_failure);
     RUN_TEST(test_save_wifi_enterprise_settings_persists_certs);
     RUN_TEST(test_save_wifi_enterprise_settings_rolls_back_config_and_certs_on_failure);
+    RUN_TEST(test_clear_wifi_credentials_rolls_back_config_and_certs_on_failure);
     RUN_TEST(test_save_mqtt_settings_preserves_spaces);
     RUN_TEST(test_save_mqtt_settings_rolls_back_on_failure);
     RUN_TEST(test_save_mqtt_settings_persists_and_removes_ca_certificate);

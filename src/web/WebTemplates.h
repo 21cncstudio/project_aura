@@ -129,7 +129,8 @@ static const char kWifiPageTemplate[] PROGMEM = R"HTML(
             display: flex; flex-direction: column;
             max-height: 95vh;
             position: relative;
-            overflow: hidden;
+            overflow-x: hidden;
+            overflow-y: auto;
         }
 
         .header {
@@ -406,7 +407,7 @@ static const char kWifiPageTemplate[] PROGMEM = R"HTML(
                             </button>
                         </div>
                     </div>
-                    <div class="warning">CA certificate is optional. Leaving it empty is less secure and should only be used when your network requires it.</div>
+                    <div class="warning" id="ca-warning">CA certificate is optional. Without CA verification, PEAP/TTLS can leak your Enterprise username and password to a fake access point. Use this only for advanced testing or when your network explicitly requires it.</div>
                     <div class="field">
                         <div class="label-row"><label for="ca-cert-pem">CA Certificate</label></div>
                         <textarea name="ca_cert_pem" id="ca-cert-pem" placeholder="-----BEGIN CERTIFICATE-----"></textarea>
@@ -451,6 +452,12 @@ static const char kWifiPageTemplate[] PROGMEM = R"HTML(
             document.getElementById('enterprise-user-row').classList.toggle('hidden', tls);
             document.getElementById('enterprise-pass-row').classList.toggle('hidden', tls);
             document.getElementById('tls-fields').classList.toggle('hidden', !tls);
+            var warning = document.getElementById('ca-warning');
+            if (warning) {
+                warning.textContent = tls
+                    ? 'CA certificate is optional. Without CA verification, the server identity is not checked.'
+                    : 'CA certificate is optional. Without CA verification, PEAP/TTLS can leak your Enterprise username and password to a fake access point.';
+            }
         }
 
         function selectNetwork(ssid, element) {
@@ -465,8 +472,8 @@ static const char kWifiPageTemplate[] PROGMEM = R"HTML(
             submitBtn.disabled = false;
             submitBtn.textContent = 'Connect to ' + (ssid.length > 15 ? ssid.substring(0, 12) + '...' : ssid);
 
-            if (element && element.getAttribute('data-enterprise') === '1') {
-                setAuthMode('enterprise');
+            if (element && element.getAttribute('data-manual') !== '1') {
+                setAuthMode(element.getAttribute('data-enterprise') === '1' ? 'enterprise' : 'personal');
             }
 
             setTimeout(function() {

@@ -17,6 +17,10 @@ namespace {
 
 constexpr size_t kEnterpriseFieldMaxBytes = 64;
 
+bool string_is_empty(const String &value) {
+    return value.length() == 0;
+}
+
 String trim_copy(const String &value) {
     const char *raw = value.c_str();
     if (!raw) {
@@ -105,6 +109,51 @@ bool isEnterpriseFieldValid(const String &value) {
            !WebInputValidation::hasControlChars(value);
 }
 
+bool contains_ordered_text(const String &value, const char *first, const char *second) {
+    const char *raw = value.c_str();
+    if (!raw || !first || !second) {
+        return false;
+    }
+    const char *first_pos = strstr(raw, first);
+    if (!first_pos) {
+        return false;
+    }
+    return strstr(first_pos + strlen(first), second) != nullptr;
+}
+
+bool contains_only_pem_text_chars(const String &value) {
+    const char *raw = value.c_str();
+    if (!raw) {
+        return false;
+    }
+    for (; *raw != '\0'; ++raw) {
+        const unsigned char ch = static_cast<unsigned char>(*raw);
+        if (ch == '\n' || (ch >= 32 && ch <= 126)) {
+            continue;
+        }
+        return false;
+    }
+    return true;
+}
+
+bool is_pem_certificate(const String &value) {
+    return contains_ordered_text(value,
+                                 "-----BEGIN CERTIFICATE-----",
+                                 "-----END CERTIFICATE-----");
+}
+
+bool is_pem_private_key(const String &value) {
+    return contains_ordered_text(value,
+                                 "-----BEGIN PRIVATE KEY-----",
+                                 "-----END PRIVATE KEY-----") ||
+           contains_ordered_text(value,
+                                 "-----BEGIN RSA PRIVATE KEY-----",
+                                 "-----END RSA PRIVATE KEY-----") ||
+           contains_ordered_text(value,
+                                 "-----BEGIN EC PRIVATE KEY-----",
+                                 "-----END EC PRIVATE KEY-----");
+}
+
 bool looksEncryptedPrivateKey(const String &value) {
     const char *raw = value.c_str();
     if (!raw) {
@@ -119,6 +168,32 @@ void fail(ParseResult &result, const char *message) {
     result.success = false;
     result.status_code = 400;
     result.error_message = message;
+}
+
+bool validate_pem_size(ParseResult &result, const String &value, size_t max_bytes,
+                       const char *message) {
+    if (value.length() <= max_bytes) {
+        return true;
+    }
+    fail(result, message);
+    return false;
+}
+
+bool validate_optional_certificate(ParseResult &result, const String &value,
+                                   const char *type_message,
+                                   const char *chars_message) {
+    if (string_is_empty(value)) {
+        return true;
+    }
+    if (!is_pem_certificate(value)) {
+        fail(result, type_message);
+        return false;
+    }
+    if (!contains_only_pem_text_chars(value)) {
+        fail(result, chars_message);
+        return false;
+    }
+    return true;
 }
 
 } // namespace
@@ -181,10 +256,34 @@ ParseResult parseSaveInput(const SaveInput &input) {
     settings.client_cert_pem = normalize_pem_text(input.client_cert_pem);
     settings.client_key_pem = normalize_pem_text(input.client_key_pem);
 
+    if (eap_method == Config::WifiEapMethod::Tls) {
+        settings.username = "";
+        settings.enterprise_password = "";
+    } else {
+        settings.client_cert_pem = "";
+        settings.client_key_pem = "";
+    }
+
+    if (!validate_pem_size(result, settings.ca_cert_pem, Config::WIFI_EAP_PEM_MAX_BYTES,
+                           "CA certificate is too large") ||
+        !validate_pem_size(result, settings.client_cert_pem, Config::WIFI_EAP_PEM_MAX_BYTES,
+                           "Client certificate is too large") ||
+        !validate_pem_size(result, settings.client_key_pem,
+                           Config::WIFI_EAP_PRIVATE_KEY_MAX_BYTES,
+                           "Client private key is too large")) {
+        return result;
+    }
+
     if (!isEnterpriseFieldValid(settings.identity) ||
         !isEnterpriseFieldValid(settings.username) ||
         !isEnterpriseFieldValid(settings.enterprise_password)) {
         fail(result, "Enterprise identity, username, and password must be 64 bytes or less");
+        return result;
+    }
+
+    if (!validate_optional_certificate(result, settings.ca_cert_pem,
+                                       "CA certificate must be a PEM certificate",
+                                       "CA certificate contains unsupported characters")) {
         return result;
     }
 
@@ -208,6 +307,19 @@ ParseResult parseSaveInput(const SaveInput &input) {
         }
         if (looksEncryptedPrivateKey(settings.client_key_pem)) {
             fail(result, "Encrypted private keys and PKCS12/PFX files are not supported");
+            return result;
+        }
+        if (!validate_optional_certificate(result, settings.client_cert_pem,
+                                           "Client certificate must be a PEM certificate",
+                                           "Client certificate contains unsupported characters")) {
+            return result;
+        }
+        if (!is_pem_private_key(settings.client_key_pem)) {
+            fail(result, "Client private key must be an unencrypted PEM private key");
+            return result;
+        }
+        if (!contains_only_pem_text_chars(settings.client_key_pem)) {
+            fail(result, "Client private key contains unsupported characters");
             return result;
         }
     }

@@ -916,6 +916,7 @@ void AuraNetworkManager::beginStaConnect(int32_t channel, const uint8_t *bssid) 
         return;
     }
 
+    clear_sta_enterprise_state();
 #if CONFIG_ESP_WIFI_ENTERPRISE_SUPPORT
     const wpa2_auth_method_t method = to_wpa2_auth_method(wifi_eap_method_);
     const int phase2 = wifi_eap_method_ == Config::WifiEapMethod::Ttls
