@@ -917,14 +917,8 @@ void UiController::on_card_voc_nox_event(lv_event_t *e) {
         }
     }
 
-    if (next_sensor == INFO_NOX &&
-        currentData.optional_gas_sensor_present &&
-        currentData.optional_gas_type != 0) {
-        select_optional_gas_info();
-    } else {
-        info_sensor = next_sensor;
-        restore_sensor_info_selection();
-    }
+    info_sensor = next_sensor;
+    restore_sensor_info_selection();
     pending_screen_id = SCREEN_ID_PAGE_SENSORS_INFO;
 }
 
