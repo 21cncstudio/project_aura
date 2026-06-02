@@ -16,6 +16,7 @@
 namespace {
 
 constexpr uint32_t kAuraLinkLinkedHoldMs = 900;
+constexpr const char *kAuraLinkComingSoonQrText = "Coming soon";
 
 const char *claim_status_text(AuraLinkManager::ClaimStatus status) {
     switch (status) {
@@ -36,6 +37,18 @@ const char *claim_status_text(AuraLinkManager::ClaimStatus status) {
         case AuraLinkManager::ClaimStatus::Idle:
         default:
             return nullptr;
+    }
+}
+
+bool is_claim_error(AuraLinkManager::ClaimStatus status) {
+    switch (status) {
+        case AuraLinkManager::ClaimStatus::InvalidCode:
+        case AuraLinkManager::ClaimStatus::Expired:
+        case AuraLinkManager::ClaimStatus::AlreadyUsed:
+        case AuraLinkManager::ClaimStatus::ServerUnreachable:
+            return true;
+        default:
+            return false;
     }
 }
 
@@ -88,6 +101,15 @@ void UiController::update_aura_link_ui() {
     const AuraLinkManager::Snapshot snapshot = auraLinkManager.snapshot();
     const bool linked = snapshot.linked;
     const bool pending = snapshot.claim_status == AuraLinkManager::ClaimStatus::Pending;
+    const bool claim_error = is_claim_error(snapshot.claim_status);
+    lv_color_t status_color = color_yellow();
+    if (pending) {
+        status_color = color_blue();
+    } else if (claim_error) {
+        status_color = color_red();
+    } else if (linked && !snapshot.upload_paused) {
+        status_color = color_green();
+    }
 
     if (objects.label_aura_aq_link_status_value) {
         const char *status = "Off";
@@ -103,6 +125,16 @@ void UiController::update_aura_link_ui() {
         safe_label_set_text(objects.label_aura_aq_link_status_value, status);
     }
 
+    if (objects.container_aura_aq_link_status) {
+        apply_toggle_style(objects.container_aura_aq_link_status);
+        set_chip_color(objects.container_aura_aq_link_status, status_color);
+        if (linked && !snapshot.upload_paused && !claim_error) {
+            lv_obj_add_state(objects.container_aura_aq_link_status, LV_STATE_CHECKED);
+        } else {
+            lv_obj_clear_state(objects.container_aura_aq_link_status, LV_STATE_CHECKED);
+        }
+    }
+
     if (objects.label_aura_aq_link_last_upload_value) {
         char buf[32];
         format_last_upload(now, snapshot.last_upload_success_ms, buf, sizeof(buf));
@@ -115,19 +147,19 @@ void UiController::update_aura_link_ui() {
         safe_label_set_text(objects.label_aura_aq_link_upload_interval_value, buf);
     }
 
-    set_button_enabled(objects.btn_aura_aq_link_activate, snapshot.configured && !linked && !pending);
-    set_button_enabled(objects.btn_aura_aq_link_reset, linked && !pending);
+    const bool can_activate = snapshot.configured && !linked && !pending;
+    const bool can_reset = linked && !pending;
+    set_button_enabled(objects.btn_aura_aq_link_activate, can_activate);
+    set_button_enabled(objects.label_btn_aura_aq_link_activate, can_activate);
+    set_button_enabled(objects.btn_aura_aq_link_reset, can_reset);
+    set_button_enabled(objects.label_btn_aura_aq_link_reset, can_reset);
 
     if (objects.qrcode_aura_aq_link_portal) {
-        if (snapshot.configured) {
-            lv_obj_clear_flag(objects.qrcode_aura_aq_link_portal, LV_OBJ_FLAG_HIDDEN);
-            update_qrcode_if_needed(objects.qrcode_aura_aq_link_portal,
-                                    Config::AURA_LINK_BASE_URL,
-                                    aura_link_qr_cache_,
-                                    sizeof(aura_link_qr_cache_));
-        } else {
-            lv_obj_add_flag(objects.qrcode_aura_aq_link_portal, LV_OBJ_FLAG_HIDDEN);
-        }
+        lv_obj_clear_flag(objects.qrcode_aura_aq_link_portal, LV_OBJ_FLAG_HIDDEN);
+        update_qrcode_if_needed(objects.qrcode_aura_aq_link_portal,
+                                kAuraLinkComingSoonQrText,
+                                aura_link_qr_cache_,
+                                sizeof(aura_link_qr_cache_));
     }
 
     if (aura_link_modal_ == AuraLinkModal::Pairing) {

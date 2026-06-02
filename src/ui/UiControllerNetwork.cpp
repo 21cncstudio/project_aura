@@ -611,7 +611,8 @@ void UiController::update_status_icons() {
         lv_obj_t *wifi_icons[] = {
             objects.wifi_status_icon_1,
             objects.wifi_status_icon_2,
-            objects.wifi_status_icon_3
+            objects.wifi_status_icon_3,
+            objects.wifi_status_icon_aura_aq_link
         };
         const size_t wifi_icon_count = sizeof(wifi_icons) / sizeof(wifi_icons[0]);
         for (size_t i = 0; i < wifi_icon_count; i++) {
@@ -691,7 +692,8 @@ void UiController::update_status_icons() {
         lv_obj_t *mqtt_icons[] = {
             objects.mqtt_status_icon_1,
             objects.mqtt_status_icon_2,
-            objects.mqtt_status_icon_3
+            objects.mqtt_status_icon_3,
+            objects.link_status_icon_aura_aq_link
         };
         const size_t mqtt_icon_count = sizeof(mqtt_icons) / sizeof(mqtt_icons[0]);
         for (size_t i = 0; i < mqtt_icon_count; i++) {
