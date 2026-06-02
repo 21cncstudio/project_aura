@@ -42,6 +42,9 @@ constexpr uint32_t kUrgentUploadQuotaWindowMs = 60UL * 60UL * 1000UL;
 constexpr uint8_t kUrgentUploadMaxPerWindow = 6;
 constexpr uint32_t kMinUploadIntervalSeconds = 30;
 constexpr uint32_t kMaxUploadIntervalSeconds = 24UL * 60UL * 60UL;
+constexpr uint32_t kPendingResetInitialDelayMs = 60UL * 1000UL;
+constexpr uint32_t kPendingResetRetryDelayMs = 60UL * 1000UL;
+constexpr uint8_t kPendingResetMaxAttempts = 10;
 
 constexpr uint32_t kAlertMetricTemp = 1UL << 0;
 constexpr uint32_t kAlertMetricHumidity = 1UL << 1;
@@ -303,11 +306,23 @@ bool urgent_quota_available(uint32_t now_ms, uint32_t window_started_ms, uint8_t
     return count < kUrgentUploadMaxPerWindow;
 }
 
+bool deadline_reached(uint32_t now_ms, uint32_t due_ms) {
+    return static_cast<int32_t>(now_ms - due_ms) >= 0;
+}
+
+bool reset_status_clears_pending(int status) {
+    return (status >= 200 && status < 300) ||
+           status == 401 ||
+           status == 403 ||
+           status == 404;
+}
+
 } // namespace
 
 void AuraLinkManager::begin(StorageManager &storage) {
     storage_ = &storage;
     loadState();
+    loadPendingReset();
     if (enabled_ && !device_token_.isEmpty()) {
         beginFastUploadPhase(millis());
     }
@@ -343,6 +358,10 @@ void AuraLinkManager::poll(uint32_t now_ms,
     if (!started_) {
         return;
     }
+    if (!enabled_ && pending_reset_.valid) {
+        submitPendingResetIfReady(now_ms);
+        return;
+    }
 
     const AlertSnapshot alert_state =
         updateAlertState(now_ms, data, sensor_warmup_active, thresholds);
@@ -371,6 +390,7 @@ void AuraLinkManager::poll(uint32_t now_ms,
                                alert_state_changed);
     const uint32_t next_upload_delay_ms = plannedNextUploadDelay(now_ms, alert_state);
     if (!regular_upload_due && !urgent_upload_due) {
+        submitPendingResetIfReady(now_ms);
         return;
     }
 
@@ -433,17 +453,12 @@ void AuraLinkManager::reset() {
     char old_token[kDeviceTokenMax] = {};
     copy_string(old_device_id, sizeof(old_device_id), device_id_);
     copy_string(old_token, sizeof(old_token), device_token_);
-    clearLocalState();
 
-    if (!started_ || old_device_id[0] == '\0' || old_token[0] == '\0' || !base_url_configured()) {
-        return;
+    if (old_device_id[0] != '\0' && old_token[0] != '\0' && base_url_configured()) {
+        queuePendingReset(old_device_id, old_token, millis());
     }
 
-    WorkerCommand command;
-    command.op = WorkerOp::Reset;
-    copy_string(command.device_id, sizeof(command.device_id), old_device_id);
-    copy_string(command.device_token, sizeof(command.device_token), old_token);
-    submitCommand(command);
+    clearLocalState();
 }
 
 void AuraLinkManager::clearClaimStatus() {
@@ -510,6 +525,7 @@ AuraLinkManager::WorkerResult AuraLinkManager::executeCommand(const WorkerComman
     WorkerResult result;
     result.op = command.op;
     result.sequence = command.sequence;
+    result.reset_generation = command.reset_generation;
 
     if (command.op == WorkerOp::Claim) {
         JsonDocument request;
@@ -562,6 +578,7 @@ AuraLinkManager::WorkerResult AuraLinkManager::executeCommand(const WorkerComman
         serializeJson(request, body);
         String response;
         const int status = post_json("/api/devices/reset", body, command.device_token, response);
+        result.http_status = status;
         result.ok = status >= 200 && status < 300;
         return result;
     }
@@ -759,6 +776,170 @@ bool AuraLinkManager::submitCommand(const WorkerCommand &command) {
     return true;
 }
 
+bool AuraLinkManager::loadPendingReset() {
+    pending_reset_ = {};
+    pending_reset_inflight_ = false;
+    if (!storage_) {
+        return false;
+    }
+
+    String json;
+    if (!storage_->loadText(StorageManager::kAuraLinkPendingResetPath, json) || json.isEmpty()) {
+        return false;
+    }
+
+    JsonDocument doc;
+    if (deserializeJson(doc, json)) {
+        LOGW("AuraLink", "stored pending reset is invalid; removing it");
+        storage_->removeBlob(StorageManager::kAuraLinkPendingResetPath);
+        return false;
+    }
+
+    pending_reset_.device_id = doc["device_id"] | "";
+    pending_reset_.device_token = doc["device_token"] | "";
+    pending_reset_.created_at_ms = doc["created_at_ms"] | 0;
+    pending_reset_.attempts = doc["attempts"] | 0;
+    pending_reset_.generation = doc["generation"] | 0;
+    if (pending_reset_.device_id.isEmpty() ||
+        pending_reset_.device_token.isEmpty() ||
+        pending_reset_.attempts >= kPendingResetMaxAttempts) {
+        storage_->removeBlob(StorageManager::kAuraLinkPendingResetPath);
+        pending_reset_ = {};
+        return false;
+    }
+
+    pending_reset_.valid = true;
+    pending_reset_.next_retry_at_ms = millis() + kPendingResetRetryDelayMs;
+    if (reset_generation_ < pending_reset_.generation) {
+        reset_generation_ = pending_reset_.generation;
+    }
+    LOGW("AuraLink",
+         "pending remote reset restored (attempts=%u)",
+         static_cast<unsigned>(pending_reset_.attempts));
+    return true;
+}
+
+bool AuraLinkManager::savePendingReset() {
+    if (!storage_ || !pending_reset_.valid) {
+        return false;
+    }
+
+    JsonDocument doc;
+    doc["device_id"] = pending_reset_.device_id;
+    doc["device_token"] = pending_reset_.device_token;
+    doc["created_at_ms"] = pending_reset_.created_at_ms;
+    doc["attempts"] = pending_reset_.attempts;
+    doc["next_retry_at_ms"] = pending_reset_.next_retry_at_ms;
+    doc["generation"] = pending_reset_.generation;
+
+    String json;
+    serializeJson(doc, json);
+    if (!storage_->saveTextAtomic(StorageManager::kAuraLinkPendingResetPath, json)) {
+        LOGW("AuraLink", "failed to persist pending remote reset");
+        return false;
+    }
+    return true;
+}
+
+void AuraLinkManager::clearPendingReset() {
+    pending_reset_ = {};
+    pending_reset_inflight_ = false;
+    if (storage_) {
+        storage_->removeBlob(StorageManager::kAuraLinkPendingResetPath);
+    }
+}
+
+void AuraLinkManager::queuePendingReset(const char *old_device_id,
+                                        const char *old_token,
+                                        uint32_t now_ms) {
+    pending_reset_ = {};
+    pending_reset_.valid = true;
+    pending_reset_.device_id = old_device_id ? old_device_id : "";
+    pending_reset_.device_token = old_token ? old_token : "";
+    pending_reset_.created_at_ms = now_ms;
+    pending_reset_.attempts = 0;
+    pending_reset_.next_retry_at_ms = now_ms + kPendingResetInitialDelayMs;
+    pending_reset_.generation = ++reset_generation_;
+    pending_reset_inflight_ = false;
+
+    if (pending_reset_.device_id.isEmpty() || pending_reset_.device_token.isEmpty()) {
+        clearPendingReset();
+        return;
+    }
+    savePendingReset();
+    LOGI("AuraLink", "remote reset queued for old Link state");
+}
+
+void AuraLinkManager::submitPendingResetIfReady(uint32_t now_ms) {
+    if (!pending_reset_.valid ||
+        pending_reset_inflight_ ||
+        claim_status_ == ClaimStatus::Pending ||
+        !base_url_configured() ||
+        !deadline_reached(now_ms, pending_reset_.next_retry_at_ms)) {
+        return;
+    }
+    if (pending_reset_.attempts >= kPendingResetMaxAttempts) {
+        LOGW("AuraLink", "pending remote reset abandoned after retry limit");
+        clearPendingReset();
+        return;
+    }
+    if (WiFi.status() != WL_CONNECTED) {
+        return;
+    }
+
+    WorkerCommand command;
+    command.op = WorkerOp::Reset;
+    command.reset_generation = pending_reset_.generation;
+    copy_string(command.device_id, sizeof(command.device_id), pending_reset_.device_id);
+    copy_string(command.device_token, sizeof(command.device_token), pending_reset_.device_token);
+    if (!submitCommand(command)) {
+        return;
+    }
+
+    pending_reset_inflight_ = true;
+    ++pending_reset_.attempts;
+    savePendingReset();
+    LOGI("AuraLink",
+         "remote reset attempt %u/%u started",
+         static_cast<unsigned>(pending_reset_.attempts),
+         static_cast<unsigned>(kPendingResetMaxAttempts));
+}
+
+void AuraLinkManager::handlePendingResetResult(uint32_t now_ms, const WorkerResult &result) {
+    if (!pending_reset_inflight_ ||
+        !pending_reset_.valid ||
+        result.reset_generation != pending_reset_.generation) {
+        LOGW("AuraLink", "stale remote reset result ignored");
+        return;
+    }
+
+    pending_reset_inflight_ = false;
+    if (reset_status_clears_pending(result.http_status)) {
+        LOGI("AuraLink",
+             "pending remote reset cleared (status=%d)",
+             result.http_status);
+        clearPendingReset();
+        return;
+    }
+
+    if (pending_reset_.attempts >= kPendingResetMaxAttempts) {
+        LOGW("AuraLink",
+             "pending remote reset abandoned after %u attempts (last status=%d)",
+             static_cast<unsigned>(pending_reset_.attempts),
+             result.http_status);
+        clearPendingReset();
+        return;
+    }
+
+    pending_reset_.next_retry_at_ms = now_ms + kPendingResetRetryDelayMs;
+    savePendingReset();
+    LOGW("AuraLink",
+         "pending remote reset retry scheduled (status=%d attempts=%u/%u)",
+         result.http_status,
+         static_cast<unsigned>(pending_reset_.attempts),
+         static_cast<unsigned>(kPendingResetMaxAttempts));
+}
+
 void AuraLinkManager::consumeWorkerResult(uint32_t now_ms) {
     WorkerResult result;
     bool ready = false;
@@ -834,6 +1015,11 @@ void AuraLinkManager::consumeWorkerResult(uint32_t now_ms) {
             retry_ingest_pending_ = true;
         }
         scheduleNextUpload(now_ms, Config::AURA_LINK_UPLOAD_RETRY_MS);
+        return;
+    }
+
+    if (result.op == WorkerOp::Reset) {
+        handlePendingResetResult(now_ms, result);
         return;
     }
 }

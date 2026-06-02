@@ -343,6 +343,10 @@ copy include\secrets.h.example include\secrets.h    # Windows
 cp    include/secrets.h.example include/secrets.h    # macOS / Linux
 ```
 
+Security note: Wi-Fi, WPA Enterprise, MQTT credentials, and the optional Aura AQ Link token are
+stored as local device settings in LittleFS. Treat physical flash/serial access to the device as
+trusted access.
+
 ## MQTT + Home Assistant
 - State topic: `<base>/state`
 - Availability topic: `<base>/status`

@@ -132,6 +132,7 @@ private:
         char pairing_code[7] = {};
         char device_id[kDeviceIdMax] = {};
         char device_token[kDeviceTokenMax] = {};
+        uint32_t reset_generation = 0;
         uint32_t sequence = 0;
         uint32_t upload_interval_seconds = Config::AURA_LINK_DEFAULT_UPLOAD_INTERVAL_SECONDS;
         time_t recorded_at = 0;
@@ -160,6 +161,18 @@ private:
         char firmware_channel[24] = "stable";
         bool auto_ota_enabled = false;
         uint32_t sequence = 0;
+        uint32_t reset_generation = 0;
+        int http_status = 0;
+    };
+
+    struct PendingReset {
+        bool valid = false;
+        String device_id;
+        String device_token;
+        uint32_t created_at_ms = 0;
+        uint8_t attempts = 0;
+        uint32_t next_retry_at_ms = 0;
+        uint32_t generation = 0;
     };
 
     static void workerTaskTrampoline(void *arg);
@@ -167,6 +180,12 @@ private:
     WorkerResult executeCommand(const WorkerCommand &command);
 
     bool submitCommand(const WorkerCommand &command);
+    bool loadPendingReset();
+    bool savePendingReset();
+    void clearPendingReset();
+    void queuePendingReset(const char *old_device_id, const char *old_token, uint32_t now_ms);
+    void submitPendingResetIfReady(uint32_t now_ms);
+    void handlePendingResetResult(uint32_t now_ms, const WorkerResult &result);
     void consumeWorkerResult(uint32_t now_ms);
     bool loadState();
     bool saveState();
@@ -236,11 +255,14 @@ private:
     WorkerResult worker_result_{};
     WorkerCommand inflight_ingest_command_{};
     WorkerCommand retry_ingest_command_{};
+    PendingReset pending_reset_{};
     bool worker_command_pending_ = false;
     bool worker_result_ready_ = false;
     bool worker_busy_ = false;
     bool inflight_ingest_valid_ = false;
     bool retry_ingest_pending_ = false;
+    bool pending_reset_inflight_ = false;
+    uint32_t reset_generation_ = 0;
     AlertSnapshot alert_candidate_state_{};
     AlertSnapshot stable_alert_state_{};
     AlertSnapshot reported_alert_state_{};

@@ -241,6 +241,7 @@ void StorageManager::clearAll() {
     LittleFS.remove(kWifiEapClientCertPath);
     LittleFS.remove(kWifiEapClientKeyPath);
     LittleFS.remove(kAuraLinkPath);
+    LittleFS.remove(kAuraLinkPendingResetPath);
 #else
     g_blob_store.clear();
 #endif
