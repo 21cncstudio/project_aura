@@ -49,8 +49,9 @@ constexpr uint32_t kPendingResetRetryDelayMs = 60UL * 1000UL;
 constexpr uint8_t kPendingResetMaxAttempts = 10;
 constexpr uint32_t kTlsTimeBootstrapTimeoutMs = 5000;
 constexpr uint32_t kTlsTimeBuildSlackSeconds = 24UL * 60UL * 60UL;
-constexpr uint32_t kTlsMinInternalFreeBytes = 52UL * 1024UL;
-constexpr uint32_t kTlsMinInternalLargestBlockBytes = 24UL * 1024UL;
+constexpr uint32_t kTlsMinInternalFreeBytes = 72UL * 1024UL;
+constexpr uint32_t kTlsMinInternalLargestBlockBytes = 48UL * 1024UL;
+constexpr uint32_t kTlsLowMemoryRetryDelayMs = 5UL * 60UL * 1000UL;
 
 constexpr uint32_t kAlertMetricTemp = 1UL << 0;
 constexpr uint32_t kAlertMetricHumidity = 1UL << 1;
@@ -314,6 +315,7 @@ int post_json(const char *path, const String &body, const char *bearer_token, St
     int status = -1;
     if (is_https_url(url)) {
         if (!tls_heap_available(path)) {
+            response = "{\"error\":\"tls_low_memory\"}";
             return -1;
         }
 
@@ -685,6 +687,23 @@ void AuraLinkManager::setOtaSuspended(bool suspended) {
     }
     ota_suspended_ = suspended;
     if (suspended) {
+        WorkerCommand dropped_command;
+        bool dropped_pending_ingest = false;
+        portENTER_CRITICAL(&worker_mux_);
+        if (worker_command_pending_ && worker_command_.op == WorkerOp::Ingest) {
+            dropped_command = worker_command_;
+            worker_command_pending_ = false;
+            worker_busy_ = false;
+            dropped_pending_ingest = true;
+        }
+        portEXIT_CRITICAL(&worker_mux_);
+        if (dropped_pending_ingest) {
+            retry_ingest_command_ = dropped_command;
+            retry_ingest_pending_ = true;
+            inflight_ingest_valid_ = false;
+            scheduleNextUpload(millis(), kInitialUploadDelayMs);
+            LOGI("AuraLink", "queued ingest deferred for OTA");
+        }
         LOGI("AuraLink", "suspended for OTA");
     } else {
         LOGI("AuraLink", "resumed after OTA");
@@ -986,6 +1005,7 @@ AuraLinkManager::WorkerResult AuraLinkManager::executeCommand(const WorkerComman
 
         const String error = response_error_code(response);
         result.upload_paused = error == "account_upload_paused";
+        result.low_memory = error == "tls_low_memory";
         LOGW("AuraLink",
              "ingest failed: status=%d error=%s",
              status,
@@ -1254,7 +1274,14 @@ void AuraLinkManager::consumeWorkerResult(uint32_t now_ms) {
             retry_ingest_command_ = inflight_ingest_command_;
             retry_ingest_pending_ = true;
         }
-        scheduleNextUpload(now_ms, Config::AURA_LINK_UPLOAD_RETRY_MS);
+        if (result.low_memory) {
+            LOGW("AuraLink",
+                 "upload deferred: TLS low memory; retry in %u seconds",
+                 static_cast<unsigned>(kTlsLowMemoryRetryDelayMs / 1000UL));
+            scheduleNextUpload(now_ms, kTlsLowMemoryRetryDelayMs);
+        } else {
+            scheduleNextUpload(now_ms, Config::AURA_LINK_UPLOAD_RETRY_MS);
+        }
         return;
     }
 

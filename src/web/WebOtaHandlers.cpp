@@ -21,12 +21,30 @@ namespace {
 constexpr const char kApiErrorOtaBusyJson[] =
     "{\"success\":false,\"error\":\"OTA upload in progress\","
     "\"error_code\":\"OTA_BUSY\",\"ota_busy\":true}";
+constexpr const char kApiErrorCloudBusyJson[] =
+    "{\"success\":false,\"error\":\"Cloud upload in progress; retry OTA shortly\","
+    "\"error_code\":\"CLOUD_UPLOAD_BUSY\",\"ota_busy\":false}";
 constexpr size_t kOtaAbortDrainMaxBytes = 32UL * 1024UL;
 constexpr uint32_t kOtaAbortDrainTimeoutMs = 1500;
+constexpr uint32_t kOtaProgressLogIntervalMs = 10000;
+
+struct OtaProgressLogState {
+    uint32_t session_id = 0;
+    uint32_t last_ms = 0;
+    size_t last_written = 0;
+    uint32_t last_chunks = 0;
+};
+
+OtaProgressLogState g_ota_progress_log;
 
 void send_ota_busy_json(WebRequest &server) {
     WebResponseUtils::sendNoStoreHeaders(server);
     server.send(503, "application/json", kApiErrorOtaBusyJson);
+}
+
+void send_cloud_busy_json(WebRequest &server) {
+    WebResponseUtils::sendNoStoreHeaders(server);
+    server.send(503, "application/json", kApiErrorCloudBusyJson);
 }
 
 void send_ota_busy_upload_response(WebRequest &server) {
@@ -117,6 +135,72 @@ void abort_update_if_running() {
     }
 }
 
+void reset_ota_progress_log(const WebOtaSnapshot &ota, uint32_t now_ms) {
+    g_ota_progress_log.session_id = ota.session_id;
+    g_ota_progress_log.last_ms = now_ms;
+    g_ota_progress_log.last_written = ota.written_size;
+    g_ota_progress_log.last_chunks = ota.chunk_count;
+}
+
+void maybe_log_ota_progress(const WebOtaSnapshot &ota, uint32_t now_ms) {
+    if (!ota.active || !ota.first_chunk_seen || ota.session_id == 0) {
+        return;
+    }
+    if (g_ota_progress_log.session_id != ota.session_id) {
+        reset_ota_progress_log(ota, now_ms);
+        return;
+    }
+
+    const uint32_t interval_ms = now_ms - g_ota_progress_log.last_ms;
+    if (interval_ms < kOtaProgressLogIntervalMs) {
+        return;
+    }
+
+    const size_t interval_bytes =
+        ota.written_size >= g_ota_progress_log.last_written
+            ? ota.written_size - g_ota_progress_log.last_written
+            : 0;
+    const uint32_t interval_speed_bps =
+        interval_ms > 0
+            ? static_cast<uint32_t>((static_cast<uint64_t>(interval_bytes) * 1000ULL) / interval_ms)
+            : 0;
+    const uint32_t transfer_ms =
+        ota.first_chunk_ms > 0 ? static_cast<uint32_t>(now_ms - ota.first_chunk_ms) : 0;
+    const uint32_t average_speed_bps =
+        transfer_ms > 0
+            ? static_cast<uint32_t>((static_cast<uint64_t>(ota.written_size) * 1000ULL) / transfer_ms)
+            : 0;
+    const uint32_t delta_chunks =
+        ota.chunk_count >= g_ota_progress_log.last_chunks
+            ? ota.chunk_count - g_ota_progress_log.last_chunks
+            : 0;
+    const uint32_t percent =
+        ota.size_known && ota.expected_size > 0
+            ? static_cast<uint32_t>((static_cast<uint64_t>(ota.written_size) * 100ULL) /
+                                    ota.expected_size)
+            : 0;
+    const wl_status_t wifi_status = WiFi.status();
+    const bool rssi_valid = wifi_status == WL_CONNECTED;
+    const int rssi = rssi_valid ? WiFi.RSSI() : 0;
+
+    LOGI("OTA",
+         "progress session=%u written=%u/%u pct=%u%% interval=%u ms speed=%u B/s avg=%u B/s chunks=%u (+%u) last_chunk_age=%u ms rssi=%s%d",
+         static_cast<unsigned>(ota.session_id),
+         static_cast<unsigned>(ota.written_size),
+         static_cast<unsigned>(ota.expected_size),
+         static_cast<unsigned>(percent),
+         static_cast<unsigned>(interval_ms),
+         static_cast<unsigned>(interval_speed_bps),
+         static_cast<unsigned>(average_speed_bps),
+         static_cast<unsigned>(ota.chunk_count),
+         static_cast<unsigned>(delta_chunks),
+         static_cast<unsigned>(ota.lastChunkAgeMs(now_ms)),
+         rssi_valid ? "" : "n/a:",
+         rssi);
+
+    reset_ota_progress_log(ota, now_ms);
+}
+
 void fail_upload(WebOtaHandlers::Runtime &runtime, const String &error) {
     abort_update_if_running();
     if (runtime.set_error) {
@@ -132,6 +216,30 @@ void cleanup_after_update_response(WebOtaHandlers::Runtime &runtime, bool succes
         runtime.restore_wifi_power_save();
     }
     runtime.ota_state.clearBusy();
+}
+
+void set_cloud_upload_suspended(WebOtaHandlers::Runtime &runtime, bool suspended) {
+    if (runtime.set_cloud_upload_suspended) {
+        runtime.set_cloud_upload_suspended(runtime.cloud_upload_context, suspended);
+    }
+}
+
+bool cloud_upload_busy(WebOtaHandlers::Runtime &runtime) {
+    return runtime.cloud_upload_busy &&
+           runtime.cloud_upload_busy(runtime.cloud_upload_context);
+}
+
+bool suspend_cloud_for_ota(WebOtaHandlers::Runtime &runtime, const char *phase) {
+    set_cloud_upload_suspended(runtime, true);
+    if (!cloud_upload_busy(runtime)) {
+        return true;
+    }
+
+    LOGW("OTA",
+         "cannot start OTA %s while cloud upload worker is busy",
+         phase ? phase : "window");
+    set_cloud_upload_suspended(runtime, false);
+    return false;
 }
 
 void ota_log_abort_summary(WebRequest &server,
@@ -210,6 +318,10 @@ void handlePrepare(Runtime &runtime, bool ota_busy) {
     serializeJson(doc, json);
 
     if (result.success) {
+        if (!suspend_cloud_for_ota(runtime, "prepare")) {
+            send_cloud_busy_json(server);
+            return;
+        }
         runtime.arm_preflight_ui();
     }
     WebResponseUtils::sendNoStoreHeaders(server);
@@ -227,6 +339,10 @@ void handleUpload(Runtime &runtime, bool ota_busy) {
     if (upload.status == WebUploadStatus::Start) {
         if (ota_busy) {
             LOGW("OTA", "reject upload start while OTA is busy");
+            server.rejectUpload();
+            return;
+        }
+        if (!suspend_cloud_for_ota(runtime, "upload")) {
             server.rejectUpload();
             return;
         }
@@ -264,6 +380,7 @@ void handleUpload(Runtime &runtime, bool ota_busy) {
         runtime.ota_state.setSlotSize(target_partition->size);
         runtime.ota_state.setExpectedSize(size_known, expected_size);
         const WebOtaSnapshot ota = runtime.ota_state.snapshot();
+        reset_ota_progress_log(ota, start_ms);
         if (ota.size_known) {
             if (ota.expected_size > ota.slot_size) {
                 fail_upload(runtime,
@@ -346,6 +463,7 @@ void handleUpload(Runtime &runtime, bool ota_busy) {
             return;
         }
         runtime.ota_state.addWritten(upload.currentSize);
+        maybe_log_ota_progress(runtime.ota_state.snapshot(), now_ms);
         return;
     }
 
@@ -486,6 +604,9 @@ void handleUpdate(Runtime &runtime, bool ota_busy) {
         runtime.cancel_preflight_ui();
     }
     cleanup_after_update_response(runtime, result.success);
+    if (!result.success) {
+        set_cloud_upload_suspended(runtime, false);
+    }
 }
 
 }  // namespace WebOtaHandlers

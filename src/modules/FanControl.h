@@ -89,6 +89,7 @@ private:
     bool applyOutputMillivolts(uint16_t millivolts);
     void handleDacFault(const char *reason);
     void applyStopState(bool output_known);
+    void cancelBootAutoResume();
     uint16_t stepToMillivolts(uint8_t step) const;
     uint16_t percentToMillivolts(uint8_t percent) const;
     uint8_t evaluateAutoDemandPercent(const SensorData &data, bool gas_warmup) const;

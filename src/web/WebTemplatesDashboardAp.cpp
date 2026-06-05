@@ -1708,8 +1708,6 @@ const STATE_REFRESH_HIDDEN_MS = 30000;
 const OTA_RECOVERY_PROBE_TIMEOUT_MS = 1500;
 const OTA_STALE_STATE_THRESHOLD_S = 45;
 const OTA_RECONNECT_GRACE_MS = 120000;
-const OTA_UPLOAD_FIRST_PROGRESS_TIMEOUT_MS = 30000;
-const OTA_UPLOAD_NO_PROGRESS_TIMEOUT_MS = 90000;
 const OTA_UPLOAD_RESPONSE_TIMEOUT_FALLBACK_MS = 930000;
 let deviceClockRef = null;
 let lastStateOkAtMs = 0;
@@ -2243,21 +2241,11 @@ function createOtaUploadTimeoutController(xhr, prepareCfg) {
   function noteProgress(loaded) {
     if (!isNum(loaded) || loaded <= lastLoaded) return;
     lastLoaded = loaded;
-    if (!responseWaitStarted) {
-      scheduleAbort(
-        OTA_UPLOAD_NO_PROGRESS_TIMEOUT_MS,
-        'Upload stalled. Retry closer to device or with stronger WiFi.'
-      );
-    }
   }
 
   function noteUploadComplete() {
     if (responseWaitStarted) return;
     responseWaitStarted = true;
-    scheduleAbort(
-      responseWaitTimeoutMs,
-      'Device response timed out after upload. Wait for reconnect before retrying.'
-    );
   }
 
   function consumeAbortMessage() {
@@ -2273,8 +2261,8 @@ function createOtaUploadTimeoutController(xhr, prepareCfg) {
   }
 
   scheduleAbort(
-    OTA_UPLOAD_FIRST_PROGRESS_TIMEOUT_MS,
-    'Upload did not start in time. Retry closer to device or with stronger WiFi.'
+    responseWaitTimeoutMs,
+    'Device did not finish OTA within its upload window. Wait for reconnect before retrying.'
   );
 
   return {
@@ -2760,6 +2748,7 @@ function initOtaUI() {
     stopOtaRecoveryWatcher();
     otaReconnectGraceUntilMs = 0;
 
+    otaUploadInFlight = true;
     uploadBtn.disabled = true;
     statusEl.textContent = 'Preparing device for upload...';
     statusEl.className = 'ota-status';
@@ -2767,14 +2756,16 @@ function initOtaUI() {
     try {
       prepareCfg = await prepareOtaUpload(file.size);
     } catch (err) {
+      otaUploadInFlight = false;
       uploadBtn.disabled = false;
       statusEl.textContent =
         (err && err.message) ? err.message : 'Failed to prepare device for upload.';
       statusEl.className = 'ota-status err';
+      updateNetStatusBanner();
+      updateOtaPrecheck(safeStateNetwork());
       return;
     }
 
-    otaUploadInFlight = true;
     statusEl.textContent = 'Uploading firmware…';
     statusEl.className = 'ota-status';
     progressEl.style.width = '0%';

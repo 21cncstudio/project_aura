@@ -228,8 +228,7 @@ void FanControl::begin(bool auto_mode_preference, bool auto_armed_preference) {
     last_health_check_ms_ = 0;
     health_probe_fail_count_ = 0;
     boot_missing_lockout_ = false;
-    boot_auto_resume_pending_ = false;
-    boot_auto_resume_due_ms_ = 0;
+    cancelBootAutoResume();
     auto_resume_blocked_ = false;
     if (mode_ == Mode::Auto) {
         auto_resume_blocked_ = true;
@@ -245,6 +244,7 @@ void FanControl::begin(bool auto_mode_preference, bool auto_armed_preference) {
 
     if (!Config::DAC_FEATURE_ENABLED) {
         LOGI("FanControl", "DAC feature disabled");
+        cancelBootAutoResume();
         publishSnapshot();
         return;
     }
@@ -259,10 +259,12 @@ void FanControl::begin(bool auto_mode_preference, bool auto_armed_preference) {
             LOGI("FanControl", "DAC not installed");
             boot_missing_lockout_ = true;
             applyStopState(false);
+            cancelBootAutoResume();
             break;
         case InitStatus::Fault:
             Logger::log(Logger::Warn, "FanControl", "DAC init failed: %s",
                         init_failure_reason ? init_failure_reason : "unknown");
+            cancelBootAutoResume();
             break;
     }
     publishSnapshot();
@@ -305,6 +307,10 @@ void FanControl::poll(uint32_t now_ms, const SensorData *sensor_data, bool gas_w
         present_ = false;
         available_ = false;
         faulted_ = false;
+        cancelBootAutoResume();
+        if (mode_ == Mode::Auto) {
+            auto_resume_blocked_ = true;
+        }
         applyStopState(true);
         publishSnapshot();
         return;
@@ -318,6 +324,10 @@ void FanControl::poll(uint32_t now_ms, const SensorData *sensor_data, bool gas_w
             if (tryInitialize(now_ms, init_failure_reason) == InitStatus::Ok) {
                 LOGI("FanControl", "DAC recovered");
             }
+        }
+        if (!available_ && mode_ == Mode::Auto) {
+            cancelBootAutoResume();
+            auto_resume_blocked_ = true;
         }
     } else if (!running_ &&
                now_ms - last_health_check_ms_ >= Config::DAC_HEALTH_CHECK_MS) {
@@ -407,11 +417,12 @@ void FanControl::poll(uint32_t now_ms, const SensorData *sensor_data, bool gas_w
     }
 
     if (boot_auto_resume_pending_ && timeReached(now_ms, boot_auto_resume_due_ms_)) {
-        boot_auto_resume_pending_ = false;
-        boot_auto_resume_due_ms_ = 0;
-        if (mode_ == Mode::Auto) {
+        cancelBootAutoResume();
+        if (mode_ == Mode::Auto && available_) {
             auto_resume_blocked_ = false;
             LOGI("FanControl", "auto resume armed after boot delay");
+        } else if (mode_ == Mode::Auto) {
+            auto_resume_blocked_ = true;
         }
     }
 
@@ -551,8 +562,7 @@ void FanControl::applyMode(Mode mode) {
     if (mode == Mode::Auto && mode_ != Mode::Auto) {
         // Selecting AUTO only switches mode/UI; START AUTO is the explicit re-arm action.
         auto_resume_blocked_ = true;
-        boot_auto_resume_pending_ = false;
-        boot_auto_resume_due_ms_ = 0;
+        cancelBootAutoResume();
     }
     if (mode_ == mode) {
         return;
@@ -560,8 +570,7 @@ void FanControl::applyMode(Mode mode) {
     mode_ = mode;
     if (mode_ == Mode::Manual) {
         auto_resume_blocked_ = false;
-        boot_auto_resume_pending_ = false;
-        boot_auto_resume_due_ms_ = 0;
+        cancelBootAutoResume();
     }
     if (mode_ == Mode::Auto && !manual_override_active_) {
         manual_step_update_pending_ = false;
@@ -596,8 +605,7 @@ void FanControl::applyRequestStart() {
 void FanControl::applyRequestStop() {
     start_requested_ = false;
     stop_requested_ = true;
-    boot_auto_resume_pending_ = false;
-    boot_auto_resume_due_ms_ = 0;
+    cancelBootAutoResume();
 }
 
 void FanControl::applyRequestAutoStart() {
@@ -609,13 +617,17 @@ void FanControl::applyRequestAutoStart() {
     manual_step_update_pending_ = false;
     timer_update_pending_ = false;
     auto_resume_blocked_ = false;
-    boot_auto_resume_pending_ = false;
-    boot_auto_resume_due_ms_ = 0;
+    cancelBootAutoResume();
 }
 
 void FanControl::applyAutoConfig(const DacAutoConfig &config) {
     auto_config_ = config;
     DacAutoConfigJson::sanitize(auto_config_);
+}
+
+void FanControl::cancelBootAutoResume() {
+    boot_auto_resume_pending_ = false;
+    boot_auto_resume_due_ms_ = 0;
 }
 
 FanControl::InitStatus FanControl::tryInitialize(uint32_t now_ms, const char *&failure_reason) {
@@ -677,6 +689,10 @@ void FanControl::handleDacFault(const char *reason) {
     present_ = true;
     available_ = false;
     faulted_ = true;
+    cancelBootAutoResume();
+    if (mode_ == Mode::Auto) {
+        auto_resume_blocked_ = true;
+    }
     applyStopState(false);
     health_probe_fail_count_ = 0;
     last_recover_attempt_ms_ = millis();

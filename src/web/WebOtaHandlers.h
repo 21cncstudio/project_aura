@@ -27,6 +27,9 @@ struct Runtime {
     void (*cancel_preflight_ui)() = nullptr;
     void (*set_ui_screen)(bool active) = nullptr;
     void (*set_error)(const String &error) = nullptr;
+    void *cloud_upload_context = nullptr;
+    void (*set_cloud_upload_suspended)(void *context, bool suspended) = nullptr;
+    bool (*cloud_upload_busy)(void *context) = nullptr;
 };
 
 void handlePrepare(Runtime &runtime, bool ota_busy);

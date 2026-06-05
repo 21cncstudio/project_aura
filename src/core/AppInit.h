@@ -18,6 +18,7 @@
 #include "modules/DisplayThresholds.h"
 #include "modules/NetworkManager.h"
 #include "modules/MqttManager.h"
+#include "modules/AuraLinkManager.h"
 #include "modules/SensorManager.h"
 #include "modules/TimeManager.h"
 #include "modules/PressureHistory.h"
@@ -53,6 +54,7 @@ struct Context {
     ThemeManager &themeManager;
     BacklightManager &backlightManager;
     NightModeManager &nightModeManager;
+    AuraLinkManager &auraLinkManager;
     FanControl &fanControl;
     PressureHistory &pressureHistory;
     ChartsHistory &chartsHistory;

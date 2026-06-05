@@ -50,6 +50,9 @@ public:
     void attachWebUiBridge(WebUiBridge &webUiBridge);
     void attachDisplayThresholds(DisplayThresholdManager &displayThresholds);
     void attachSensorManager(SensorManager &sensorManager);
+    void attachCloudUploadSuspender(void *context,
+                                    void (*set_suspended)(void *context, bool suspended),
+                                    bool (*busy)(void *context));
     void attachCommandQueue(NetworkCommandQueue &commandQueue);
     void setStateChangeCallback(StateChangeCallback cb, void *ctx);
     void poll();

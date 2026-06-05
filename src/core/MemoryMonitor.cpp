@@ -8,6 +8,7 @@
 
 #include <string.h>
 #include <esp_heap_caps.h>
+#include <esp_psram.h>
 #include "core/Logger.h"
 
 void MemoryMonitor::begin(uint32_t interval_ms) {
@@ -38,6 +39,10 @@ void MemoryMonitor::logNow(const char *reason) {
     uint32_t internal_free = heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
     uint32_t internal_min = heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
     uint32_t internal_largest = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    const uint32_t psram_physical = esp_psram_get_size();
+    const uint32_t psram_heap_total = ESP.getPsramSize();
+    const uint32_t psram_free = ESP.getFreePsram();
+    const uint32_t spiram_total = heap_caps_get_total_size(MALLOC_CAP_SPIRAM);
     const uint32_t spiram_free = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
     const uint32_t spiram_min = heap_caps_get_minimum_free_size(MALLOC_CAP_SPIRAM);
     const uint32_t spiram_largest = heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM);
@@ -47,20 +52,12 @@ void MemoryMonitor::logNow(const char *reason) {
     // Keep memory telemetry visible in serial logs by default.
     Logger::Level level = Logger::Info;
 
-    if (spiram_free == 0 && spiram_min == 0 && spiram_largest == 0) {
-        Logger::log(level, tag,
-                    "%s heap free=%u min=%u max=%u cap free=%u min=%u largest=%u int free=%u min=%u largest=%u",
-                    reason_text,
-                    heap_free, heap_min, heap_max,
-                    cap_free, cap_min, cap_largest,
-                    internal_free, internal_min, internal_largest);
-    } else {
-        Logger::log(level, tag,
-                    "%s heap free=%u min=%u max=%u cap free=%u min=%u largest=%u int free=%u min=%u largest=%u spiram free=%u min=%u largest=%u",
-                    reason_text,
-                    heap_free, heap_min, heap_max,
-                    cap_free, cap_min, cap_largest,
-                    internal_free, internal_min, internal_largest,
-                    spiram_free, spiram_min, spiram_largest);
-    }
+    Logger::log(level, tag,
+                "%s heap free=%u min=%u max=%u cap free=%u min=%u largest=%u int free=%u min=%u largest=%u psram physical=%u heap_total=%u free=%u spiram total=%u free=%u min=%u largest=%u",
+                reason_text,
+                heap_free, heap_min, heap_max,
+                cap_free, cap_min, cap_largest,
+                internal_free, internal_min, internal_largest,
+                psram_physical, psram_heap_total, psram_free,
+                spiram_total, spiram_free, spiram_min, spiram_largest);
 }

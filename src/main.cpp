@@ -180,6 +180,7 @@ void setup()
         themeManager,
         backlightManager,
         nightModeManager,
+        auraLinkManager,
         fanControl,
         pressureHistory,
         chartsHistory,
@@ -229,7 +230,6 @@ void loop()
     const uint32_t loop_now = millis();
     if (ota_busy && !ota_window_active) {
         ota_window_active = true;
-        auraLinkManager.setOtaSuspended(true);
         ota_lvgl_quiesced = false;
         ota_quiesce_due_ms = loop_now + OTA_UI_QUIESCE_DELAY_MS;
         ota_pause_requested = false;
@@ -239,7 +239,6 @@ void loop()
         lvgl_port_block_touch_read(OTA_TOUCH_BLOCK_MS);
     } else if (!ota_busy && ota_window_active) {
         ota_window_active = false;
-        auraLinkManager.setOtaSuspended(false);
         if (ota_pause_requested || ota_lvgl_quiesced || lvgl_port_is_paused()) {
             lvgl_port_request_resume();
             ota_resume_pending = true;

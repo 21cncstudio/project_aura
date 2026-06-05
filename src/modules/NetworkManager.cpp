@@ -429,6 +429,15 @@ void AuraNetworkManager::attachSensorManager(SensorManager &sensorManager) {
     web_ctx_.sensor_manager = &sensorManager;
 }
 
+void AuraNetworkManager::attachCloudUploadSuspender(void *context,
+                                                    void (*set_suspended)(void *context,
+                                                                          bool suspended),
+                                                    bool (*busy)(void *context)) {
+    web_ctx_.cloud_upload_context = context;
+    web_ctx_.cloud_upload_set_ota_suspended = set_suspended;
+    web_ctx_.cloud_upload_busy = busy;
+}
+
 void AuraNetworkManager::attachCommandQueue(NetworkCommandQueue &commandQueue) {
     g_network_command_queue = &commandQueue;
 }

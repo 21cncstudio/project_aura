@@ -155,6 +155,7 @@ private:
         bool ok = false;
         bool upload_paused = false;
         bool duplicate = false;
+        bool low_memory = false;
         char device_id[kDeviceIdMax] = {};
         char device_token[kDeviceTokenMax] = {};
         uint32_t upload_interval_seconds = Config::AURA_LINK_DEFAULT_UPLOAD_INTERVAL_SECONDS;

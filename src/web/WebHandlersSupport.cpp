@@ -111,6 +111,20 @@ void ota_cancel_preflight_ui() {
     g_ota_preflight_ui_due_ms.store(0, std::memory_order_release);
 }
 
+void ota_set_cloud_upload_suspended(bool suspended) {
+    if (!g_ctx || !g_ctx->cloud_upload_set_ota_suspended) {
+        return;
+    }
+    g_ctx->cloud_upload_set_ota_suspended(g_ctx->cloud_upload_context, suspended);
+}
+
+bool ota_cloud_upload_busy() {
+    if (!g_ctx || !g_ctx->cloud_upload_busy) {
+        return false;
+    }
+    return g_ctx->cloud_upload_busy(g_ctx->cloud_upload_context);
+}
+
 void ota_restore_wifi_power_save();
 
 void ota_set_error(const String &error) {
@@ -237,6 +251,7 @@ void pollDeferred() {
         !isOtaBusy()) {
         ota_set_ui_screen(false);
         ota_cancel_preflight_ui();
+        ota_set_cloud_upload_suspended(false);
     }
 
     const WebDeferredActionsDue due = g_deferred_actions.pollDue(now_ms);
@@ -292,6 +307,9 @@ WebOtaHandlers::Runtime otaRuntime(WebHandlerContext &context) {
         ota_cancel_preflight_ui,
         ota_set_ui_screen,
         ota_set_error,
+        nullptr,
+        [](void *, bool suspended) { ota_set_cloud_upload_suspended(suspended); },
+        [](void *) { return ota_cloud_upload_busy(); },
     };
 }
 
