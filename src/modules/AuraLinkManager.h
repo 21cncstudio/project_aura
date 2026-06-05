@@ -60,6 +60,7 @@ public:
     bool claim(const char *pairing_code);
     void reset();
     void clearClaimStatus();
+    void setOtaSuspended(bool suspended);
 
     Snapshot snapshot() const;
 
@@ -243,6 +244,7 @@ private:
     uint32_t offline_after_seconds_ = Config::AURA_LINK_DEFAULT_OFFLINE_AFTER_SECONDS;
     String firmware_channel_ = "stable";
     bool auto_ota_enabled_ = false;
+    bool ota_suspended_ = false;
     uint32_t sequence_ = 0;
     uint32_t next_upload_due_ms_ = 0;
     uint32_t last_upload_success_ms_ = 0;

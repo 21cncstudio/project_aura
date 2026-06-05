@@ -11,9 +11,11 @@
 #include <WiFi.h>
 #include <WiFiClient.h>
 #include <WiFiClientSecure.h>
+#include <ctype.h>
 #include <esp_heap_caps.h>
 #include <esp_system.h>
 #include <string.h>
+#include <sys/time.h>
 
 #include "core/AppVersion.h"
 #include "core/Logger.h"
@@ -45,6 +47,10 @@ constexpr uint32_t kMaxUploadIntervalSeconds = 24UL * 60UL * 60UL;
 constexpr uint32_t kPendingResetInitialDelayMs = 60UL * 1000UL;
 constexpr uint32_t kPendingResetRetryDelayMs = 60UL * 1000UL;
 constexpr uint8_t kPendingResetMaxAttempts = 10;
+constexpr uint32_t kTlsTimeBootstrapTimeoutMs = 5000;
+constexpr uint32_t kTlsTimeBuildSlackSeconds = 24UL * 60UL * 60UL;
+constexpr uint32_t kTlsMinInternalFreeBytes = 52UL * 1024UL;
+constexpr uint32_t kTlsMinInternalLargestBlockBytes = 24UL * 1024UL;
 
 constexpr uint32_t kAlertMetricTemp = 1UL << 0;
 constexpr uint32_t kAlertMetricHumidity = 1UL << 1;
@@ -111,6 +117,186 @@ bool is_http_url(const String &url) {
     return url.startsWith("http://");
 }
 
+int month_from_name(const char *month) {
+    if (!month || strlen(month) < 3) {
+        return 0;
+    }
+    const char key[4] = {
+        static_cast<char>(tolower(static_cast<unsigned char>(month[0]))),
+        static_cast<char>(tolower(static_cast<unsigned char>(month[1]))),
+        static_cast<char>(tolower(static_cast<unsigned char>(month[2]))),
+        '\0',
+    };
+    constexpr const char *months[] = {
+        "jan", "feb", "mar", "apr", "may", "jun",
+        "jul", "aug", "sep", "oct", "nov", "dec",
+    };
+    for (int i = 0; i < 12; ++i) {
+        if (strcmp(key, months[i]) == 0) {
+            return i + 1;
+        }
+    }
+    return 0;
+}
+
+int64_t days_from_civil(int year, unsigned month, unsigned day) {
+    year -= month <= 2;
+    const int era = (year >= 0 ? year : year - 399) / 400;
+    const unsigned yoe = static_cast<unsigned>(year - era * 400);
+    const unsigned mp = month + (month > 2 ? -3 : 9);
+    const unsigned doy = (153 * mp + 2) / 5 + day - 1;
+    const unsigned doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    return static_cast<int64_t>(era) * 146097 + static_cast<int64_t>(doe) - 719468;
+}
+
+time_t make_utc_epoch(int year, int month, int day, int hour, int minute, int second) {
+    if (year < 1970 || month < 1 || month > 12 || day < 1 || day > 31 ||
+        hour < 0 || hour > 23 || minute < 0 || minute > 59 || second < 0 || second > 60) {
+        return 0;
+    }
+    const int64_t days = days_from_civil(year,
+                                         static_cast<unsigned>(month),
+                                         static_cast<unsigned>(day));
+    const int64_t epoch = days * 86400 +
+                          static_cast<int64_t>(hour) * 3600 +
+                          static_cast<int64_t>(minute) * 60 +
+                          static_cast<int64_t>(second);
+    if (epoch <= 0) {
+        return 0;
+    }
+    return static_cast<time_t>(epoch);
+}
+
+time_t build_epoch_utc() {
+    char month_name[4] = {};
+    int day = 0;
+    int year = 0;
+    int hour = 0;
+    int minute = 0;
+    int second = 0;
+    if (sscanf(__DATE__, "%3s %d %d", month_name, &day, &year) != 3 ||
+        sscanf(__TIME__, "%d:%d:%d", &hour, &minute, &second) != 3) {
+        return 0;
+    }
+    const int month = month_from_name(month_name);
+    return make_utc_epoch(year, month, day, hour, minute, second);
+}
+
+bool system_time_needs_tls_bootstrap() {
+    const time_t now_epoch = time(nullptr);
+    const time_t build_epoch = build_epoch_utc();
+    if (build_epoch <= Config::TIME_VALID_EPOCH) {
+        return now_epoch <= Config::TIME_VALID_EPOCH;
+    }
+    return now_epoch + static_cast<time_t>(kTlsTimeBuildSlackSeconds) < build_epoch;
+}
+
+String root_url_from_https_url(const String &url) {
+    if (!is_https_url(url)) {
+        return url;
+    }
+    const int scheme_len = 8;
+    const int slash = url.indexOf('/', scheme_len);
+    if (slash < 0) {
+        return url + "/";
+    }
+    return url.substring(0, slash + 1);
+}
+
+bool parse_http_date_epoch(const String &date_header, time_t &epoch) {
+    char weekday[4] = {};
+    char month_name[4] = {};
+    char zone[4] = {};
+    int day = 0;
+    int year = 0;
+    int hour = 0;
+    int minute = 0;
+    int second = 0;
+    const int parsed = sscanf(date_header.c_str(),
+                              "%3s, %d %3s %d %d:%d:%d %3s",
+                              weekday,
+                              &day,
+                              month_name,
+                              &year,
+                              &hour,
+                              &minute,
+                              &second,
+                              zone);
+    if (parsed != 8 || strcasecmp(zone, "GMT") != 0) {
+        return false;
+    }
+    const int month = month_from_name(month_name);
+    epoch = make_utc_epoch(year, month, day, hour, minute, second);
+    return epoch > Config::TIME_VALID_EPOCH;
+}
+
+bool bootstrap_time_from_https_date(const String &url) {
+    if (WiFi.status() != WL_CONNECTED) {
+        return false;
+    }
+
+    WiFiClientSecure client;
+    client.setInsecure();
+    client.setHandshakeTimeout((kTlsTimeBootstrapTimeoutMs + 999) / 1000);
+
+    HTTPClient http;
+    http.setTimeout(kTlsTimeBootstrapTimeoutMs);
+    http.setReuse(false);
+    const char *headers[] = {"Date"};
+    http.collectHeaders(headers, 1);
+
+    const String probe_url = root_url_from_https_url(url);
+    if (!http.begin(client, probe_url)) {
+        LOGW("AuraLink", "TLS time bootstrap begin failed");
+        return false;
+    }
+
+    const int status = http.sendRequest("HEAD");
+    const String date_header = http.header("Date");
+    http.end();
+
+    if (status <= 0 || date_header.isEmpty()) {
+        LOGW("AuraLink", "TLS time bootstrap failed: status=%d", status);
+        return false;
+    }
+
+    time_t epoch = 0;
+    if (!parse_http_date_epoch(date_header, epoch)) {
+        LOGW("AuraLink", "TLS time bootstrap returned invalid Date header");
+        return false;
+    }
+
+    timeval tv{};
+    tv.tv_sec = epoch;
+    if (settimeofday(&tv, nullptr) != 0) {
+        LOGW("AuraLink", "TLS time bootstrap settimeofday failed");
+        return false;
+    }
+
+    LOGI("AuraLink", "TLS time bootstrapped from server Date");
+    return true;
+}
+
+bool tls_heap_available(const char *path) {
+    const size_t free_internal = heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    const size_t largest_internal = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    if (free_internal >= kTlsMinInternalFreeBytes &&
+        largest_internal >= kTlsMinInternalLargestBlockBytes) {
+        LOGI("AuraLink",
+             "attempt TLS %s: internal heap free=%u largest=%u",
+             path ? path : "",
+             static_cast<unsigned>(free_internal),
+             static_cast<unsigned>(largest_internal));
+        return true;
+    }
+    LOGW("AuraLink",
+         "skip TLS %s: internal heap free=%u largest=%u",
+         path ? path : "",
+         static_cast<unsigned>(free_internal),
+         static_cast<unsigned>(largest_internal));
+    return false;
+}
+
 int post_json(const char *path, const String &body, const char *bearer_token, String &response) {
     response = "";
     if (!base_url_configured()) {
@@ -127,15 +313,26 @@ int post_json(const char *path, const String &body, const char *bearer_token, St
 
     int status = -1;
     if (is_https_url(url)) {
+        if (!tls_heap_available(path)) {
+            return -1;
+        }
+
+        if (system_time_needs_tls_bootstrap()) {
+            bootstrap_time_from_https_date(url);
+        }
+
         WiFiClientSecure client;
         if (Config::AURA_LINK_ROOT_CA_PEM && Config::AURA_LINK_ROOT_CA_PEM[0] != '\0') {
             client.setCACert(Config::AURA_LINK_ROOT_CA_PEM);
         } else if (Config::AURA_LINK_ALLOW_INSECURE_TLS) {
             client.setInsecure();
         } else {
+            LOGW("AuraLink", "HTTPS configured without CA certificate");
             return -1;
         }
+        client.setHandshakeTimeout((Config::AURA_LINK_HTTP_TIMEOUT_MS + 999) / 1000);
         if (!http.begin(client, url)) {
+            LOGW("AuraLink", "POST %s begin failed", path ? path : "");
             return -1;
         }
         http.addHeader("Content-Type", "application/json");
@@ -145,6 +342,12 @@ int post_json(const char *path, const String &body, const char *bearer_token, St
         }
         status = http.POST(body);
         response = http.getString();
+        if (status <= 0) {
+            LOGW("AuraLink",
+                 "POST %s failed: %s",
+                 path ? path : "",
+                 http.errorToString(status).c_str());
+        }
         http.end();
         return status;
     }
@@ -164,6 +367,12 @@ int post_json(const char *path, const String &body, const char *bearer_token, St
     }
     status = http.POST(body);
     response = http.getString();
+    if (status <= 0) {
+        LOGW("AuraLink",
+             "POST %s failed: %s",
+             path ? path : "",
+             http.errorToString(status).c_str());
+    }
     http.end();
     return status;
 }
@@ -358,6 +567,9 @@ void AuraLinkManager::poll(uint32_t now_ms,
     if (!started_) {
         return;
     }
+    if (ota_suspended_) {
+        return;
+    }
     if (!enabled_ && pending_reset_.valid) {
         submitPendingResetIfReady(now_ms);
         return;
@@ -467,6 +679,21 @@ void AuraLinkManager::clearClaimStatus() {
     }
 }
 
+void AuraLinkManager::setOtaSuspended(bool suspended) {
+    if (ota_suspended_ == suspended) {
+        return;
+    }
+    ota_suspended_ = suspended;
+    if (suspended) {
+        LOGI("AuraLink", "suspended for OTA");
+    } else {
+        LOGI("AuraLink", "resumed after OTA");
+        if (enabled_ && !device_id_.isEmpty() && !device_token_.isEmpty()) {
+            scheduleNextUpload(millis(), kInitialUploadDelayMs);
+        }
+    }
+}
+
 AuraLinkManager::Snapshot AuraLinkManager::snapshot() const {
     Snapshot out;
     out.configured = base_url_configured();
@@ -537,8 +764,13 @@ AuraLinkManager::WorkerResult AuraLinkManager::executeCommand(const WorkerComman
         serializeJson(request, body);
         String response;
         const int status = post_json("/api/devices/claim", body, nullptr, response);
+        result.http_status = status;
         if (status != 200) {
             result.claim_status = mapClaimError(status, response);
+            LOGW("AuraLink",
+                 "claim failed: status=%d error=%s",
+                 status,
+                 response_error_code(response).c_str());
             return result;
         }
 
@@ -737,6 +969,7 @@ AuraLinkManager::WorkerResult AuraLinkManager::executeCommand(const WorkerComman
         serializeJson(request, body);
         String response;
         const int status = post_json("/api/devices/ingest", body, command.device_token, response);
+        result.http_status = status;
         if (status >= 200 && status < 300) {
             result.ok = true;
             JsonDocument doc;
@@ -753,6 +986,10 @@ AuraLinkManager::WorkerResult AuraLinkManager::executeCommand(const WorkerComman
 
         const String error = response_error_code(response);
         result.upload_paused = error == "account_upload_paused";
+        LOGW("AuraLink",
+             "ingest failed: status=%d error=%s",
+             status,
+             error.c_str());
         return result;
     }
 
@@ -761,6 +998,9 @@ AuraLinkManager::WorkerResult AuraLinkManager::executeCommand(const WorkerComman
 
 bool AuraLinkManager::submitCommand(const WorkerCommand &command) {
     if (!worker_task_) {
+        return false;
+    }
+    if (ota_suspended_ && command.op == WorkerOp::Ingest) {
         return false;
     }
     portENTER_CRITICAL(&worker_mux_);
@@ -1168,7 +1408,7 @@ void AuraLinkManager::recordSubmittedUploadForScheduling() {
 }
 
 bool AuraLinkManager::shouldUpload(uint32_t now_ms, const SensorData &data) const {
-    if (!enabled_ || upload_paused_ || device_id_.isEmpty() || device_token_.isEmpty()) {
+    if (ota_suspended_ || !enabled_ || upload_paused_ || device_id_.isEmpty() || device_token_.isEmpty()) {
         return false;
     }
     if (!base_url_configured()) {
@@ -1188,7 +1428,7 @@ bool AuraLinkManager::shouldRetryUpload(uint32_t now_ms) const {
     if (!retry_ingest_pending_) {
         return false;
     }
-    if (!enabled_ || upload_paused_ || device_id_.isEmpty() || device_token_.isEmpty()) {
+    if (ota_suspended_ || !enabled_ || upload_paused_ || device_id_.isEmpty() || device_token_.isEmpty()) {
         return false;
     }
     if (!base_url_configured() || WiFi.status() != WL_CONNECTED) {
@@ -1201,7 +1441,7 @@ bool AuraLinkManager::shouldRetryUpload(uint32_t now_ms) const {
 bool AuraLinkManager::shouldTriggerUrgentUpload(uint32_t now_ms,
                                                 const SensorData &data,
                                                 const AlertSnapshot &alert_state) const {
-    if (!enabled_ || upload_paused_ || device_id_.isEmpty() || device_token_.isEmpty()) {
+    if (ota_suspended_ || !enabled_ || upload_paused_ || device_id_.isEmpty() || device_token_.isEmpty()) {
         return false;
     }
     if (!base_url_configured() || WiFi.status() != WL_CONNECTED) {

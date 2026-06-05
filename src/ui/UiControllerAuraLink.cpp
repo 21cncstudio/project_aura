@@ -83,6 +83,41 @@ void format_last_upload(uint32_t now_ms, uint32_t last_ms, char *out, size_t out
     }
 }
 
+void set_aura_link_action_button_visual(lv_obj_t *button,
+                                        lv_obj_t *label,
+                                        bool enabled,
+                                        lv_color_t active_bg,
+                                        lv_color_t active_grad,
+                                        lv_color_t active_text,
+                                        lv_color_t inactive,
+                                        lv_color_t inactive_text) {
+    if (button) {
+        const lv_color_t bg = enabled ? active_bg : inactive;
+        const lv_color_t grad = enabled ? active_grad : inactive;
+        const lv_grad_dir_t grad_dir = enabled ? LV_GRAD_DIR_VER : LV_GRAD_DIR_NONE;
+        const lv_opa_t opa = enabled ? LV_OPA_COVER : LV_OPA_60;
+
+        lv_obj_set_style_bg_color(button, bg, LV_PART_MAIN | LV_STATE_DEFAULT);
+        lv_obj_set_style_bg_grad_color(button, grad, LV_PART_MAIN | LV_STATE_DEFAULT);
+        lv_obj_set_style_bg_grad_dir(button, grad_dir, LV_PART_MAIN | LV_STATE_DEFAULT);
+        lv_obj_set_style_border_color(button, bg, LV_PART_MAIN | LV_STATE_DEFAULT);
+        lv_obj_set_style_shadow_color(button, bg, LV_PART_MAIN | LV_STATE_DEFAULT);
+        lv_obj_set_style_opa(button, opa, LV_PART_MAIN | LV_STATE_DEFAULT);
+
+        lv_obj_set_style_bg_color(button, inactive, LV_PART_MAIN | LV_STATE_DISABLED);
+        lv_obj_set_style_bg_grad_color(button, inactive, LV_PART_MAIN | LV_STATE_DISABLED);
+        lv_obj_set_style_bg_grad_dir(button, LV_GRAD_DIR_NONE, LV_PART_MAIN | LV_STATE_DISABLED);
+        lv_obj_set_style_border_color(button, inactive, LV_PART_MAIN | LV_STATE_DISABLED);
+        lv_obj_set_style_shadow_color(button, inactive, LV_PART_MAIN | LV_STATE_DISABLED);
+        lv_obj_set_style_opa(button, LV_OPA_60, LV_PART_MAIN | LV_STATE_DISABLED);
+    }
+    if (label) {
+        const lv_color_t text = enabled ? active_text : inactive_text;
+        lv_obj_set_style_text_color(label, text, LV_PART_MAIN | LV_STATE_DEFAULT);
+        lv_obj_set_style_text_color(label, inactive_text, LV_PART_MAIN | LV_STATE_DISABLED);
+    }
+}
+
 } // namespace
 
 void UiController::update_aura_link_ui() {
@@ -153,6 +188,22 @@ void UiController::update_aura_link_ui() {
     set_button_enabled(objects.label_btn_aura_aq_link_activate, can_activate);
     set_button_enabled(objects.btn_aura_aq_link_reset, can_reset);
     set_button_enabled(objects.label_btn_aura_aq_link_reset, can_reset);
+    set_aura_link_action_button_visual(objects.btn_aura_aq_link_activate,
+                                       objects.label_btn_aura_aq_link_activate,
+                                       can_activate,
+                                       lv_color_hex(0x0f8104),
+                                       lv_color_hex(0x0d4009),
+                                       active_text_color(),
+                                       color_inactive(),
+                                       lv_color_hex(0x8a8a8a));
+    set_aura_link_action_button_visual(objects.btn_aura_aq_link_reset,
+                                       objects.label_btn_aura_aq_link_reset,
+                                       can_reset,
+                                       lv_color_hex(0x951212),
+                                       lv_color_hex(0x490808),
+                                       active_text_color(),
+                                       color_inactive(),
+                                       lv_color_hex(0x8a8a8a));
 
     if (objects.qrcode_aura_aq_link_portal) {
         lv_obj_clear_flag(objects.qrcode_aura_aq_link_portal, LV_OBJ_FLAG_HIDDEN);
