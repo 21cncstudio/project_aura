@@ -20,6 +20,7 @@ struct ConnectivityRuntimeSnapshot {
     bool wifi_connected = false;
     bool wifi_ap_mode = false;
     bool wifi_scan_in_progress = false;
+    bool wifi_scan_completed = false;
     int wifi_state = 0;
     int wifi_sta_status = 0;
     uint8_t wifi_retry_count = 0;

@@ -32,7 +32,6 @@
 #include "modules/SensorManager.h"
 #include "modules/TimeManager.h"
 #include "modules/FanControl.h"
-#include "modules/AuraLinkManager.h"
 #include "web/WebRuntime.h"
 #include "web/WebUiBridge.h"
 
@@ -66,7 +65,6 @@ TimeManager timeManager;
 ThemeManager themeManager;
 BacklightManager backlightManager;
 NightModeManager nightModeManager;
-AuraLinkManager auraLinkManager;
 FanControl fanControl;
 MemoryMonitor memoryMonitor;
 uint32_t boot_start_ms = 0;
@@ -99,7 +97,6 @@ UiContext ui_context{
     themeManager,
     backlightManager,
     nightModeManager,
-    auraLinkManager,
     fanControl,
     currentData,
     night_mode,
@@ -180,7 +177,6 @@ void setup()
         themeManager,
         backlightManager,
         nightModeManager,
-        auraLinkManager,
         fanControl,
         pressureHistory,
         chartsHistory,
@@ -209,7 +205,6 @@ void setup()
     if (!network_plane_running) {
         LOGW("Main", "network task unavailable, falling back to main-loop networking");
     }
-    auraLinkManager.begin(storage);
 }
 
 void loop()
@@ -323,11 +318,6 @@ void loop()
     mqttManager.setSystemTimeValid(timeManager.isSystemTimeValid());
     uiController.onTimePoll(time_poll);
     fanControl.poll(now, &currentData, sensorManager.isWarmupActive());
-    auraLinkManager.poll(now,
-                         currentData,
-                         sensorManager.isWarmupActive(),
-                         timeManager,
-                         displayThresholds.snapshot());
     const FanControl::Snapshot fan_snapshot = fanControl.snapshot();
     webRuntimeState.update(currentData, sensorManager.isWarmupActive(), fanControl);
     mqttRuntimeState.update(currentData,

@@ -102,6 +102,17 @@ void test_web_ota_api_utils_build_update_result_reports_total_deadline_as_timeou
     TEST_ASSERT_EQUAL_STRING("UPLOAD_TIMEOUT", result.error_code.c_str());
 }
 
+void test_web_ota_api_utils_build_update_result_reports_invalid_size() {
+    const WebOtaApiUtils::Result result =
+        WebOtaApiUtils::buildUpdateResult(true, false, 0, 0, false, 0, "Firmware size is required");
+
+    TEST_ASSERT_FALSE(result.success);
+    TEST_ASSERT_FALSE(result.rebooting);
+    TEST_ASSERT_EQUAL_INT(400, result.status_code);
+    TEST_ASSERT_EQUAL_STRING("INVALID_SIZE", result.error_code.c_str());
+    TEST_ASSERT_EQUAL_STRING("Firmware size is required", result.error.c_str());
+}
+
 void test_web_ota_api_utils_build_prepare_result_reports_success_payload() {
     const WebOtaApiUtils::PrepareResult result =
         WebOtaApiUtils::buildPrepareResult(true, true, true, 6553600, true, 3713984, 840000);
@@ -143,6 +154,16 @@ void test_web_ota_api_utils_build_prepare_result_reports_invalid_size() {
     TEST_ASSERT_EQUAL_STRING("Invalid firmware size", result.error.c_str());
 }
 
+void test_web_ota_api_utils_build_prepare_result_requires_size() {
+    const WebOtaApiUtils::PrepareResult result =
+        WebOtaApiUtils::buildPrepareResult(true, false, false, 6553600, false, 0, 900000);
+
+    TEST_ASSERT_FALSE(result.success);
+    TEST_ASSERT_EQUAL_INT(400, result.status_code);
+    TEST_ASSERT_EQUAL_STRING("INVALID_SIZE", result.error_code.c_str());
+    TEST_ASSERT_EQUAL_STRING("Firmware size is required", result.error.c_str());
+}
+
 void test_web_ota_api_utils_build_prepare_result_reports_unavailable_state() {
     const WebOtaApiUtils::PrepareResult result =
         WebOtaApiUtils::buildPrepareResult(false, true, true, 0, true, 1234, 0);
@@ -162,9 +183,11 @@ int main(int, char **) {
     RUN_TEST(test_web_ota_api_utils_build_update_result_reports_interrupt_with_specific_code);
     RUN_TEST(test_web_ota_api_utils_build_update_result_reports_client_disconnect_separately);
     RUN_TEST(test_web_ota_api_utils_build_update_result_reports_total_deadline_as_timeout);
+    RUN_TEST(test_web_ota_api_utils_build_update_result_reports_invalid_size);
     RUN_TEST(test_web_ota_api_utils_build_prepare_result_reports_success_payload);
     RUN_TEST(test_web_ota_api_utils_build_prepare_result_rejects_oversized_image);
     RUN_TEST(test_web_ota_api_utils_build_prepare_result_reports_invalid_size);
+    RUN_TEST(test_web_ota_api_utils_build_prepare_result_requires_size);
     RUN_TEST(test_web_ota_api_utils_build_prepare_result_reports_unavailable_state);
     return UNITY_END();
 }

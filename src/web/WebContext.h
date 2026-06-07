@@ -60,7 +60,4 @@ struct WebHandlerContext {
     DisplayThresholdManager *display_thresholds = nullptr;
     SensorManager *sensor_manager = nullptr;
 
-    void *cloud_upload_context = nullptr;
-    void (*cloud_upload_set_ota_suspended)(void *context, bool suspended) = nullptr;
-    bool (*cloud_upload_busy)(void *context) = nullptr;
 };

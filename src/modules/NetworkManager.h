@@ -10,6 +10,7 @@
 #include <memory>
 
 #include <Arduino.h>
+#include <DNSServer.h>
 #include "modules/StorageManager.h"
 #include "web/WebContext.h"
 #include "web/WebTransport.h"
@@ -50,9 +51,6 @@ public:
     void attachWebUiBridge(WebUiBridge &webUiBridge);
     void attachDisplayThresholds(DisplayThresholdManager &displayThresholds);
     void attachSensorManager(SensorManager &sensorManager);
-    void attachCloudUploadSuspender(void *context,
-                                    void (*set_suspended)(void *context, bool suspended),
-                                    bool (*busy)(void *context));
     void attachCommandQueue(NetworkCommandQueue &commandQueue);
     void setStateChangeCallback(StateChangeCallback cb, void *ctx);
     void poll();
@@ -88,6 +86,7 @@ public:
     uint8_t retryCount() const { return wifi_retry_count_; }
     const String &scanOptions() const { return wifi_scan_options_; }
     bool scanInProgress() const { return wifi_scan_in_progress_; }
+    bool scanCompleted() const { return wifi_scan_completed_; }
 
 private:
     void registerServerRoutes();
@@ -105,6 +104,9 @@ private:
     void startSta();
     void startAp();
     void stopAp();
+    void startCaptiveDns(const IPAddress &ap_ip);
+    void stopCaptiveDns();
+    void restoreApQuietModeAfterScan();
     void startMdns();
     void stopMdns();
     void notifyStateChangeIfNeeded();
@@ -132,7 +134,10 @@ private:
     String hostname_;
     String ap_ssid_;
     String wifi_scan_options_;
+    DNSServer captive_dns_;
     bool wifi_scan_in_progress_ = false;
+    bool wifi_scan_completed_ = false;
+    bool captive_dns_started_ = false;
     uint32_t wifi_scan_started_ms_ = 0;
     uint8_t wifi_retry_count_ = 0;
     uint32_t wifi_retry_at_ms_ = 0;

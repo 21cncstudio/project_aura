@@ -40,6 +40,14 @@ void classify_failure(Result &result, bool has_upload) {
         return;
     }
 
+    if (error_contains(result.error, "Firmware size") ||
+        error_contains(result.error, "firmware size") ||
+        error_contains(result.error, "Invalid size")) {
+        result.status_code = 400;
+        result.error_code = "INVALID_SIZE";
+        return;
+    }
+
     if (error_contains(result.error, "timed out")) {
         result.status_code = 408;
         result.error_code = "UPLOAD_TIMEOUT";
@@ -149,7 +157,14 @@ PrepareResult buildPrepareResult(bool available,
         return result;
     }
 
-    if (size_supplied && !size_valid) {
+    if (!size_supplied) {
+        result.status_code = 400;
+        result.error_code = "INVALID_SIZE";
+        result.error = "Firmware size is required";
+        return result;
+    }
+
+    if (!size_valid) {
         result.status_code = 400;
         result.error_code = "INVALID_SIZE";
         result.error = "Invalid firmware size";

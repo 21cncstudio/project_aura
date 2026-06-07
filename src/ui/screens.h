@@ -26,8 +26,7 @@ enum ScreensEnum {
     SCREEN_ID_PAGE_DAC_SETTINGS = 13,
     SCREEN_ID_PAGE_FW_UPDATE = 14,
     SCREEN_ID_PAGE_DIAG = 15,
-    SCREEN_ID_PAGE_AURA_AQ_LINK = 16,
-    _SCREEN_ID_LAST = 16
+    _SCREEN_ID_LAST = 15
 };
 
 typedef struct _objects_t {
@@ -46,7 +45,6 @@ typedef struct _objects_t {
     lv_obj_t *page_dac_settings;
     lv_obj_t *page_fw_update;
     lv_obj_t *page_diag;
-    lv_obj_t *page_aura_aq_link;
     lv_obj_t *label_boot_ver;
     lv_obj_t *background_boot_diag;
     lv_obj_t *btn_diag_continue;
@@ -207,8 +205,8 @@ typedef struct _objects_t {
     lv_obj_t *label_temp_offset_value;
     lv_obj_t *btn_temp_offset_plus;
     lv_obj_t *label_btn_temp_offset_plus;
-    lv_obj_t *btn_aura_aq_link;
-    lv_obj_t *label_btn_aura_aq_link;
+    lv_obj_t *btn_night_mode;
+    lv_obj_t *label_btn_night_mode;
     lv_obj_t *btn_units;
     lv_obj_t *label_btn_units;
     lv_obj_t *btn_head_status;
@@ -524,8 +522,6 @@ typedef struct _objects_t {
     lv_obj_t *label_auto_night_title;
     lv_obj_t *btn_auto_night_back;
     lv_obj_t *label_btn_auto_night_back;
-    lv_obj_t *btn_night_mode;
-    lv_obj_t *label_btn_night_mode;
     lv_obj_t *background_clock_2;
     lv_obj_t *container_backlight_schedule;
     lv_obj_t *label_backlight_schedule_title;
@@ -976,46 +972,6 @@ typedef struct _objects_t {
     lv_obj_t *label_btn_diag_back;
     lv_obj_t *btn_diag_clear;
     lv_obj_t *label_btn_diag_back_1;
-    lv_obj_t *background_aura_aq_link;
-    lv_obj_t *container_aura_aq_link_header;
-    lv_obj_t *label_aura_aq_link_title;
-    lv_obj_t *btn_aura_aq_link_back;
-    lv_obj_t *label_btn_aura_aq_link_back;
-    lv_obj_t *wifi_status_icon_aura_aq_link;
-    lv_obj_t *link_status_icon_aura_aq_link;
-    lv_obj_t *container_aura_aq_link_main;
-    lv_obj_t *btn_aura_aq_link_activate;
-    lv_obj_t *label_btn_aura_aq_link_activate;
-    lv_obj_t *qrcode_aura_aq_link_portal;
-    lv_obj_t *label_aura_aq_link_description;
-    lv_obj_t *btn_aura_aq_link_reset;
-    lv_obj_t *label_btn_aura_aq_link_reset;
-    lv_obj_t *container_aura_aq_link_status;
-    lv_obj_t *label_aura_aq_link_status_value;
-    lv_obj_t *label_aura_aq_link_status;
-    lv_obj_t *container_aura_aq_link_last_upload;
-    lv_obj_t *label_aura_aq_link_last_upload_value;
-    lv_obj_t *label_aura_aq_link_last_upload;
-    lv_obj_t *container_aura_aq_link_upload_interval;
-    lv_obj_t *label_aura_aq_link_upload_interval_value;
-    lv_obj_t *label_aura_aq_link_upload_interval;
-    lv_obj_t *container_aura_aq_link_reset_modal;
-    lv_obj_t *label_aura_aq_link_reset_title;
-    lv_obj_t *btn_aura_aq_link_reset_confirm;
-    lv_obj_t *label_btn_aura_aq_link_reset_confirm;
-    lv_obj_t *btn_aura_aq_link_reset_cancel;
-    lv_obj_t *label_btn_aura_aq_link_reset_cancel;
-    lv_obj_t *label_aura_aq_link_reset_message;
-    lv_obj_t *container_aura_aq_link_pairing_modal;
-    lv_obj_t *container_aura_aq_link_pairing_code;
-    lv_obj_t *label_aura_aq_link_pairing_code;
-    lv_obj_t *btnmatrix_aura_aq_link_pairing_keypad;
-    lv_obj_t *label_aura_aq_link_pairing_title;
-    lv_obj_t *btn_aura_aq_link_pairing_activate;
-    lv_obj_t *label_btn_aura_aq_link_pairing_activate;
-    lv_obj_t *btn_aura_aq_link_pairing_cancel;
-    lv_obj_t *label_btn_aura_aq_link_pairing_cancel;
-    lv_obj_t *label_aura_aq_link_pairing_status;
 } objects_t;
 
 extern objects_t objects;
@@ -1064,9 +1020,6 @@ void tick_screen_page_fw_update();
 
 void create_screen_page_diag();
 void tick_screen_page_diag();
-
-void create_screen_page_aura_aq_link();
-void tick_screen_page_aura_aq_link();
 
 void tick_screen_by_id(enum ScreensEnum screenId);
 void tick_screen(int screen_index);

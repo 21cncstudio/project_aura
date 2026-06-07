@@ -68,20 +68,25 @@ void handleWifiRoot(WebHandlerContext &context,
         return;
     }
 
-    if (server.hasArg("scan") && context.wifi_start_scan) {
+    const bool scan_requested = server.hasArg("scan");
+    if (scan_requested && context.wifi_start_scan) {
         context.wifi_start_scan();
     }
     String list_items;
-    if (connectivity.wifi_scan_in_progress) {
+    const bool scan_in_progress = connectivity.wifi_scan_in_progress || scan_requested;
+    if (scan_in_progress) {
         list_items = FPSTR(WebTemplates::kWifiListScanning);
     } else if (!connectivity.wifi_scan_options.isEmpty()) {
         list_items = connectivity.wifi_scan_options;
+    } else if (!connectivity.wifi_scan_completed) {
+        list_items = FPSTR(WebTemplates::kWifiListScanPrompt);
     } else {
         list_items = FPSTR(WebTemplates::kWifiListEmpty);
     }
     WebWifiPage::RootPageData page_data{};
     page_data.ssid_items = list_items;
-    page_data.scan_in_progress = connectivity.wifi_scan_in_progress;
+    page_data.scan_in_progress = scan_in_progress;
+    page_data.scan_completed = connectivity.wifi_scan_completed;
     const String html =
         WebWifiPage::renderRootHtml(FPSTR(WebTemplates::kWifiPageTemplate), page_data);
     WebResponseUtils::sendHtmlStream(server, html, stream_context);
@@ -140,6 +145,22 @@ void handleDashboardApp(WebHandlerContext &context,
                                        true,
                                        WebResponseUtils::AssetCacheMode::Immutable,
                                        stream_context);
+}
+
+void handleCaptiveProbe(WebHandlerContext &context) {
+    if (!context.server || !context.connectivity_runtime) {
+        return;
+    }
+    const ConnectivityRuntimeSnapshot connectivity = context.connectivity_runtime->snapshot();
+    if (!connectivity.wifi_ap_mode) {
+        context.server->send(204, "text/plain", "");
+        return;
+    }
+
+    const String portal_url = WebWifiPage::captivePortalRedirectUrl(connectivity.ap_ip);
+    WebResponseUtils::sendNoStoreHeaders(*context.server);
+    context.server->sendHeader("Location", portal_url, true);
+    context.server->send(302, "text/plain", "Redirecting to Aura Wi-Fi setup");
 }
 
 void handleWifiNotFound(WebHandlerContext &context) {

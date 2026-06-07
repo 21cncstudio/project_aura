@@ -9,12 +9,14 @@
 #include "web/WebQueryString.h"
 
 #include <algorithm>
+#include <cstring>
 #include <errno.h>
 #include <list>
 #include <memory>
 #include <vector>
 
 #include <esp_http_server.h>
+#include <esp_heap_caps.h>
 #include <lwip/sockets.h>
 
 #include "core/Logger.h"
@@ -172,24 +174,41 @@ public:
         explicit BufferedBodyReader(EspHttpRequest *request)
             : request_(request),
               req_(request ? request->req_ : nullptr),
-              remaining_(req_ && req_->content_len > 0 ? static_cast<size_t>(req_->content_len) : 0) {
-            buffer_.reserve(2048);
+              remaining_(req_ && req_->content_len > 0 ? static_cast<size_t>(req_->content_len) : 0),
+              buffer_(allocateBuffer()) {}
+
+        ~BufferedBodyReader() {
+            if (buffer_) {
+                heap_caps_free(buffer_);
+            }
         }
+
+        BufferedBodyReader(const BufferedBodyReader &) = delete;
+        BufferedBodyReader &operator=(const BufferedBodyReader &) = delete;
 
         size_t remainingBytesOnSocket() const {
             return remaining_;
         }
 
         bool readLine(String &line) {
+            if (!buffer_) {
+                if (request_) {
+                    request_->setUploadAbortReason(WebUploadAbortReason::SocketError);
+                }
+                return false;
+            }
+
             while (true) {
-                auto it = std::search(buffer_.begin(),
-                                      buffer_.end(),
+                const uint8_t *begin = bufferData();
+                const uint8_t *end = begin + buffer_size_;
+                auto it = std::search(begin,
+                                      end,
                                       kCrLf,
                                       kCrLf + 2);
-                if (it != buffer_.end()) {
-                    const size_t line_len = static_cast<size_t>(std::distance(buffer_.begin(), it));
-                    line = String(reinterpret_cast<const char *>(buffer_.data()), line_len);
-                    buffer_.erase(buffer_.begin(), it + 2);
+                if (it != end) {
+                    const size_t line_len = static_cast<size_t>(std::distance(begin, it));
+                    line = String(reinterpret_cast<const char *>(begin), line_len);
+                    consume(line_len + 2);
                     return true;
                 }
                 if (!receiveMore()) {
@@ -201,20 +220,27 @@ public:
         template <typename Callback>
         bool streamUntilBoundary(const String &boundary, Callback callback, bool &final_boundary) {
             final_boundary = false;
-            const String marker_string = String("\r\n--") + boundary;
-            std::vector<uint8_t> marker(marker_string.length());
-            for (size_t i = 0; i < marker.size(); ++i) {
-                marker[i] = static_cast<uint8_t>(marker_string[i]);
+            if (!buffer_) {
+                if (request_) {
+                    request_->setUploadAbortReason(WebUploadAbortReason::SocketError);
+                }
+                return false;
             }
 
+            const String marker_string = String("\r\n--") + boundary;
+            const auto *marker = reinterpret_cast<const uint8_t *>(marker_string.c_str());
+            const size_t marker_size = marker_string.length();
+
             while (true) {
-                auto it = std::search(buffer_.begin(), buffer_.end(), marker.begin(), marker.end());
-                if (it != buffer_.end()) {
-                    const size_t data_len = static_cast<size_t>(std::distance(buffer_.begin(), it));
-                    if (data_len > 0 && !callback(buffer_.data(), data_len)) {
+                const uint8_t *begin = bufferData();
+                const uint8_t *end = begin + buffer_size_;
+                auto it = std::search(begin, end, marker, marker + marker_size);
+                if (it != end) {
+                    const size_t data_len = static_cast<size_t>(std::distance(begin, it));
+                    if (data_len > 0 && !callback(begin, data_len)) {
                         return false;
                     }
-                    buffer_.erase(buffer_.begin(), it + static_cast<ptrdiff_t>(marker.size()));
+                    consume(data_len + marker_size);
                     return consumeBoundarySuffix(final_boundary);
                 }
 
@@ -222,13 +248,13 @@ public:
                     return false;
                 }
 
-                const size_t keep_bytes = marker.size() > 1 ? marker.size() - 1 : 0;
-                if (buffer_.size() > keep_bytes) {
-                    const size_t flush_len = buffer_.size() - keep_bytes;
-                    if (flush_len > 0 && !callback(buffer_.data(), flush_len)) {
+                const size_t keep_bytes = marker_size > 1 ? marker_size - 1 : 0;
+                if (buffer_size_ > keep_bytes) {
+                    const size_t flush_len = buffer_size_ - keep_bytes;
+                    if (flush_len > 0 && !callback(bufferData(), flush_len)) {
                         return false;
                     }
-                    buffer_.erase(buffer_.begin(), buffer_.begin() + static_cast<ptrdiff_t>(flush_len));
+                    consume(flush_len);
                 }
 
                 if (!receiveMore()) {
@@ -238,25 +264,88 @@ public:
         }
 
     private:
+        static uint8_t *allocateBuffer() {
+            auto *buffer = static_cast<uint8_t *>(
+                heap_caps_malloc(kBufferCapacity, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
+            if (buffer) {
+                return buffer;
+            }
+
+            LOGW("Web", "multipart internal buffer allocation failed, using generic 8-bit heap");
+            return static_cast<uint8_t *>(heap_caps_malloc(kBufferCapacity, MALLOC_CAP_8BIT));
+        }
+
+        uint8_t *bufferData() {
+            return buffer_ ? buffer_ + buffer_head_ : nullptr;
+        }
+
+        const uint8_t *bufferData() const {
+            return buffer_ ? buffer_ + buffer_head_ : nullptr;
+        }
+
+        size_t writableTailBytes() const {
+            return buffer_ ? kBufferCapacity - (buffer_head_ + buffer_size_) : 0;
+        }
+
+        void compactBuffer() {
+            if (!buffer_ || buffer_head_ == 0) {
+                return;
+            }
+            if (buffer_size_ > 0) {
+                memmove(buffer_, buffer_ + buffer_head_, buffer_size_);
+            }
+            buffer_head_ = 0;
+        }
+
+        void consume(size_t count) {
+            if (count >= buffer_size_) {
+                buffer_head_ = 0;
+                buffer_size_ = 0;
+                return;
+            }
+
+            buffer_head_ += count;
+            buffer_size_ -= count;
+            if (buffer_head_ > kBufferCapacity / 2 && buffer_head_ > buffer_size_) {
+                compactBuffer();
+            }
+        }
+
         bool receiveMore() {
-            if (!req_ || remaining_ == 0) {
+            if (!req_ || remaining_ == 0 || !buffer_) {
+                if (request_ && !buffer_) {
+                    request_->setUploadAbortReason(WebUploadAbortReason::SocketError);
+                }
                 return false;
             }
 
-            char chunk[2048];
             while (remaining_ > 0) {
+                if (writableTailBytes() == 0) {
+                    compactBuffer();
+                }
+                const size_t writable = writableTailBytes();
+                if (writable == 0) {
+                    if (request_) {
+                        request_->setUploadAbortReason(WebUploadAbortReason::SocketError);
+                    }
+                    return false;
+                }
+
                 const uint32_t now_ms = millis();
                 if (request_ && request_->uploadDeadlineExceeded(now_ms)) {
                     request_->setUploadAbortReason(WebUploadAbortReason::TotalTimeout);
                     return false;
                 }
 
-                const size_t to_read = remaining_ < sizeof(chunk) ? remaining_ : sizeof(chunk);
-                const int received = httpd_req_recv(req_, chunk, to_read);
+                const size_t to_read = std::min(std::min(remaining_, kRecvChunkSize), writable);
+                const int received =
+                    httpd_req_recv(req_,
+                                   reinterpret_cast<char *>(buffer_ + buffer_head_ + buffer_size_),
+                                   to_read);
                 if (received > 0) {
                     timeout_window_active_ = false;
                     timeout_window_start_ms_ = 0;
-                    buffer_.insert(buffer_.end(), chunk, chunk + received);
+                    buffer_size_ += static_cast<size_t>(received);
                     remaining_ -= static_cast<size_t>(received);
                     return true;
                 }
@@ -291,7 +380,7 @@ public:
         }
 
         bool ensureAvailable(size_t count) {
-            while (buffer_.size() < count) {
+            while (buffer_size_ < count) {
                 if (!receiveMore()) {
                     return false;
                 }
@@ -304,21 +393,21 @@ public:
                 return false;
             }
 
-            if (buffer_[0] == '-' && buffer_[1] == '-') {
+            if (bufferData()[0] == '-' && bufferData()[1] == '-') {
                 final_boundary = true;
-                buffer_.erase(buffer_.begin(), buffer_.begin() + 2);
-                if (buffer_.size() < 2 && remaining_ > 0) {
+                consume(2);
+                if (buffer_size_ < 2 && remaining_ > 0) {
                     receiveMore();
                 }
-                if (buffer_.size() >= 2 && buffer_[0] == '\r' && buffer_[1] == '\n') {
-                    buffer_.erase(buffer_.begin(), buffer_.begin() + 2);
+                if (buffer_size_ >= 2 && bufferData()[0] == '\r' && bufferData()[1] == '\n') {
+                    consume(2);
                 }
                 return true;
             }
 
-            if (buffer_[0] == '\r' && buffer_[1] == '\n') {
+            if (bufferData()[0] == '\r' && bufferData()[1] == '\n') {
                 final_boundary = false;
-                buffer_.erase(buffer_.begin(), buffer_.begin() + 2);
+                consume(2);
                 return true;
             }
 
@@ -328,10 +417,14 @@ public:
         EspHttpRequest *request_ = nullptr;
         httpd_req_t *req_ = nullptr;
         size_t remaining_ = 0;
-        std::vector<uint8_t> buffer_{};
+        uint8_t *buffer_ = nullptr;
+        size_t buffer_head_ = 0;
+        size_t buffer_size_ = 0;
         bool timeout_window_active_ = false;
         uint32_t timeout_window_start_ms_ = 0;
-        static constexpr char kCrLf[2] = {'\r', '\n'};
+        static constexpr size_t kBufferCapacity = 4096;
+        static constexpr size_t kRecvChunkSize = 2048;
+        static constexpr uint8_t kCrLf[2] = {'\r', '\n'};
     };
 
     void begin(httpd_req_t *req) {

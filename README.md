@@ -119,7 +119,14 @@ Useful API routes used by the dashboard:
 - `GET /api/events`
 - `GET /api/diag` (AP setup mode only)
 - `POST /api/settings`
-- `POST /api/ota`
+- `POST /api/ota` (multipart form: required `ota_size=<bytes>` before `firmware=@...`)
+
+PowerShell example for command-line OTA upload:
+
+```powershell
+$fw = Get-Item .pio\build\project_aura\firmware.bin
+curl.exe -F "ota_size=$($fw.Length)" -F "firmware=@$($fw.FullName);type=application/octet-stream" "http://aura-672c7c.local/api/ota"
+```
 
 ## Project Files and Backer Resources
 This GitHub repository contains the open-source firmware, web dashboard assets, Home Assistant examples,

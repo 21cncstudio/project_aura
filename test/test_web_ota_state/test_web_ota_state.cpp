@@ -24,6 +24,10 @@ void test_web_ota_state_begin_upload_resets_previous_state() {
     TEST_ASSERT_FALSE(snapshot.reboot_pending);
     TEST_ASSERT_FALSE(snapshot.size_known);
     TEST_ASSERT_TRUE(snapshot.session_id != 0);
+    TEST_ASSERT_EQUAL_UINT32(snapshot.session_id, state.sessionId());
+    TEST_ASSERT_FALSE(state.hasError());
+    TEST_ASSERT_FALSE(state.firstChunkSeen());
+    TEST_ASSERT_EQUAL_UINT32(0, state.firstChunkDelayMs());
     TEST_ASSERT_EQUAL_UINT32(0, static_cast<uint32_t>(snapshot.written_size));
     TEST_ASSERT_EQUAL_UINT32(200, snapshot.upload_start_ms);
     TEST_ASSERT_EQUAL_UINT32(0, static_cast<uint32_t>(snapshot.error.length()));
@@ -41,7 +45,9 @@ void test_web_ota_state_tracks_chunks_and_sizes() {
 
     const WebOtaSnapshot snapshot = state.snapshot();
     TEST_ASSERT_TRUE(snapshot.first_chunk_seen);
+    TEST_ASSERT_TRUE(state.firstChunkSeen());
     TEST_ASSERT_EQUAL_UINT32(30, snapshot.firstChunkDelayMs());
+    TEST_ASSERT_EQUAL_UINT32(30, state.firstChunkDelayMs());
     TEST_ASSERT_EQUAL_UINT32(2, snapshot.chunk_count);
     TEST_ASSERT_EQUAL_UINT32(120, static_cast<uint32_t>(snapshot.chunk_min_size));
     TEST_ASSERT_EQUAL_UINT32(300, static_cast<uint32_t>(snapshot.chunk_max_size));
@@ -59,6 +65,7 @@ void test_web_ota_state_error_is_sticky_and_clears_active() {
 
     const WebOtaSnapshot snapshot = state.snapshot();
     TEST_ASSERT_FALSE(snapshot.active);
+    TEST_ASSERT_TRUE(state.hasError());
     TEST_ASSERT_TRUE(state.isBusy());
     TEST_ASSERT_FALSE(snapshot.success);
     TEST_ASSERT_TRUE(snapshot.hasTerminalResult(60));
@@ -74,8 +81,10 @@ void test_web_ota_state_error_is_sticky_and_clears_active() {
 void test_web_ota_state_success_and_expected_size_match() {
     WebOtaState state;
     state.beginUpload(50);
-    state.setExpectedSize(true, 256);
     state.addWritten(256);
+    TEST_ASSERT_FALSE(state.writtenMatchesExpected());
+
+    state.setExpectedSize(true, 256);
     TEST_ASSERT_TRUE(state.writtenMatchesExpected());
 
     state.markFinalizeDuration(12);

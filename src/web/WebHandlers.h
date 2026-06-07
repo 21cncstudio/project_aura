@@ -14,6 +14,7 @@ void WebHandlersInit(WebHandlerContext *context);
 void wifi_build_scan_items(int count);
 
 void wifi_handle_root();
+void wifi_handle_captive_probe();
 void dashboard_handle_root();
 void dashboard_handle_styles();
 void dashboard_handle_app();

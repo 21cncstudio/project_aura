@@ -84,15 +84,6 @@ void UiController::on_wifi_settings_event_cb(lv_event_t *e) { if (instance_) ins
 void UiController::on_wifi_back_event_cb(lv_event_t *e) { if (instance_) instance_->on_wifi_back_event(e); }
 void UiController::on_mqtt_settings_event_cb(lv_event_t *e) { if (instance_) instance_->on_mqtt_settings_event(e); }
 void UiController::on_mqtt_back_event_cb(lv_event_t *e) { if (instance_) instance_->on_mqtt_back_event(e); }
-void UiController::on_aura_aq_link_settings_event_cb(lv_event_t *e) { if (instance_) instance_->on_aura_aq_link_settings_event(e); }
-void UiController::on_aura_aq_link_back_event_cb(lv_event_t *e) { if (instance_) instance_->on_aura_aq_link_back_event(e); }
-void UiController::on_aura_aq_link_activate_event_cb(lv_event_t *e) { if (instance_) instance_->on_aura_aq_link_activate_event(e); }
-void UiController::on_aura_aq_link_reset_event_cb(lv_event_t *e) { if (instance_) instance_->on_aura_aq_link_reset_event(e); }
-void UiController::on_aura_aq_link_pairing_activate_event_cb(lv_event_t *e) { if (instance_) instance_->on_aura_aq_link_pairing_activate_event(e); }
-void UiController::on_aura_aq_link_pairing_cancel_event_cb(lv_event_t *e) { if (instance_) instance_->on_aura_aq_link_pairing_cancel_event(e); }
-void UiController::on_aura_aq_link_reset_confirm_event_cb(lv_event_t *e) { if (instance_) instance_->on_aura_aq_link_reset_confirm_event(e); }
-void UiController::on_aura_aq_link_reset_cancel_event_cb(lv_event_t *e) { if (instance_) instance_->on_aura_aq_link_reset_cancel_event(e); }
-void UiController::on_aura_aq_link_keypad_event_cb(lv_event_t *e) { if (instance_) instance_->on_aura_aq_link_keypad_event(e); }
 void UiController::on_theme_color_event_cb(lv_event_t *e) { if (instance_) instance_->on_theme_color_event(e); }
 void UiController::on_theme_back_event_cb(lv_event_t *e) { if (instance_) instance_->on_theme_back_event(e); }
 void UiController::on_theme_tab_event_cb(lv_event_t *e) { if (instance_) instance_->on_theme_tab_event(e); }

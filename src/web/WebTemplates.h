@@ -56,7 +56,19 @@ static const char kWifiListEmpty[] PROGMEM = R"HTML(
     </div>
     <div class="network-info">
         <span class="network-name">No networks found</span>
-        <span class="network-meta">Try rescan</span>
+        <span class="network-meta">Press Rescan Networks to try again</span>
+    </div>
+</div>
+)HTML";
+
+static const char kWifiListScanPrompt[] PROGMEM = R"HTML(
+<div class="network-item disabled">
+    <div class="network-icon">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12.55a11 11 0 0 1 14.08 0"></path><path d="M8.53 16.11a6 6 0 0 1 6.95 0"></path><line x1="12" y1="20" x2="12.01" y2="20"></line></svg>
+    </div>
+    <div class="network-info">
+        <span class="network-name">Press Scan Networks to search</span>
+        <span class="network-meta">Manual Entry is still available</span>
     </div>
 </div>
 )HTML";
@@ -165,16 +177,6 @@ static const char kWifiPageTemplate[] PROGMEM = R"HTML(
             letter-spacing: 0.08em; color: var(--text-dim);
         }
 
-        .rescan-btn {
-            background: none; border: none; padding: 4px 8px; margin-right: -8px;
-            font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em;
-            color: var(--primary);
-            cursor: pointer; display: flex; align-items: center; gap: 4px;
-            border-radius: 6px; transition: opacity 0.2s;
-            text-decoration: none;
-        }
-        .rescan-btn:hover { opacity: 0.8; }
-
         .network-list-container {
             flex: 1;
             min-height: 120px;
@@ -261,6 +263,19 @@ static const char kWifiPageTemplate[] PROGMEM = R"HTML(
             font-weight: 700; cursor: pointer;
         }
         .mode-btn.active { border-color: var(--primary); color: var(--text); background: rgba(99, 102, 241, 0.2); }
+        .scan-network-btn {
+            margin-top: 8px;
+            width: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            text-decoration: none;
+        }
+        .scan-network-btn.disabled {
+            pointer-events: none;
+            opacity: 0.7;
+        }
         .hidden { display: none; }
         .warning { font-size: 11px; color: #fbbf24; line-height: 1.4; margin: 4px 0 8px; }
 
@@ -334,14 +349,14 @@ static const char kWifiPageTemplate[] PROGMEM = R"HTML(
                         <button type="button" class="mode-btn active" id="mode-personal" onclick="setAuthMode('personal')">Personal</button>
                         <button type="button" class="mode-btn" id="mode-enterprise" onclick="setAuthMode('enterprise')">Enterprise</button>
                     </div>
+                    <a href="{{SCAN_BUTTON_HREF}}" class="mode-btn scan-network-btn{{SCAN_BUTTON_DISABLED_CLASS}}" id="scan-network-btn">
+                        <svg id="scan-network-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 2v6h-6"></path><path d="M3 12a9 9 0 0 1 15-6.7L21 8"></path><path d="M3 22v-6h6"></path><path d="M21 12a9 9 0 0 1-15 6.7L3 16"></path></svg>
+                        <span id="scan-network-label">{{SCAN_BUTTON_LABEL}}</span>
+                    </a>
                 </div>
 
                 <div class="label-row">
                     <label>Select Network</label>
-                    <a href="/wifi?scan=1" class="rescan-btn" id="rescan-btn">
-                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 2v6h-6"></path><path d="M3 12a9 9 0 0 1 15-6.7L21 8"></path><path d="M3 22v-6h6"></path><path d="M21 12a9 9 0 0 1-15 6.7L3 16"></path></svg>
-                        Rescan
-                    </a>
                 </div>
 
                 <div class="network-list-container">
@@ -523,11 +538,18 @@ static const char kWifiPageTemplate[] PROGMEM = R"HTML(
 
             var scanInProgress = {{SCAN_IN_PROGRESS}};
             if (scanInProgress) {
-                var rescanBtn = document.getElementById('rescan-btn');
-                if (rescanBtn) {
-                    rescanBtn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="animation: spin 1s linear infinite"><path d="M21 2v6h-6"></path><path d="M3 12a9 9 0 0 1 15-6.7L21 8"></path><path d="M3 22v-6h6"></path><path d="M21 12a9 9 0 0 1-15 6.7L3 16"></path></svg> Scanning...';
-                    rescanBtn.style.pointerEvents = 'none';
-                    rescanBtn.style.opacity = '0.7';
+                var scanBtn = document.getElementById('scan-network-btn');
+                var scanIcon = document.getElementById('scan-network-icon');
+                var scanLabel = document.getElementById('scan-network-label');
+                if (scanBtn) {
+                    scanBtn.classList.add('disabled');
+                    scanBtn.setAttribute('href', '#');
+                }
+                if (scanIcon) {
+                    scanIcon.style.animation = 'spin 1s linear infinite';
+                }
+                if (scanLabel) {
+                    scanLabel.textContent = 'Scanning...';
                 }
                 watchScanProgress();
             }

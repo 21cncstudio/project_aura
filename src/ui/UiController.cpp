@@ -336,7 +336,6 @@ UiController::UiController(const UiContext &context)
       themeManager(context.themeManager),
       backlightManager(context.backlightManager),
       nightModeManager(context.nightModeManager),
-      auraLinkManager(context.auraLinkManager),
       fanControl(context.fanControl),
       currentData(context.currentData),
       night_mode(context.night_mode),
@@ -775,9 +774,22 @@ void UiController::requestWifiReconnectFromUi() {
 }
 
 void UiController::toggleWifiApModeFromUi() {
+    refreshConnectivitySnapshot();
+    const bool next_ap_active =
+        !(connectivity_.wifi_enabled &&
+          connectivity_.wifi_state == static_cast<int>(AuraNetworkManager::WIFI_STATE_AP_CONFIG));
     if (!networkCommandQueue.enqueue(NetworkCommandQueue::Type::ToggleWifiApMode)) {
         LOGW("UI", "network command queue full: ToggleWifiApMode");
+        return;
     }
+    if (objects.btn_wifi_start_ap) {
+        if (next_ap_active) {
+            lv_obj_add_state(objects.btn_wifi_start_ap, LV_STATE_CHECKED);
+        } else {
+            lv_obj_clear_state(objects.btn_wifi_start_ap, LV_STATE_CHECKED);
+        }
+    }
+    markWebPagePanelDirty();
     datetime_ui_dirty = true;
 }
 
@@ -1365,10 +1377,6 @@ void UiController::poll(uint32_t now) {
     UiScreenFlow::processPendingScreen(*this, now);
     UiScreenFlow::processBootRelease(*this, now);
     UiScreenFlow::processDeferredUnloads(*this, now);
-    if (current_screen_id == SCREEN_ID_PAGE_AURA_AQ_LINK) {
-        update_aura_link_ui();
-    }
-
     UiRenderLoop::process(*this, now);
     lvgl_port_unlock();
     publishWebUiSnapshot();
@@ -1428,7 +1436,6 @@ void UiController::reset_dynamic_url_caches() {
     mqtt_portal_qr_cache_[0] = '\0';
     theme_custom_qr_cache_[0] = '\0';
     dac_portal_qr_cache_[0] = '\0';
-    aura_link_qr_cache_[0] = '\0';
     dac_network_ui_signature_ = UINT32_MAX;
 }
 
@@ -2897,7 +2904,7 @@ void UiController::init_ui_defaults() {
     }
     if (objects.btn_wifi_start_ap) {
         // AP state indicator is managed manually in update_wifi_ui().
-        lv_obj_clear_flag(objects.btn_wifi_start_ap, LV_OBJ_FLAG_CHECKABLE);
+        lv_obj_add_flag(objects.btn_wifi_start_ap, LV_OBJ_FLAG_CHECKABLE);
     }
     if (objects.chip_rtc_status) {
         lv_obj_add_flag(objects.chip_rtc_status, LV_OBJ_FLAG_CLICKABLE);
@@ -2920,12 +2927,10 @@ void UiController::init_ui_defaults() {
     if (objects.wifi_status_icon_2) lv_obj_add_flag(objects.wifi_status_icon_2, LV_OBJ_FLAG_HIDDEN);
     if (objects.wifi_status_icon_3) lv_obj_add_flag(objects.wifi_status_icon_3, LV_OBJ_FLAG_HIDDEN);
     if (objects.wifi_status_icon_4) lv_obj_add_flag(objects.wifi_status_icon_4, LV_OBJ_FLAG_HIDDEN);
-    if (objects.wifi_status_icon_aura_aq_link) lv_obj_add_flag(objects.wifi_status_icon_aura_aq_link, LV_OBJ_FLAG_HIDDEN);
     if (objects.mqtt_status_icon_1) lv_obj_add_flag(objects.mqtt_status_icon_1, LV_OBJ_FLAG_HIDDEN);
     if (objects.mqtt_status_icon_2) lv_obj_add_flag(objects.mqtt_status_icon_2, LV_OBJ_FLAG_HIDDEN);
     if (objects.mqtt_status_icon_3) lv_obj_add_flag(objects.mqtt_status_icon_3, LV_OBJ_FLAG_HIDDEN);
     if (objects.mqtt_status_icon_4) lv_obj_add_flag(objects.mqtt_status_icon_4, LV_OBJ_FLAG_HIDDEN);
-    if (objects.link_status_icon_aura_aq_link) lv_obj_add_flag(objects.link_status_icon_aura_aq_link, LV_OBJ_FLAG_HIDDEN);
 
     if (objects.btn_mqtt) {
         lv_obj_set_style_bg_color(objects.btn_mqtt, color_inactive(), LV_PART_MAIN | LV_STATE_DISABLED);
@@ -2966,28 +2971,6 @@ void UiController::init_ui_defaults() {
     }
     if (objects.label_dac_settings) {
         lv_obj_set_style_text_color(objects.label_dac_settings, color_inactive(), LV_PART_MAIN | LV_STATE_DISABLED);
-    }
-    if (objects.btn_aura_aq_link_activate) {
-        lv_obj_set_style_bg_color(objects.btn_aura_aq_link_activate, color_inactive(), LV_PART_MAIN | LV_STATE_DISABLED);
-        lv_obj_set_style_bg_grad_color(objects.btn_aura_aq_link_activate, color_inactive(), LV_PART_MAIN | LV_STATE_DISABLED);
-        lv_obj_set_style_bg_grad_dir(objects.btn_aura_aq_link_activate, LV_GRAD_DIR_NONE, LV_PART_MAIN | LV_STATE_DISABLED);
-        lv_obj_set_style_border_color(objects.btn_aura_aq_link_activate, color_inactive(), LV_PART_MAIN | LV_STATE_DISABLED);
-        lv_obj_set_style_shadow_color(objects.btn_aura_aq_link_activate, color_inactive(), LV_PART_MAIN | LV_STATE_DISABLED);
-        lv_obj_set_style_opa(objects.btn_aura_aq_link_activate, LV_OPA_60, LV_PART_MAIN | LV_STATE_DISABLED);
-    }
-    if (objects.label_btn_aura_aq_link_activate) {
-        lv_obj_set_style_text_color(objects.label_btn_aura_aq_link_activate, color_inactive(), LV_PART_MAIN | LV_STATE_DISABLED);
-    }
-    if (objects.btn_aura_aq_link_reset) {
-        lv_obj_set_style_bg_color(objects.btn_aura_aq_link_reset, color_inactive(), LV_PART_MAIN | LV_STATE_DISABLED);
-        lv_obj_set_style_bg_grad_color(objects.btn_aura_aq_link_reset, color_inactive(), LV_PART_MAIN | LV_STATE_DISABLED);
-        lv_obj_set_style_bg_grad_dir(objects.btn_aura_aq_link_reset, LV_GRAD_DIR_NONE, LV_PART_MAIN | LV_STATE_DISABLED);
-        lv_obj_set_style_border_color(objects.btn_aura_aq_link_reset, color_inactive(), LV_PART_MAIN | LV_STATE_DISABLED);
-        lv_obj_set_style_shadow_color(objects.btn_aura_aq_link_reset, color_inactive(), LV_PART_MAIN | LV_STATE_DISABLED);
-        lv_obj_set_style_opa(objects.btn_aura_aq_link_reset, LV_OPA_60, LV_PART_MAIN | LV_STATE_DISABLED);
-    }
-    if (objects.label_btn_aura_aq_link_reset) {
-        lv_obj_set_style_text_color(objects.label_btn_aura_aq_link_reset, color_inactive(), LV_PART_MAIN | LV_STATE_DISABLED);
     }
     if (objects.btn_night_mode) {
         lv_obj_set_style_bg_color(objects.btn_night_mode, color_inactive(), LV_PART_MAIN | LV_STATE_DISABLED);
@@ -3036,4 +3019,3 @@ void UiController::init_ui_defaults() {
     update_ui();
     confirm_hide();
 }
-

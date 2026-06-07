@@ -68,18 +68,6 @@ void mqtt_sync_with_wifi_cb() {
     }
 }
 
-void aura_link_set_ota_suspended_cb(void *ctx, bool suspended) {
-    auto *manager = static_cast<AuraLinkManager *>(ctx);
-    if (manager) {
-        manager->setOtaSuspended(suspended);
-    }
-}
-
-bool aura_link_busy_cb(void *ctx) {
-    auto *manager = static_cast<AuraLinkManager *>(ctx);
-    return manager && manager->snapshot().busy;
-}
-
 void wifi_state_change_cb(AuraNetworkManager::WifiState,
                           AuraNetworkManager::WifiState,
                           bool connected,
@@ -160,9 +148,6 @@ void AppInit::initManagersAndConfig(Context &ctx, StorageManager::BootAction boo
     ctx.networkManager.attachWebUiBridge(ctx.webUiBridge);
     ctx.networkManager.attachDisplayThresholds(ctx.displayThresholds);
     ctx.networkManager.attachSensorManager(ctx.sensorManager);
-    ctx.networkManager.attachCloudUploadSuspender(&ctx.auraLinkManager,
-                                                  aura_link_set_ota_suspended_cb,
-                                                  aura_link_busy_cb);
     ctx.networkManager.attachCommandQueue(ctx.networkCommandQueue);
     g_wifi_state_ctx.network = &ctx.networkManager;
     g_wifi_state_ctx.time_manager = &ctx.timeManager;

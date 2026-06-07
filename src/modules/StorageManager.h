@@ -77,9 +77,6 @@ public:
     static constexpr const char *kWifiEapCaCertPath = "/wifi_eap_ca.pem";
     static constexpr const char *kWifiEapClientCertPath = "/wifi_eap_client.crt";
     static constexpr const char *kWifiEapClientKeyPath = "/wifi_eap_client.key";
-    static constexpr const char *kAuraLinkPath = "/aura_link.json";
-    static constexpr const char *kAuraLinkPendingResetPath = "/aura_link_pending_reset.json";
-
 private:
     bool loadConfig();
     bool saveConfigInternal();

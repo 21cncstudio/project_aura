@@ -15,6 +15,15 @@ void registerRoutes(WebServerBackend &server) {
     server.onGet(WebTemplates::kDashboardStylesCssPath, dashboard_handle_styles);
     server.onGet(WebTemplates::kDashboardAppJsPath, dashboard_handle_app);
     server.onGet("/wifi", wifi_handle_root);
+    server.onGet("/generate_204", wifi_handle_captive_probe);
+    server.onGet("/gen_204", wifi_handle_captive_probe);
+    server.onGet("/hotspot-detect.html", wifi_handle_captive_probe);
+    server.onGet("/library/test/success.html", wifi_handle_captive_probe);
+    server.onGet("/success.txt", wifi_handle_captive_probe);
+    server.onGet("/connecttest.txt", wifi_handle_captive_probe);
+    server.onGet("/ncsi.txt", wifi_handle_captive_probe);
+    server.onGet("/redirect", wifi_handle_captive_probe);
+    server.onGet("/canonical.html", wifi_handle_captive_probe);
     server.onGet("/diag", diag_handle_root);
     server.onGet("/debug/sfa40", sfa40_debug_handle_root);
     server.onPost("/save", wifi_handle_save);

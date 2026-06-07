@@ -98,6 +98,12 @@ void wifi_handle_root() {
     with_response_context(WebPortalHandlers::handleWifiRoot);
 }
 
+void wifi_handle_captive_probe() {
+    with_context([](WebHandlerContext &context) {
+        WebPortalHandlers::handleCaptiveProbe(context);
+    });
+}
+
 void dashboard_handle_root() {
     with_response_context(WebPortalHandlers::handleDashboardRoot);
 }

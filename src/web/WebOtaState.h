@@ -12,6 +12,13 @@
 
 #include <atomic>
 
+#ifdef UNIT_TEST
+#include <mutex>
+#else
+#include <freertos/FreeRTOS.h>
+#include <freertos/semphr.h>
+#endif
+
 struct WebOtaSnapshot {
     bool upload_seen = false;
     bool active = false;
@@ -48,6 +55,10 @@ struct WebOtaSnapshot {
 
 class WebOtaState {
 public:
+    WebOtaState();
+    WebOtaState(const WebOtaState &) = delete;
+    WebOtaState &operator=(const WebOtaState &) = delete;
+
     static constexpr uint32_t terminalResultTtlMs() {
         return 60000;
     }
@@ -56,6 +67,10 @@ public:
     void beginUpload(uint32_t now_ms);
     bool isActive() const;
     bool isBusy() const;
+    bool hasError() const;
+    uint32_t sessionId() const;
+    bool firstChunkSeen() const;
+    uint32_t firstChunkDelayMs() const;
     void setTotalTimeoutMs(uint32_t timeout_ms);
     bool totalTimeoutExceeded(uint32_t now_ms) const;
     void poll(uint32_t now_ms);
@@ -74,8 +89,17 @@ public:
     WebOtaSnapshot snapshot() const;
 
 private:
+    void resetLocked();
     void setTerminalResultDeadline(uint32_t now_ms);
+    void lock() const;
+    void unlock() const;
 
+#ifdef UNIT_TEST
+    mutable std::mutex mutex_;
+#else
+    mutable StaticSemaphore_t mutex_buffer_{};
+    mutable SemaphoreHandle_t mutex_ = nullptr;
+#endif
     std::atomic<bool> active_{false};
     std::atomic<bool> busy_{false};
     bool upload_seen_ = false;

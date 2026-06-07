@@ -31,6 +31,7 @@ void ConnectivityRuntime::update(AuraNetworkManager &networkManager, MqttManager
         snapshot_.wifi_enabled &&
         networkManager.state() == AuraNetworkManager::WIFI_STATE_AP_CONFIG;
     snapshot_.wifi_scan_in_progress = networkManager.scanInProgress();
+    snapshot_.wifi_scan_completed = networkManager.scanCompleted();
     snapshot_.wifi_state = static_cast<int>(networkManager.state());
     snapshot_.wifi_sta_status = static_cast<int>(WiFi.status());
     snapshot_.wifi_retry_count = networkManager.retryCount();

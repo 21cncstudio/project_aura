@@ -19,6 +19,7 @@ void handleDashboardStyles(WebHandlerContext &context,
                            const WebResponseUtils::StreamContext &stream_context);
 void handleDashboardApp(WebHandlerContext &context,
                         const WebResponseUtils::StreamContext &stream_context);
+void handleCaptiveProbe(WebHandlerContext &context);
 void handleWifiNotFound(WebHandlerContext &context);
 
 }  // namespace WebPortalHandlers

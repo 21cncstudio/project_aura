@@ -76,7 +76,7 @@ String captivePortalRedirectUrl(const String &ap_ip) {
     const bool has_ap_ip = ap_ip.length() > 0 && ap_ip != "0.0.0.0";
     String url = "http://";
     url += has_ap_ip ? ap_ip : String("192.168.4.1");
-    url += "/";
+    url += "/wifi";
     return url;
 }
 
@@ -86,6 +86,19 @@ String renderRootHtml(const String &html_template, const RootPageData &data) {
     html = replace_placeholder(html,
                                "{{SCAN_IN_PROGRESS}}",
                                data.scan_in_progress ? String("1") : String("0"));
+    String scan_button_label = "Scan Networks";
+    if (data.scan_in_progress) {
+        scan_button_label = "Scanning...";
+    } else if (data.scan_completed) {
+        scan_button_label = "Rescan Networks";
+    }
+    html = replace_placeholder(html, "{{SCAN_BUTTON_LABEL}}", scan_button_label);
+    html = replace_placeholder(html,
+                               "{{SCAN_BUTTON_DISABLED_CLASS}}",
+                               data.scan_in_progress ? String(" disabled") : String(""));
+    html = replace_placeholder(html,
+                               "{{SCAN_BUTTON_HREF}}",
+                               data.scan_in_progress ? String("#") : String("/wifi?scan=1"));
     return html;
 }
 

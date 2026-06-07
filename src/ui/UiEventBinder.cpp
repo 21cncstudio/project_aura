@@ -46,8 +46,6 @@ lv_obj_t *UiEventBinder::screenRootById(int screen_id) {
             return objects.page_fw_update;
         case SCREEN_ID_PAGE_DIAG:
             return objects.page_diag;
-        case SCREEN_ID_PAGE_AURA_AQ_LINK:
-            return objects.page_aura_aq_link;
         default:
             return nullptr;
     }
@@ -269,14 +267,6 @@ void UiEventBinder::bindAvailableEvents(UiController &owner, int screen_id) {
         {objects.btn_dak_manual_auto, UiController::on_dac_manual_auto_event_cb, LV_EVENT_CLICKED},
         {objects.btn_dak_auto_on_toggle, UiController::on_dac_auto_start_event_cb, LV_EVENT_CLICKED},
         {objects.btn_dak_manual_stop_1, UiController::on_dac_auto_stop_event_cb, LV_EVENT_CLICKED},
-        {objects.btn_aura_aq_link, UiController::on_aura_aq_link_settings_event_cb, LV_EVENT_CLICKED},
-        {objects.btn_aura_aq_link_back, UiController::on_aura_aq_link_back_event_cb, LV_EVENT_CLICKED},
-        {objects.btn_aura_aq_link_activate, UiController::on_aura_aq_link_activate_event_cb, LV_EVENT_CLICKED},
-        {objects.btn_aura_aq_link_reset, UiController::on_aura_aq_link_reset_event_cb, LV_EVENT_CLICKED},
-        {objects.btn_aura_aq_link_pairing_activate, UiController::on_aura_aq_link_pairing_activate_event_cb, LV_EVENT_CLICKED},
-        {objects.btn_aura_aq_link_pairing_cancel, UiController::on_aura_aq_link_pairing_cancel_event_cb, LV_EVENT_CLICKED},
-        {objects.btn_aura_aq_link_reset_confirm, UiController::on_aura_aq_link_reset_confirm_event_cb, LV_EVENT_CLICKED},
-        {objects.btn_aura_aq_link_reset_cancel, UiController::on_aura_aq_link_reset_cancel_event_cb, LV_EVENT_CLICKED},
     };
 
     const EventBinding value_bindings[] = {
@@ -352,7 +342,6 @@ void UiEventBinder::bindAvailableEvents(UiController &owner, int screen_id) {
         {objects.btn_dak_manual_timer_toggle_2hours, UiController::on_dac_manual_timer_event_cb, LV_EVENT_VALUE_CHANGED},
         {objects.btn_dak_manual_timer_toggle_4hours, UiController::on_dac_manual_timer_event_cb, LV_EVENT_VALUE_CHANGED},
         {objects.btn_dak_manual_timer_toggle_8hours, UiController::on_dac_manual_timer_event_cb, LV_EVENT_VALUE_CHANGED},
-        {objects.btnmatrix_aura_aq_link_pairing_keypad, UiController::on_aura_aq_link_keypad_event_cb, LV_EVENT_VALUE_CHANGED},
     };
 
     constexpr lv_coord_t kExtendedHitAreaPx = 16;
@@ -368,7 +357,6 @@ void UiEventBinder::bindAvailableEvents(UiController &owner, int screen_id) {
         objects.btn_wifi_back,
         objects.btn_back,
         objects.btn_dac_settings_back,
-        objects.btn_aura_aq_link_back,
         objects.btn_diag_clear,
     };
 

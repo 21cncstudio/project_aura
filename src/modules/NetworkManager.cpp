@@ -45,6 +45,7 @@ constexpr uint32_t kWifiColdBootWarmupMs = 2500UL;
 constexpr uint8_t kWifiColdBootSoftConnectAttempts = 3;
 constexpr uint32_t kWifiRecoveryRetryDelayMs = 30000UL;
 constexpr wifi_ps_type_t kWifiStaDefaultPowerSaveMode = WIFI_PS_NONE;
+constexpr uint32_t kCaptiveDnsTtlSeconds = 30UL;
 
 bool is_retryable_connect_reason(wifi_err_reason_t reason) {
     return reason == WIFI_REASON_AUTH_EXPIRE ||
@@ -58,6 +59,22 @@ bool has_internal_heap_for_wifi_start(uint32_t &free_bytes, uint32_t &largest_bl
     largest_block_bytes = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
     return (free_bytes >= kWifiInternalHeapMinFreeForStart) &&
            (largest_block_bytes >= kWifiInternalHeapMinLargestForStart);
+}
+
+bool ip_has_value(const IPAddress &ip) {
+    return ip[0] != 0 || ip[1] != 0 || ip[2] != 0 || ip[3] != 0;
+}
+
+IPAddress ap_local_ip() {
+    return IPAddress(192, 168, 4, 1);
+}
+
+IPAddress ap_dhcp_start_ip() {
+    return IPAddress(192, 168, 4, 2);
+}
+
+IPAddress ap_subnet_mask() {
+    return IPAddress(255, 255, 255, 0);
 }
 
 void clear_sta_enterprise_state() {
@@ -429,15 +446,6 @@ void AuraNetworkManager::attachSensorManager(SensorManager &sensorManager) {
     web_ctx_.sensor_manager = &sensorManager;
 }
 
-void AuraNetworkManager::attachCloudUploadSuspender(void *context,
-                                                    void (*set_suspended)(void *context,
-                                                                          bool suspended),
-                                                    bool (*busy)(void *context)) {
-    web_ctx_.cloud_upload_context = context;
-    web_ctx_.cloud_upload_set_ota_suspended = set_suspended;
-    web_ctx_.cloud_upload_busy = busy;
-}
-
 void AuraNetworkManager::attachCommandQueue(NetworkCommandQueue &commandQueue) {
     g_network_command_queue = &commandQueue;
 }
@@ -704,6 +712,7 @@ void AuraNetworkManager::clearCredentials() {
     resetColdBootStaAssist();
     wifi_scan_options_.clear();
     wifi_scan_in_progress_ = false;
+    wifi_scan_completed_ = false;
     stopMdns();
     stopAp();
     WiFi.scanDelete();
@@ -721,9 +730,14 @@ void AuraNetworkManager::startScan() {
     if (WebHandlersIsOtaBusy()) {
         return;
     }
+    if (wifi_state_ != WIFI_STATE_AP_CONFIG) {
+        LOGD("WiFi", "scan ignored outside AP config mode");
+        return;
+    }
     if (wifi_scan_in_progress_) {
         return;
     }
+    wifi_scan_completed_ = false;
     WiFi.scanDelete();
     int ret = WiFi.scanNetworks(true);
     if (ret == WIFI_SCAN_RUNNING) {
@@ -733,10 +747,15 @@ void AuraNetworkManager::startScan() {
         wifi_build_scan_items(ret);
         WiFi.scanDelete();
         wifi_scan_in_progress_ = false;
+        wifi_scan_completed_ = true;
         wifi_scan_started_ms_ = 0;
+        restoreApQuietModeAfterScan();
     } else {
+        wifi_scan_options_.clear();
         wifi_scan_in_progress_ = false;
+        wifi_scan_completed_ = false;
         wifi_scan_started_ms_ = 0;
+        restoreApQuietModeAfterScan();
         LOGW("WiFi", "scan start failed: %d", ret);
     }
 }
@@ -747,7 +766,9 @@ void AuraNetworkManager::stopScan() {
     }
     WiFi.scanDelete();
     wifi_scan_in_progress_ = false;
+    wifi_scan_completed_ = false;
     wifi_scan_started_ms_ = 0;
+    restoreApQuietModeAfterScan();
 }
 
 void AuraNetworkManager::connectSta() {
@@ -810,6 +831,9 @@ void AuraNetworkManager::poll() {
     }
 
     if (wifi_state_ == WIFI_STATE_AP_CONFIG) {
+        if (captive_dns_started_) {
+            captive_dns_.processNextRequest();
+        }
         if (wifi_scan_in_progress_) {
             if (ota_busy) {
                 stopScan();
@@ -828,11 +852,15 @@ void AuraNetworkManager::poll() {
                         wifi_build_scan_items(n);
                         WiFi.scanDelete();
                         wifi_scan_in_progress_ = false;
+                        wifi_scan_completed_ = true;
                         wifi_scan_started_ms_ = 0;
+                        restoreApQuietModeAfterScan();
                     } else if (n == WIFI_SCAN_FAILED) {
                         wifi_scan_options_.clear();
                         wifi_scan_in_progress_ = false;
+                        wifi_scan_completed_ = false;
                         wifi_scan_started_ms_ = 0;
+                        restoreApQuietModeAfterScan();
                     }
                 }
             }
@@ -1104,10 +1132,33 @@ void AuraNetworkManager::startSta() {
 
 void AuraNetworkManager::startAp() {
     stopMdns();
+    stopScan();
+    stopCaptiveDns();
+    wifi_scan_completed_ = false;
     WiFi.persistent(false);
-    WiFi.mode(WIFI_AP_STA);
+    if (!WiFi.mode(WIFI_AP)) {
+        LOGW("WiFi", "failed to enter AP mode");
+        wifi_state_ = WIFI_STATE_OFF;
+        sta_link_fail_streak_ = 0;
+        wifi_retry_count_ = 0;
+        wifi_retry_at_ms_ = 0;
+        resetStaConnectAttemptState();
+        resetColdBootStaAssist();
+        wifi_ui_dirty_ = true;
+        return;
+    }
+
+    const IPAddress ap_ip = ap_local_ip();
+    if (!WiFi.softAPConfig(ap_ip, ap_ip, ap_subnet_mask(), ap_dhcp_start_ip(), ap_ip)) {
+        LOGW("WiFi", "failed to apply AP IP config");
+    }
+
     const char *ap_ssid = ap_ssid_.isEmpty() ? Config::WIFI_AP_SSID : ap_ssid_.c_str();
-    if (!WiFi.softAP(ap_ssid)) {
+    if (!WiFi.softAP(ap_ssid,
+                     nullptr,
+                     Config::WIFI_AP_CHANNEL,
+                     Config::WIFI_AP_HIDDEN ? 1 : 0,
+                     Config::WIFI_AP_MAX_CLIENTS)) {
         LOGW("WiFi", "failed to start AP: %s", ap_ssid);
         if (WiFi.status() == WL_CONNECTED) {
             wifi_state_ = WIFI_STATE_STA_CONNECTED;
@@ -1123,24 +1174,80 @@ void AuraNetworkManager::startAp() {
         wifi_ui_dirty_ = true;
         return;
     }
+    if (!WiFi.softAPbandwidth(WIFI_BW_HT20)) {
+        LOGW("WiFi", "failed to force AP 20 MHz bandwidth");
+    }
     startServerIfNeeded();
     IPAddress ip = WiFi.softAPIP();
-    startScan();
+    startCaptiveDns(ip);
     wifi_state_ = WIFI_STATE_AP_CONFIG;
     wifi_retry_at_ms_ = 0;
     wifi_retry_count_ = 0;
     resetStaConnectAttemptState();
     resetColdBootStaAssist();
     wifi_ui_dirty_ = true;
-    Logger::log(Logger::Info, "WiFi", "AP started: %s", ap_ssid);
+    Logger::log(Logger::Info,
+                "WiFi",
+                "AP started: %s (channel=%u, max_clients=%u, hidden=%s)",
+                ap_ssid,
+                static_cast<unsigned>(Config::WIFI_AP_CHANNEL),
+                static_cast<unsigned>(Config::WIFI_AP_MAX_CLIENTS),
+                Config::WIFI_AP_HIDDEN ? "yes" : "no");
     Logger::log(Logger::Info, "WiFi", "AP IP: %s", ip.toString().c_str());
 }
 
 void AuraNetworkManager::stopAp() {
+    stopCaptiveDns();
+    stopScan();
     if (wifi_state_ == WIFI_STATE_AP_CONFIG) {
+        WiFi.softAPdisconnect(false);
         WiFi.enableAP(false);
     }
     wifi_ui_dirty_ = true;
+}
+
+void AuraNetworkManager::startCaptiveDns(const IPAddress &ap_ip) {
+    if (!ip_has_value(ap_ip)) {
+        LOGW("WiFi", "captive DNS skipped: AP IP unavailable");
+        return;
+    }
+
+    captive_dns_.stop();
+    captive_dns_.setTTL(kCaptiveDnsTtlSeconds);
+    if (captive_dns_.start(DNS_DEFAULT_PORT, "*", ap_ip)) {
+        captive_dns_started_ = true;
+        Logger::log(Logger::Info,
+                    "WiFi",
+                    "captive DNS started on %s",
+                    ap_ip.toString().c_str());
+    } else {
+        captive_dns_started_ = false;
+        LOGW("WiFi", "failed to start captive DNS");
+    }
+}
+
+void AuraNetworkManager::stopCaptiveDns() {
+    if (!captive_dns_started_) {
+        return;
+    }
+    captive_dns_.stop();
+    captive_dns_started_ = false;
+}
+
+void AuraNetworkManager::restoreApQuietModeAfterScan() {
+    if (wifi_state_ != WIFI_STATE_AP_CONFIG) {
+        return;
+    }
+    if (WiFi.status() == WL_CONNECTED) {
+        return;
+    }
+    const wifi_mode_t mode = WiFi.getMode();
+    if ((mode & WIFI_AP) == 0 || (mode & WIFI_STA) == 0) {
+        return;
+    }
+    if (!WiFi.enableSTA(false)) {
+        LOGW("WiFi", "failed to disable STA after AP scan");
+    }
 }
 
 void AuraNetworkManager::startMdns() {

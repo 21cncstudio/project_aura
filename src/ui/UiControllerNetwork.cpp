@@ -458,7 +458,7 @@ void UiController::update_wifi_ui() {
                                     LV_PART_MAIN | LV_STATE_DISABLED | LV_STATE_CHECKED);
     }
     if (objects.btn_wifi_start_ap) {
-        lv_obj_clear_flag(objects.btn_wifi_start_ap, LV_OBJ_FLAG_CHECKABLE);
+        lv_obj_add_flag(objects.btn_wifi_start_ap, LV_OBJ_FLAG_CHECKABLE);
         lv_obj_set_style_bg_color(objects.btn_wifi_start_ap, color_inactive(), LV_PART_MAIN | LV_STATE_DISABLED);
         lv_obj_set_style_border_color(objects.btn_wifi_start_ap, color_inactive(), LV_PART_MAIN | LV_STATE_DISABLED);
         lv_obj_set_style_shadow_color(objects.btn_wifi_start_ap, color_inactive(), LV_PART_MAIN | LV_STATE_DISABLED);
@@ -541,11 +541,19 @@ void UiController::update_wifi_ui() {
         set_button_enabled(objects.label_btn_wifi_reconnect, can_reconnect);
     }
     if (objects.btn_wifi_start_ap) {
-        if (wifi_enabled && wifi_state == static_cast<int>(AuraNetworkManager::WIFI_STATE_AP_CONFIG)) {
+        const bool ap_active =
+            wifi_enabled && wifi_state == static_cast<int>(AuraNetworkManager::WIFI_STATE_AP_CONFIG);
+        if (ap_active) {
             lv_obj_add_state(objects.btn_wifi_start_ap, LV_STATE_CHECKED);
         } else {
             lv_obj_clear_state(objects.btn_wifi_start_ap, LV_STATE_CHECKED);
         }
+        lv_obj_set_style_border_color(objects.btn_wifi_start_ap,
+                                      ap_active ? color_yellow() : color_inactive(),
+                                      LV_PART_MAIN | LV_STATE_CHECKED);
+        lv_obj_set_style_shadow_color(objects.btn_wifi_start_ap,
+                                      ap_active ? color_yellow() : color_inactive(),
+                                      LV_PART_MAIN | LV_STATE_CHECKED);
         set_button_enabled(objects.btn_wifi_start_ap, wifi_enabled);
         set_button_enabled(objects.label_btn_wifi_start_ap, wifi_enabled);
     }
@@ -612,7 +620,6 @@ void UiController::update_status_icons() {
             objects.wifi_status_icon_1,
             objects.wifi_status_icon_2,
             objects.wifi_status_icon_3,
-            objects.wifi_status_icon_aura_aq_link
         };
         const size_t wifi_icon_count = sizeof(wifi_icons) / sizeof(wifi_icons[0]);
         for (size_t i = 0; i < wifi_icon_count; i++) {
@@ -693,7 +700,6 @@ void UiController::update_status_icons() {
             objects.mqtt_status_icon_1,
             objects.mqtt_status_icon_2,
             objects.mqtt_status_icon_3,
-            objects.link_status_icon_aura_aq_link
         };
         const size_t mqtt_icon_count = sizeof(mqtt_icons) / sizeof(mqtt_icons[0]);
         for (size_t i = 0; i < mqtt_icon_count; i++) {

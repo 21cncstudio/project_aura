@@ -37,7 +37,20 @@ bool WebOtaSnapshot::hasTerminalResult(uint32_t now_ms) const {
            (result_ttl_ms == 0 || static_cast<uint32_t>(now_ms - result_set_ms) < result_ttl_ms);
 }
 
+WebOtaState::WebOtaState() {
+#ifndef UNIT_TEST
+    mutex_ = xSemaphoreCreateMutexStatic(&mutex_buffer_);
+    configASSERT(mutex_ != nullptr);
+#endif
+}
+
 void WebOtaState::reset() {
+    lock();
+    resetLocked();
+    unlock();
+}
+
+void WebOtaState::resetLocked() {
     upload_seen_ = false;
     active_.store(false, std::memory_order_release);
     busy_.store(false, std::memory_order_release);
@@ -66,7 +79,8 @@ void WebOtaState::reset() {
 }
 
 void WebOtaState::beginUpload(uint32_t now_ms) {
-    reset();
+    lock();
+    resetLocked();
     upload_seen_ = true;
     active_.store(true, std::memory_order_release);
     busy_.store(true, std::memory_order_release);
@@ -75,6 +89,7 @@ void WebOtaState::beginUpload(uint32_t now_ms) {
         next_session_id_ = 1;
     }
     upload_start_ms_ = now_ms;
+    unlock();
 }
 
 bool WebOtaState::isActive() const {
@@ -85,41 +100,84 @@ bool WebOtaState::isBusy() const {
     return busy_.load(std::memory_order_acquire);
 }
 
+bool WebOtaState::hasError() const {
+    lock();
+    const bool has_error = error_.length() > 0;
+    unlock();
+    return has_error;
+}
+
+uint32_t WebOtaState::sessionId() const {
+    lock();
+    const uint32_t session_id = session_id_;
+    unlock();
+    return session_id;
+}
+
+bool WebOtaState::firstChunkSeen() const {
+    lock();
+    const bool first_chunk_seen = first_chunk_seen_;
+    unlock();
+    return first_chunk_seen;
+}
+
+uint32_t WebOtaState::firstChunkDelayMs() const {
+    lock();
+    const uint32_t delay_ms = first_chunk_seen_ ? (first_chunk_ms_ - upload_start_ms_) : 0;
+    unlock();
+    return delay_ms;
+}
+
 void WebOtaState::setTotalTimeoutMs(uint32_t timeout_ms) {
+    lock();
     total_timeout_ms_ = timeout_ms;
+    unlock();
 }
 
 bool WebOtaState::totalTimeoutExceeded(uint32_t now_ms) const {
-    return total_timeout_ms_ > 0 &&
-           upload_start_ms_ > 0 &&
-           static_cast<uint32_t>(now_ms - upload_start_ms_) >= total_timeout_ms_;
+    lock();
+    const bool exceeded = total_timeout_ms_ > 0 &&
+                          upload_start_ms_ > 0 &&
+                          static_cast<uint32_t>(now_ms - upload_start_ms_) >= total_timeout_ms_;
+    unlock();
+    return exceeded;
 }
 
 void WebOtaState::poll(uint32_t now_ms) {
+    lock();
     if (!upload_seen_ || active_.load(std::memory_order_acquire) || result_set_ms_ == 0 ||
         result_ttl_ms_ == 0) {
+        unlock();
         return;
     }
     if (static_cast<uint32_t>(now_ms - result_set_ms_) >= result_ttl_ms_) {
-        reset();
+        resetLocked();
     }
+    unlock();
 }
 
 void WebOtaState::setStartRssi(int rssi) {
+    lock();
     start_rssi_valid_ = true;
     start_rssi_ = rssi;
+    unlock();
 }
 
 void WebOtaState::setSlotSize(size_t slot_size) {
+    lock();
     slot_size_ = slot_size;
+    unlock();
 }
 
 void WebOtaState::setExpectedSize(bool known, size_t expected_size) {
+    lock();
     size_known_ = known;
     expected_size_ = known ? expected_size : 0;
+    unlock();
 }
 
 bool WebOtaState::noteChunk(size_t chunk_size, uint32_t now_ms) {
+    lock();
     const bool first_chunk = !first_chunk_seen_;
     if (first_chunk) {
         first_chunk_seen_ = true;
@@ -134,23 +192,34 @@ bool WebOtaState::noteChunk(size_t chunk_size, uint32_t now_ms) {
     }
     chunk_sum_size_ += chunk_size;
     chunk_count_++;
+    unlock();
     return first_chunk;
 }
 
 bool WebOtaState::wouldExceedSlot(size_t chunk_size) const {
-    return written_size_ + chunk_size > slot_size_;
+    lock();
+    const bool would_exceed = written_size_ + chunk_size > slot_size_;
+    unlock();
+    return would_exceed;
 }
 
 void WebOtaState::addWritten(size_t amount) {
+    lock();
     written_size_ += amount;
+    unlock();
 }
 
 bool WebOtaState::writtenMatchesExpected() const {
-    return !size_known_ || expected_size_ == 0 || written_size_ == expected_size_;
+    lock();
+    const bool matches = size_known_ && expected_size_ > 0 && written_size_ == expected_size_;
+    unlock();
+    return matches;
 }
 
 void WebOtaState::markFinalizeDuration(uint32_t finalize_ms) {
+    lock();
     finalize_ms_ = finalize_ms;
+    unlock();
 }
 
 void WebOtaState::setTerminalResultDeadline(uint32_t now_ms) {
@@ -159,17 +228,22 @@ void WebOtaState::setTerminalResultDeadline(uint32_t now_ms) {
 }
 
 void WebOtaState::markSuccess(uint32_t now_ms) {
+    lock();
     success_ = true;
     reboot_pending_ = false;
     setTerminalResultDeadline(now_ms);
     active_.store(false, std::memory_order_release);
+    unlock();
 }
 
 void WebOtaState::markRebootPending() {
+    lock();
     reboot_pending_ = true;
+    unlock();
 }
 
 void WebOtaState::setErrorOnce(const String &error, uint32_t now_ms) {
+    lock();
     if (error_.length() == 0) {
         error_ = error;
     }
@@ -177,6 +251,7 @@ void WebOtaState::setErrorOnce(const String &error, uint32_t now_ms) {
     reboot_pending_ = false;
     setTerminalResultDeadline(now_ms);
     active_.store(false, std::memory_order_release);
+    unlock();
 }
 
 void WebOtaState::clearBusy() {
@@ -184,6 +259,7 @@ void WebOtaState::clearBusy() {
 }
 
 WebOtaSnapshot WebOtaState::snapshot() const {
+    lock();
     WebOtaSnapshot snapshot;
     snapshot.upload_seen = upload_seen_;
     snapshot.active = active_.load(std::memory_order_acquire);
@@ -208,5 +284,24 @@ WebOtaSnapshot WebOtaState::snapshot() const {
     snapshot.start_rssi = start_rssi_;
     snapshot.result_set_ms = result_set_ms_;
     snapshot.result_ttl_ms = result_ttl_ms_;
+    unlock();
     return snapshot;
+}
+
+void WebOtaState::lock() const {
+#ifdef UNIT_TEST
+    mutex_.lock();
+#else
+    configASSERT(mutex_ != nullptr);
+    xSemaphoreTake(mutex_, portMAX_DELAY);
+#endif
+}
+
+void WebOtaState::unlock() const {
+#ifdef UNIT_TEST
+    mutex_.unlock();
+#else
+    configASSERT(mutex_ != nullptr);
+    xSemaphoreGive(mutex_);
+#endif
 }

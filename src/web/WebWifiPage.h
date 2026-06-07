@@ -14,6 +14,7 @@ namespace WebWifiPage {
 struct RootPageData {
     String ssid_items;
     bool scan_in_progress = false;
+    bool scan_completed = false;
 };
 
 struct SavePageData {
