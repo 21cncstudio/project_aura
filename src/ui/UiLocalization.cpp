@@ -25,6 +25,7 @@ const char *language_label(Config::Language lang) {
         case Config::Language::PT: return "PORTUGU\xC3\x8AS BR";
         case Config::Language::NL: return "NEDERLANDS";
         case Config::Language::ZH: return "\xE7\xAE\x80\xE4\xBD\x93\xE4\xB8\xAD\xE6\x96\x87";
+        case Config::Language::JA: return "\xE6\x97\xA5\xE6\x9C\xAC\xE8\xAA\x9E";
         case Config::Language::EN:
         default:
             return "ENGLISH";
@@ -58,7 +59,8 @@ Config::Language UiLocalization::nextLanguage(Config::Language current) {
         case Config::Language::IT: return Config::Language::PT;
         case Config::Language::PT: return Config::Language::NL;
         case Config::Language::NL: return Config::Language::ZH;
-        case Config::Language::ZH: return Config::Language::EN;
+        case Config::Language::ZH: return Config::Language::JA;
+        case Config::Language::JA: return Config::Language::EN;
         default:
             return Config::Language::EN;
     }
@@ -82,11 +84,31 @@ void UiLocalization::updateLanguageLabel(UiController &owner) {
 }
 
 void UiLocalization::updateLanguageFonts(UiController &owner) {
-    const bool is_zh = (owner.ui_language == Config::Language::ZH);
-    const lv_font_t *from_14 = is_zh ? &ui_font_jet_reg_14 : &ui_font_noto_sans_sc_reg_14;
-    const lv_font_t *to_14 = is_zh ? &ui_font_noto_sans_sc_reg_14 : &ui_font_jet_reg_14;
-    const lv_font_t *from_18 = is_zh ? &ui_font_jet_reg_18 : &ui_font_noto_sans_sc_reg_18;
-    const lv_font_t *to_18 = is_zh ? &ui_font_noto_sans_sc_reg_18 : &ui_font_jet_reg_18;
+    // Pick the 14/18 px body fonts for the active language: JetBrains (Latin)
+    // for Western languages, Noto Sans SC for Chinese, Noto Sans JP for Japanese.
+    const lv_font_t *target_14 = &ui_font_jet_reg_14;
+    const lv_font_t *target_18 = &ui_font_jet_reg_18;
+    switch (owner.ui_language) {
+        case Config::Language::ZH:
+            target_14 = &ui_font_noto_sans_sc_reg_14;
+            target_18 = &ui_font_noto_sans_sc_reg_18;
+            break;
+        case Config::Language::JA:
+            target_14 = &ui_font_noto_sans_jp_reg_14;
+            target_18 = &ui_font_noto_sans_jp_reg_18;
+            break;
+        default:
+            break;
+    }
+
+    // Any previously applied body font may still be in the tree (e.g. when
+    // switching directly between two CJK languages), so replace them all.
+    const lv_font_t *candidates_14[] = {
+        &ui_font_jet_reg_14, &ui_font_noto_sans_sc_reg_14, &ui_font_noto_sans_jp_reg_14,
+    };
+    const lv_font_t *candidates_18[] = {
+        &ui_font_jet_reg_18, &ui_font_noto_sans_sc_reg_18, &ui_font_noto_sans_jp_reg_18,
+    };
 
     lv_obj_t *roots[] = {
         objects.page_boot_logo,
@@ -107,8 +129,12 @@ void UiLocalization::updateLanguageFonts(UiController &owner) {
     };
 
     for (lv_obj_t *root : roots) {
-        replace_font_recursive(root, from_14, to_14);
-        replace_font_recursive(root, from_18, to_18);
+        for (const lv_font_t *from : candidates_14) {
+            replace_font_recursive(root, from, target_14);
+        }
+        for (const lv_font_t *from : candidates_18) {
+            replace_font_recursive(root, from, target_18);
+        }
     }
 }
 
@@ -161,7 +187,8 @@ void UiLocalization::refreshTextsForScreen(UiController &owner, int screen_id) {
             break;
     }
 
-    if (owner.ui_language == Config::Language::ZH) {
+    if (owner.ui_language == Config::Language::ZH ||
+        owner.ui_language == Config::Language::JA) {
         updateLanguageFonts(owner);
     }
 }

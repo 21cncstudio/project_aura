@@ -251,6 +251,7 @@ Project Aura speaks your language. You can switch languages in the Settings menu
 - Portugues BR
 - Nederlands
 - Simplified Chinese
+- Japanese
 
 ## Firmware Architecture
 Data flow and responsibilities are intentionally split into small managers:

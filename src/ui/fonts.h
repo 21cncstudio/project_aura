@@ -14,6 +14,8 @@ extern const lv_font_t ui_font_jet_reg_18;
 extern const lv_font_t ui_font_jet_med_28;
 extern const lv_font_t ui_font_noto_sans_sc_reg_14;
 extern const lv_font_t ui_font_noto_sans_sc_reg_18;
+extern const lv_font_t ui_font_noto_sans_jp_reg_14;
+extern const lv_font_t ui_font_noto_sans_jp_reg_18;
 
 
 #ifdef __cplusplus
