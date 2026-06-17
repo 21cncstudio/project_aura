@@ -690,7 +690,12 @@ bool StorageManager::loadConfig() {
         readValue(ui, "temp_offset", loaded.temp_offset);
         readValue(ui, "hum_offset", loaded.hum_offset);
         readValue(ui, "units_c", loaded.units_c);
-        readValue(ui, "units_mdy", loaded.units_mdy);
+        bool legacy_units_mdy = false;
+        readValue(ui, "units_mdy", legacy_units_mdy);
+        int date_format_raw = static_cast<int>(
+            legacy_units_mdy ? Config::DateFormat::MDY : Config::DateFormat::DMY);
+        readValue(ui, "date_format", date_format_raw);
+        loaded.date_format = Config::clampDateFormat(date_format_raw);
         readValue(ui, "night_mode", loaded.night_mode);
         readValue(ui, "header_status_enabled", loaded.header_status_enabled);
         readValue(ui, "led_indicators", loaded.led_indicators);
@@ -812,7 +817,7 @@ bool StorageManager::saveConfigInternal() {
     ui["temp_offset"] = config_.temp_offset;
     ui["hum_offset"] = config_.hum_offset;
     ui["units_c"] = config_.units_c;
-    ui["units_mdy"] = config_.units_mdy;
+    ui["date_format"] = static_cast<uint8_t>(config_.date_format);
     ui["night_mode"] = config_.night_mode;
     ui["header_status_enabled"] = config_.header_status_enabled;
     ui["led_indicators"] = config_.led_indicators;
