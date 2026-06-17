@@ -112,7 +112,7 @@ void UiController::on_confirm_cancel_event_cb(lv_event_t *e) { if (instance_) in
 void UiController::on_night_mode_event_cb(lv_event_t *e) { if (instance_) instance_->on_night_mode_event(e); }
 void UiController::on_units_c_f_event_cb(lv_event_t *e) { if (instance_) instance_->on_units_c_f_event(e); }
 void UiController::on_time_format_toggle_event_cb(lv_event_t *e) { if (instance_) instance_->on_time_format_toggle_event(e); }
-void UiController::on_units_mdy_event_cb(lv_event_t *e) { if (instance_) instance_->on_units_mdy_event(e); }
+void UiController::on_date_format_event_cb(lv_event_t *e) { if (instance_) instance_->on_date_format_event(e); }
 void UiController::on_led_indicators_event_cb(lv_event_t *e) { if (instance_) instance_->on_led_indicators_event(e); }
 void UiController::on_alert_blink_event_cb(lv_event_t *e) { if (instance_) instance_->on_alert_blink_event(e); }
 void UiController::on_co2_calib_event_cb(lv_event_t *e) { if (instance_) instance_->on_co2_calib_event(e); }
@@ -780,14 +780,14 @@ void UiController::on_units_c_f_event(lv_event_t *e) {
     }
     lv_obj_t *btn = lv_event_get_target(e);
     bool use_c = lv_obj_has_state(btn, LV_STATE_CHECKED);
-    const bool use_mdy = !use_c;
-    if (use_c == temp_units_c && use_mdy == date_units_mdy) {
+    if (use_c == temp_units_c) {
         return;
     }
     temp_units_c = use_c;
-    date_units_mdy = use_mdy;
+    // Sensible default: °F implies MM/DD/YYYY, °C implies DD.MM.YYYY.
+    date_format_ = use_c ? Config::DateFormat::DMY : Config::DateFormat::MDY;
     storage.config().units_c = temp_units_c;
-    storage.config().units_mdy = date_units_mdy;
+    storage.config().date_format = date_format_;
     persist_ui_config(storage, "unit system");
     clock_ui_dirty = true;
     sync_display_threshold_labels();
@@ -813,25 +813,18 @@ void UiController::on_time_format_toggle_event(lv_event_t *e) {
     publishWebUiSnapshot();
 }
 
-void UiController::on_units_mdy_event(lv_event_t *e) {
-    if (lv_event_get_code(e) != LV_EVENT_VALUE_CHANGED) {
+void UiController::on_date_format_event(lv_event_t *e) {
+    if (lv_event_get_code(e) != LV_EVENT_CLICKED) {
         return;
     }
-    lv_obj_t *btn = lv_event_get_target(e);
-    bool use_mdy = lv_obj_has_state(btn, LV_STATE_CHECKED);
-    const bool use_c = !use_mdy;
-    if (use_c == temp_units_c && use_mdy == date_units_mdy) {
-        return;
-    }
-    date_units_mdy = use_mdy;
-    temp_units_c = use_c;
-    storage.config().units_mdy = date_units_mdy;
-    storage.config().units_c = temp_units_c;
-    persist_ui_config(storage, "unit system");
+    // Cycle MDY -> DMY -> ISO -> MDY.
+    const uint8_t next = (static_cast<uint8_t>(date_format_) + 1) %
+                         static_cast<uint8_t>(Config::DateFormat::COUNT);
+    date_format_ = static_cast<Config::DateFormat>(next);
+    storage.config().date_format = date_format_;
+    persist_ui_config(storage, "date format");
     clock_ui_dirty = true;
-    sync_display_threshold_labels();
     update_clock_labels();
-    update_ui();
 }
 
 void UiController::on_restart_event(lv_event_t *e) {

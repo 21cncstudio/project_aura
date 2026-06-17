@@ -422,6 +422,7 @@ private:
     void update_status_message(uint32_t now_ms, bool gas_warmup);
     void update_diag_log_ui();
     void update_clock_labels();
+    void update_date_format_button();
     bool pressure_altitude_is_set() const;
     int pressure_altitude_meters() const;
     float pressure_absolute_to_msl_hpa(float pressure_hpa, int altitude_m) const;
@@ -593,7 +594,7 @@ private:
     void on_night_mode_event(lv_event_t *e);
     void on_units_c_f_event(lv_event_t *e);
     void on_time_format_toggle_event(lv_event_t *e);
-    void on_units_mdy_event(lv_event_t *e);
+    void on_date_format_event(lv_event_t *e);
     void on_led_indicators_event(lv_event_t *e);
     void on_alert_blink_event(lv_event_t *e);
     void on_co2_calib_event(lv_event_t *e);
@@ -770,7 +771,7 @@ private:
     static void on_night_mode_event_cb(lv_event_t *e);
     static void on_units_c_f_event_cb(lv_event_t *e);
     static void on_time_format_toggle_event_cb(lv_event_t *e);
-    static void on_units_mdy_event_cb(lv_event_t *e);
+    static void on_date_format_event_cb(lv_event_t *e);
     static void on_led_indicators_event_cb(lv_event_t *e);
     static void on_alert_blink_event_cb(lv_event_t *e);
     static void on_co2_calib_event_cb(lv_event_t *e);
@@ -1001,7 +1002,7 @@ private:
     int pressure_altitude_pending_m_ = Config::PRESSURE_ALTITUDE_DEFAULT_M;
     bool pressure_altitude_overlay_open_ = false;
     Config::Language ui_language = Config::Language::EN;
-    bool date_units_mdy = false;
+    Config::DateFormat date_format_ = Config::DateFormat::DMY;
     bool time_format_24h_ = true;
     bool language_dirty = false;
     bool blink_state = true;
