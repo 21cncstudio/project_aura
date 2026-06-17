@@ -410,6 +410,8 @@ typedef struct _objects_t {
     lv_obj_t *label_btn_set_date_year_plus;
     lv_obj_t *btn_1224_toggle;
     lv_obj_t *label_btn_1224_toggle;
+    lv_obj_t *btn_date_format;
+    lv_obj_t *label_btn_date_format;
     lv_obj_t *card_time_1;
     lv_obj_t *label_time_value_1;
     lv_obj_t *label_date_value_1;
