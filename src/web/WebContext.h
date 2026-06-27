@@ -20,6 +20,8 @@ class WebUiBridge;
 class WebRuntimeState;
 class DisplayThresholdManager;
 class SensorManager;
+class SdCardManager;
+class DailyExtremaHistory;
 
 struct WebHandlerContext {
     WebRequest *server = nullptr;
@@ -59,4 +61,6 @@ struct WebHandlerContext {
     WebUiBridge *web_ui_bridge = nullptr;
     DisplayThresholdManager *display_thresholds = nullptr;
     SensorManager *sensor_manager = nullptr;
+    SdCardManager *sd_card = nullptr;
+    DailyExtremaHistory *daily_extrema = nullptr;
 };

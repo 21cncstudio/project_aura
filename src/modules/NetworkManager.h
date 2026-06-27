@@ -23,6 +23,8 @@ class WebUiBridge;
 class WebRuntimeState;
 class DisplayThresholdManager;
 class SensorManager;
+class SdCardManager;
+class DailyExtremaHistory;
 
 class AuraNetworkManager {
 public:
@@ -50,6 +52,7 @@ public:
     void attachWebUiBridge(WebUiBridge &webUiBridge);
     void attachDisplayThresholds(DisplayThresholdManager &displayThresholds);
     void attachSensorManager(SensorManager &sensorManager);
+    void attachDailyHistory(SdCardManager &sdCard, DailyExtremaHistory &dailyExtrema);
     void attachCommandQueue(NetworkCommandQueue &commandQueue);
     void setStateChangeCallback(StateChangeCallback cb, void *ctx);
     void poll();

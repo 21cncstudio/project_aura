@@ -7,6 +7,7 @@
 #include "web/WebHandlers.h"
 
 #include "web/WebChartsApiHandlers.h"
+#include "web/WebDailyHistoryHandlers.h"
 #include "web/WebDacApiHandlers.h"
 #include "web/WebHandlersSupport.h"
 #include "web/WebMqttHandlers.h"
@@ -259,6 +260,18 @@ void thresholds_handle_reset() {
 
 void charts_handle_data() {
     with_ota_busy(WebChartsApiHandlers::handleData);
+}
+
+void daily_history_status_handle() {
+    with_ota_busy([](WebHandlerContext &context, bool ota_busy) {
+        WebDailyHistoryHandlers::handleStatus(context, ota_busy, WebHandlersSupport::otaBusyJson());
+    });
+}
+
+void daily_history_csv_handle() {
+    with_ota_busy([](WebHandlerContext &context, bool ota_busy) {
+        WebDailyHistoryHandlers::handleCsv(context, ota_busy, WebHandlersSupport::otaBusyJson());
+    });
 }
 
 void state_handle_data() {

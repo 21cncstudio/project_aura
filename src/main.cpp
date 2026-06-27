@@ -28,9 +28,11 @@
 #include "modules/DisplayThresholds.h"
 #include "modules/PressureHistory.h"
 #include "modules/ChartsHistory.h"
+#include "modules/DailyExtremaHistory.h"
 #include "modules/NetworkManager.h"
 #include "modules/MqttManager.h"
 #include "modules/SensorManager.h"
+#include "modules/SdCardManager.h"
 #include "modules/TimeManager.h"
 #include "modules/FanControl.h"
 #include "web/WebRuntime.h"
@@ -52,6 +54,8 @@ SensorData currentData;
 StorageManager storage;
 PressureHistory pressureHistory;
 ChartsHistory chartsHistory;
+SdCardManager sdCardManager;
+DailyExtremaHistory dailyExtremaHistory;
 AuraNetworkManager networkManager;
 MqttManager mqttManager;
 ConnectivityRuntime connectivityRuntime;
@@ -195,6 +199,9 @@ void setup()
 
     AppInit::initManagersAndConfig(init_ctx, boot_action);
     auto *board = AppInit::initBoardAndPeripherals(init_ctx);
+    sdCardManager.begin(board);
+    dailyExtremaHistory.begin(sdCardManager);
+    networkManager.attachDailyHistory(sdCardManager, dailyExtremaHistory);
     AppInit::initLvglAndUi(init_ctx, board);
     memoryMonitor.logNow("boot");
 
@@ -324,6 +331,10 @@ void loop()
     TimeManager::PollResult time_poll = timeManager.poll(now);
     mqttManager.setSystemTimeValid(timeManager.isSystemTimeValid());
     uiController.onTimePoll(time_poll);
+    if (sensor_poll.data_changed) {
+        dailyExtremaHistory.update(currentData, now);
+    }
+    dailyExtremaHistory.poll(now);
     fanControl.poll(now, &currentData, sensorManager.isWarmupActive());
     const FanControl::Snapshot fan_snapshot = fanControl.snapshot();
     webRuntimeState.update(currentData, sensorManager.isWarmupActive(), fanControl);
