@@ -251,6 +251,17 @@ Project Aura speaks your language. You can switch languages in the Settings menu
 - Portugues BR
 - Nederlands
 - Simplified Chinese
+- Japanese
+
+Japanese UI text uses generated LVGL font subsets. After editing
+`src/ui/strings/UiStrings.ja.inc`, regenerate the Japanese fonts with:
+
+```bash
+python tools/generate_ui_font_subset.py --font path/to/NotoSansJP-Regular.ttf
+```
+
+The EEZ-generated screens keep the default Latin layout fonts; runtime
+localization swaps the 14/18 px body fonts for CJK languages.
 
 ## Firmware Architecture
 Data flow and responsibilities are intentionally split into small managers:
