@@ -38,6 +38,9 @@ void registerRoutes(WebServerBackend &server) {
     server.onGet("/api/charts", charts_handle_data);
     server.onGet("/api/history/daily/status", daily_history_status_handle);
     server.onGet("/api/history/daily.csv", daily_history_csv_handle);
+    server.onGet("/api/history/current-day.csv", daily_history_current_day_csv_handle);
+    server.onPost("/api/history/clear", daily_history_clear_handle);
+    server.onPost("/api/history/current-day/clear", daily_history_clear_current_day_handle);
     server.onGet("/api/state", state_handle_data);
     server.onGet("/api/events", events_handle_data);
     server.onGet("/api/diag", diag_handle_data);

@@ -14,21 +14,31 @@
 #include "modules/ChartsHistory.h"
 #include "modules/DailyHistoryStorage.h"
 
+#ifndef UNIT_TEST
+#include <freertos/FreeRTOS.h>
+#include <freertos/semphr.h>
+#endif
+
 class DailyExtremaHistory {
 public:
     static constexpr const char *kDailyCsvPath = "/aura/history/daily.csv";
     static constexpr const char *kStatePath = "/aura/history/current_day.bin";
     static constexpr uint32_t kStateSaveIntervalMs = 15UL * 60UL * 1000UL;
 
+    DailyExtremaHistory();
+    ~DailyExtremaHistory();
+
     void begin(DailyHistoryStorage &storage);
     void update(const SensorData &data, uint32_t now_ms);
     void poll(uint32_t now_ms);
     void flush();
 
-    bool hasCurrentDay() const { return state_.day_key != 0; }
-    uint32_t currentDayKey() const { return state_.day_key; }
+    bool hasCurrentDay() const;
+    uint32_t currentDayKey() const;
     uint32_t currentSampleCount() const;
-    bool lastWriteOk() const { return last_write_ok_; }
+    bool lastWriteOk() const;
+    bool currentDayCsv(String &out, bool include_header = true) const;
+    void clearCurrentDay();
 
     using NowEpochFn = time_t (*)();
     static void setNowEpochFn(NowEpochFn fn);
@@ -68,16 +78,34 @@ private:
     static bool validPersistedState(const PersistedState &state);
     static const MetricDef &metricDef(uint8_t index);
 
-    void ensureDay(uint32_t day_key);
+    class ScopedLock {
+    public:
+        explicit ScopedLock(const DailyExtremaHistory &owner, uint32_t timeout_ms = 1000);
+        ~ScopedLock();
+        ScopedLock(const ScopedLock &) = delete;
+        ScopedLock &operator=(const ScopedLock &) = delete;
+        bool locked() const { return locked_; }
+
+    private:
+        const DailyExtremaHistory &owner_;
+        bool locked_ = false;
+    };
+
+    bool lock(uint32_t timeout_ms = 1000) const;
+    void unlock() const;
+    uint32_t currentSampleCountLocked() const;
+    bool ensureDay(uint32_t day_key);
     void resetForDay(uint32_t day_key);
     void resetMetric(ChartsHistory::Metric metric);
-    void restoreOrFinalizeStoredDay(uint32_t current_day_key);
+    bool restoreOrFinalizeStoredDay(uint32_t current_day_key);
     void updateMetric(ChartsHistory::Metric metric, bool valid, float value, uint32_t epoch);
     void updateOptionalGasMetric(const SensorData &data, uint32_t epoch);
     bool hasAnySamples() const;
+    bool appendCsvRows(String &rows, bool include_header) const;
+    bool finalizeCurrentDayCsv();
     bool appendCurrentDayCsv();
     bool ensureCsvHeader();
-    void saveStateIfDue(uint32_t now_ms, bool force);
+    void saveStateIfDue(uint32_t now_ms, bool force, bool preserve_failure = false);
 
     static NowEpochFn now_epoch_fn_;
 
@@ -87,4 +115,8 @@ private:
     bool dirty_ = false;
     bool last_write_ok_ = true;
     uint32_t last_save_ms_ = 0;
+
+#ifndef UNIT_TEST
+    mutable SemaphoreHandle_t mutex_ = nullptr;
+#endif
 };

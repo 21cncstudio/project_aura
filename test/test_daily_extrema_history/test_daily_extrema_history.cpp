@@ -19,6 +19,7 @@ constexpr time_t kDayTwoNoon = 1782648000; // 2026-06-28 12:00:00 UTC
 class FakeDailyStorage final : public DailyHistoryStorage {
 public:
     bool ready = true;
+    bool fail_append = false;
     std::map<std::string, std::string> text_files;
     std::map<std::string, std::vector<uint8_t>> binary_files;
 
@@ -44,7 +45,7 @@ public:
     }
 
     bool appendText(const char *path, const char *text) override {
-        if (!ready || !path || !text) {
+        if (!ready || fail_append || !path || !text) {
             return false;
         }
         text_files[path] += text;
@@ -158,6 +159,45 @@ void test_daily_extrema_ignores_invalid_values() {
     TEST_ASSERT_TRUE(csv.find(",25.0,") != std::string::npos);
 }
 
+void test_daily_extrema_exports_current_day_without_finalizing() {
+    FakeDailyStorage storage;
+    DailyExtremaHistory history;
+    history.begin(storage);
+
+    SensorData data;
+    set_basic_data(data, 650, 21.0f, 8.5f);
+    history.update(data, getMillis());
+
+    String current_csv;
+    TEST_ASSERT_TRUE(history.currentDayCsv(current_csv));
+
+    const std::string csv = current_csv.c_str();
+    TEST_ASSERT_TRUE(csv.find("date,metric,unit,min,min_time,max,max_time,sample_count\n") != std::string::npos);
+    TEST_ASSERT_TRUE(csv.find("2026-06-27,co2,ppm,650") != std::string::npos);
+    TEST_ASSERT_TRUE(csv.find("2026-06-27,temperature,C,21.0") != std::string::npos);
+    TEST_ASSERT_TRUE(csv.find("2026-06-27,pm25,ug/m3,8.5") != std::string::npos);
+    TEST_ASSERT_EQUAL_UINT32(0, storage.text_files.count(DailyExtremaHistory::kDailyCsvPath));
+    TEST_ASSERT_EQUAL_UINT32(20260627U, history.currentDayKey());
+}
+
+void test_daily_extrema_clear_current_day_resets_live_state() {
+    FakeDailyStorage storage;
+    DailyExtremaHistory history;
+    history.begin(storage);
+
+    SensorData data;
+    set_basic_data(data, 650, 21.0f, 8.5f);
+    history.update(data, getMillis());
+
+    TEST_ASSERT_TRUE(history.hasCurrentDay());
+    history.clearCurrentDay();
+
+    String current_csv;
+    TEST_ASSERT_FALSE(history.hasCurrentDay());
+    TEST_ASSERT_EQUAL_UINT32(0, history.currentSampleCount());
+    TEST_ASSERT_FALSE(history.currentDayCsv(current_csv));
+}
+
 void test_daily_extrema_restores_current_day_state() {
     FakeDailyStorage storage;
     {
@@ -209,11 +249,47 @@ void test_daily_extrema_resets_optional_gas_when_type_changes() {
     TEST_ASSERT_TRUE(csv.find("12.50") == std::string::npos);
 }
 
+void test_daily_extrema_keeps_previous_day_when_csv_append_fails() {
+    FakeDailyStorage storage;
+    DailyExtremaHistory history;
+    history.begin(storage);
+
+    SensorData data;
+    set_basic_data(data, 700, 21.0f, 7.0f);
+    history.update(data, getMillis());
+
+    storage.fail_append = true;
+    setNowEpoch(kDayTwoNoon);
+    advanceMillis(24UL * 60UL * 60UL * 1000UL);
+    set_basic_data(data, 900, 23.0f, 12.0f);
+    history.update(data, getMillis());
+
+    TEST_ASSERT_EQUAL_UINT32(20260627U, history.currentDayKey());
+    TEST_ASSERT_FALSE(history.lastWriteOk());
+    TEST_ASSERT_EQUAL_UINT32(0, storage.text_files.count(DailyExtremaHistory::kDailyCsvPath));
+
+    String current_csv;
+    TEST_ASSERT_TRUE(history.currentDayCsv(current_csv));
+    const std::string stale_csv = current_csv.c_str();
+    TEST_ASSERT_TRUE(stale_csv.find("2026-06-27,co2,ppm,700") != std::string::npos);
+    TEST_ASSERT_TRUE(stale_csv.find("2026-06-28") == std::string::npos);
+
+    storage.fail_append = false;
+    history.update(data, getMillis());
+
+    TEST_ASSERT_EQUAL_UINT32(20260628U, history.currentDayKey());
+    const std::string daily_csv = storage.text_files[DailyExtremaHistory::kDailyCsvPath];
+    TEST_ASSERT_TRUE(daily_csv.find("2026-06-27,co2,ppm,700") != std::string::npos);
+}
+
 int main(int, char **) {
     UNITY_BEGIN();
     RUN_TEST(test_daily_extrema_tracks_min_max_and_peak_times);
     RUN_TEST(test_daily_extrema_ignores_invalid_values);
+    RUN_TEST(test_daily_extrema_exports_current_day_without_finalizing);
+    RUN_TEST(test_daily_extrema_clear_current_day_resets_live_state);
     RUN_TEST(test_daily_extrema_restores_current_day_state);
     RUN_TEST(test_daily_extrema_resets_optional_gas_when_type_changes);
+    RUN_TEST(test_daily_extrema_keeps_previous_day_when_csv_append_fails);
     return UNITY_END();
 }

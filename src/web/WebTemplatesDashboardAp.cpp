@@ -117,6 +117,7 @@ const char kDashboardPageTemplateAp[] PROGMEM = R"HTML_DASH_AP(
     .btn-amber { background: rgba(245,158,11,.12); border-color: rgba(245,158,11,.45); color: #fcd34d; }
     .btn-amber:hover { background: rgba(245,158,11,.22); border-color: rgba(245,158,11,.62); color: #fde68a; }
     .link-btn { text-decoration: none; display: inline-flex; align-items: center; }
+    .btn.disabled, .btn[aria-disabled="true"] { opacity: .5; pointer-events: none; cursor: not-allowed; }
     .net-status {
       margin: 16px 0 0;
       padding: 9px 12px;
@@ -458,6 +459,12 @@ const char kDashboardPageTemplateAp[] PROGMEM = R"HTML_DASH_AP(
     .sys-btn-row { display: flex; flex-direction: column; gap: 8px; margin-top: 14px; }
     .sys-btn-row .btn,
     .sys-btn-row .link-btn { width: 100%; justify-content: center; }
+    .sd-action-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+    .sd-action-row .btn { flex: 1 1 150px; justify-content: center; }
+    .sd-note { min-height: 16px; margin-top: 10px; color: #9ca3af; font-size: 12px; line-height: 1.4; }
+    .sd-note.ok { color: #86efac; }
+    .sd-note.err { color: #fca5a5; }
+    .sd-note.warn { color: #fcd34d; }
 
     /* ── OTA progress ── */
     .progress-track { height: 8px; background: #1f2937; border-radius: 999px; overflow: hidden; border: 1px solid #374151; margin-top: 10px; }
@@ -662,23 +669,53 @@ const char kDashboardPageTemplateAp[] PROGMEM = R"HTML_DASH_AP(
   <!-- === SYSTEM === -->
   <div id="tab-system" class="tab-panel">
     <div class="system-grid">
-      <div class="sg">
-        <div class="sg-title">System Info</div>
-        <div class="info-rows" id="systemInfoRows">
-          <div class="info-row"><span class="info-key">Mode</span><span class="info-val" id="si-mode">--</span></div>
-          <div class="info-row"><span class="info-key">IP Address</span><span class="info-val" id="si-ip">--</span></div>
-          <div class="info-row"><span class="info-key">Hostname</span><span class="info-val" id="si-hostname">--</span></div>
-          <div class="info-row"><span class="info-key">Firmware</span><span class="info-val" id="si-firmware">--</span></div>
-          <div class="info-row"><span class="info-key">Build</span><span class="info-val" id="si-build">--</span></div>
-          <div class="info-row"><span class="info-key">Uptime</span><span class="info-val" id="si-uptime">--</span></div>
-          <div class="info-row"><span class="info-key">DAC</span><span class="info-val" id="si-dac">--</span></div>
+      <div class="system-col">
+        <div class="sg">
+          <div class="sg-title">System Info</div>
+          <div class="info-rows" id="systemInfoRows">
+            <div class="info-row"><span class="info-key">Mode</span><span class="info-val" id="si-mode">--</span></div>
+            <div class="info-row"><span class="info-key">IP Address</span><span class="info-val" id="si-ip">--</span></div>
+            <div class="info-row"><span class="info-key">Hostname</span><span class="info-val" id="si-hostname">--</span></div>
+            <div class="info-row"><span class="info-key">Firmware</span><span class="info-val" id="si-firmware">--</span></div>
+            <div class="info-row"><span class="info-key">Build</span><span class="info-val" id="si-build">--</span></div>
+            <div class="info-row"><span class="info-key">Uptime</span><span class="info-val" id="si-uptime">--</span></div>
+            <div class="info-row"><span class="info-key">DAC</span><span class="info-val" id="si-dac">--</span></div>
+          </div>
+          <div class="sys-btn-row">
+            <button class="btn btn-danger" type="button" id="rebootBtn">Reboot Device</button>
+            <button class="btn" type="button" id="openThemeBtn" disabled>Open Theme Studio</button>
+            <button class="btn" type="button" id="openDacBtn" disabled>Open Fan Control Page</button>
+            <a class="btn link-btn" href="/thresholds">Display Thresholds</a>
+            <a class="btn link-btn" href="/dashboard" id="networkActionBtn">Open Dashboard</a>
+          </div>
         </div>
-        <div class="sys-btn-row">
-          <button class="btn btn-danger" type="button" id="rebootBtn">Reboot Device</button>
-          <button class="btn" type="button" id="openThemeBtn" disabled>Open Theme Studio</button>
-          <button class="btn" type="button" id="openDacBtn" disabled>Open Fan Control Page</button>
-          <a class="btn link-btn" href="/thresholds">Display Thresholds</a>
-          <a class="btn link-btn" href="/dashboard" id="networkActionBtn">Open Dashboard</a>
+        <div class="sg">
+          <div class="sg-title">SD History</div>
+          <div class="info-rows">
+            <div class="info-row"><span class="info-key">Card</span><span class="info-val" id="sd-status">--</span></div>
+            <div class="info-row"><span class="info-key">Card size</span><span class="info-val" id="sd-capacity">--</span></div>
+            <div class="info-row"><span class="info-key">Current day</span><span class="info-val" id="sd-day">--</span></div>
+            <div class="info-row"><span class="info-key">Metric samples</span><span class="info-val" id="sd-samples">--</span></div>
+            <div class="info-row"><span class="info-key">State file</span><span class="info-val" id="sd-state-file">--</span></div>
+            <div class="info-row"><span class="info-key">Daily CSV</span><span class="info-val" id="sd-daily-csv">--</span></div>
+            <div class="info-row"><span class="info-key">Last write</span><span class="info-val" id="sd-last-write">--</span></div>
+          </div>
+          <div class="sd-action-row">
+            <button class="btn" type="button" id="sdRefreshBtn">Refresh SD</button>
+            <a class="btn btn-cyan link-btn disabled"
+               href="/api/history/current-day.csv"
+               id="sdExportCurrentBtn"
+               aria-disabled="true"
+               tabindex="-1">Export current day</a>
+            <a class="btn btn-cyan link-btn disabled"
+               href="/api/history/daily.csv"
+               id="sdExportCsvBtn"
+               aria-disabled="true"
+               tabindex="-1">Export daily CSV</a>
+            <button class="btn btn-danger" type="button" id="sdClearCurrentBtn">Delete current day</button>
+            <button class="btn btn-danger" type="button" id="sdClearHistoryBtn">Clear history</button>
+          </div>
+          <div class="sd-note" id="sd-note" aria-live="polite">Open System to load SD history status.</div>
         </div>
       </div>
       <div class="system-col">
@@ -849,6 +886,28 @@ function fmtMM(v, unit) {
     ? v.toFixed(2)
     : (Math.abs(v) >= 100 ? v.toFixed(0) : v.toFixed(1));
   return unit ? s + ' ' + unit : s;
+}
+function formatBytes(bytes) {
+  if (!isNum(bytes) || bytes < 0) return '--';
+  const units = ['B', 'KB', 'MB', 'GB'];
+  let value = Number(bytes);
+  let unitIndex = 0;
+  while (value >= 1024 && unitIndex < units.length - 1) {
+    value /= 1024;
+    unitIndex += 1;
+  }
+  const digits = unitIndex === 0 ? 0 : (value >= 100 ? 0 : 1);
+  return value.toFixed(digits) + ' ' + units[unitIndex];
+}
+function formatDayKey(dayKey) {
+  if (!isNum(dayKey) || dayKey <= 0) return '--';
+  const text = String(Math.trunc(dayKey));
+  if (text.length !== 8) return text;
+  return text.slice(0, 4) + '-' + text.slice(4, 6) + '-' + text.slice(6, 8);
+}
+function formatFileStatus(fileInfo) {
+  if (!fileInfo || fileInfo.exists !== true) return 'Not available';
+  return formatBytes(Number(fileInfo.size_bytes || 0));
 }
 function isUsUnitSystem(tempUnit) { return tempUnit === 'f'; }
 function tempToDisplay(tempC, tempUnit) {
@@ -1705,9 +1764,126 @@ function renderSystemMeta(payload) {
   if (dacBtn) dacBtn.disabled = system.dac_available !== true;
 }
 
+function setSdNote(text, cls) {
+  const el = document.getElementById('sd-note');
+  if (!el) return;
+  el.textContent = text || '';
+  el.className = 'sd-note' + (cls ? (' ' + cls) : '');
+}
+
+function setLinkButtonEnabled(id, enabled) {
+  const btn = document.getElementById(id);
+  if (!btn) return;
+  btn.classList.toggle('disabled', !enabled);
+  btn.setAttribute('aria-disabled', enabled ? 'false' : 'true');
+  if (enabled) {
+    btn.removeAttribute('tabindex');
+  } else {
+    btn.setAttribute('tabindex', '-1');
+  }
+}
+
+function setSdExportEnabled(enabled) {
+  setLinkButtonEnabled('sdExportCsvBtn', enabled);
+}
+
+function setSdCurrentExportEnabled(enabled) {
+  setLinkButtonEnabled('sdExportCurrentBtn', enabled);
+}
+
+function renderSdHistoryStatus(payload) {
+  const sd = (payload && payload.sd) || {};
+  const daily = (payload && payload.daily) || {};
+  const files = (payload && payload.files) || {};
+  const mounted = sd.mounted === true;
+  const attempted = sd.attempted === true;
+  const dailyCsv = files.daily_csv || null;
+  const stateFile = files.current_day_state || null;
+  const lastError = typeof sd.last_error === 'string' ? sd.last_error : '';
+
+  setInfoValue('sd-status',
+               mounted ? 'Mounted' : (attempted ? 'Mount failed' : 'Not attempted'),
+               mounted ? 'ok' : (attempted ? 'err' : ''));
+  setInfoValue('sd-capacity', mounted ? formatBytes(Number(sd.card_size_bytes || 0)) : '--');
+  setInfoValue('sd-day', formatDayKey(Number(daily.current_day || 0)));
+  setInfoValue('sd-samples', isNum(daily.current_sample_count) ? String(daily.current_sample_count) : '--');
+  setInfoValue('sd-state-file', formatFileStatus(stateFile), stateFile && stateFile.exists === true ? 'ok' : '');
+  setInfoValue('sd-daily-csv', formatFileStatus(dailyCsv), dailyCsv && dailyCsv.exists === true ? 'ok' : '');
+  setInfoValue('sd-last-write',
+               daily.last_write_ok === true ? 'OK' : 'Failed',
+               daily.last_write_ok === true ? 'ok' : 'err');
+
+  const currentReady = isNum(daily.current_sample_count) && daily.current_sample_count > 0;
+  const exportReady = mounted && dailyCsv && dailyCsv.exists === true && Number(dailyCsv.size_bytes || 0) > 0;
+  setSdCurrentExportEnabled(currentReady);
+  setSdExportEnabled(exportReady);
+  ['sdClearCurrentBtn','sdClearHistoryBtn'].forEach(id => {
+    const btn = document.getElementById(id);
+    if (btn) btn.disabled = !mounted;
+  });
+
+  if (!mounted) {
+    setSdNote(lastError || 'SD card is not mounted.', 'err');
+  } else if (!exportReady) {
+    setSdNote('Daily CSV will appear after the first day rollover. Use Export current day to preview today.', 'warn');
+  } else {
+    setSdNote('Daily CSV is ready for export.', 'ok');
+  }
+}
+
+async function refreshSdHistory(options) {
+  if (otaUploadInFlight || otaAwaitingDeviceOutcome || otaRestartPending || sdHistoryRefreshBusy) return;
+  sdHistoryRefreshBusy = true;
+  const silent = options && options.silent === true;
+  const btn = document.getElementById('sdRefreshBtn');
+  if (btn && !silent) {
+    btn.disabled = true;
+    btn.textContent = 'Refreshing...';
+  }
+  try {
+    const payload = await getJson('/api/history/daily/status');
+    renderSdHistoryStatus(payload);
+  } catch (error) {
+    setSdCurrentExportEnabled(false);
+    setSdExportEnabled(false);
+    setSdNote((error && error.message) ? error.message : 'Failed to load SD history status.', 'err');
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = 'Refresh SD';
+    }
+    sdHistoryRefreshBusy = false;
+  }
+}
+
 // ─────────────────────────────────────────────
 // State
 // ─────────────────────────────────────────────
+function setSdServiceButtonsDisabled(disabled) {
+  ['sdClearCurrentBtn','sdClearHistoryBtn','sdRefreshBtn'].forEach(id => {
+    const btn = document.getElementById(id);
+    if (btn) btn.disabled = !!disabled;
+  });
+}
+
+async function runSdServiceAction(url, confirmText, progressText, successText) {
+  if (confirmText && !window.confirm(confirmText)) return;
+  setSdServiceButtonsDisabled(true);
+  setSdNote(progressText || 'Working...', 'warn');
+  try {
+    const result = await postJson(url, {});
+    if (result && result.success === false) {
+      throw new Error(result.error || 'SD action failed.');
+    }
+    setSdNote(successText || 'Done.', 'ok');
+    await refreshSdHistory({ silent: true });
+  } catch (error) {
+    setSdNote((error && error.message) ? error.message : 'SD action failed.', 'err');
+  } finally {
+    setSdServiceButtonsDisabled(false);
+  }
+}
+
 let activeTab = 'sensors';
 let chartGroup = 'core';
 let chartRange = '24h';
@@ -1715,6 +1891,7 @@ let stateCache = null;
 let historyCache = null;
 let refreshBusy = false;
 let refreshTimer = null;
+let sdHistoryRefreshBusy = false;
 let otaUploadInFlight = false;
 let otaAwaitingPhysicalConfirm = false;
 let otaAwaitingDeviceOutcome = false;
@@ -3122,6 +3299,7 @@ async function refreshActive() {
     if (activeTab === 'charts')  { try { await refreshCharts(); } catch (_) {} }
     if (activeTab === 'events')  { try { await refreshEvents(); } catch (_) {} }
     if (activeTab === 'sensors') { try { await refreshSensorHistory(); } catch (_) {} }
+    if (activeTab === 'system')  { try { await refreshSdHistory({ silent: true }); } catch (_) {} }
   }
   refreshBusy = false;
 }
@@ -3153,6 +3331,7 @@ function selectTab(tab) {
   if (tab === 'charts') refreshCharts().catch(() => {});
   if (tab === 'events') refreshEvents().catch(() => {});
   if (tab === 'sensors') refreshSensorHistory().catch(() => {});
+  if (tab === 'system') refreshSdHistory().catch(() => {});
 }
 
 // ─────────────────────────────────────────────
@@ -3187,6 +3366,19 @@ document.getElementById('rebootBtn').addEventListener('click', async () => {
 });
 document.getElementById('openThemeBtn').addEventListener('click', () => { window.location.href = '/theme'; });
 document.getElementById('openDacBtn').addEventListener('click', () => { window.location.href = '/dac'; });
+document.getElementById('sdRefreshBtn').addEventListener('click', () => { refreshSdHistory().catch(() => {}); });
+document.getElementById('sdClearCurrentBtn').addEventListener('click', () => {
+  runSdServiceAction('/api/history/current-day/clear',
+                     'Delete current day history snapshot?',
+                     'Deleting current day snapshot...',
+                     'Current day history deleted.').catch(() => {});
+});
+document.getElementById('sdClearHistoryBtn').addEventListener('click', () => {
+  runSdServiceAction('/api/history/clear',
+                     'Delete daily CSV and current day history?',
+                     'Deleting history files...',
+                     'History deleted.').catch(() => {});
+});
 
 initSettingsUI();
 initTimeSyncUI();

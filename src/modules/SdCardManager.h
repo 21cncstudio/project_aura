@@ -43,6 +43,9 @@ public:
     Status status() const;
     String fullPath(const char *relative_path) const;
     FILE *openRead(const char *relative_path) const;
+    bool fileInfo(const char *path, bool &exists, size_t &out_size) const;
+    bool acquireFileAccess(uint32_t timeout_ms = 1000) const;
+    void releaseFileAccess() const;
 
     bool isReady() const override { return mounted_; }
     bool fileExists(const char *path) const override;

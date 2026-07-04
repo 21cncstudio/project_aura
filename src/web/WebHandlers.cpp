@@ -274,6 +274,24 @@ void daily_history_csv_handle() {
     });
 }
 
+void daily_history_current_day_csv_handle() {
+    with_ota_busy([](WebHandlerContext &context, bool ota_busy) {
+        WebDailyHistoryHandlers::handleCurrentDayCsv(context, ota_busy, WebHandlersSupport::otaBusyJson());
+    });
+}
+
+void daily_history_clear_handle() {
+    with_ota_busy([](WebHandlerContext &context, bool ota_busy) {
+        WebDailyHistoryHandlers::handleClearHistory(context, ota_busy, WebHandlersSupport::otaBusyJson());
+    });
+}
+
+void daily_history_clear_current_day_handle() {
+    with_ota_busy([](WebHandlerContext &context, bool ota_busy) {
+        WebDailyHistoryHandlers::handleClearCurrentDay(context, ota_busy, WebHandlersSupport::otaBusyJson());
+    });
+}
+
 void state_handle_data() {
     with_context([](WebHandlerContext &context) {
         const WebOtaSnapshot ota_snapshot = WebHandlersSupport::otaSnapshot();

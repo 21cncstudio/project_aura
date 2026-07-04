@@ -45,6 +45,9 @@ DEFINE_HANDLER(thresholds_handle_reset)
 DEFINE_HANDLER(charts_handle_data)
 DEFINE_HANDLER(daily_history_status_handle)
 DEFINE_HANDLER(daily_history_csv_handle)
+DEFINE_HANDLER(daily_history_current_day_csv_handle)
+DEFINE_HANDLER(daily_history_clear_handle)
+DEFINE_HANDLER(daily_history_clear_current_day_handle)
 DEFINE_HANDLER(state_handle_data)
 DEFINE_HANDLER(events_handle_data)
 DEFINE_HANDLER(diag_handle_data)
@@ -193,6 +196,35 @@ void test_web_route_registry_registers_ota_upload_endpoints() {
     TEST_ASSERT_TRUE(upload->upload_handler == ota_handle_upload);
 }
 
+void test_web_route_registry_registers_history_endpoints() {
+    CapturingBackend backend = capture_routes();
+
+    const CapturedRoute *status =
+        backend.find(RouteMethod::Get, "/api/history/daily/status");
+    TEST_ASSERT_NOT_NULL(status);
+    TEST_ASSERT_TRUE(status->handler == daily_history_status_handle);
+
+    const CapturedRoute *daily_csv =
+        backend.find(RouteMethod::Get, "/api/history/daily.csv");
+    TEST_ASSERT_NOT_NULL(daily_csv);
+    TEST_ASSERT_TRUE(daily_csv->handler == daily_history_csv_handle);
+
+    const CapturedRoute *current_day_csv =
+        backend.find(RouteMethod::Get, "/api/history/current-day.csv");
+    TEST_ASSERT_NOT_NULL(current_day_csv);
+    TEST_ASSERT_TRUE(current_day_csv->handler == daily_history_current_day_csv_handle);
+
+    const CapturedRoute *clear =
+        backend.find(RouteMethod::Post, "/api/history/clear");
+    TEST_ASSERT_NOT_NULL(clear);
+    TEST_ASSERT_TRUE(clear->handler == daily_history_clear_handle);
+
+    const CapturedRoute *clear_current_day =
+        backend.find(RouteMethod::Post, "/api/history/current-day/clear");
+    TEST_ASSERT_NOT_NULL(clear_current_day);
+    TEST_ASSERT_TRUE(clear_current_day->handler == daily_history_clear_current_day_handle);
+}
+
 void test_web_route_registry_has_no_duplicate_uri_method_pairs() {
     CapturingBackend backend = capture_routes();
 
@@ -216,6 +248,7 @@ int main(int, char **) {
     UNITY_BEGIN();
     RUN_TEST(test_web_route_registry_registers_expected_route_count);
     RUN_TEST(test_web_route_registry_registers_ota_upload_endpoints);
+    RUN_TEST(test_web_route_registry_registers_history_endpoints);
     RUN_TEST(test_web_route_registry_has_no_duplicate_uri_method_pairs);
     RUN_TEST(test_esp_http_server_route_capacity_covers_registered_routes);
     return UNITY_END();

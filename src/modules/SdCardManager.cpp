@@ -6,6 +6,7 @@
 
 #include "modules/SdCardManager.h"
 
+#include <errno.h>
 #include <string.h>
 #include <sys/stat.h>
 
@@ -69,6 +70,14 @@ void SdCardManager::unlock() const {
         xSemaphoreGive(mutex_);
     }
 #endif
+}
+
+bool SdCardManager::acquireFileAccess(uint32_t timeout_ms) const {
+    return lock(timeout_ms);
+}
+
+void SdCardManager::releaseFileAccess() const {
+    unlock();
 }
 
 bool SdCardManager::setCardSelect(bool selected) {
@@ -228,24 +237,31 @@ bool SdCardManager::ensureParentDirs(const char *relative_path) const {
 }
 
 bool SdCardManager::fileExists(const char *path) const {
-    if (!mounted_ || !path) {
-        return false;
-    }
-    struct stat st = {};
-    const String full = fullPath(path);
-    return stat(full.c_str(), &st) == 0 && S_ISREG(st.st_mode);
+    bool exists = false;
+    size_t size = 0;
+    return fileInfo(path, exists, size) && exists;
 }
 
 bool SdCardManager::fileSize(const char *path, size_t &out_size) const {
+    bool exists = false;
+    return fileInfo(path, exists, out_size) && exists;
+}
+
+bool SdCardManager::fileInfo(const char *path, bool &exists, size_t &out_size) const {
+    exists = false;
     out_size = 0;
     if (!mounted_ || !path) {
         return false;
     }
     struct stat st = {};
     const String full = fullPath(path);
-    if (stat(full.c_str(), &st) != 0 || !S_ISREG(st.st_mode)) {
-        return false;
+    if (stat(full.c_str(), &st) != 0) {
+        return errno == ENOENT;
     }
+    if (!S_ISREG(st.st_mode)) {
+        return true;
+    }
+    exists = true;
     out_size = static_cast<size_t>(st.st_size);
     return true;
 }

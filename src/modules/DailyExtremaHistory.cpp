@@ -12,6 +12,11 @@
 
 #include "core/Logger.h"
 
+#ifndef UNIT_TEST
+#include <freertos/FreeRTOS.h>
+#include <freertos/semphr.h>
+#endif
+
 namespace {
 
 constexpr uint32_t kDailyExtremaMagic = 0x44455848; // "DEXH"
@@ -69,11 +74,59 @@ time_t DailyExtremaHistory::nowEpochRaw() {
     return time(nullptr);
 }
 
+DailyExtremaHistory::DailyExtremaHistory() {
+#ifndef UNIT_TEST
+    mutex_ = xSemaphoreCreateMutex();
+#endif
+}
+
+DailyExtremaHistory::~DailyExtremaHistory() {
+#ifndef UNIT_TEST
+    if (mutex_) {
+        vSemaphoreDelete(mutex_);
+        mutex_ = nullptr;
+    }
+#endif
+}
+
+DailyExtremaHistory::ScopedLock::ScopedLock(const DailyExtremaHistory &owner, uint32_t timeout_ms)
+    : owner_(owner), locked_(owner.lock(timeout_ms)) {}
+
+DailyExtremaHistory::ScopedLock::~ScopedLock() {
+    if (locked_) {
+        owner_.unlock();
+    }
+}
+
+bool DailyExtremaHistory::lock(uint32_t timeout_ms) const {
+#ifdef UNIT_TEST
+    (void)timeout_ms;
+    return true;
+#else
+    if (!mutex_) {
+        return true;
+    }
+    return xSemaphoreTake(mutex_, pdMS_TO_TICKS(timeout_ms)) == pdTRUE;
+#endif
+}
+
+void DailyExtremaHistory::unlock() const {
+#ifndef UNIT_TEST
+    if (mutex_) {
+        xSemaphoreGive(mutex_);
+    }
+#endif
+}
+
 void DailyExtremaHistory::setNowEpochFn(NowEpochFn fn) {
     now_epoch_fn_ = fn ? fn : &DailyExtremaHistory::nowEpochRaw;
 }
 
 void DailyExtremaHistory::begin(DailyHistoryStorage &storage) {
+    ScopedLock guard(*this);
+    if (!guard.locked()) {
+        return;
+    }
     storage_ = &storage;
     memset(&state_, 0, sizeof(state_));
     restored_ = false;
@@ -82,12 +135,32 @@ void DailyExtremaHistory::begin(DailyHistoryStorage &storage) {
     last_save_ms_ = 0;
 }
 
-uint32_t DailyExtremaHistory::currentSampleCount() const {
+bool DailyExtremaHistory::hasCurrentDay() const {
+    ScopedLock guard(*this);
+    return guard.locked() && state_.day_key != 0;
+}
+
+uint32_t DailyExtremaHistory::currentDayKey() const {
+    ScopedLock guard(*this);
+    return guard.locked() ? state_.day_key : 0;
+}
+
+bool DailyExtremaHistory::lastWriteOk() const {
+    ScopedLock guard(*this);
+    return guard.locked() && last_write_ok_;
+}
+
+uint32_t DailyExtremaHistory::currentSampleCountLocked() const {
     uint32_t total = 0;
     for (const auto &metric : state_.metrics) {
         total += metric.sample_count;
     }
     return total;
+}
+
+uint32_t DailyExtremaHistory::currentSampleCount() const {
+    ScopedLock guard(*this);
+    return guard.locked() ? currentSampleCountLocked() : 0;
 }
 
 bool DailyExtremaHistory::localDateFromEpoch(time_t epoch, uint32_t &day_key) {
@@ -145,10 +218,10 @@ const DailyExtremaHistory::MetricDef &DailyExtremaHistory::metricDef(uint8_t ind
     return kMetricDefs[index];
 }
 
-void DailyExtremaHistory::restoreOrFinalizeStoredDay(uint32_t current_day_key) {
+bool DailyExtremaHistory::restoreOrFinalizeStoredDay(uint32_t current_day_key) {
     restored_ = true;
     if (!storage_ || !storage_->isReady()) {
-        return;
+        return true;
     }
 
     PersistedState stored{};
@@ -156,39 +229,49 @@ void DailyExtremaHistory::restoreOrFinalizeStoredDay(uint32_t current_day_key) {
     if (!storage_->readBinary(kStatePath, &stored, sizeof(stored), read_len) ||
         read_len != sizeof(stored) ||
         !validPersistedState(stored)) {
-        return;
+        return true;
     }
 
     state_ = stored;
     if (state_.day_key == current_day_key) {
         LOGI("DailyHistory", "restored day=%u samples=%u",
              static_cast<unsigned>(state_.day_key),
-             static_cast<unsigned>(currentSampleCount()));
-        return;
+             static_cast<unsigned>(currentSampleCountLocked()));
+        return true;
     }
 
     LOGI("DailyHistory", "finalizing stored day=%u before current day=%u",
          static_cast<unsigned>(state_.day_key),
          static_cast<unsigned>(current_day_key));
-    appendCurrentDayCsv();
-    storage_->removeFile(kStatePath);
+    if (!finalizeCurrentDayCsv()) {
+        return false;
+    }
+    if (!storage_->removeFile(kStatePath)) {
+        LOGW("DailyHistory", "failed to remove finalized current day state");
+    }
     memset(&state_, 0, sizeof(state_));
+    dirty_ = false;
+    last_save_ms_ = 0;
+    return true;
 }
 
-void DailyExtremaHistory::ensureDay(uint32_t day_key) {
-    if (!restored_) {
-        restoreOrFinalizeStoredDay(day_key);
+bool DailyExtremaHistory::ensureDay(uint32_t day_key) {
+    if (!restored_ && !restoreOrFinalizeStoredDay(day_key)) {
+        return false;
     }
 
     if (state_.day_key == 0) {
         resetForDay(day_key);
-        return;
+        return true;
     }
 
     if (state_.day_key != day_key) {
-        appendCurrentDayCsv();
+        if (!finalizeCurrentDayCsv()) {
+            return false;
+        }
         resetForDay(day_key);
     }
+    return state_.day_key == day_key;
 }
 
 void DailyExtremaHistory::resetForDay(uint32_t day_key) {
@@ -252,12 +335,19 @@ void DailyExtremaHistory::updateOptionalGasMetric(const SensorData &data, uint32
 }
 
 void DailyExtremaHistory::update(const SensorData &data, uint32_t now_ms) {
+    ScopedLock guard(*this);
+    if (!guard.locked()) {
+        return;
+    }
     uint32_t day_key = 0;
     const time_t now_epoch = now_epoch_fn_();
     if (!localDateFromEpoch(now_epoch, day_key)) {
         return;
     }
-    ensureDay(day_key);
+    if (!ensureDay(day_key)) {
+        saveStateIfDue(now_ms, true, true);
+        return;
+    }
     const uint32_t epoch = static_cast<uint32_t>(now_epoch);
 
     updateMetric(ChartsHistory::METRIC_CO2, data.co2_valid, static_cast<float>(data.co2), epoch);
@@ -285,10 +375,18 @@ void DailyExtremaHistory::update(const SensorData &data, uint32_t now_ms) {
 }
 
 void DailyExtremaHistory::poll(uint32_t now_ms) {
+    ScopedLock guard(*this);
+    if (!guard.locked()) {
+        return;
+    }
     saveStateIfDue(now_ms, false);
 }
 
 void DailyExtremaHistory::flush() {
+    ScopedLock guard(*this);
+    if (!guard.locked()) {
+        return;
+    }
     saveStateIfDue(millis(), true);
 }
 
@@ -314,13 +412,12 @@ bool DailyExtremaHistory::ensureCsvHeader() {
         "date,metric,unit,min,min_time,max,max_time,sample_count\n");
 }
 
-bool DailyExtremaHistory::appendCurrentDayCsv() {
-    if (!storage_ || !storage_->isReady() || state_.day_key == 0 || !hasAnySamples()) {
+bool DailyExtremaHistory::appendCsvRows(String &rows, bool include_header) const {
+    if (state_.day_key == 0 || !hasAnySamples()) {
         return false;
     }
-    if (!ensureCsvHeader()) {
-        last_write_ok_ = false;
-        return false;
+    if (include_header) {
+        rows += "date,metric,unit,min,min_time,max,max_time,sample_count\n";
     }
 
     char day_buf[16] = {};
@@ -328,8 +425,6 @@ bool DailyExtremaHistory::appendCurrentDayCsv() {
     char max_time[16] = {};
     formatDay(state_.day_key, day_buf, sizeof(day_buf));
 
-    String rows;
-    rows.reserve(1024);
     for (uint8_t i = 0; i < ChartsHistory::kMetricCount; ++i) {
         const MetricState &metric = state_.metrics[i];
         if (!metric.valid || metric.sample_count == 0) {
@@ -356,6 +451,51 @@ bool DailyExtremaHistory::appendCurrentDayCsv() {
         rows += format_uint(metric.sample_count);
         rows += '\n';
     }
+    return true;
+}
+
+bool DailyExtremaHistory::currentDayCsv(String &out, bool include_header) const {
+    ScopedLock guard(*this);
+    if (!guard.locked()) {
+        out = "";
+        return false;
+    }
+    out = "";
+    out.reserve(1152);
+    return appendCsvRows(out, include_header);
+}
+
+void DailyExtremaHistory::clearCurrentDay() {
+    ScopedLock guard(*this);
+    if (!guard.locked()) {
+        return;
+    }
+    memset(&state_, 0, sizeof(state_));
+    dirty_ = false;
+    restored_ = true;
+    last_save_ms_ = 0;
+    last_write_ok_ = true;
+}
+
+bool DailyExtremaHistory::finalizeCurrentDayCsv() {
+    if (state_.day_key == 0 || !hasAnySamples()) {
+        return true;
+    }
+    return appendCurrentDayCsv();
+}
+
+bool DailyExtremaHistory::appendCurrentDayCsv() {
+    if (!storage_ || !storage_->isReady() || state_.day_key == 0 || !hasAnySamples()) {
+        return false;
+    }
+    if (!ensureCsvHeader()) {
+        last_write_ok_ = false;
+        return false;
+    }
+
+    String rows;
+    rows.reserve(1024);
+    appendCsvRows(rows, false);
 
     const bool ok = rows.length() == 0 || storage_->appendText(kDailyCsvPath, rows.c_str());
     last_write_ok_ = ok;
@@ -366,11 +506,11 @@ bool DailyExtremaHistory::appendCurrentDayCsv() {
     }
     LOGI("DailyHistory", "saved daily extrema day=%u samples=%u",
          static_cast<unsigned>(state_.day_key),
-         static_cast<unsigned>(currentSampleCount()));
+         static_cast<unsigned>(currentSampleCountLocked()));
     return true;
 }
 
-void DailyExtremaHistory::saveStateIfDue(uint32_t now_ms, bool force) {
+void DailyExtremaHistory::saveStateIfDue(uint32_t now_ms, bool force, bool preserve_failure) {
     if (!dirty_ || !storage_ || !storage_->isReady() || state_.day_key == 0) {
         return;
     }
@@ -381,10 +521,14 @@ void DailyExtremaHistory::saveStateIfDue(uint32_t now_ms, bool force) {
     state_.version = kDailyExtremaVersion;
     state_.metric_count = ChartsHistory::kMetricCount;
     last_save_ms_ = now_ms;
-    last_write_ok_ = storage_->writeBinaryAtomic(kStatePath, &state_, sizeof(state_));
-    if (last_write_ok_) {
+    const bool ok = storage_->writeBinaryAtomic(kStatePath, &state_, sizeof(state_));
+    if (ok) {
         dirty_ = false;
+        if (!preserve_failure) {
+            last_write_ok_ = true;
+        }
     } else {
+        last_write_ok_ = false;
         LOGW("DailyHistory", "failed to save current day state");
     }
 }

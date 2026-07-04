@@ -9,7 +9,7 @@ class WebServerBackend;
 
 namespace WebRouteRegistry {
 
-constexpr size_t kUriRouteCount = 35;
+constexpr size_t kUriRouteCount = 38;
 constexpr const char *kOtaPreparePath = "/api/ota/prepare";
 constexpr const char *kOtaUploadPath = "/api/ota";
 
