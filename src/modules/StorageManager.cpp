@@ -690,7 +690,19 @@ bool StorageManager::loadConfig() {
         readValue(ui, "temp_offset", loaded.temp_offset);
         readValue(ui, "hum_offset", loaded.hum_offset);
         readValue(ui, "units_c", loaded.units_c);
-        readValue(ui, "units_mdy", loaded.units_mdy);
+        int lang_raw = static_cast<int>(Config::Language::EN);
+        readValue(ui, "lang", lang_raw);
+        loaded.language = Config::clampLanguage(lang_raw);
+        bool legacy_units_mdy = !loaded.units_c;
+        readValue(ui, "units_mdy", legacy_units_mdy);
+        Config::DateFormat legacy_date_format =
+            legacy_units_mdy ? Config::DateFormat::MDY : Config::DateFormat::DMY;
+        if (loaded.language == Config::Language::JA) {
+            legacy_date_format = Config::DateFormat::ISO;
+        }
+        int date_format_raw = static_cast<int>(legacy_date_format);
+        readValue(ui, "date_format", date_format_raw);
+        loaded.date_format = Config::clampDateFormat(date_format_raw);
         readValue(ui, "night_mode", loaded.night_mode);
         readValue(ui, "header_status_enabled", loaded.header_status_enabled);
         readValue(ui, "led_indicators", loaded.led_indicators);
@@ -700,9 +712,6 @@ bool StorageManager::loadConfig() {
         readValue(ui, "pressure_altitude_set", loaded.pressure_altitude_set);
         readValue(ui, "pressure_altitude_m", loaded.pressure_altitude_m);
         readString(ui, "display_name", loaded.web_display_name);
-        int lang_raw = static_cast<int>(Config::Language::EN);
-        readValue(ui, "lang", lang_raw);
-        loaded.language = Config::clampLanguage(lang_raw);
     }
 
     ArduinoJson::JsonObject backlight = root["backlight"].as<ArduinoJson::JsonObject>();
@@ -812,7 +821,8 @@ bool StorageManager::saveConfigInternal() {
     ui["temp_offset"] = config_.temp_offset;
     ui["hum_offset"] = config_.hum_offset;
     ui["units_c"] = config_.units_c;
-    ui["units_mdy"] = config_.units_mdy;
+    ui["units_mdy"] = config_.date_format == Config::DateFormat::MDY;
+    ui["date_format"] = static_cast<uint8_t>(config_.date_format);
     ui["night_mode"] = config_.night_mode;
     ui["header_status_enabled"] = config_.header_status_enabled;
     ui["led_indicators"] = config_.led_indicators;

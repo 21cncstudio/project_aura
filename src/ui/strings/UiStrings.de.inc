@@ -135,7 +135,7 @@
     "Monat:",
     "Jahr:",
     "ZEIT",
-    "JETZT ANWENDEN",
+    "ANWENDEN",
     "RTC:",
     "WLAN:",
     "NTP:",

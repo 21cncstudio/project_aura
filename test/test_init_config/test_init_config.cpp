@@ -34,10 +34,22 @@ void test_normalize_offsets_clamps_low() {
     TEST_ASSERT_FLOAT_WITHIN(0.001f, Config::HUM_OFFSET_MIN, hum_offset);
 }
 
+void test_default_date_format_uses_japanese_iso_and_unit_defaults() {
+    TEST_ASSERT_EQUAL_INT(static_cast<int>(Config::DateFormat::ISO),
+                          static_cast<int>(Config::defaultDateFormat(Config::Language::JA, true)));
+    TEST_ASSERT_EQUAL_INT(static_cast<int>(Config::DateFormat::ISO),
+                          static_cast<int>(Config::defaultDateFormat(Config::Language::JA, false)));
+    TEST_ASSERT_EQUAL_INT(static_cast<int>(Config::DateFormat::DMY),
+                          static_cast<int>(Config::defaultDateFormat(Config::Language::EN, true)));
+    TEST_ASSERT_EQUAL_INT(static_cast<int>(Config::DateFormat::MDY),
+                          static_cast<int>(Config::defaultDateFormat(Config::Language::EN, false)));
+}
+
 int main(int, char **) {
     UNITY_BEGIN();
     RUN_TEST(test_normalize_offsets_rounding);
     RUN_TEST(test_normalize_offsets_clamps_high);
     RUN_TEST(test_normalize_offsets_clamps_low);
+    RUN_TEST(test_default_date_format_uses_japanese_iso_and_unit_defaults);
     return UNITY_END();
 }

@@ -979,25 +979,18 @@ bool UiController::webSetNtpServer(const String &server) {
 
 bool UiController::webSetUnitsC(bool units_c) {
     if (units_c == temp_units_c) {
-        const bool expected_mdy = !units_c;
-        if (date_units_mdy != expected_mdy) {
-            date_units_mdy = expected_mdy;
-            storage.config().units_mdy = expected_mdy;
-            clock_ui_dirty = true;
-        }
         return true;
     }
     const bool previous_units_c = temp_units_c;
-    const bool previous_units_mdy = date_units_mdy;
+    const Config::DateFormat previous_date_format = date_format_;
     temp_units_c = units_c;
-    date_units_mdy = !units_c;
     storage.config().units_c = temp_units_c;
-    storage.config().units_mdy = date_units_mdy;
+    apply_contextual_date_format_default(ui_language, previous_units_c);
     if (!storage.saveConfig(true)) {
         temp_units_c = previous_units_c;
-        date_units_mdy = previous_units_mdy;
+        date_format_ = previous_date_format;
         storage.config().units_c = previous_units_c;
-        storage.config().units_mdy = previous_units_mdy;
+        storage.config().date_format = previous_date_format;
         clock_ui_dirty = true;
         data_dirty = true;
         LOGE("UI", "failed to persist temperature unit change");
@@ -1008,6 +1001,22 @@ bool UiController::webSetUnitsC(bool units_c) {
     data_dirty = true;
     mqttRuntimeState.requestPublish();
     return true;
+}
+
+void UiController::apply_contextual_date_format_default(Config::Language previous_language,
+                                                        bool previous_units_c) {
+    const Config::DateFormat previous_default =
+        Config::defaultDateFormat(previous_language, previous_units_c);
+    const Config::DateFormat next_default =
+        Config::defaultDateFormat(ui_language, temp_units_c);
+    if (date_format_ != previous_default || date_format_ == next_default) {
+        return;
+    }
+    date_format_ = next_default;
+    storage.config().date_format = date_format_;
+    clock_ui_dirty = true;
+    datetime_ui_dirty = true;
+    update_date_format_button();
 }
 
 bool UiController::webSetOffsets(float temp_offset_c, float hum_offset_pct) {
@@ -2145,6 +2154,7 @@ void UiController::update_clock_labels() {
         if (objects.label_time_ampm_title_2) safe_label_set_text(objects.label_time_ampm_title_2, "");
         set_label_hidden(objects.label_time_ampm_title_1, true);
         set_label_hidden(objects.label_time_ampm_title_2, true);
+        update_date_format_button();
         return;
     }
     format_clock_time_label(local_tm, time_format_24h_, buf, sizeof(buf), ampm_buf, sizeof(ampm_buf));
@@ -2159,19 +2169,50 @@ void UiController::update_clock_labels() {
         safe_label_set_text(objects.label_time_ampm_title_2, show_ampm ? ampm_buf : "");
         set_label_hidden(objects.label_time_ampm_title_2, !show_ampm);
     }
-    if (date_units_mdy) {
-        snprintf(buf, sizeof(buf), "%02d/%02d/%04d",
-                 local_tm.tm_mon + 1,
-                 local_tm.tm_mday,
-                 local_tm.tm_year + 1900);
-    } else {
-        snprintf(buf, sizeof(buf), "%02d.%02d.%04d",
-                 local_tm.tm_mday,
-                 local_tm.tm_mon + 1,
-                 local_tm.tm_year + 1900);
+    switch (date_format_) {
+        case Config::DateFormat::MDY:
+            snprintf(buf, sizeof(buf), "%02d/%02d/%04d",
+                     local_tm.tm_mon + 1,
+                     local_tm.tm_mday,
+                     local_tm.tm_year + 1900);
+            break;
+        case Config::DateFormat::ISO:
+            snprintf(buf, sizeof(buf), "%04d-%02d-%02d",
+                     local_tm.tm_year + 1900,
+                     local_tm.tm_mon + 1,
+                     local_tm.tm_mday);
+            break;
+        case Config::DateFormat::DMY:
+        default:
+            snprintf(buf, sizeof(buf), "%02d.%02d.%04d",
+                     local_tm.tm_mday,
+                     local_tm.tm_mon + 1,
+                     local_tm.tm_year + 1900);
+            break;
     }
     if (objects.label_date_value_1) safe_label_set_text(objects.label_date_value_1, buf);
     if (objects.label_date_value_2) safe_label_set_text(objects.label_date_value_2, buf);
+    update_date_format_button();
+}
+
+void UiController::update_date_format_button() {
+    if (!objects.label_btn_date_format) {
+        return;
+    }
+    const char *text = "DMY";
+    switch (date_format_) {
+        case Config::DateFormat::MDY:
+            text = "MDY";
+            break;
+        case Config::DateFormat::ISO:
+            text = "ISO";
+            break;
+        case Config::DateFormat::DMY:
+        default:
+            text = "DMY";
+            break;
+    }
+    safe_label_set_text(objects.label_btn_date_format, text);
 }
 
 void UiController::set_button_enabled(lv_obj_t *btn, bool enabled) {
@@ -2968,21 +3009,12 @@ void UiController::init_ui_defaults() {
         lv_obj_set_style_text_color(objects.label_btn_night_mode, color_inactive(), LV_PART_MAIN | LV_STATE_DISABLED);
     }
     ui_language = storage.config().language;
-    date_units_mdy = storage.config().units_mdy;
+    date_format_ = storage.config().date_format;
     time_format_24h_ = storage.config().time_format_24h;
     rtc_detection_saved_mode_ = storage.config().rtc_mode;
     rtc_detection_pending_mode_ = rtc_detection_saved_mode_;
     reset_pressure_altitude_pending();
     pressure_altitude_overlay_open_ = false;
-    const bool expected_units_mdy = !temp_units_c;
-    if (date_units_mdy != expected_units_mdy) {
-        date_units_mdy = expected_units_mdy;
-        storage.config().units_mdy = expected_units_mdy;
-        if (!storage.saveConfig(true)) {
-            storage.requestSave();
-            LOGW("UI", "failed to normalize date format for unit system");
-        }
-    }
     language_dirty = false;
     header_status_enabled = storage.config().header_status_enabled;
     UiLocalization::applyCurrentLanguage(*this);

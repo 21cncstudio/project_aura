@@ -76,6 +76,27 @@ namespace Config {
         return static_cast<Language>(value);
     }
 
+    enum class DateFormat : uint8_t {
+        MDY = 0,  // MM/DD/YYYY
+        DMY = 1,  // DD.MM.YYYY
+        ISO = 2,  // YYYY-MM-DD
+        COUNT
+    };
+
+    inline DateFormat clampDateFormat(int value) {
+        if (value < 0 || value >= static_cast<int>(DateFormat::COUNT)) {
+            return DateFormat::DMY;
+        }
+        return static_cast<DateFormat>(value);
+    }
+
+    inline DateFormat defaultDateFormat(Language language, bool units_c) {
+        if (language == Language::JA) {
+            return DateFormat::ISO;
+        }
+        return units_c ? DateFormat::DMY : DateFormat::MDY;
+    }
+
     enum class RtcMode : uint8_t {
         Auto = 0,
         Pcf8523 = 1,
@@ -613,7 +634,7 @@ namespace Config {
         float temp_offset = 0.0f;
         float hum_offset = 0.0f;
         bool units_c = true;
-        bool units_mdy = false;
+        DateFormat date_format = DateFormat::DMY;
         bool night_mode = false;
         bool header_status_enabled = true;
         bool led_indicators = true;

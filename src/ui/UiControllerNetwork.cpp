@@ -861,6 +861,7 @@ void UiController::update_datetime_texts() {
     if (objects.label_set_date_year_title) safe_label_set_text(objects.label_set_date_year_title, UiText::LabelSetDateYear());
     if (objects.label_time_title_1) safe_label_set_text(objects.label_time_title_1, UiText::LabelTimeCard());
     if (objects.label_btn_datetime_apply) safe_label_set_text(objects.label_btn_datetime_apply, UiText::LabelApplyNow());
+    update_date_format_button();
     sync_back_button_label(objects.label_btn_datetime_back, datetime_has_unsaved_changes());
     if (objects.label_rtc_title) safe_label_set_text(objects.label_rtc_title, UiText::LabelRtc());
     if (objects.label_wifi_title_1) safe_label_set_text(objects.label_wifi_title_1, UiText::LabelWifiChip());

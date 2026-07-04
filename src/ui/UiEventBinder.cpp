@@ -281,6 +281,7 @@ void UiEventBinder::bindAvailableEvents(UiController &owner, int screen_id) {
         {objects.btn_night_mode, UiController::on_night_mode_event_cb, LV_EVENT_VALUE_CHANGED},
         {objects.btn_units, UiController::on_units_c_f_event_cb, LV_EVENT_VALUE_CHANGED},
         {objects.btn_1224_toggle, UiController::on_time_format_toggle_event_cb, LV_EVENT_VALUE_CHANGED},
+        {objects.btn_date_format, UiController::on_date_format_event_cb, LV_EVENT_CLICKED},
         {objects.btn_led_indicators, UiController::on_led_indicators_event_cb, LV_EVENT_VALUE_CHANGED},
         {objects.btn_alert_blink, UiController::on_alert_blink_event_cb, LV_EVENT_VALUE_CHANGED},
         {objects.btn_co2_calib_asc, UiController::on_co2_calib_asc_event_cb, LV_EVENT_VALUE_CHANGED},
