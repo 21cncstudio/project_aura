@@ -56,6 +56,7 @@ public:
     void beginUpload(uint32_t now_ms);
     bool isActive() const;
     bool isBusy() const;
+    bool hasError() const;
     void setTotalTimeoutMs(uint32_t timeout_ms);
     bool totalTimeoutExceeded(uint32_t now_ms) const;
     void poll(uint32_t now_ms);

@@ -54,12 +54,14 @@ void test_web_ota_state_tracks_chunks_and_sizes() {
 void test_web_ota_state_error_is_sticky_and_clears_active() {
     WebOtaState state;
     state.beginUpload(10);
+    TEST_ASSERT_FALSE(state.hasError());
     state.setErrorOnce("first", 40);
     state.setErrorOnce("second", 50);
 
     const WebOtaSnapshot snapshot = state.snapshot();
     TEST_ASSERT_FALSE(snapshot.active);
     TEST_ASSERT_TRUE(state.isBusy());
+    TEST_ASSERT_TRUE(state.hasError());
     TEST_ASSERT_FALSE(snapshot.success);
     TEST_ASSERT_TRUE(snapshot.hasTerminalResult(60));
     TEST_ASSERT_EQUAL_STRING("first", snapshot.error.c_str());
@@ -69,6 +71,7 @@ void test_web_ota_state_error_is_sticky_and_clears_active() {
 
     state.reset();
     TEST_ASSERT_FALSE(state.isBusy());
+    TEST_ASSERT_FALSE(state.hasError());
 }
 
 void test_web_ota_state_success_and_expected_size_match() {

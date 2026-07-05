@@ -583,12 +583,14 @@ void handleUpload(Runtime &runtime, bool ota_busy) {
     }
 
     if (upload.status == WebUploadStatus::Write) {
-        const WebOtaSnapshot ota = runtime.ota_state.snapshot();
-        if (!ota.active || ota.hasError() || upload.currentSize == 0) {
+        if (!runtime.ota_state.isActive() ||
+            runtime.ota_state.hasError() ||
+            upload.currentSize == 0) {
             return;
         }
         const uint32_t now_ms = millis();
         if (runtime.ota_state.totalTimeoutExceeded(now_ms)) {
+            const WebOtaSnapshot ota = runtime.ota_state.snapshot();
             fail_upload(runtime,
                         ota_abort_error_message(ota,
                                                 WebUploadAbortReason::TotalTimeout,

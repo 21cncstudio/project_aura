@@ -85,6 +85,10 @@ bool WebOtaState::isBusy() const {
     return busy_.load(std::memory_order_acquire);
 }
 
+bool WebOtaState::hasError() const {
+    return error_.length() > 0;
+}
+
 void WebOtaState::setTotalTimeoutMs(uint32_t timeout_ms) {
     total_timeout_ms_ = timeout_ms;
 }
