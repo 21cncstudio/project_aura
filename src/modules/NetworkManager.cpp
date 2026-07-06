@@ -602,18 +602,7 @@ bool AuraNetworkManager::setEnabled(bool enabled) {
             startAp();
         }
     } else {
-        stopMdns();
-        stopAp();
-        WiFi.scanDelete();
-        WiFi.disconnect(true);
-        WiFi.mode(WIFI_OFF);
-        wifi_state_ = WIFI_STATE_OFF;
-        wifi_retry_count_ = 0;
-        wifi_retry_at_ms_ = 0;
-        wifi_connect_start_ms_ = 0;
-        wifi_connected_since_ms_ = 0;
-        resetStaConnectAttemptState();
-        resetColdBootStaAssist();
+        shutdownWifi(false);
     }
     return true;
 }
@@ -634,20 +623,27 @@ bool AuraNetworkManager::applyEnabledIfDirty() {
             startAp();
         }
     } else {
-        stopMdns();
-        stopAp();
-        WiFi.scanDelete();
-        WiFi.disconnect(true);
-        WiFi.mode(WIFI_OFF);
-        wifi_state_ = WIFI_STATE_OFF;
-        wifi_retry_count_ = 0;
-        wifi_retry_at_ms_ = 0;
-        wifi_connect_start_ms_ = 0;
-        wifi_connected_since_ms_ = 0;
-        resetStaConnectAttemptState();
-        resetColdBootStaAssist();
+        shutdownWifi(false);
     }
     return true;
+}
+
+void AuraNetworkManager::shutdownWifi(bool erase_sdk_credentials) {
+    stopMdns();
+    stopAp();
+    WiFi.scanDelete();
+    wifi_scan_options_.clear();
+    wifi_scan_in_progress_ = false;
+    wifi_scan_started_ms_ = 0;
+    WiFi.disconnect(true, erase_sdk_credentials);
+    WiFi.mode(WIFI_OFF);
+    wifi_state_ = WIFI_STATE_OFF;
+    wifi_retry_count_ = 0;
+    wifi_retry_at_ms_ = 0;
+    wifi_connect_start_ms_ = 0;
+    wifi_connected_since_ms_ = 0;
+    resetStaConnectAttemptState();
+    resetColdBootStaAssist();
 }
 
 void AuraNetworkManager::applyRuntimeWiFiSettings(const Config::WifiSettings &settings) {
@@ -692,23 +688,9 @@ void AuraNetworkManager::clearCredentials() {
     wifi_eap_ca_cert_pem_ = "";
     wifi_eap_client_cert_pem_ = "";
     wifi_eap_client_key_pem_ = "";
-    wifi_retry_count_ = 0;
-    wifi_retry_at_ms_ = 0;
-    wifi_connect_start_ms_ = 0;
-    wifi_connected_since_ms_ = 0;
-    resetStaConnectAttemptState();
-    resetColdBootStaAssist();
-    wifi_scan_options_.clear();
-    wifi_scan_in_progress_ = false;
-    stopMdns();
-    stopAp();
-    WiFi.scanDelete();
-    WiFi.disconnect(true, true);
+    shutdownWifi(true);
     if (wifi_enabled_) {
         startAp();
-    } else {
-        WiFi.mode(WIFI_OFF);
-        wifi_state_ = WIFI_STATE_OFF;
     }
     wifi_ui_dirty_ = true;
 }

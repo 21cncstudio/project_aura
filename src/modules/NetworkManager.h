@@ -97,6 +97,7 @@ private:
     void resetStaConnectAttemptState();
     void scheduleStaRetry(const char *log_reason, bool warn = true);
     void resetColdBootStaAssist();
+    void shutdownWifi(bool erase_sdk_credentials);
     void applyRuntimeWiFiSettings(const Config::WifiSettings &settings);
     bool resolveStaConnectTarget(int32_t &channel_out, uint8_t bssid_out[6], int32_t &rssi_out);
     void warmupIfDisabled();
