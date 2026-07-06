@@ -352,7 +352,7 @@ void AuraNetworkManager::begin(StorageManager &storage) {
         if (!wifi_ssid_.isEmpty()) {
             wifi_cold_boot_warmup_pending_ = (boot_reset_reason == ESP_RST_POWERON);
             wifi_cold_boot_targeted_connect_active_ = (boot_reset_reason == ESP_RST_POWERON);
-            wifi_state_ = WIFI_STATE_OFF;
+            setWifiState(WIFI_STATE_OFF);
             wifi_retry_count_ = 0;
             wifi_retry_at_ms_ = millis() + kInitialWifiConnectDelayMs;
             wifi_connect_start_ms_ = 0;
@@ -371,9 +371,9 @@ void AuraNetworkManager::begin(StorageManager &storage) {
         WiFi.disconnect();
         WiFi.mode(WIFI_OFF);
         resetColdBootStaAssist();
-        wifi_state_ = WIFI_STATE_OFF;
+        setWifiState(WIFI_STATE_OFF);
     }
-    wifi_state_last_ = wifi_state_;
+    wifi_state_last_ = state();
 }
 
 void AuraNetworkManager::attachMqttContext(MqttRuntime &mqtt_runtime,
@@ -518,7 +518,7 @@ void AuraNetworkManager::scheduleStaRetry(const char *log_reason, bool warn) {
     if (wifi_retry_count_ < Config::WIFI_CONNECT_MAX_RETRIES) {
         wifi_retry_count_++;
         wifi_retry_at_ms_ = millis() + Config::WIFI_CONNECT_RETRY_DELAY_MS;
-        wifi_state_ = WIFI_STATE_OFF;
+        setWifiState(WIFI_STATE_OFF);
         wifi_ui_dirty_ = true;
         Logger::log(warn ? Logger::Warn : Logger::Info, "WiFi",
                     "%s, retry %u/%u",
@@ -530,7 +530,7 @@ void AuraNetworkManager::scheduleStaRetry(const char *log_reason, bool warn) {
                     "%s, enter error state; background retry in %u seconds",
                     (log_reason && log_reason[0] != '\0') ? log_reason : "connect failed",
                     static_cast<unsigned>(kWifiRecoveryRetryDelayMs / 1000UL));
-        wifi_state_ = WIFI_STATE_OFF;
+        setWifiState(WIFI_STATE_OFF);
         wifi_retry_count_ = Config::WIFI_CONNECT_MAX_RETRIES;
         wifi_retry_at_ms_ = millis() + kWifiRecoveryRetryDelayMs;
         wifi_ui_dirty_ = true;
@@ -538,7 +538,7 @@ void AuraNetworkManager::scheduleStaRetry(const char *log_reason, bool warn) {
 }
 
 void AuraNetworkManager::noteStaConnectTransientFailure(uint32_t reason) {
-    if (wifi_state_ != WIFI_STATE_STA_CONNECTING) {
+    if (state() != WIFI_STATE_STA_CONNECTING) {
         return;
     }
     const uint8_t current = wifi_connect_transient_failures_.load(std::memory_order_acquire);
@@ -571,18 +571,22 @@ void AuraNetworkManager::setStateChangeCallback(StateChangeCallback cb, void *ct
 }
 
 void AuraNetworkManager::notifyStateChangeIfNeeded() {
-    if (wifi_state_ == wifi_state_last_) {
+    const WifiState current_state = state();
+    if (current_state == wifi_state_last_) {
         return;
     }
     Logger::log(Logger::Info, "WiFi",
                 "state changed: %d -> %d (connected=%s)",
                 static_cast<int>(wifi_state_last_),
-                static_cast<int>(wifi_state_),
-                isConnected() ? "YES" : "NO");
+                static_cast<int>(current_state),
+                current_state == WIFI_STATE_STA_CONNECTED ? "YES" : "NO");
     if (state_change_cb_) {
-        state_change_cb_(wifi_state_last_, wifi_state_, isConnected(), state_change_ctx_);
+        state_change_cb_(wifi_state_last_,
+                         current_state,
+                         current_state == WIFI_STATE_STA_CONNECTED,
+                         state_change_ctx_);
     }
-    wifi_state_last_ = wifi_state_;
+    wifi_state_last_ = current_state;
 }
 
 bool AuraNetworkManager::setEnabled(bool enabled) {
@@ -638,7 +642,7 @@ void AuraNetworkManager::shutdownWifi(bool erase_sdk_credentials) {
     wifi_scan_started_ms_ = 0;
     WiFi.disconnect(true, erase_sdk_credentials);
     WiFi.mode(WIFI_OFF);
-    wifi_state_ = WIFI_STATE_OFF;
+    setWifiState(WIFI_STATE_OFF);
     wifi_retry_count_ = 0;
     wifi_retry_at_ms_ = 0;
     wifi_connect_start_ms_ = 0;
@@ -752,7 +756,7 @@ void AuraNetworkManager::startApOnDemand() {
 void AuraNetworkManager::poll() {
     const bool ota_busy = WebHandlersIsOtaBusy();
 
-    if (wifi_state_ == WIFI_STATE_STA_CONNECTING) {
+    if (state() == WIFI_STATE_STA_CONNECTING) {
         const uint8_t transient_failures =
             wifi_connect_transient_failures_.load(std::memory_order_acquire);
         const wifi_err_reason_t last_transient_reason = static_cast<wifi_err_reason_t>(
@@ -764,7 +768,7 @@ void AuraNetworkManager::poll() {
         wl_status_t st = WiFi.status();
         if (st == WL_CONNECTED) {
             apply_sta_default_power_save("sta connected");
-            wifi_state_ = WIFI_STATE_STA_CONNECTED;
+            setWifiState(WIFI_STATE_STA_CONNECTED);
             sta_link_fail_streak_ = 0;
             wifi_retry_count_ = 0;
             wifi_retry_at_ms_ = 0;
@@ -784,7 +788,7 @@ void AuraNetworkManager::poll() {
                    (millis() - wifi_connect_start_ms_ > Config::WIFI_CONNECT_TIMEOUT_MS)) {
             scheduleStaRetry("connect failed");
         }
-    } else if (wifi_state_ == WIFI_STATE_OFF && wifi_enabled_ && wifi_retry_at_ms_ != 0) {
+    } else if (state() == WIFI_STATE_OFF && wifi_enabled_ && wifi_retry_at_ms_ != 0) {
         const uint32_t now_ms = millis();
         if (static_cast<int32_t>(now_ms - wifi_retry_at_ms_) >= 0) {
             wifi_retry_at_ms_ = 0;
@@ -792,7 +796,7 @@ void AuraNetworkManager::poll() {
         }
     }
 
-    if (wifi_state_ == WIFI_STATE_AP_CONFIG) {
+    if (state() == WIFI_STATE_AP_CONFIG) {
         if (wifi_scan_in_progress_) {
             if (ota_busy) {
                 stopScan();
@@ -820,7 +824,7 @@ void AuraNetworkManager::poll() {
                 }
             }
         }
-    } else if (wifi_state_ == WIFI_STATE_STA_CONNECTED) {
+    } else if (state() == WIFI_STATE_STA_CONNECTED) {
         // Periodic check of actual WiFi link while connected.
         static uint32_t last_check_ms = 0;
         static uint32_t last_ota_defer_log_ms = 0;
@@ -867,7 +871,7 @@ void AuraNetworkManager::poll() {
                                     static_cast<unsigned>(wifi_connected_since_ms_ == 0 ? 0 : (now - wifi_connected_since_ms_) / 1000),
                                     rssi_text);
                         stopMdns();
-                        wifi_state_ = WIFI_STATE_OFF;
+                        setWifiState(WIFI_STATE_OFF);
                         wifi_connected_since_ms_ = 0;
                         sta_last_rssi_valid_ = false;
                         sta_last_rssi_dbm_ = 0;
@@ -967,7 +971,7 @@ void AuraNetworkManager::startSta() {
     uint32_t internal_free = 0;
     uint32_t internal_largest = 0;
     if (!has_internal_heap_for_wifi_start(internal_free, internal_largest)) {
-        wifi_state_ = WIFI_STATE_OFF;
+        setWifiState(WIFI_STATE_OFF);
         wifi_retry_at_ms_ = millis() + Config::WIFI_CONNECT_RETRY_DELAY_MS;
         wifi_ui_dirty_ = true;
         Logger::log(Logger::Warn, "WiFi",
@@ -994,14 +998,14 @@ void AuraNetworkManager::startSta() {
             }
             if (!WiFi.mode(WIFI_STA)) {
                 LOGW("WiFi", "failed to enter STA mode for warmup, retrying");
-                wifi_state_ = WIFI_STATE_OFF;
+                setWifiState(WIFI_STATE_OFF);
                 wifi_retry_at_ms_ = millis() + Config::WIFI_CONNECT_RETRY_DELAY_MS;
                 wifi_ui_dirty_ = true;
                 return;
             }
             if (!wait_for_sta_started(kWifiStaTransitionTimeoutMs)) {
                 LOGW("WiFi", "STA did not report started for warmup, retrying");
-                wifi_state_ = WIFI_STATE_OFF;
+                setWifiState(WIFI_STATE_OFF);
                 wifi_retry_at_ms_ = millis() + Config::WIFI_CONNECT_RETRY_DELAY_MS;
                 wifi_ui_dirty_ = true;
                 return;
@@ -1038,7 +1042,7 @@ void AuraNetworkManager::startSta() {
     if ((mode & WIFI_STA) == 0) {
         if (!WiFi.mode(WIFI_STA)) {
             LOGW("WiFi", "failed to enter STA mode, retrying");
-            wifi_state_ = WIFI_STATE_OFF;
+            setWifiState(WIFI_STATE_OFF);
             wifi_retry_at_ms_ = millis() + Config::WIFI_CONNECT_RETRY_DELAY_MS;
             wifi_ui_dirty_ = true;
             return;
@@ -1046,7 +1050,7 @@ void AuraNetworkManager::startSta() {
     }
     if (!wait_for_sta_started(kWifiStaTransitionTimeoutMs)) {
         LOGW("WiFi", "STA did not report started before connect, retrying");
-        wifi_state_ = WIFI_STATE_OFF;
+        setWifiState(WIFI_STATE_OFF);
         wifi_retry_at_ms_ = millis() + Config::WIFI_CONNECT_RETRY_DELAY_MS;
         wifi_ui_dirty_ = true;
         return;
@@ -1088,7 +1092,7 @@ void AuraNetworkManager::startSta() {
         beginStaConnect(0, nullptr);
     }
     startServerIfNeeded();
-    wifi_state_ = WIFI_STATE_STA_CONNECTING;
+    setWifiState(WIFI_STATE_STA_CONNECTING);
     wifi_connect_start_ms_ = millis();
     wifi_connected_since_ms_ = 0;
     wifi_ui_dirty_ = true;
@@ -1106,10 +1110,10 @@ void AuraNetworkManager::startAp() {
     if (!WiFi.softAP(ap_ssid)) {
         LOGW("WiFi", "failed to start AP: %s", ap_ssid);
         if (WiFi.status() == WL_CONNECTED) {
-            wifi_state_ = WIFI_STATE_STA_CONNECTED;
+            setWifiState(WIFI_STATE_STA_CONNECTED);
             sta_link_fail_streak_ = 0;
         } else {
-            wifi_state_ = WIFI_STATE_OFF;
+            setWifiState(WIFI_STATE_OFF);
             sta_link_fail_streak_ = 0;
             wifi_retry_count_ = 0;
             wifi_retry_at_ms_ = 0;
@@ -1122,7 +1126,7 @@ void AuraNetworkManager::startAp() {
     startServerIfNeeded();
     IPAddress ip = WiFi.softAPIP();
     startScan();
-    wifi_state_ = WIFI_STATE_AP_CONFIG;
+    setWifiState(WIFI_STATE_AP_CONFIG);
     wifi_retry_at_ms_ = 0;
     wifi_retry_count_ = 0;
     resetStaConnectAttemptState();
@@ -1133,7 +1137,7 @@ void AuraNetworkManager::startAp() {
 }
 
 void AuraNetworkManager::stopAp() {
-    if (wifi_state_ == WIFI_STATE_AP_CONFIG) {
+    if (state() == WIFI_STATE_AP_CONFIG) {
         WiFi.enableAP(false);
     }
     wifi_ui_dirty_ = true;

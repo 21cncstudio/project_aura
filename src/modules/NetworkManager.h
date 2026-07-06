@@ -69,10 +69,10 @@ public:
 
     bool isEnabled() const { return wifi_enabled_; }
     bool isEnabledDirty() const { return wifi_enabled_dirty_; }
-    WifiState state() const { return wifi_state_; }
-    bool isConnected() const { return wifi_state_ == WIFI_STATE_STA_CONNECTED; }
+    WifiState state() const { return wifi_state_.load(std::memory_order_relaxed); }
+    bool isConnected() const { return state() == WIFI_STATE_STA_CONNECTED; }
     uint32_t staConnectedElapsedMs() const {
-        if (wifi_state_ != WIFI_STATE_STA_CONNECTED || wifi_connected_since_ms_ == 0) {
+        if (state() != WIFI_STATE_STA_CONNECTED || wifi_connected_since_ms_ == 0) {
             return 0;
         }
         return millis() - wifi_connected_since_ms_;
@@ -108,13 +108,14 @@ private:
     void stopAp();
     void startMdns();
     void stopMdns();
+    void setWifiState(WifiState state) { wifi_state_.store(state, std::memory_order_relaxed); }
     void notifyStateChangeIfNeeded();
 
     StorageManager *storage_ = nullptr;
     std::unique_ptr<WebServerBackend> server_backend_;
     WebHandlerContext web_ctx_{};
 
-    WifiState wifi_state_ = WIFI_STATE_OFF;
+    std::atomic<WifiState> wifi_state_{WIFI_STATE_OFF};
     WifiState wifi_state_last_ = WIFI_STATE_OFF;
     uint32_t wifi_connect_start_ms_ = 0;
     uint32_t wifi_connected_since_ms_ = 0;
