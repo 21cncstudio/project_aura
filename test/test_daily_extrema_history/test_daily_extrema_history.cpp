@@ -20,28 +20,44 @@ class FakeDailyStorage final : public DailyHistoryStorage {
 public:
     bool ready = true;
     bool fail_append = false;
+    bool fail_write = false;
+    bool fail_remove = false;
+    uint32_t write_count = 0;
     std::map<std::string, std::string> text_files;
     std::map<std::string, std::vector<uint8_t>> binary_files;
 
     bool isReady() const override { return ready; }
 
-    bool fileExists(const char *path) const override {
-        return text_files.count(path ? path : "") > 0 || binary_files.count(path ? path : "") > 0;
-    }
-
-    bool fileSize(const char *path, size_t &out_size) const override {
+    bool fileInfo(const char *path, bool &exists, size_t &out_size) const override {
+        exists = false;
         out_size = 0;
-        auto text_it = text_files.find(path ? path : "");
+        if (!ready || !path) {
+            return false;
+        }
+        auto text_it = text_files.find(path);
         if (text_it != text_files.end()) {
+            exists = true;
             out_size = text_it->second.size();
             return true;
         }
-        auto bin_it = binary_files.find(path ? path : "");
+        auto bin_it = binary_files.find(path);
         if (bin_it != binary_files.end()) {
+            exists = true;
             out_size = bin_it->second.size();
             return true;
         }
-        return false;
+        return true;
+    }
+
+    bool fileExists(const char *path) const override {
+        bool exists = false;
+        size_t size = 0;
+        return fileInfo(path, exists, size) && exists;
+    }
+
+    bool fileSize(const char *path, size_t &out_size) const override {
+        bool exists = false;
+        return fileInfo(path, exists, out_size) && exists;
     }
 
     bool appendText(const char *path, const char *text) override {
@@ -67,6 +83,10 @@ public:
     }
 
     bool writeBinaryAtomic(const char *path, const void *data, size_t len) override {
+        ++write_count;
+        if (fail_write) {
+            return false;
+        }
         if (!ready || !path || !data) {
             return false;
         }
@@ -76,12 +96,12 @@ public:
     }
 
     bool removeFile(const char *path) override {
-        if (!path) {
+        if (!path || fail_remove) {
             return false;
         }
-        text_files.erase(path);
-        binary_files.erase(path);
-        return true;
+        const size_t text_removed = text_files.erase(path);
+        const size_t binary_removed = binary_files.erase(path);
+        return text_removed > 0 || binary_removed > 0;
     }
 };
 
@@ -213,6 +233,77 @@ void test_daily_extrema_clear_current_day_resets_live_state() {
     TEST_ASSERT_FALSE(history.hasCurrentDay());
     TEST_ASSERT_EQUAL_UINT32(0, history.currentSampleCount());
     TEST_ASSERT_FALSE(history.currentDayCsv(current_csv));
+}
+
+void test_daily_extrema_clear_current_day_removes_persisted_state() {
+    FakeDailyStorage storage;
+    DailyExtremaHistory history;
+    history.begin(storage, true);
+
+    SensorData data;
+    set_basic_data(data, 650, 21.0f, 8.5f);
+    history.update(data, getMillis());
+
+    TEST_ASSERT_TRUE(storage.fileExists(DailyExtremaHistory::kStatePath));
+
+    const DailyExtremaHistory::ClearCurrentDayResult result = history.clearCurrentDay(true);
+
+    TEST_ASSERT_TRUE(result.ok);
+    TEST_ASSERT_TRUE(result.state_existed);
+    TEST_ASSERT_FALSE(storage.fileExists(DailyExtremaHistory::kStatePath));
+    TEST_ASSERT_FALSE(history.hasCurrentDay());
+    TEST_ASSERT_EQUAL_UINT32(0, history.currentSampleCount());
+}
+
+void test_daily_extrema_clear_current_day_preserves_ram_when_state_remove_fails() {
+    FakeDailyStorage storage;
+    DailyExtremaHistory history;
+    history.begin(storage, true);
+
+    SensorData data;
+    set_basic_data(data, 650, 21.0f, 8.5f);
+    history.update(data, getMillis());
+
+    storage.fail_remove = true;
+    const DailyExtremaHistory::ClearCurrentDayResult result = history.clearCurrentDay(true);
+
+    TEST_ASSERT_FALSE(result.ok);
+    TEST_ASSERT_TRUE(result.state_existed);
+    TEST_ASSERT_TRUE(storage.fileExists(DailyExtremaHistory::kStatePath));
+    TEST_ASSERT_TRUE(history.hasCurrentDay());
+    TEST_ASSERT_EQUAL_UINT32(3, history.currentSampleCount());
+}
+
+void test_daily_extrema_flush_persists_dirty_state_before_interval() {
+    FakeDailyStorage storage;
+    DailyExtremaHistory history;
+    history.begin(storage, true);
+
+    advanceMillis(1000);
+    SensorData data;
+    set_basic_data(data, 650, 21.0f, 8.5f);
+    history.update(data, getMillis());
+    TEST_ASSERT_EQUAL_UINT32(1, storage.write_count);
+
+    advanceEpoch(60);
+    advanceMillis(60UL * 1000UL);
+    set_basic_data(data, 650, 30.0f, 8.5f);
+    history.update(data, getMillis());
+    TEST_ASSERT_EQUAL_UINT32(1, storage.write_count);
+
+    history.flush();
+    TEST_ASSERT_EQUAL_UINT32(2, storage.write_count);
+
+    DailyExtremaHistory restored;
+    restored.begin(storage, true);
+    SensorData empty_data{};
+    restored.update(empty_data, getMillis());
+
+    String current_csv;
+    TEST_ASSERT_TRUE(restored.currentDayCsv(current_csv));
+    const std::string csv = current_csv.c_str();
+    TEST_ASSERT_TRUE(csv.find("2026-06-27,temperature,C,21.0") != std::string::npos);
+    TEST_ASSERT_TRUE(csv.find(",30.0,") != std::string::npos);
 }
 
 void test_daily_extrema_restores_current_day_state() {
@@ -424,12 +515,46 @@ void test_daily_extrema_keeps_previous_day_when_csv_append_fails() {
     TEST_ASSERT_TRUE(daily_csv.find("2026-06-27,co2,ppm,700") != std::string::npos);
 }
 
+void test_daily_extrema_failed_state_save_retries_after_short_backoff() {
+    FakeDailyStorage storage;
+    DailyExtremaHistory history;
+    history.begin(storage, true);
+
+    advanceMillis(1000);
+    SensorData data;
+    set_basic_data(data, 650, 21.0f, 8.5f);
+    history.update(data, getMillis());
+    TEST_ASSERT_EQUAL_UINT32(1, storage.write_count);
+
+    storage.fail_write = true;
+    advanceEpoch(60);
+    advanceMillis(DailyExtremaHistory::kStateSaveIntervalMs);
+    set_basic_data(data, 900, 19.0f, 12.0f);
+    history.update(data, getMillis());
+    TEST_ASSERT_EQUAL_UINT32(2, storage.write_count);
+    TEST_ASSERT_FALSE(history.lastWriteOk());
+
+    storage.fail_write = false;
+    advanceMillis(DailyExtremaHistory::kStateSaveRetryIntervalMs - 1);
+    history.poll(getMillis());
+    TEST_ASSERT_EQUAL_UINT32(2, storage.write_count);
+    TEST_ASSERT_FALSE(history.lastWriteOk());
+
+    advanceMillis(1);
+    history.poll(getMillis());
+    TEST_ASSERT_EQUAL_UINT32(3, storage.write_count);
+    TEST_ASSERT_TRUE(history.lastWriteOk());
+}
+
 int main(int, char **) {
     UNITY_BEGIN();
     RUN_TEST(test_daily_extrema_tracks_min_max_and_peak_times);
     RUN_TEST(test_daily_extrema_ignores_invalid_values);
     RUN_TEST(test_daily_extrema_exports_current_day_without_finalizing);
     RUN_TEST(test_daily_extrema_clear_current_day_resets_live_state);
+    RUN_TEST(test_daily_extrema_clear_current_day_removes_persisted_state);
+    RUN_TEST(test_daily_extrema_clear_current_day_preserves_ram_when_state_remove_fails);
+    RUN_TEST(test_daily_extrema_flush_persists_dirty_state_before_interval);
     RUN_TEST(test_daily_extrema_restores_current_day_state);
     RUN_TEST(test_daily_extrema_exports_imperial_temperature_and_pressure);
     RUN_TEST(test_daily_extrema_unit_switch_applies_to_next_day_only);
@@ -437,5 +562,6 @@ int main(int, char **) {
     RUN_TEST(test_daily_extrema_migrates_v1_state_as_metric);
     RUN_TEST(test_daily_extrema_resets_optional_gas_when_type_changes);
     RUN_TEST(test_daily_extrema_keeps_previous_day_when_csv_append_fails);
+    RUN_TEST(test_daily_extrema_failed_state_save_retries_after_short_backoff);
     return UNITY_END();
 }

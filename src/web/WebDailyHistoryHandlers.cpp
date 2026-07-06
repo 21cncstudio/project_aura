@@ -295,15 +295,16 @@ void handleClearHistory(WebHandlerContext &context, bool ota_busy, const char *o
         return;
     }
 
+    DailyExtremaHistory::ClearCurrentDayResult clear_result{};
+    if (context.daily_extrema) {
+        clear_result = context.daily_extrema->clearCurrentDay(true);
+    }
+
     bool daily_existed = false;
-    bool state_existed = false;
     const bool daily_ok =
         remove_if_exists(*context.sd_card, DailyExtremaHistory::kDailyCsvPath, daily_existed);
-    const bool state_ok =
-        remove_if_exists(*context.sd_card, DailyExtremaHistory::kStatePath, state_existed);
-    if (state_ok && context.daily_extrema) {
-        context.daily_extrema->clearCurrentDay();
-    }
+    const bool state_ok = clear_result.ok;
+    const bool state_existed = clear_result.state_existed;
 
     ArduinoJson::JsonDocument doc;
     ArduinoJson::JsonObject root = doc.to<ArduinoJson::JsonObject>();
@@ -321,12 +322,12 @@ void handleClearCurrentDay(WebHandlerContext &context, bool ota_busy, const char
         return;
     }
 
-    bool state_existed = false;
-    const bool state_ok =
-        remove_if_exists(*context.sd_card, DailyExtremaHistory::kStatePath, state_existed);
-    if (state_ok && context.daily_extrema) {
-        context.daily_extrema->clearCurrentDay();
+    DailyExtremaHistory::ClearCurrentDayResult clear_result{};
+    if (context.daily_extrema) {
+        clear_result = context.daily_extrema->clearCurrentDay(true);
     }
+    const bool state_ok = clear_result.ok;
+    const bool state_existed = clear_result.state_existed;
 
     ArduinoJson::JsonDocument doc;
     ArduinoJson::JsonObject root = doc.to<ArduinoJson::JsonObject>();

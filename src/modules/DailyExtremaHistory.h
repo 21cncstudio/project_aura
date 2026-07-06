@@ -24,6 +24,7 @@ public:
     static constexpr const char *kDailyCsvPath = "/aura/history/daily.csv";
     static constexpr const char *kStatePath = "/aura/history/current_day.bin";
     static constexpr uint32_t kStateSaveIntervalMs = 15UL * 60UL * 1000UL;
+    static constexpr uint32_t kStateSaveRetryIntervalMs = 5000UL;
 
     DailyExtremaHistory();
     ~DailyExtremaHistory();
@@ -41,7 +42,11 @@ public:
     bool currentDayUnitsC() const;
     bool preferredUnitsC() const;
     bool currentDayCsv(String &out, bool include_header = true) const;
-    void clearCurrentDay();
+    struct ClearCurrentDayResult {
+        bool ok = false;
+        bool state_existed = false;
+    };
+    ClearCurrentDayResult clearCurrentDay(bool remove_state_file = false);
 
     using NowEpochFn = time_t (*)();
     static void setNowEpochFn(NowEpochFn fn);
@@ -121,6 +126,8 @@ private:
     bool last_write_ok_ = true;
     bool preferred_units_c_ = true;
     uint32_t last_save_ms_ = 0;
+    uint32_t last_save_attempt_ms_ = 0;
+    bool save_retry_pending_ = false;
 
 #ifndef UNIT_TEST
     mutable SemaphoreHandle_t mutex_ = nullptr;

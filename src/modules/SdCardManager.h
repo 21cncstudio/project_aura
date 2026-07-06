@@ -43,7 +43,7 @@ public:
     Status status() const;
     String fullPath(const char *relative_path) const;
     FILE *openRead(const char *relative_path) const;
-    bool fileInfo(const char *path, bool &exists, size_t &out_size) const;
+    bool fileInfo(const char *path, bool &exists, size_t &out_size) const override;
     bool acquireFileAccess(uint32_t timeout_ms = 1000) const;
     void releaseFileAccess() const;
 

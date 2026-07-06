@@ -14,6 +14,7 @@ public:
     virtual ~DailyHistoryStorage() = default;
 
     virtual bool isReady() const = 0;
+    virtual bool fileInfo(const char *path, bool &exists, size_t &out_size) const = 0;
     virtual bool fileExists(const char *path) const = 0;
     virtual bool fileSize(const char *path, size_t &out_size) const = 0;
     virtual bool appendText(const char *path, const char *text) = 0;

@@ -227,6 +227,7 @@ void loop()
         // the management interface. This intentionally favors predictable
         // controlled restarts over stricter rollback protection for late faults.
         OtaRollback::markValidIfPending("controlled_restart");
+        dailyExtremaHistory.flush();
         WebHandlersBeginRestartShutdown();
         lvgl_port_prepare_restart();
         quiesce_network_for_restart();

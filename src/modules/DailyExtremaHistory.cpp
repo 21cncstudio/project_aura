@@ -169,6 +169,8 @@ void DailyExtremaHistory::begin(DailyHistoryStorage &storage, bool initial_units
     dirty_ = false;
     last_write_ok_ = true;
     last_save_ms_ = 0;
+    last_save_attempt_ms_ = 0;
+    save_retry_pending_ = false;
 }
 
 void DailyExtremaHistory::setPreferredUnitsC(bool units_c) {
@@ -324,6 +326,8 @@ bool DailyExtremaHistory::restoreOrFinalizeStoredDay(uint32_t current_day_key) {
     memset(&state_, 0, sizeof(state_));
     dirty_ = false;
     last_save_ms_ = 0;
+    last_save_attempt_ms_ = 0;
+    save_retry_pending_ = false;
     return true;
 }
 
@@ -540,16 +544,34 @@ bool DailyExtremaHistory::currentDayCsv(String &out, bool include_header) const 
     return appendCsvRows(out, include_header);
 }
 
-void DailyExtremaHistory::clearCurrentDay() {
+DailyExtremaHistory::ClearCurrentDayResult
+DailyExtremaHistory::clearCurrentDay(bool remove_state_file) {
+    ClearCurrentDayResult result{};
     ScopedLock guard(*this);
     if (!guard.locked()) {
-        return;
+        return result;
+    }
+    if (remove_state_file) {
+        if (!storage_ || !storage_->isReady()) {
+            return result;
+        }
+        size_t state_size = 0;
+        if (!storage_->fileInfo(kStatePath, result.state_existed, state_size)) {
+            return result;
+        }
+        if (result.state_existed && !storage_->removeFile(kStatePath)) {
+            return result;
+        }
     }
     memset(&state_, 0, sizeof(state_));
     dirty_ = false;
     restored_ = true;
     last_save_ms_ = 0;
+    last_save_attempt_ms_ = 0;
+    save_retry_pending_ = false;
     last_write_ok_ = true;
+    result.ok = true;
+    return result;
 }
 
 bool DailyExtremaHistory::finalizeCurrentDayCsv() {
@@ -589,20 +611,29 @@ void DailyExtremaHistory::saveStateIfDue(uint32_t now_ms, bool force, bool prese
     if (!dirty_ || !storage_ || !storage_->isReady() || state_.day_key == 0) {
         return;
     }
-    if (!force && last_save_ms_ != 0 && now_ms - last_save_ms_ < kStateSaveIntervalMs) {
-        return;
+    if (!force) {
+        if (save_retry_pending_) {
+            if (now_ms - last_save_attempt_ms_ < kStateSaveRetryIntervalMs) {
+                return;
+            }
+        } else if (last_save_ms_ != 0 && now_ms - last_save_ms_ < kStateSaveIntervalMs) {
+            return;
+        }
     }
     state_.magic = kDailyExtremaMagic;
     state_.version = kDailyExtremaVersion;
     state_.metric_count = ChartsHistory::kMetricCount;
-    last_save_ms_ = now_ms;
+    last_save_attempt_ms_ = now_ms;
     const bool ok = storage_->writeBinaryAtomic(kStatePath, &state_, sizeof(state_));
     if (ok) {
         dirty_ = false;
+        save_retry_pending_ = false;
+        last_save_ms_ = now_ms;
         if (!preserve_failure) {
             last_write_ok_ = true;
         }
     } else {
+        save_retry_pending_ = true;
         last_write_ok_ = false;
         LOGW("DailyHistory", "failed to save current day state");
     }
