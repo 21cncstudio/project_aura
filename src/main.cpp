@@ -221,6 +221,11 @@ void loop()
 {
     if (WebHandlersConsumeRestartRequest()) {
         LOGI("OTA", "restarting now (main loop)");
+        // Treat controlled restart as a successful boot signal during OTA
+        // rollback validation. Otherwise a user-requested restart from web/UI/MQTT
+        // before the stable gate would roll back firmware that already reached
+        // the management interface. This intentionally favors predictable
+        // controlled restarts over stricter rollback protection for late faults.
         OtaRollback::markValidIfPending("controlled_restart");
         WebHandlersBeginRestartShutdown();
         lvgl_port_prepare_restart();
