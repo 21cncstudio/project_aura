@@ -1070,7 +1070,11 @@ void AuraNetworkManager::startSta() {
     bool targeted_connect = false;
     if (wifi_cold_boot_targeted_connect_active_) {
         wifi_cold_boot_targeted_connect_active_ = false;
-        // Synchronous scan is limited to the power-on cold-boot assist path.
+        // This synchronous scan is intentionally limited to the power-on
+        // cold-boot assist path, before web/MQTT/OTA deferred work is expected
+        // to be active. Do not reuse it for runtime reconnects without moving
+        // target selection to an async scan flow; blocking here would stall
+        // WebHandlersPollDeferred() and OTA deferred restart polling.
         int32_t target_channel = 0;
         int32_t target_rssi = -128;
         uint8_t target_bssid[6] = {};
