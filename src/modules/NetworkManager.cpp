@@ -6,6 +6,7 @@
 
 #include "modules/NetworkManager.h"
 
+#include <cstdio>
 #include <cstring>
 #include <memory>
 
@@ -642,6 +643,8 @@ void AuraNetworkManager::shutdownWifi(bool erase_sdk_credentials) {
     wifi_retry_at_ms_ = 0;
     wifi_connect_start_ms_ = 0;
     wifi_connected_since_ms_ = 0;
+    sta_last_rssi_valid_ = false;
+    sta_last_rssi_dbm_ = 0;
     resetStaConnectAttemptState();
     resetColdBootStaAssist();
 }
@@ -730,9 +733,8 @@ void AuraNetworkManager::stopScan() {
 
 void AuraNetworkManager::connectSta() {
     wifi_retry_at_ms_ = 0;
-    wifi_retry_count_ = 1;
-    startSta();
     wifi_retry_count_ = 0;
+    startSta();
 }
 
 void AuraNetworkManager::startApOnDemand() {
@@ -767,6 +769,8 @@ void AuraNetworkManager::poll() {
             wifi_retry_count_ = 0;
             wifi_retry_at_ms_ = 0;
             wifi_connected_since_ms_ = millis();
+            sta_last_rssi_dbm_ = WiFi.RSSI();
+            sta_last_rssi_valid_ = true;
             resetStaConnectAttemptState();
             resetColdBootStaAssist();
             wifi_ui_dirty_ = true;
@@ -826,6 +830,8 @@ void AuraNetworkManager::poll() {
             wl_status_t st = WiFi.status();
             if (st == WL_CONNECTED) {
                 sta_link_fail_streak_ = 0;
+                sta_last_rssi_dbm_ = WiFi.RSSI();
+                sta_last_rssi_valid_ = true;
             } else {
                 if (ota_busy) {
                     sta_link_fail_streak_ = 0;
@@ -847,7 +853,13 @@ void AuraNetworkManager::poll() {
                                     static_cast<unsigned>(kStaLinkFailThreshold));
                     }
                     if (sta_link_fail_streak_ >= kStaLinkFailThreshold) {
-                        const char *rssi_text = "n/a";
+                        char rssi_text[16] = "n/a";
+                        if (sta_last_rssi_valid_) {
+                            snprintf(rssi_text,
+                                     sizeof(rssi_text),
+                                     "%d dBm",
+                                     static_cast<int>(sta_last_rssi_dbm_));
+                        }
                         Logger::log(Logger::Warn, "WiFi",
                                     "connection lost detected (status=%d after %u checks, was connected for %u seconds, RSSI was %s)",
                                     static_cast<int>(st),
@@ -857,6 +869,8 @@ void AuraNetworkManager::poll() {
                         stopMdns();
                         wifi_state_ = WIFI_STATE_OFF;
                         wifi_connected_since_ms_ = 0;
+                        sta_last_rssi_valid_ = false;
+                        sta_last_rssi_dbm_ = 0;
                         sta_link_fail_streak_ = 0;
                         wifi_retry_at_ms_ = now + Config::WIFI_CONNECT_RETRY_DELAY_MS;
                         wifi_retry_count_ = 0;
@@ -947,6 +961,8 @@ void AuraNetworkManager::startSta() {
         startAp();
         return;
     }
+    sta_last_rssi_valid_ = false;
+    sta_last_rssi_dbm_ = 0;
 
     uint32_t internal_free = 0;
     uint32_t internal_largest = 0;

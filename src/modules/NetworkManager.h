@@ -137,6 +137,8 @@ private:
     uint32_t wifi_scan_started_ms_ = 0;
     uint8_t wifi_retry_count_ = 0;
     uint32_t wifi_retry_at_ms_ = 0;
+    bool sta_last_rssi_valid_ = false;
+    int32_t sta_last_rssi_dbm_ = 0;
     bool wifi_enabled_ = false;
     bool wifi_enabled_dirty_ = false;
     std::atomic<bool> wifi_ui_dirty_{false};
