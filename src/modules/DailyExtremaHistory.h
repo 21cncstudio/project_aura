@@ -28,7 +28,8 @@ public:
     DailyExtremaHistory();
     ~DailyExtremaHistory();
 
-    void begin(DailyHistoryStorage &storage);
+    void begin(DailyHistoryStorage &storage, bool initial_units_c);
+    void setPreferredUnitsC(bool units_c);
     void update(const SensorData &data, uint32_t now_ms);
     void poll(uint32_t now_ms);
     void flush();
@@ -37,6 +38,8 @@ public:
     uint32_t currentDayKey() const;
     uint32_t currentSampleCount() const;
     bool lastWriteOk() const;
+    bool currentDayUnitsC() const;
+    bool preferredUnitsC() const;
     bool currentDayCsv(String &out, bool include_header = true) const;
     void clearCurrentDay();
 
@@ -67,7 +70,8 @@ private:
         uint16_t metric_count = 0;
         uint32_t day_key = 0;
         uint8_t optional_gas_type = 0;
-        uint8_t reserved[3] = {};
+        uint8_t units_c = 1;
+        uint8_t reserved[2] = {};
         MetricState metrics[ChartsHistory::kMetricCount] = {};
     };
 
@@ -76,6 +80,7 @@ private:
     static void formatDay(uint32_t day_key, char *out, size_t len);
     static void formatTime(uint32_t epoch, char *out, size_t len);
     static bool validPersistedState(const PersistedState &state);
+    static void migratePersistedState(PersistedState &state);
     static const MetricDef &metricDef(uint8_t index);
 
     class ScopedLock {
@@ -114,6 +119,7 @@ private:
     bool restored_ = false;
     bool dirty_ = false;
     bool last_write_ok_ = true;
+    bool preferred_units_c_ = true;
     uint32_t last_save_ms_ = 0;
 
 #ifndef UNIT_TEST

@@ -20,7 +20,9 @@
 namespace {
 
 constexpr uint32_t kDailyExtremaMagic = 0x44455848; // "DEXH"
-constexpr uint16_t kDailyExtremaVersion = 1;
+constexpr uint16_t kDailyExtremaVersionV1 = 1;
+constexpr uint16_t kDailyExtremaVersion = 2;
+constexpr float kHpaToInhg = 0.0295299830714f;
 
 const DailyExtremaHistory::MetricDef kMetricDefs[] = {
     {ChartsHistory::METRIC_CO2, "co2", "ppm", 0},
@@ -52,6 +54,39 @@ String format_uint(uint32_t value) {
     char buf[16] = {};
     snprintf(buf, sizeof(buf), "%u", static_cast<unsigned>(value));
     return String(buf);
+}
+
+float csv_metric_value(ChartsHistory::Metric metric, float value, bool units_c) {
+    if (units_c) {
+        return value;
+    }
+    if (metric == ChartsHistory::METRIC_TEMPERATURE) {
+        return value * 9.0f / 5.0f + 32.0f;
+    }
+    if (metric == ChartsHistory::METRIC_PRESSURE) {
+        return value * kHpaToInhg;
+    }
+    return value;
+}
+
+const char *csv_metric_unit(const DailyExtremaHistory::MetricDef &def, bool units_c) {
+    if (units_c) {
+        return def.unit;
+    }
+    if (def.metric == ChartsHistory::METRIC_TEMPERATURE) {
+        return "F";
+    }
+    if (def.metric == ChartsHistory::METRIC_PRESSURE) {
+        return "inHg";
+    }
+    return def.unit;
+}
+
+uint8_t csv_metric_decimals(const DailyExtremaHistory::MetricDef &def, bool units_c) {
+    if (!units_c && def.metric == ChartsHistory::METRIC_PRESSURE) {
+        return 2;
+    }
+    return def.decimals;
 }
 
 bool localtime_safe(const time_t *epoch, tm *out) {
@@ -122,17 +157,26 @@ void DailyExtremaHistory::setNowEpochFn(NowEpochFn fn) {
     now_epoch_fn_ = fn ? fn : &DailyExtremaHistory::nowEpochRaw;
 }
 
-void DailyExtremaHistory::begin(DailyHistoryStorage &storage) {
+void DailyExtremaHistory::begin(DailyHistoryStorage &storage, bool initial_units_c) {
     ScopedLock guard(*this);
     if (!guard.locked()) {
         return;
     }
     storage_ = &storage;
     memset(&state_, 0, sizeof(state_));
+    preferred_units_c_ = initial_units_c;
     restored_ = false;
     dirty_ = false;
     last_write_ok_ = true;
     last_save_ms_ = 0;
+}
+
+void DailyExtremaHistory::setPreferredUnitsC(bool units_c) {
+    ScopedLock guard(*this);
+    if (!guard.locked()) {
+        return;
+    }
+    preferred_units_c_ = units_c;
 }
 
 bool DailyExtremaHistory::hasCurrentDay() const {
@@ -148,6 +192,19 @@ uint32_t DailyExtremaHistory::currentDayKey() const {
 bool DailyExtremaHistory::lastWriteOk() const {
     ScopedLock guard(*this);
     return guard.locked() && last_write_ok_;
+}
+
+bool DailyExtremaHistory::currentDayUnitsC() const {
+    ScopedLock guard(*this);
+    if (!guard.locked()) {
+        return true;
+    }
+    return state_.day_key == 0 ? preferred_units_c_ : state_.units_c != 0;
+}
+
+bool DailyExtremaHistory::preferredUnitsC() const {
+    ScopedLock guard(*this);
+    return guard.locked() ? preferred_units_c_ : true;
 }
 
 uint32_t DailyExtremaHistory::currentSampleCountLocked() const {
@@ -209,9 +266,19 @@ void DailyExtremaHistory::formatTime(uint32_t epoch, char *out, size_t len) {
 
 bool DailyExtremaHistory::validPersistedState(const PersistedState &state) {
     return state.magic == kDailyExtremaMagic &&
-           state.version == kDailyExtremaVersion &&
+           (state.version == kDailyExtremaVersionV1 ||
+            state.version == kDailyExtremaVersion) &&
            state.metric_count == ChartsHistory::kMetricCount &&
            state.day_key >= 20200101U;
+}
+
+void DailyExtremaHistory::migratePersistedState(PersistedState &state) {
+    if (state.version == kDailyExtremaVersionV1) {
+        state.version = kDailyExtremaVersion;
+        state.units_c = 1;
+    } else {
+        state.units_c = state.units_c ? 1 : 0;
+    }
 }
 
 const DailyExtremaHistory::MetricDef &DailyExtremaHistory::metricDef(uint8_t index) {
@@ -232,7 +299,12 @@ bool DailyExtremaHistory::restoreOrFinalizeStoredDay(uint32_t current_day_key) {
         return true;
     }
 
+    const bool migrated = stored.version != kDailyExtremaVersion;
+    migratePersistedState(stored);
     state_ = stored;
+    if (migrated) {
+        dirty_ = true;
+    }
     if (state_.day_key == current_day_key) {
         LOGI("DailyHistory", "restored day=%u samples=%u",
              static_cast<unsigned>(state_.day_key),
@@ -280,6 +352,7 @@ void DailyExtremaHistory::resetForDay(uint32_t day_key) {
     state_.version = kDailyExtremaVersion;
     state_.metric_count = ChartsHistory::kMetricCount;
     state_.day_key = day_key;
+    state_.units_c = preferred_units_c_ ? 1 : 0;
     dirty_ = true;
 }
 
@@ -438,13 +511,15 @@ bool DailyExtremaHistory::appendCsvRows(String &rows, bool include_header) const
         rows += ',';
         rows += def.key;
         rows += ',';
-        rows += def.unit;
+        rows += csv_metric_unit(def, state_.units_c != 0);
         rows += ',';
-        rows += format_value(metric.min_value, def.decimals);
+        rows += format_value(csv_metric_value(def.metric, metric.min_value, state_.units_c != 0),
+                             csv_metric_decimals(def, state_.units_c != 0));
         rows += ',';
         rows += min_time;
         rows += ',';
-        rows += format_value(metric.max_value, def.decimals);
+        rows += format_value(csv_metric_value(def.metric, metric.max_value, state_.units_c != 0),
+                             csv_metric_decimals(def, state_.units_c != 0));
         rows += ',';
         rows += max_time;
         rows += ',';

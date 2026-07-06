@@ -95,6 +95,19 @@ void set_basic_data(SensorData &data, int co2, float temp, float pm25) {
     data.pm25 = pm25;
 }
 
+void set_pressure(SensorData &data, float pressure_hpa) {
+    data.pressure_valid = true;
+    data.pressure = pressure_hpa;
+}
+
+void downgrade_current_state_to_v1_metric(FakeDailyStorage &storage) {
+    auto &blob = storage.binary_files[DailyExtremaHistory::kStatePath];
+    TEST_ASSERT_TRUE(blob.size() > 13);
+    blob[4] = 1;
+    blob[5] = 0;
+    blob[13] = 0;
+}
+
 } // namespace
 
 void setUp() {
@@ -110,15 +123,17 @@ void tearDown() {
 void test_daily_extrema_tracks_min_max_and_peak_times() {
     FakeDailyStorage storage;
     DailyExtremaHistory history;
-    history.begin(storage);
+    history.begin(storage, true);
 
     SensorData data;
     set_basic_data(data, 500, 21.5f, 5.0f);
+    set_pressure(data, 1000.0f);
     history.update(data, getMillis());
 
     advanceEpoch(3600);
     advanceMillis(3600UL * 1000UL);
     set_basic_data(data, 1200, 19.0f, 42.0f);
+    set_pressure(data, 1003.4f);
     history.update(data, getMillis());
 
     setNowEpoch(kDayTwoNoon);
@@ -130,13 +145,15 @@ void test_daily_extrema_tracks_min_max_and_peak_times() {
     TEST_ASSERT_TRUE(csv.find("2026-06-27,co2,ppm,500") != std::string::npos);
     TEST_ASSERT_TRUE(csv.find(",1200,") != std::string::npos);
     TEST_ASSERT_TRUE(csv.find("2026-06-27,temperature,C,19.0") != std::string::npos);
+    TEST_ASSERT_TRUE(csv.find("2026-06-27,pressure,hPa,1000.0") != std::string::npos);
+    TEST_ASSERT_TRUE(csv.find(",1003.4,") != std::string::npos);
     TEST_ASSERT_TRUE(csv.find("2026-06-27,pm25,ug/m3,5.0") != std::string::npos);
 }
 
 void test_daily_extrema_ignores_invalid_values() {
     FakeDailyStorage storage;
     DailyExtremaHistory history;
-    history.begin(storage);
+    history.begin(storage, true);
 
     SensorData data;
     set_basic_data(data, 700, 20.0f, 10.0f);
@@ -162,7 +179,7 @@ void test_daily_extrema_ignores_invalid_values() {
 void test_daily_extrema_exports_current_day_without_finalizing() {
     FakeDailyStorage storage;
     DailyExtremaHistory history;
-    history.begin(storage);
+    history.begin(storage, true);
 
     SensorData data;
     set_basic_data(data, 650, 21.0f, 8.5f);
@@ -183,7 +200,7 @@ void test_daily_extrema_exports_current_day_without_finalizing() {
 void test_daily_extrema_clear_current_day_resets_live_state() {
     FakeDailyStorage storage;
     DailyExtremaHistory history;
-    history.begin(storage);
+    history.begin(storage, true);
 
     SensorData data;
     set_basic_data(data, 650, 21.0f, 8.5f);
@@ -202,7 +219,7 @@ void test_daily_extrema_restores_current_day_state() {
     FakeDailyStorage storage;
     {
         DailyExtremaHistory writer;
-        writer.begin(storage);
+        writer.begin(storage, true);
         SensorData data;
         set_basic_data(data, 800, 22.0f, 12.0f);
         writer.update(data, getMillis());
@@ -210,7 +227,7 @@ void test_daily_extrema_restores_current_day_state() {
     }
 
     DailyExtremaHistory restored;
-    restored.begin(storage);
+    restored.begin(storage, true);
     advanceEpoch(120);
     SensorData data;
     set_basic_data(data, 450, 23.0f, 9.0f);
@@ -224,10 +241,135 @@ void test_daily_extrema_restores_current_day_state() {
     TEST_ASSERT_TRUE(csv.find(",800,") != std::string::npos);
 }
 
+void test_daily_extrema_exports_imperial_temperature_and_pressure() {
+    FakeDailyStorage storage;
+    DailyExtremaHistory history;
+    history.begin(storage, false);
+
+    SensorData data;
+    set_basic_data(data, 500, 0.0f, 5.0f);
+    set_pressure(data, 1013.25f);
+    history.update(data, getMillis());
+
+    advanceEpoch(3600);
+    set_basic_data(data, 1200, 10.0f, 42.0f);
+    set_pressure(data, 1000.0f);
+    history.update(data, getMillis());
+
+    setNowEpoch(kDayTwoNoon);
+    history.update(data, getMillis());
+
+    const std::string csv = storage.text_files[DailyExtremaHistory::kDailyCsvPath];
+    TEST_ASSERT_TRUE(csv.find("2026-06-27,temperature,F,32.0") != std::string::npos);
+    TEST_ASSERT_TRUE(csv.find(",50.0,") != std::string::npos);
+    TEST_ASSERT_TRUE(csv.find("2026-06-27,pressure,inHg,29.53") != std::string::npos);
+    TEST_ASSERT_TRUE(csv.find(",29.92,") != std::string::npos);
+    TEST_ASSERT_TRUE(csv.find("2026-06-27,co2,ppm,500") != std::string::npos);
+}
+
+void test_daily_extrema_unit_switch_applies_to_next_day_only() {
+    FakeDailyStorage storage;
+    DailyExtremaHistory history;
+    history.begin(storage, false);
+
+    SensorData data;
+    set_basic_data(data, 500, 0.0f, 5.0f);
+    set_pressure(data, 1013.25f);
+    history.update(data, getMillis());
+
+    history.setPreferredUnitsC(true);
+    TEST_ASSERT_FALSE(history.currentDayUnitsC());
+    TEST_ASSERT_TRUE(history.preferredUnitsC());
+
+    advanceEpoch(3600);
+    set_basic_data(data, 1200, 10.0f, 42.0f);
+    set_pressure(data, 1000.0f);
+    history.update(data, getMillis());
+
+    String current_csv;
+    TEST_ASSERT_TRUE(history.currentDayCsv(current_csv));
+    TEST_ASSERT_TRUE(std::string(current_csv.c_str()).find("2026-06-27,temperature,F,32.0") != std::string::npos);
+
+    setNowEpoch(kDayTwoNoon);
+    set_basic_data(data, 700, 20.0f, 7.0f);
+    set_pressure(data, 990.0f);
+    history.update(data, getMillis());
+
+    const std::string daily_csv = storage.text_files[DailyExtremaHistory::kDailyCsvPath];
+    TEST_ASSERT_TRUE(daily_csv.find("2026-06-27,temperature,F,32.0") != std::string::npos);
+
+    String next_csv;
+    TEST_ASSERT_TRUE(history.currentDayCsv(next_csv));
+    TEST_ASSERT_TRUE(std::string(next_csv.c_str()).find("2026-06-28,temperature,C,20.0") != std::string::npos);
+    TEST_ASSERT_TRUE(history.currentDayUnitsC());
+}
+
+void test_daily_extrema_restores_v2_units_from_state() {
+    FakeDailyStorage storage;
+    {
+        DailyExtremaHistory writer;
+        writer.begin(storage, false);
+        SensorData data;
+        set_basic_data(data, 800, 0.0f, 12.0f);
+        set_pressure(data, 1013.25f);
+        writer.update(data, getMillis());
+        writer.flush();
+    }
+
+    DailyExtremaHistory restored;
+    restored.begin(storage, true);
+    advanceEpoch(120);
+    SensorData data;
+    set_basic_data(data, 450, 10.0f, 9.0f);
+    set_pressure(data, 1000.0f);
+    restored.update(data, getMillis());
+
+    TEST_ASSERT_FALSE(restored.currentDayUnitsC());
+    TEST_ASSERT_TRUE(restored.preferredUnitsC());
+
+    setNowEpoch(kDayTwoNoon);
+    restored.update(data, getMillis());
+
+    const std::string csv = storage.text_files[DailyExtremaHistory::kDailyCsvPath];
+    TEST_ASSERT_TRUE(csv.find("2026-06-27,temperature,F,32.0") != std::string::npos);
+    TEST_ASSERT_TRUE(csv.find("2026-06-27,pressure,inHg,29.53") != std::string::npos);
+}
+
+void test_daily_extrema_migrates_v1_state_as_metric() {
+    FakeDailyStorage storage;
+    {
+        DailyExtremaHistory writer;
+        writer.begin(storage, false);
+        SensorData data;
+        set_basic_data(data, 800, 0.0f, 12.0f);
+        set_pressure(data, 1013.25f);
+        writer.update(data, getMillis());
+        writer.flush();
+    }
+    downgrade_current_state_to_v1_metric(storage);
+
+    DailyExtremaHistory restored;
+    restored.begin(storage, false);
+    advanceEpoch(120);
+    SensorData data;
+    set_basic_data(data, 450, 10.0f, 9.0f);
+    set_pressure(data, 1000.0f);
+    restored.update(data, getMillis());
+
+    TEST_ASSERT_TRUE(restored.currentDayUnitsC());
+
+    setNowEpoch(kDayTwoNoon);
+    restored.update(data, getMillis());
+
+    const std::string csv = storage.text_files[DailyExtremaHistory::kDailyCsvPath];
+    TEST_ASSERT_TRUE(csv.find("2026-06-27,temperature,C,0.0") != std::string::npos);
+    TEST_ASSERT_TRUE(csv.find("2026-06-27,pressure,hPa,1000.0") != std::string::npos);
+}
+
 void test_daily_extrema_resets_optional_gas_when_type_changes() {
     FakeDailyStorage storage;
     DailyExtremaHistory history;
-    history.begin(storage);
+    history.begin(storage, true);
 
     SensorData data;
     data.optional_gas_sensor_present = true;
@@ -252,7 +394,7 @@ void test_daily_extrema_resets_optional_gas_when_type_changes() {
 void test_daily_extrema_keeps_previous_day_when_csv_append_fails() {
     FakeDailyStorage storage;
     DailyExtremaHistory history;
-    history.begin(storage);
+    history.begin(storage, true);
 
     SensorData data;
     set_basic_data(data, 700, 21.0f, 7.0f);
@@ -289,6 +431,10 @@ int main(int, char **) {
     RUN_TEST(test_daily_extrema_exports_current_day_without_finalizing);
     RUN_TEST(test_daily_extrema_clear_current_day_resets_live_state);
     RUN_TEST(test_daily_extrema_restores_current_day_state);
+    RUN_TEST(test_daily_extrema_exports_imperial_temperature_and_pressure);
+    RUN_TEST(test_daily_extrema_unit_switch_applies_to_next_day_only);
+    RUN_TEST(test_daily_extrema_restores_v2_units_from_state);
+    RUN_TEST(test_daily_extrema_migrates_v1_state_as_metric);
     RUN_TEST(test_daily_extrema_resets_optional_gas_when_type_changes);
     RUN_TEST(test_daily_extrema_keeps_previous_day_when_csv_append_fails);
     return UNITY_END();

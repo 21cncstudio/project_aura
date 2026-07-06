@@ -35,6 +35,7 @@
 #include "modules/NetworkManager.h"
 #include "modules/MqttManager.h"
 #include "modules/SensorManager.h"
+#include "modules/DailyExtremaHistory.h"
 #include "modules/FanControl.h"
 #include "modules/TimeManager.h"
 #include "ui/ThemeManager.h"
@@ -332,6 +333,7 @@ UiController::UiController(const UiContext &context)
       networkCommandQueue(context.networkCommandQueue),
       sensorManager(context.sensorManager),
       chartsHistory(context.chartsHistory),
+      dailyExtremaHistory(context.dailyExtremaHistory),
       timeManager(context.timeManager),
       themeManager(context.themeManager),
       backlightManager(context.backlightManager),
@@ -998,6 +1000,7 @@ bool UiController::webSetUnitsC(bool units_c) {
     }
     clock_ui_dirty = true;
     sync_display_threshold_labels();
+    dailyExtremaHistory.setPreferredUnitsC(temp_units_c);
     data_dirty = true;
     mqttRuntimeState.requestPublish();
     return true;

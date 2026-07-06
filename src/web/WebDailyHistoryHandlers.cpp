@@ -149,10 +149,14 @@ void handleStatus(WebHandlerContext &context, bool ota_busy, const char *ota_bus
         daily["current_day"] = context.daily_extrema->currentDayKey();
         daily["current_sample_count"] = context.daily_extrema->currentSampleCount();
         daily["last_write_ok"] = context.daily_extrema->lastWriteOk();
+        daily["current_day_units_c"] = context.daily_extrema->currentDayUnitsC();
+        daily["preferred_units_c"] = context.daily_extrema->preferredUnitsC();
     } else {
         daily["current_day"] = 0;
         daily["current_sample_count"] = 0;
         daily["last_write_ok"] = false;
+        daily["current_day_units_c"] = true;
+        daily["preferred_units_c"] = true;
     }
 
     ArduinoJson::JsonObject files = root["files"].to<ArduinoJson::JsonObject>();

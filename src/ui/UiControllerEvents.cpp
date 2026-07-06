@@ -18,6 +18,7 @@
 #include "modules/NetworkManager.h"
 #include "modules/MqttManager.h"
 #include "modules/SensorManager.h"
+#include "modules/DailyExtremaHistory.h"
 #include "modules/StorageManager.h"
 #include "modules/TimeManager.h"
 #include "ui/BacklightManager.h"
@@ -792,6 +793,7 @@ void UiController::on_units_c_f_event(lv_event_t *e) {
     storage.config().units_c = temp_units_c;
     apply_contextual_date_format_default(ui_language, previous_units_c);
     persist_ui_config(storage, "unit system");
+    dailyExtremaHistory.setPreferredUnitsC(temp_units_c);
     clock_ui_dirty = true;
     sync_display_threshold_labels();
     update_clock_labels();

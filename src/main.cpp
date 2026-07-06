@@ -98,6 +98,7 @@ UiContext ui_context{
     networkCommandQueue,
     sensorManager,
     chartsHistory,
+    dailyExtremaHistory,
     timeManager,
     themeManager,
     backlightManager,
@@ -200,7 +201,7 @@ void setup()
     AppInit::initManagersAndConfig(init_ctx, boot_action);
     auto *board = AppInit::initBoardAndPeripherals(init_ctx);
     sdCardManager.begin(board);
-    dailyExtremaHistory.begin(sdCardManager);
+    dailyExtremaHistory.begin(sdCardManager, temp_units_c);
     networkManager.attachDailyHistory(sdCardManager, dailyExtremaHistory);
     AppInit::initLvglAndUi(init_ctx, board);
     memoryMonitor.logNow("boot");

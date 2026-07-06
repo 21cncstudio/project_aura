@@ -24,6 +24,7 @@ class StorageManager;
 class AuraNetworkManager;
 class MqttManager;
 class ChartsHistory;
+class DailyExtremaHistory;
 class ThemeManager;
 class BacklightManager;
 class NightModeManager;
@@ -45,6 +46,7 @@ struct UiContext {
     NetworkCommandQueue &networkCommandQueue;
     SensorManager &sensorManager;
     ChartsHistory &chartsHistory;
+    DailyExtremaHistory &dailyExtremaHistory;
     TimeManager &timeManager;
     ThemeManager &themeManager;
     BacklightManager &backlightManager;
@@ -939,6 +941,7 @@ private:
     NetworkCommandQueue &networkCommandQueue;
     SensorManager &sensorManager;
     ChartsHistory &chartsHistory;
+    DailyExtremaHistory &dailyExtremaHistory;
     TimeManager &timeManager;
     ThemeManager &themeManager;
     BacklightManager &backlightManager;

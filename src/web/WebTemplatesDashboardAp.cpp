@@ -695,7 +695,8 @@ const char kDashboardPageTemplateAp[] PROGMEM = R"HTML_DASH_AP(
             <div class="info-row"><span class="info-key">Card</span><span class="info-val" id="sd-status">--</span></div>
             <div class="info-row"><span class="info-key">Card size</span><span class="info-val" id="sd-capacity">--</span></div>
             <div class="info-row"><span class="info-key">Current day</span><span class="info-val" id="sd-day">--</span></div>
-            <div class="info-row"><span class="info-key">Metric samples</span><span class="info-val" id="sd-samples">--</span></div>
+            <div class="info-row"><span class="info-key">CSV units</span><span class="info-val" id="sd-csv-units">--</span></div>
+            <div class="info-row"><span class="info-key">Samples</span><span class="info-val" id="sd-samples">--</span></div>
             <div class="info-row"><span class="info-key">State file</span><span class="info-val" id="sd-state-file">--</span></div>
             <div class="info-row"><span class="info-key">Daily CSV</span><span class="info-val" id="sd-daily-csv">--</span></div>
             <div class="info-row"><span class="info-key">Last write</span><span class="info-val" id="sd-last-write">--</span></div>
@@ -1791,6 +1792,24 @@ function setSdCurrentExportEnabled(enabled) {
   setLinkButtonEnabled('sdExportCurrentBtn', enabled);
 }
 
+function sdCsvUnitLabel(unitsC) {
+  return unitsC === false ? 'Imperial (\u00B0F, inHg)' : 'Metric (\u00B0C, hPa)';
+}
+
+function sdCsvUnitShortLabel(unitsC) {
+  return unitsC === false ? 'Imperial' : 'Metric';
+}
+
+function formatSdCsvUnits(daily) {
+  const hasCurrentDay = Number(daily && daily.current_day || 0) > 0;
+  const currentUnitsC = !(daily && daily.current_day_units_c === false);
+  const preferredUnitsC = !(daily && daily.preferred_units_c === false);
+  if (!hasCurrentDay) return 'Next: ' + sdCsvUnitLabel(preferredUnitsC);
+  if (currentUnitsC === preferredUnitsC) return sdCsvUnitLabel(currentUnitsC);
+  return 'Current: ' + sdCsvUnitShortLabel(currentUnitsC) +
+         '; next: ' + sdCsvUnitShortLabel(preferredUnitsC);
+}
+
 function renderSdHistoryStatus(payload) {
   const sd = (payload && payload.sd) || {};
   const daily = (payload && payload.daily) || {};
@@ -1806,6 +1825,7 @@ function renderSdHistoryStatus(payload) {
                mounted ? 'ok' : (attempted ? 'err' : ''));
   setInfoValue('sd-capacity', mounted ? formatBytes(Number(sd.card_size_bytes || 0)) : '--');
   setInfoValue('sd-day', formatDayKey(Number(daily.current_day || 0)));
+  setInfoValue('sd-csv-units', formatSdCsvUnits(daily));
   setInfoValue('sd-samples', isNum(daily.current_sample_count) ? String(daily.current_sample_count) : '--');
   setInfoValue('sd-state-file', formatFileStatus(stateFile), stateFile && stateFile.exists === true ? 'ok' : '');
   setInfoValue('sd-daily-csv', formatFileStatus(dailyCsv), dailyCsv && dailyCsv.exists === true ? 'ok' : '');
