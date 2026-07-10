@@ -1,5 +1,8 @@
 #include <unity.h>
 
+#include <math.h>
+
+#include "config/AppConfig.h"
 #include "config/AppData.h"
 #include "modules/DacAutoDemand.h"
 
@@ -21,83 +24,156 @@ void disable_all_sensors(DacAutoConfig &cfg) {
     cfg.nox.enabled = false;
 }
 
-}  // namespace
-
-void test_dac_auto_demand_uses_display_thresholds_for_voc_and_nox() {
-    DacAutoConfig cfg{};
-    cfg.enabled = true;
-    disable_all_sensors(cfg);
-    cfg.voc.enabled = true;
-    cfg.voc.band = {11, 22, 33, 44};
-    cfg.nox.enabled = true;
-    cfg.nox.band = {15, 25, 35, 45};
-
-    SensorData data{};
-    data.voc_valid = true;
-    data.voc_index = 120;
-    data.nox_valid = true;
-    data.nox_index = 95;
-
-    DisplayThresholds::Config thresholds = DisplayThresholds::defaults();
-    thresholds.voc = {100.0f, 150.0f, 200.0f};
-    thresholds.nox = {80.0f, 100.0f, 150.0f};
-
-    DacAutoDemand::Result result = DacAutoDemand::evaluate(cfg, data, false, thresholds);
-    TEST_ASSERT_EQUAL_UINT8(25, result.percent);
-    TEST_ASSERT_EQUAL_INT(static_cast<int>(DacAutoDemand::Sensor::NOX),
-                          static_cast<int>(result.sensor));
-
-    thresholds.voc = {120.0f, 150.0f, 200.0f};
-    thresholds.nox = {95.0f, 100.0f, 150.0f};
-    result = DacAutoDemand::evaluate(cfg, data, false, thresholds);
-    TEST_ASSERT_EQUAL_UINT8(15, result.percent);
-    TEST_ASSERT_EQUAL_INT(static_cast<int>(DacAutoDemand::Sensor::NOX),
-                          static_cast<int>(result.sensor));
-
-    thresholds.voc = {80.0f, 100.0f, 110.0f};
-    thresholds.nox = {50.0f, 80.0f, 90.0f};
-    result = DacAutoDemand::evaluate(cfg, data, false, thresholds);
-    TEST_ASSERT_EQUAL_UINT8(45, result.percent);
-    TEST_ASSERT_EQUAL_INT(static_cast<int>(DacAutoDemand::Sensor::NOX),
-                          static_cast<int>(result.sensor));
+DacAutoSensorConfig &sensor_config(DacAutoConfig &cfg, DacAutoDemand::Sensor sensor) {
+    switch (sensor) {
+        case DacAutoDemand::Sensor::CO2:
+            return cfg.co2;
+        case DacAutoDemand::Sensor::CO:
+            return cfg.co;
+        case DacAutoDemand::Sensor::PM05:
+            return cfg.pm05;
+        case DacAutoDemand::Sensor::PM1:
+            return cfg.pm1;
+        case DacAutoDemand::Sensor::PM4:
+            return cfg.pm4;
+        case DacAutoDemand::Sensor::PM25:
+            return cfg.pm25;
+        case DacAutoDemand::Sensor::PM10:
+            return cfg.pm10;
+        case DacAutoDemand::Sensor::HCHO:
+            return cfg.hcho;
+        case DacAutoDemand::Sensor::VOC:
+            return cfg.voc;
+        case DacAutoDemand::Sensor::NOX:
+            return cfg.nox;
+        case DacAutoDemand::Sensor::None:
+        default:
+            return cfg.co2;
+    }
 }
 
-void test_dac_auto_demand_uses_display_thresholds_for_co2_hcho_and_co() {
-    DacAutoConfig cfg{};
+void enable_only(DacAutoConfig &cfg, DacAutoDemand::Sensor sensor) {
     cfg.enabled = true;
     disable_all_sensors(cfg);
-    cfg.co2.enabled = true;
-    cfg.co2.band = {10, 20, 30, 40};
-    cfg.hcho.enabled = true;
-    cfg.hcho.band = {11, 21, 31, 41};
-    cfg.co.enabled = true;
-    cfg.co.band = {12, 22, 32, 42};
+    DacAutoSensorConfig &selected = sensor_config(cfg, sensor);
+    selected.enabled = true;
+    selected.band = {10, 20, 30, 40};
+}
 
+void set_sensor_value(SensorData &data, DacAutoDemand::Sensor sensor, float value) {
+    switch (sensor) {
+        case DacAutoDemand::Sensor::CO2:
+            data.co2_valid = true;
+            data.co2 = static_cast<int>(value);
+            break;
+        case DacAutoDemand::Sensor::CO:
+            data.co_sensor_present = true;
+            data.co_valid = true;
+            data.co_ppm = value;
+            break;
+        case DacAutoDemand::Sensor::PM05:
+            data.pm05_valid = true;
+            data.pm05 = value;
+            break;
+        case DacAutoDemand::Sensor::PM1:
+            data.pm1_valid = true;
+            data.pm1 = value;
+            break;
+        case DacAutoDemand::Sensor::PM4:
+            data.pm4_valid = true;
+            data.pm4 = value;
+            break;
+        case DacAutoDemand::Sensor::PM25:
+            data.pm25_valid = true;
+            data.pm25 = value;
+            break;
+        case DacAutoDemand::Sensor::PM10:
+            data.pm10_valid = true;
+            data.pm10 = value;
+            break;
+        case DacAutoDemand::Sensor::HCHO:
+            data.hcho_valid = true;
+            data.hcho = value;
+            break;
+        case DacAutoDemand::Sensor::VOC:
+            data.voc_valid = true;
+            data.voc_index = static_cast<int>(value);
+            break;
+        case DacAutoDemand::Sensor::NOX:
+            data.nox_valid = true;
+            data.nox_index = static_cast<int>(value);
+            break;
+        case DacAutoDemand::Sensor::None:
+        default:
+            break;
+    }
+}
+
+void set_shared_thresholds(DisplayThresholds::Config &thresholds,
+                           DacAutoDemand::Sensor sensor,
+                           const DisplayThresholds::High &value) {
+    switch (sensor) {
+        case DacAutoDemand::Sensor::CO2:
+            thresholds.co2 = value;
+            break;
+        case DacAutoDemand::Sensor::CO:
+            thresholds.co = value;
+            break;
+        case DacAutoDemand::Sensor::HCHO:
+            thresholds.hcho = value;
+            break;
+        case DacAutoDemand::Sensor::VOC:
+            thresholds.voc = value;
+            break;
+        case DacAutoDemand::Sensor::NOX:
+            thresholds.nox = value;
+            break;
+        default:
+            break;
+    }
+}
+
+void assert_single_sensor_demand(DacAutoDemand::Sensor sensor,
+                                 float value,
+                                 const DisplayThresholds::Config &thresholds,
+                                 uint8_t expected_percent) {
+    DacAutoConfig cfg{};
+    enable_only(cfg, sensor);
     SensorData data{};
-    data.co2_valid = true;
-    data.co2 = 750;
-    data.hcho_valid = true;
-    data.hcho = 55.0f;
-    data.co_sensor_present = true;
-    data.co_valid = true;
-    data.co_ppm = 4.0f;
+    set_sensor_value(data, sensor, value);
 
-    DisplayThresholds::Config thresholds = DisplayThresholds::defaults();
-    thresholds.co2 = {700.0f, 900.0f, 1200.0f};
-    thresholds.hcho = {40.0f, 60.0f, 100.0f};
-    thresholds.co = {5.0f, 10.0f, 20.0f};
+    const DacAutoDemand::Result result =
+        DacAutoDemand::evaluate(cfg, data, false, thresholds);
+    TEST_ASSERT_EQUAL_UINT8_MESSAGE(expected_percent,
+                                    result.percent,
+                                    DacAutoDemand::sensorLabel(sensor));
+    TEST_ASSERT_EQUAL_INT_MESSAGE(static_cast<int>(sensor),
+                                  static_cast<int>(result.sensor),
+                                  DacAutoDemand::sensorLabel(sensor));
+}
 
-    DacAutoDemand::Result result = DacAutoDemand::evaluate(cfg, data, false, thresholds);
-    TEST_ASSERT_EQUAL_UINT8(21, result.percent);
-    TEST_ASSERT_EQUAL_INT(static_cast<int>(DacAutoDemand::Sensor::HCHO),
-                          static_cast<int>(result.sensor));
+}  // namespace
 
-    thresholds.co2 = {800.0f, 900.0f, 1200.0f};
-    thresholds.hcho = {55.0f, 60.0f, 100.0f};
-    result = DacAutoDemand::evaluate(cfg, data, false, thresholds);
-    TEST_ASSERT_EQUAL_UINT8(12, result.percent);
-    TEST_ASSERT_EQUAL_INT(static_cast<int>(DacAutoDemand::Sensor::CO),
-                          static_cast<int>(result.sensor));
+void test_dac_auto_demand_uses_inclusive_display_thresholds_for_each_shared_sensor() {
+    const DacAutoDemand::Sensor sensors[] = {
+        DacAutoDemand::Sensor::CO2,
+        DacAutoDemand::Sensor::CO,
+        DacAutoDemand::Sensor::HCHO,
+        DacAutoDemand::Sensor::VOC,
+        DacAutoDemand::Sensor::NOX,
+    };
+
+    for (DacAutoDemand::Sensor sensor : sensors) {
+        DisplayThresholds::Config thresholds = DisplayThresholds::defaults();
+        set_shared_thresholds(thresholds, sensor, {100.0f, 200.0f, 300.0f});
+
+        assert_single_sensor_demand(sensor, 100.0f, thresholds, 10);
+        assert_single_sensor_demand(sensor, 101.0f, thresholds, 20);
+        assert_single_sensor_demand(sensor, 200.0f, thresholds, 20);
+        assert_single_sensor_demand(sensor, 201.0f, thresholds, 30);
+        assert_single_sensor_demand(sensor, 300.0f, thresholds, 30);
+        assert_single_sensor_demand(sensor, 301.0f, thresholds, 40);
+    }
 }
 
 void test_dac_auto_demand_suppresses_reactive_gases_during_warmup() {
@@ -122,26 +198,103 @@ void test_dac_auto_demand_suppresses_reactive_gases_during_warmup() {
                           static_cast<int>(result.sensor));
 }
 
-void test_dac_auto_demand_keeps_pm_on_fixed_zones() {
+void test_dac_auto_demand_keeps_all_pm_sensors_on_inclusive_fixed_zones() {
+    struct PmCase {
+        DacAutoDemand::Sensor sensor;
+        float green;
+        float yellow;
+        float orange;
+    };
+    const PmCase cases[] = {
+        {DacAutoDemand::Sensor::PM05,
+         Config::AQ_PM05_GREEN_MAX_PPCM3,
+         Config::AQ_PM05_YELLOW_MAX_PPCM3,
+         Config::AQ_PM05_ORANGE_MAX_PPCM3},
+        {DacAutoDemand::Sensor::PM1,
+         Config::AQ_PM1_GREEN_MAX_UGM3,
+         Config::AQ_PM1_YELLOW_MAX_UGM3,
+         Config::AQ_PM1_ORANGE_MAX_UGM3},
+        {DacAutoDemand::Sensor::PM4,
+         Config::AQ_PM4_GREEN_MAX_UGM3,
+         Config::AQ_PM4_YELLOW_MAX_UGM3,
+         Config::AQ_PM4_ORANGE_MAX_UGM3},
+        {DacAutoDemand::Sensor::PM25,
+         Config::AQ_PM25_GREEN_MAX_UGM3,
+         Config::AQ_PM25_YELLOW_MAX_UGM3,
+         Config::AQ_PM25_ORANGE_MAX_UGM3},
+        {DacAutoDemand::Sensor::PM10,
+         Config::AQ_PM10_GREEN_MAX_UGM3,
+         Config::AQ_PM10_YELLOW_MAX_UGM3,
+         Config::AQ_PM10_ORANGE_MAX_UGM3},
+    };
+
+    const DisplayThresholds::Config thresholds = DisplayThresholds::defaults();
+    for (const PmCase &pm : cases) {
+        assert_single_sensor_demand(pm.sensor, pm.green, thresholds, 10);
+        assert_single_sensor_demand(pm.sensor, pm.yellow, thresholds, 20);
+        assert_single_sensor_demand(pm.sensor, pm.orange, thresholds, 30);
+        assert_single_sensor_demand(pm.sensor, pm.orange + 0.1f, thresholds, 40);
+    }
+}
+
+void test_dac_auto_demand_tie_break_keeps_first_sensor() {
     DacAutoConfig cfg{};
     cfg.enabled = true;
     disable_all_sensors(cfg);
-    cfg.pm25.enabled = true;
-    cfg.pm25.band = {10, 20, 30, 40};
+    cfg.co2.enabled = true;
+    cfg.co2.band = {50, 50, 50, 50};
+    cfg.co.enabled = true;
+    cfg.co.band = {50, 50, 50, 50};
 
     SensorData data{};
-    data.pm25_valid = true;
-    data.pm25 = 12.0f;
+    set_sensor_value(data, DacAutoDemand::Sensor::CO2, 500.0f);
+    set_sensor_value(data, DacAutoDemand::Sensor::CO, 1.0f);
 
-    DacAutoDemand::Result result =
+    const DacAutoDemand::Result result =
         DacAutoDemand::evaluate(cfg, data, false, DisplayThresholds::defaults());
-    TEST_ASSERT_EQUAL_UINT8(10, result.percent);
-    TEST_ASSERT_EQUAL_INT(static_cast<int>(DacAutoDemand::Sensor::PM25),
+    TEST_ASSERT_EQUAL_UINT8(50, result.percent);
+    TEST_ASSERT_EQUAL_INT(static_cast<int>(DacAutoDemand::Sensor::CO2),
+                          static_cast<int>(result.sensor));
+}
+
+void test_dac_auto_demand_ignores_disabled_and_invalid_samples() {
+    DisplayThresholds::Config thresholds = DisplayThresholds::defaults();
+    DacAutoConfig cfg{};
+    SensorData data{};
+
+    enable_only(cfg, DacAutoDemand::Sensor::CO2);
+    cfg.enabled = false;
+    set_sensor_value(data, DacAutoDemand::Sensor::CO2, 2000.0f);
+    DacAutoDemand::Result result = DacAutoDemand::evaluate(cfg, data, false, thresholds);
+    TEST_ASSERT_EQUAL_UINT8(0, result.percent);
+    TEST_ASSERT_EQUAL_INT(static_cast<int>(DacAutoDemand::Sensor::None),
                           static_cast<int>(result.sensor));
 
-    data.pm25 = 56.0f;
-    result = DacAutoDemand::evaluate(cfg, data, false, DisplayThresholds::defaults());
-    TEST_ASSERT_EQUAL_UINT8(40, result.percent);
+    cfg.enabled = true;
+    cfg.co2.enabled = false;
+    result = DacAutoDemand::evaluate(cfg, data, false, thresholds);
+    TEST_ASSERT_EQUAL_UINT8(0, result.percent);
+
+    enable_only(cfg, DacAutoDemand::Sensor::CO);
+    data = SensorData{};
+    data.co_sensor_present = true;
+    data.co_valid = true;
+    data.co_ppm = NAN;
+    result = DacAutoDemand::evaluate(cfg, data, false, thresholds);
+    TEST_ASSERT_EQUAL_UINT8(0, result.percent);
+
+    data.co_ppm = -0.1f;
+    result = DacAutoDemand::evaluate(cfg, data, false, thresholds);
+    TEST_ASSERT_EQUAL_UINT8(0, result.percent);
+
+    enable_only(cfg, DacAutoDemand::Sensor::VOC);
+    data = SensorData{};
+    data.voc_valid = true;
+    data.voc_index = -1;
+    result = DacAutoDemand::evaluate(cfg, data, false, thresholds);
+    TEST_ASSERT_EQUAL_UINT8(0, result.percent);
+    TEST_ASSERT_EQUAL_INT(static_cast<int>(DacAutoDemand::Sensor::None),
+                          static_cast<int>(result.sensor));
 }
 
 void test_dac_auto_demand_formats_reason_values() {
@@ -156,10 +309,11 @@ void test_dac_auto_demand_formats_reason_values() {
 
 int main(int, char **) {
     UNITY_BEGIN();
-    RUN_TEST(test_dac_auto_demand_uses_display_thresholds_for_voc_and_nox);
-    RUN_TEST(test_dac_auto_demand_uses_display_thresholds_for_co2_hcho_and_co);
+    RUN_TEST(test_dac_auto_demand_uses_inclusive_display_thresholds_for_each_shared_sensor);
     RUN_TEST(test_dac_auto_demand_suppresses_reactive_gases_during_warmup);
-    RUN_TEST(test_dac_auto_demand_keeps_pm_on_fixed_zones);
+    RUN_TEST(test_dac_auto_demand_keeps_all_pm_sensors_on_inclusive_fixed_zones);
+    RUN_TEST(test_dac_auto_demand_tie_break_keeps_first_sensor);
+    RUN_TEST(test_dac_auto_demand_ignores_disabled_and_invalid_samples);
     RUN_TEST(test_dac_auto_demand_formats_reason_values);
     return UNITY_END();
 }

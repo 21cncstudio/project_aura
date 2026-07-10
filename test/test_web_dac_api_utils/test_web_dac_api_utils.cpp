@@ -29,7 +29,10 @@ void test_web_dac_api_utils_fill_state_json_populates_dac_auto_and_sensor_fields
     payload.dac.stop_at_ms = 4500;
     payload.dac.auto_config.enabled = true;
     payload.thresholds.co2.green = 700.0f;
+    payload.thresholds.hcho.yellow = 55.0f;
+    payload.thresholds.co.orange = 90.0f;
     payload.thresholds.voc.orange = 325.0f;
+    payload.thresholds.nox.green = 45.0f;
     payload.sensors.co2 = 742;
     payload.sensors.co2_valid = true;
     payload.sensors.co_ppm = 5.5f;
@@ -49,11 +52,28 @@ void test_web_dac_api_utils_fill_state_json_populates_dac_auto_and_sensor_fields
     TEST_ASSERT_EQUAL_UINT(50, doc["dac"]["output_percent"].as<unsigned>());
     TEST_ASSERT_EQUAL_STRING("RUNNING", doc["dac"]["status"].as<const char *>());
     TEST_ASSERT_TRUE(doc["auto"]["enabled"].as<bool>());
+    TEST_ASSERT_EQUAL_INT(DisplayThresholds::kVersion, doc["thresholds"]["version"].as<int>());
     TEST_ASSERT_FLOAT_WITHIN(0.001f, 700.0f, doc["thresholds"]["metrics"]["co2"]["green"].as<float>());
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, 55.0f, doc["thresholds"]["metrics"]["hcho"]["yellow"].as<float>());
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, 90.0f, doc["thresholds"]["metrics"]["co"]["orange"].as<float>());
     TEST_ASSERT_FLOAT_WITHIN(0.001f, 325.0f, doc["thresholds"]["metrics"]["voc"]["orange"].as<float>());
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, 45.0f, doc["thresholds"]["metrics"]["nox"]["green"].as<float>());
     TEST_ASSERT_TRUE(doc["sensors"]["gas_warmup"].as<bool>());
     TEST_ASSERT_EQUAL_INT(742, doc["sensors"]["co2"].as<int>());
     TEST_ASSERT_EQUAL_INT(87, doc["sensors"]["voc_index"].as<int>());
+}
+
+void test_web_dac_api_utils_default_state_payload_serializes_default_thresholds() {
+    const WebDacApiUtils::StatePayload payload{};
+    ArduinoJson::JsonDocument doc;
+    WebDacApiUtils::fillStateJson(doc.to<ArduinoJson::JsonObject>(), payload);
+
+    TEST_ASSERT_EQUAL_INT(DisplayThresholds::kVersion, doc["thresholds"]["version"].as<int>());
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, 800.0f, doc["thresholds"]["metrics"]["co2"]["green"].as<float>());
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, 30.0f, doc["thresholds"]["metrics"]["hcho"]["green"].as<float>());
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, 9.0f, doc["thresholds"]["metrics"]["co"]["green"].as<float>());
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, 150.0f, doc["thresholds"]["metrics"]["voc"]["green"].as<float>());
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, 50.0f, doc["thresholds"]["metrics"]["nox"]["green"].as<float>());
 }
 
 void test_web_dac_api_utils_parse_action_update_supports_known_actions_and_rejects_bad_values() {
@@ -140,6 +160,7 @@ int main(int, char **) {
     UNITY_BEGIN();
     RUN_TEST(test_web_dac_api_utils_fill_success_json_sets_success_flag);
     RUN_TEST(test_web_dac_api_utils_fill_state_json_populates_dac_auto_and_sensor_fields);
+    RUN_TEST(test_web_dac_api_utils_default_state_payload_serializes_default_thresholds);
     RUN_TEST(test_web_dac_api_utils_parse_action_update_supports_known_actions_and_rejects_bad_values);
     RUN_TEST(test_web_dac_api_utils_parse_action_request_body_rejects_missing_and_invalid_json);
     RUN_TEST(test_web_dac_api_utils_parse_auto_update_reads_nested_auto_and_rearm);

@@ -87,7 +87,8 @@ testing, and the 180-degree screen rotation setting for the 7" build.
 - 4.3" and 7" Waveshare ESP32-S3 touchscreen builds are supported
 - Recommended custom Aura PCB path plus classic module-based path
 - No soldering required for the recommended PCB build
-- Optional DAC control (GP8403, 0-10V): manual levels/timer plus automatic demand mode from air-quality thresholds
+- Optional DAC control (GP8403, 0-10V): manual levels/timer plus automatic demand mode from air-quality thresholds.
+  DAC Auto uses editable Display Threshold zones for CO2, HCHO, CO, VOC, and NOx; PM zones remain fixed and every zone maximum is inclusive (`value <= threshold`).
 - Hardware autodetect: PCF8523/DS3231 RTC plus BMP58x/BMP3xx/DPS310 pressure
 - Robust Safe Boot: automatic rollback to the last-known-good config after crashes
 

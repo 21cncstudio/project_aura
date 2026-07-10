@@ -145,6 +145,39 @@ void test_display_threshold_serialize_roundtrip_preserves_values_and_switches() 
     TEST_ASSERT_TRUE(parsed.background_alerts.co_enabled);
 }
 
+void test_display_threshold_deserialize_migrates_legacy_v1_without_voc_and_nox() {
+    const String legacy_json =
+        "{\"version\":1,\"metrics\":{"
+        "\"temp\":{\"orange_min\":15,\"yellow_min\":17,\"good_min\":19,"
+        "\"good_max\":24,\"yellow_max\":26,\"orange_max\":29},"
+        "\"rh\":{\"orange_min\":20,\"yellow_min\":30,\"good_min\":40,"
+        "\"good_max\":60,\"yellow_max\":65,\"orange_max\":70},"
+        "\"dew_point\":{\"orange_min\":5,\"yellow_min\":8,\"good_min\":10,"
+        "\"good_max\":16,\"yellow_max\":18,\"orange_max\":21},"
+        "\"ah\":{\"orange_min\":4,\"yellow_min\":5,\"good_min\":7,"
+        "\"good_max\":15,\"yellow_max\":18,\"orange_max\":20},"
+        "\"co2\":{\"green\":700,\"yellow\":900,\"orange\":1400},"
+        "\"hcho\":{\"green\":25,\"yellow\":55,\"orange\":95},"
+        "\"co\":{\"green\":8,\"yellow\":30,\"orange\":90}},"
+        "\"background_alerts\":{\"hcho_enabled\":false,\"co_enabled\":true,"
+        "\"co2_enabled\":false}}";
+
+    DisplayThresholds::Config parsed{};
+    TEST_ASSERT_TRUE(DisplayThresholds::deserialize(legacy_json, parsed));
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, 19.0f, parsed.temp.good_min);
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, 700.0f, parsed.co2.green);
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, 95.0f, parsed.hcho.orange);
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, 30.0f, parsed.co.yellow);
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, 150.0f, parsed.voc.green);
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, 250.0f, parsed.voc.yellow);
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, 350.0f, parsed.voc.orange);
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, 50.0f, parsed.nox.green);
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, 100.0f, parsed.nox.yellow);
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, 200.0f, parsed.nox.orange);
+    TEST_ASSERT_FALSE(parsed.background_alerts.hcho_enabled);
+    TEST_ASSERT_FALSE(parsed.background_alerts.co2_enabled);
+}
+
 void test_display_threshold_partial_update_keeps_unspecified_values() {
     DisplayThresholds::Config current = DisplayThresholds::defaults();
     ArduinoJson::JsonDocument doc;
@@ -196,6 +229,7 @@ int main(int, char **) {
     RUN_TEST(test_display_threshold_validation_rejects_bad_order);
     RUN_TEST(test_display_threshold_validation_rejects_negative_rh_and_ah_only);
     RUN_TEST(test_display_threshold_serialize_roundtrip_preserves_values_and_switches);
+    RUN_TEST(test_display_threshold_deserialize_migrates_legacy_v1_without_voc_and_nox);
     RUN_TEST(test_display_threshold_partial_update_keeps_unspecified_values);
     RUN_TEST(test_display_threshold_manager_falls_back_to_defaults_and_persists_reset);
     return UNITY_END();

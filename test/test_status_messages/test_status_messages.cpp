@@ -95,6 +95,34 @@ void test_status_messages_voc_and_nox_use_display_thresholds() {
     TEST_ASSERT_EQUAL_UINT(0, result.count);
 }
 
+void test_status_messages_nox_defaults_use_inclusive_boundaries() {
+    SensorData data{};
+    data.nox_valid = true;
+    const DisplayThresholds::Config thresholds = DisplayThresholds::defaults();
+
+    data.nox_index = 50;
+    StatusMessages::StatusMessageResult result =
+        StatusMessages::build_status_messages(data, false, thresholds);
+    TEST_ASSERT_TRUE(result.has_valid);
+    TEST_ASSERT_EQUAL_UINT(0, result.count);
+
+    data.nox_index = 100;
+    result = StatusMessages::build_status_messages(data, false, thresholds);
+    TEST_ASSERT_EQUAL_UINT(1, result.count);
+    TEST_ASSERT_EQUAL_UINT8(StatusMessages::STATUS_SENSOR_NOX, result.messages[0].sensor);
+    TEST_ASSERT_EQUAL_UINT8(StatusMessages::STATUS_YELLOW, result.messages[0].severity);
+
+    data.nox_index = 200;
+    result = StatusMessages::build_status_messages(data, false, thresholds);
+    TEST_ASSERT_EQUAL_UINT(1, result.count);
+    TEST_ASSERT_EQUAL_UINT8(StatusMessages::STATUS_ORANGE, result.messages[0].severity);
+
+    data.nox_index = 201;
+    result = StatusMessages::build_status_messages(data, false, thresholds);
+    TEST_ASSERT_EQUAL_UINT(1, result.count);
+    TEST_ASSERT_EQUAL_UINT8(StatusMessages::STATUS_RED, result.messages[0].severity);
+}
+
 void test_status_messages_humidity_uses_display_thresholds() {
     SensorData data{};
     data.hum_valid = true;
@@ -134,6 +162,7 @@ int main(int, char **) {
     RUN_TEST(test_status_messages_co_safety_override_uses_display_thresholds);
     RUN_TEST(test_status_messages_co2_uses_display_thresholds);
     RUN_TEST(test_status_messages_voc_and_nox_use_display_thresholds);
+    RUN_TEST(test_status_messages_nox_defaults_use_inclusive_boundaries);
     RUN_TEST(test_status_messages_humidity_uses_display_thresholds);
     RUN_TEST(test_status_messages_dew_point_defaults_match_display_thresholds);
     return UNITY_END();
