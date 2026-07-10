@@ -11,6 +11,7 @@
 #include <stdint.h>
 
 #include "modules/DacAutoConfig.h"
+#include "modules/DisplayThresholds.h"
 
 namespace WebDacApiUtils {
 
@@ -57,6 +58,7 @@ struct SensorSnapshot {
 struct StatePayload {
     DacStateSnapshot dac{};
     SensorSnapshot sensors{};
+    DisplayThresholds::Config thresholds = DisplayThresholds::defaults();
     bool gas_warmup = false;
     uint32_t now_ms = 0;
 };

@@ -10,6 +10,7 @@
 #include <stdio.h>
 
 #include "core/Logger.h"
+#include "modules/DacAutoDemand.h"
 #include "modules/FanControl.h"
 #include "modules/NetworkManager.h"
 #include "modules/StorageManager.h"
@@ -85,87 +86,6 @@ void format_mmss(uint32_t total_seconds, char *out, size_t out_len) {
     snprintf(out, out_len, "%02lu:%02lu",
              static_cast<unsigned long>(minutes),
              static_cast<unsigned long>(seconds));
-}
-
-uint8_t co2_auto_percent(const DacAutoSensorConfig &cfg, int co2) {
-    if (co2 < Config::AQ_CO2_GREEN_MAX_PPM) {
-        return cfg.band.green_percent;
-    }
-    if (co2 < Config::AQ_CO2_YELLOW_MAX_PPM) {
-        return cfg.band.yellow_percent;
-    }
-    if (co2 < Config::AQ_CO2_ORANGE_MAX_PPM) {
-        return cfg.band.orange_percent;
-    }
-    return cfg.band.red_percent;
-}
-
-uint8_t co_auto_percent(const DacAutoSensorConfig &cfg, float co_ppm) {
-    if (co_ppm < Config::AQ_CO_GREEN_MAX_PPM) {
-        return cfg.band.green_percent;
-    }
-    if (co_ppm <= Config::AQ_CO_YELLOW_MAX_PPM) {
-        return cfg.band.yellow_percent;
-    }
-    if (co_ppm <= Config::AQ_CO_ORANGE_MAX_PPM) {
-        return cfg.band.orange_percent;
-    }
-    return cfg.band.red_percent;
-}
-
-uint8_t pm25_auto_percent(const DacAutoSensorConfig &cfg, float pm25) {
-    if (pm25 <= Config::AQ_PM25_GREEN_MAX_UGM3) {
-        return cfg.band.green_percent;
-    }
-    if (pm25 <= Config::AQ_PM25_YELLOW_MAX_UGM3) {
-        return cfg.band.yellow_percent;
-    }
-    if (pm25 <= Config::AQ_PM25_ORANGE_MAX_UGM3) {
-        return cfg.band.orange_percent;
-    }
-    return cfg.band.red_percent;
-}
-
-uint8_t voc_auto_percent(const DacAutoSensorConfig &cfg, int voc_index) {
-    if (voc_index <= Config::AQ_VOC_GREEN_MAX_INDEX) {
-        return cfg.band.green_percent;
-    }
-    if (voc_index <= Config::AQ_VOC_YELLOW_MAX_INDEX) {
-        return cfg.band.yellow_percent;
-    }
-    if (voc_index <= Config::AQ_VOC_ORANGE_MAX_INDEX) {
-        return cfg.band.orange_percent;
-    }
-    return cfg.band.red_percent;
-}
-
-uint8_t nox_auto_percent(const DacAutoSensorConfig &cfg, int nox_index) {
-    if (nox_index <= Config::AQ_NOX_GREEN_MAX_INDEX) {
-        return cfg.band.green_percent;
-    }
-    if (nox_index <= Config::AQ_NOX_YELLOW_MAX_INDEX) {
-        return cfg.band.yellow_percent;
-    }
-    if (nox_index <= Config::AQ_NOX_ORANGE_MAX_INDEX) {
-        return cfg.band.orange_percent;
-    }
-    return cfg.band.red_percent;
-}
-
-void update_reason_candidate(uint8_t percent,
-                             const char *sensor,
-                             const char *value,
-                             uint8_t &best_percent,
-                             char *best_sensor,
-                             size_t sensor_len,
-                             char *best_value,
-                             size_t value_len) {
-    if (percent <= best_percent) {
-        return;
-    }
-    best_percent = percent;
-    snprintf(best_sensor, sensor_len, "%s", sensor);
-    snprintf(best_value, value_len, "%s", value);
 }
 
 } // namespace
@@ -291,77 +211,21 @@ void UiController::update_dac_ui(uint32_t now_ms) {
     if (objects.label_dac_rl_sensor || objects.label_dac_rl_value) {
         char reason_sensor[16] = "--";
         char reason_value[32] = "--";
-        uint8_t best_percent = 0;
         const DacAutoConfig cfg = fanControl.autoConfig();
         const bool gas_warmup = sensorManager.isWarmupActive();
 
         if (cfg.enabled) {
-            if (cfg.co2.enabled && currentData.co2_valid && currentData.co2 > 0) {
-                char value_buf[32];
-                snprintf(value_buf, sizeof(value_buf), "%d ppm", currentData.co2);
-                update_reason_candidate(co2_auto_percent(cfg.co2, currentData.co2),
-                                        "CO2:",
-                                        value_buf,
-                                        best_percent,
-                                        reason_sensor, sizeof(reason_sensor),
-                                        reason_value, sizeof(reason_value));
-            }
-
-            if (cfg.co.enabled &&
-                currentData.co_sensor_present &&
-                currentData.co_valid &&
-                isfinite(currentData.co_ppm) &&
-                currentData.co_ppm >= 0.0f) {
-                char value_buf[32];
-                snprintf(value_buf, sizeof(value_buf), "%.1f ppm", currentData.co_ppm);
-                update_reason_candidate(co_auto_percent(cfg.co, currentData.co_ppm),
-                                        "CO:",
-                                        value_buf,
-                                        best_percent,
-                                        reason_sensor, sizeof(reason_sensor),
-                                        reason_value, sizeof(reason_value));
-            }
-
-            if (cfg.pm25.enabled &&
-                currentData.pm25_valid &&
-                isfinite(currentData.pm25) &&
-                currentData.pm25 >= 0.0f) {
-                char value_buf[32];
-                snprintf(value_buf, sizeof(value_buf), "%.1f ug/m3", currentData.pm25);
-                update_reason_candidate(pm25_auto_percent(cfg.pm25, currentData.pm25),
-                                        "PM2.5:",
-                                        value_buf,
-                                        best_percent,
-                                        reason_sensor, sizeof(reason_sensor),
-                                        reason_value, sizeof(reason_value));
-            }
-
-            if (cfg.voc.enabled &&
-                !gas_warmup &&
-                currentData.voc_valid &&
-                currentData.voc_index >= 0) {
-                char value_buf[32];
-                snprintf(value_buf, sizeof(value_buf), "%d idx", currentData.voc_index);
-                update_reason_candidate(voc_auto_percent(cfg.voc, currentData.voc_index),
-                                        "VOC:",
-                                        value_buf,
-                                        best_percent,
-                                        reason_sensor, sizeof(reason_sensor),
-                                        reason_value, sizeof(reason_value));
-            }
-
-            if (cfg.nox.enabled &&
-                !gas_warmup &&
-                currentData.nox_valid &&
-                currentData.nox_index >= 0) {
-                char value_buf[32];
-                snprintf(value_buf, sizeof(value_buf), "%d idx", currentData.nox_index);
-                update_reason_candidate(nox_auto_percent(cfg.nox, currentData.nox_index),
-                                        "NOx:",
-                                        value_buf,
-                                        best_percent,
-                                        reason_sensor, sizeof(reason_sensor),
-                                        reason_value, sizeof(reason_value));
+            const DacAutoDemand::Result reason =
+                DacAutoDemand::evaluate(cfg, currentData, gas_warmup, displayThresholds.snapshot());
+            if (reason.sensor != DacAutoDemand::Sensor::None) {
+                snprintf(reason_sensor,
+                         sizeof(reason_sensor),
+                         "%s",
+                         DacAutoDemand::sensorLabel(reason.sensor));
+                DacAutoDemand::formatSensorValue(reason.sensor,
+                                                 reason.value,
+                                                 reason_value,
+                                                 sizeof(reason_value));
             }
         }
 

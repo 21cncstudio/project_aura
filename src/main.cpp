@@ -342,7 +342,7 @@ void loop()
         dailyExtremaHistory.update(currentData, now);
     }
     dailyExtremaHistory.poll(now);
-    fanControl.poll(now, &currentData, sensorManager.isWarmupActive());
+    fanControl.poll(now, &currentData, sensorManager.isWarmupActive(), displayThresholds.snapshot());
     const FanControl::Snapshot fan_snapshot = fanControl.snapshot();
     webRuntimeState.update(currentData, sensorManager.isWarmupActive(), fanControl);
     mqttRuntimeState.update(currentData,

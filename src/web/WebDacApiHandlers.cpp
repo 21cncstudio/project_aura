@@ -45,6 +45,9 @@ void handleState(WebHandlerContext &context, bool ota_busy, const char *ota_busy
     WebDacApiUtils::StatePayload payload{};
     payload.now_ms = millis();
     payload.gas_warmup = runtime.gas_warmup;
+    payload.thresholds = context.display_thresholds
+                             ? context.display_thresholds->snapshot()
+                             : DisplayThresholds::defaults();
     payload.dac.available = fan.available;
     payload.dac.faulted = fan.faulted;
     payload.dac.running = fan.running;

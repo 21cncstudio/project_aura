@@ -11,6 +11,7 @@
 #include "config/AppConfig.h"
 #include "config/AppData.h"
 #include "core/Logger.h"
+#include "modules/DacAutoDemand.h"
 
 namespace {
 
@@ -268,7 +269,10 @@ void FanControl::begin(bool auto_mode_preference, bool auto_armed_preference) {
     publishSnapshot();
 }
 
-void FanControl::poll(uint32_t now_ms, const SensorData *sensor_data, bool gas_warmup) {
+void FanControl::poll(uint32_t now_ms,
+                      const SensorData *sensor_data,
+                      bool gas_warmup,
+                      const DisplayThresholds::Config &thresholds) {
     ensureSyncPrimitives();
 
     PendingCommands pending;
@@ -418,7 +422,7 @@ void FanControl::poll(uint32_t now_ms, const SensorData *sensor_data, bool gas_w
     if (mode_ == Mode::Auto && available_ && !manual_override_active_ && !auto_resume_blocked_) {
         uint8_t demand_percent = 0;
         if (auto_config_.enabled && sensor_data != nullptr) {
-            demand_percent = evaluateAutoDemandPercent(*sensor_data, gas_warmup);
+            demand_percent = evaluateAutoDemandPercent(*sensor_data, gas_warmup, thresholds);
         }
         const uint16_t target_mv = percentToMillivolts(demand_percent);
 
@@ -715,148 +719,8 @@ uint16_t FanControl::percentToMillivolts(uint8_t percent) const {
     return static_cast<uint16_t>(mv / 100u);
 }
 
-uint8_t FanControl::evaluateAutoDemandPercent(const SensorData &data, bool gas_warmup) const {
-    uint8_t demand = 0;
-
-    const auto pick_percent = [&](const DacAutoSensorConfig &sensor,
-                                  bool valid,
-                                  float value,
-                                  float green_limit,
-                                  float yellow_limit,
-                                  float orange_limit) -> uint8_t {
-        if (!sensor.enabled || !valid) {
-            return 0;
-        }
-        if (value < green_limit) {
-            return sensor.band.green_percent;
-        }
-        if (value < yellow_limit) {
-            return sensor.band.yellow_percent;
-        }
-        if (value < orange_limit) {
-            return sensor.band.orange_percent;
-        }
-        return sensor.band.red_percent;
-    };
-
-    const bool co2_valid = data.co2_valid && data.co2 > 0;
-    demand = maxPercent(demand, pick_percent(auto_config_.co2,
-                                             co2_valid,
-                                             static_cast<float>(data.co2),
-                                             Config::AQ_CO2_GREEN_MAX_PPM,
-                                             Config::AQ_CO2_YELLOW_MAX_PPM,
-                                             Config::AQ_CO2_ORANGE_MAX_PPM));
-
-    const bool co_valid = data.co_sensor_present &&
-                          data.co_valid &&
-                          isfinite(data.co_ppm) &&
-                          data.co_ppm >= 0.0f;
-    if (co_valid) {
-        float co = data.co_ppm;
-        uint8_t co_percent = auto_config_.co.band.red_percent;
-        if (co < Config::AQ_CO_GREEN_MAX_PPM) {
-            co_percent = auto_config_.co.band.green_percent;
-        } else if (co <= Config::AQ_CO_YELLOW_MAX_PPM) {
-            co_percent = auto_config_.co.band.yellow_percent;
-        } else if (co <= Config::AQ_CO_ORANGE_MAX_PPM) {
-            co_percent = auto_config_.co.band.orange_percent;
-        }
-        if (auto_config_.co.enabled) {
-            demand = maxPercent(demand, co_percent);
-        }
-    }
-
-    const bool pm05_valid = data.pm05_valid &&
-                            isfinite(data.pm05) &&
-                            data.pm05 >= 0.0f;
-    demand = maxPercent(demand, pick_percent(auto_config_.pm05,
-                                             pm05_valid,
-                                             data.pm05,
-                                             Config::AQ_PM05_GREEN_MAX_PPCM3,
-                                             Config::AQ_PM05_YELLOW_MAX_PPCM3,
-                                             Config::AQ_PM05_ORANGE_MAX_PPCM3));
-
-    const bool pm1_valid = data.pm1_valid &&
-                           isfinite(data.pm1) &&
-                           data.pm1 >= 0.0f;
-    demand = maxPercent(demand, pick_percent(auto_config_.pm1,
-                                             pm1_valid,
-                                             data.pm1,
-                                             Config::AQ_PM1_GREEN_MAX_UGM3,
-                                             Config::AQ_PM1_YELLOW_MAX_UGM3,
-                                             Config::AQ_PM1_ORANGE_MAX_UGM3));
-
-    const bool pm4_valid = data.pm4_valid &&
-                           isfinite(data.pm4) &&
-                           data.pm4 >= 0.0f;
-    demand = maxPercent(demand, pick_percent(auto_config_.pm4,
-                                             pm4_valid,
-                                             data.pm4,
-                                             Config::AQ_PM4_GREEN_MAX_UGM3,
-                                             Config::AQ_PM4_YELLOW_MAX_UGM3,
-                                             Config::AQ_PM4_ORANGE_MAX_UGM3));
-
-    const bool pm25_valid = data.pm25_valid &&
-                            isfinite(data.pm25) &&
-                            data.pm25 >= 0.0f;
-    demand = maxPercent(demand, pick_percent(auto_config_.pm25,
-                                             pm25_valid,
-                                             data.pm25,
-                                             Config::AQ_PM25_GREEN_MAX_UGM3,
-                                             Config::AQ_PM25_YELLOW_MAX_UGM3,
-                                             Config::AQ_PM25_ORANGE_MAX_UGM3));
-
-    const bool pm10_valid = data.pm10_valid &&
-                            isfinite(data.pm10) &&
-                            data.pm10 >= 0.0f;
-    demand = maxPercent(demand, pick_percent(auto_config_.pm10,
-                                             pm10_valid,
-                                             data.pm10,
-                                             Config::AQ_PM10_GREEN_MAX_UGM3,
-                                             Config::AQ_PM10_YELLOW_MAX_UGM3,
-                                             Config::AQ_PM10_ORANGE_MAX_UGM3));
-
-    const bool hcho_valid = data.hcho_valid &&
-                            isfinite(data.hcho) &&
-                            data.hcho >= 0.0f;
-    demand = maxPercent(demand, pick_percent(auto_config_.hcho,
-                                             hcho_valid,
-                                             data.hcho,
-                                             Config::AQ_HCHO_GREEN_MAX_PPB,
-                                             Config::AQ_HCHO_YELLOW_MAX_PPB,
-                                             Config::AQ_HCHO_ORANGE_MAX_PPB));
-
-    const bool voc_valid = !gas_warmup &&
-                           data.voc_valid &&
-                           data.voc_index >= 0;
-    if (voc_valid && auto_config_.voc.enabled) {
-        int voc = data.voc_index;
-        uint8_t voc_percent = auto_config_.voc.band.red_percent;
-        if (voc <= Config::AQ_VOC_GREEN_MAX_INDEX) {
-            voc_percent = auto_config_.voc.band.green_percent;
-        } else if (voc <= Config::AQ_VOC_YELLOW_MAX_INDEX) {
-            voc_percent = auto_config_.voc.band.yellow_percent;
-        } else if (voc <= Config::AQ_VOC_ORANGE_MAX_INDEX) {
-            voc_percent = auto_config_.voc.band.orange_percent;
-        }
-        demand = maxPercent(demand, voc_percent);
-    }
-
-    const bool nox_valid = !gas_warmup &&
-                           data.nox_valid &&
-                           data.nox_index >= 0;
-    if (nox_valid && auto_config_.nox.enabled) {
-        int nox = data.nox_index;
-        uint8_t nox_percent = auto_config_.nox.band.red_percent;
-        if (nox <= Config::AQ_NOX_GREEN_MAX_INDEX) {
-            nox_percent = auto_config_.nox.band.green_percent;
-        } else if (nox <= Config::AQ_NOX_YELLOW_MAX_INDEX) {
-            nox_percent = auto_config_.nox.band.yellow_percent;
-        } else if (nox <= Config::AQ_NOX_ORANGE_MAX_INDEX) {
-            nox_percent = auto_config_.nox.band.orange_percent;
-        }
-        demand = maxPercent(demand, nox_percent);
-    }
-
-    return demand;
+uint8_t FanControl::evaluateAutoDemandPercent(const SensorData &data,
+                                              bool gas_warmup,
+                                              const DisplayThresholds::Config &thresholds) const {
+    return DacAutoDemand::evaluate(auto_config_, data, gas_warmup, thresholds).percent;
 }

@@ -11,6 +11,7 @@
 #include <freertos/semphr.h>
 
 #include "modules/DacAutoConfig.h"
+#include "modules/DisplayThresholds.h"
 #include "modules/FanStateSnapshot.h"
 #include "drivers/Gp8403.h"
 
@@ -29,7 +30,10 @@ public:
     using Snapshot = FanStateSnapshot;
 
     void begin(bool auto_mode_preference, bool auto_armed_preference);
-    void poll(uint32_t now_ms, const SensorData *sensor_data, bool gas_warmup);
+    void poll(uint32_t now_ms,
+              const SensorData *sensor_data,
+              bool gas_warmup,
+              const DisplayThresholds::Config &thresholds);
 
     void setMode(Mode mode);
     void setManualStep(uint8_t step);
@@ -91,7 +95,9 @@ private:
     void applyStopState(bool output_known);
     uint16_t stepToMillivolts(uint8_t step) const;
     uint16_t percentToMillivolts(uint8_t percent) const;
-    uint8_t evaluateAutoDemandPercent(const SensorData &data, bool gas_warmup) const;
+    uint8_t evaluateAutoDemandPercent(const SensorData &data,
+                                      bool gas_warmup,
+                                      const DisplayThresholds::Config &thresholds) const;
     static uint8_t maxPercent(uint8_t a, uint8_t b) { return (a > b) ? a : b; }
 
     Gp8403 dac_;

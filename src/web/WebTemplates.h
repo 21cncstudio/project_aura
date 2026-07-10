@@ -2520,6 +2520,44 @@ static const char kDacPageTemplate[] PROGMEM = R"HTML(
       setSaveButtonState("idle");
     }
 
+    function fmtThresholdValue(value, decimals) {
+      const n = Number(value);
+      if (!Number.isFinite(n)) return null;
+      let s = n.toFixed(decimals || 0);
+      s = s.replace(/\.0+$/, "");
+      s = s.replace(/(\.\d*?)0+$/, "$1");
+      return s;
+    }
+
+    function highThresholdLabels(source, meta) {
+      if (!source || !meta) return null;
+      const g = fmtThresholdValue(source.green, meta.decimals);
+      const y = fmtThresholdValue(source.yellow, meta.decimals);
+      const o = fmtThresholdValue(source.orange, meta.decimals);
+      if (g === null || y === null || o === null) return null;
+      return [`<=${g}`, `>${g}-${y}`, `>${y}-${o}`, `>${o}`];
+    }
+
+    function updateAutoCardLabels() {
+      document.querySelectorAll("#sensors_wrapper .sensor-card").forEach(card => {
+        const meta = AUTO_META[card.dataset.key];
+        if (!meta || !Array.isArray(meta.labels)) return;
+        const labels = card.querySelectorAll(".th-label");
+        meta.labels.forEach((label, index) => {
+          if (labels[index]) labels[index].textContent = label;
+        });
+      });
+    }
+
+    function applyThresholdLabels(thresholdMetrics) {
+      if (!thresholdMetrics || typeof thresholdMetrics !== "object") return;
+      ["co2", "co", "hcho", "voc", "nox"].forEach(key => {
+        const labels = highThresholdLabels(thresholdMetrics[key], AUTO_META[key]);
+        if (labels) AUTO_META[key].labels = labels;
+      });
+      updateAutoCardLabels();
+    }
+
     function setMasterAutoVisual(enabled) {
       const btn = document.getElementById("btn_master_auto");
       btn.classList.toggle("on", !!enabled);
@@ -2637,6 +2675,8 @@ static const char kDacPageTemplate[] PROGMEM = R"HTML(
       const dac = data.dac || {};
       const autoCfg = data.auto || {};
       const sensors = data.sensors || {};
+      const thresholdMetrics = data.thresholds && data.thresholds.metrics;
+      applyThresholdLabels(thresholdMetrics);
 
       setStatus(dac.status || "OFFLINE");
       const mode = dac.mode || "manual";
@@ -2863,7 +2903,7 @@ static const char kThresholdsPageTemplate[] PROGMEM = R"HTML(
     <div><div class="brand">AURA</div><div class="sub">Display thresholds</div></div>
     <a class="btn" href="/dashboard">Back to dashboard</a>
   </div>
-  <div class="banner">These thresholds control display colors, status warnings, graph zones and alert wake behavior. AQI, DAC Auto, MQTT, history and raw sensor readings are unchanged.</div>
+  <div class="banner">These thresholds control display colors, status warnings, graph zones, alert wake behavior and DAC Auto gas zones for CO2, HCHO, CO, VOC and NOx. AQI, MQTT, history and raw sensor readings are unchanged.</div>
   <div class="grid" id="cards"></div>
   <div class="card" style="margin-top:14px">
     <h2>Background alerts</h2>

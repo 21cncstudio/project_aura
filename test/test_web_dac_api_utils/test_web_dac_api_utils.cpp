@@ -28,6 +28,8 @@ void test_web_dac_api_utils_fill_state_json_populates_dac_auto_and_sensor_fields
     payload.dac.output_mv = 5000;
     payload.dac.stop_at_ms = 4500;
     payload.dac.auto_config.enabled = true;
+    payload.thresholds.co2.green = 700.0f;
+    payload.thresholds.voc.orange = 325.0f;
     payload.sensors.co2 = 742;
     payload.sensors.co2_valid = true;
     payload.sensors.co_ppm = 5.5f;
@@ -47,6 +49,8 @@ void test_web_dac_api_utils_fill_state_json_populates_dac_auto_and_sensor_fields
     TEST_ASSERT_EQUAL_UINT(50, doc["dac"]["output_percent"].as<unsigned>());
     TEST_ASSERT_EQUAL_STRING("RUNNING", doc["dac"]["status"].as<const char *>());
     TEST_ASSERT_TRUE(doc["auto"]["enabled"].as<bool>());
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, 700.0f, doc["thresholds"]["metrics"]["co2"]["green"].as<float>());
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, 325.0f, doc["thresholds"]["metrics"]["voc"]["orange"].as<float>());
     TEST_ASSERT_TRUE(doc["sensors"]["gas_warmup"].as<bool>());
     TEST_ASSERT_EQUAL_INT(742, doc["sensors"]["co2"].as<int>());
     TEST_ASSERT_EQUAL_INT(87, doc["sensors"]["voc_index"].as<int>());

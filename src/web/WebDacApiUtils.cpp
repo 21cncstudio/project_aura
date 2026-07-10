@@ -61,6 +61,11 @@ void fillStateJson(ArduinoJson::JsonObject root, const StatePayload &payload) {
     ArduinoJson::JsonObject auto_cfg = root["auto"].to<ArduinoJson::JsonObject>();
     DacAutoConfigJson::writeJson(auto_cfg, dac_snapshot.auto_config);
 
+    ArduinoJson::JsonObject thresholds = root["thresholds"].to<ArduinoJson::JsonObject>();
+    thresholds["version"] = DisplayThresholds::kVersion;
+    DisplayThresholds::writeMetricsJson(thresholds["metrics"].to<ArduinoJson::JsonObject>(),
+                                        payload.thresholds);
+
     const SensorSnapshot &sensor_snapshot = payload.sensors;
     ArduinoJson::JsonObject sensors = root["sensors"].to<ArduinoJson::JsonObject>();
     sensors["gas_warmup"] = payload.gas_warmup;
