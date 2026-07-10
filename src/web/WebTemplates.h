@@ -2898,6 +2898,8 @@ const METRICS = [
   {key:'co2',label:'CO2',unit:'ppm',type:'high',digits:0},
   {key:'hcho',label:'HCHO',unit:'ppb',type:'high',digits:0},
   {key:'co',label:'CO',unit:'ppm',type:'high',digits:1},
+  {key:'voc',label:'VOC',unit:'idx',type:'high',digits:0},
+  {key:'nox',label:'NOx',unit:'idx',type:'high',digits:0},
 ];
 const BG = [
   ['hcho_enabled','HCHO background alert'],

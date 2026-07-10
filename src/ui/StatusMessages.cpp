@@ -169,28 +169,24 @@ StatusMessageResult build_status_messages(const SensorData &data,
 
     if (!gas_warmup && data.voc_valid && data.voc_index > 0) {
         result.has_valid = true;
-        if (data.voc_index > 350) {
-            voc_sev = STATUS_RED;
+        voc_sev = classify_high_severity(static_cast<float>(data.voc_index), thresholds.voc);
+        if (voc_sev == STATUS_RED) {
             voc_msg = text(TextId::MsgVocVeryHigh);
-        } else if (data.voc_index > 250) {
-            voc_sev = STATUS_ORANGE;
+        } else if (voc_sev == STATUS_ORANGE) {
             voc_msg = text(TextId::MsgVocHigh);
-        } else if (data.voc_index >= 151) {
-            voc_sev = STATUS_YELLOW;
+        } else if (voc_sev == STATUS_YELLOW) {
             voc_msg = text(TextId::MsgVocHigh);
         }
     }
 
     if (!gas_warmup && data.nox_valid && data.nox_index > 0) {
         result.has_valid = true;
-        if (data.nox_index >= 200) {
-            nox_sev = STATUS_RED;
+        nox_sev = classify_high_severity(static_cast<float>(data.nox_index), thresholds.nox);
+        if (nox_sev == STATUS_RED) {
             nox_msg = text(TextId::MsgNoxVeryHigh);
-        } else if (data.nox_index >= 100) {
-            nox_sev = STATUS_ORANGE;
+        } else if (nox_sev == STATUS_ORANGE) {
             nox_msg = text(TextId::MsgNoxHigh);
-        } else if (data.nox_index >= 50) {
-            nox_sev = STATUS_YELLOW;
+        } else if (nox_sev == STATUS_YELLOW) {
             nox_msg = text(TextId::MsgNoxElevated);
         }
     }

@@ -68,6 +68,33 @@ void test_status_messages_co2_uses_display_thresholds() {
     TEST_ASSERT_EQUAL_UINT(0, result.count);
 }
 
+void test_status_messages_voc_and_nox_use_display_thresholds() {
+    SensorData data{};
+    data.voc_valid = true;
+    data.voc_index = 120;
+    data.nox_valid = true;
+    data.nox_index = 40;
+
+    DisplayThresholds::Config thresholds = DisplayThresholds::defaults();
+    thresholds.voc = {100.0f, 150.0f, 200.0f};
+    thresholds.nox = {30.0f, 60.0f, 90.0f};
+
+    StatusMessages::StatusMessageResult result =
+        StatusMessages::build_status_messages(data, false, thresholds);
+    TEST_ASSERT_TRUE(result.has_valid);
+    TEST_ASSERT_EQUAL_UINT(2, result.count);
+    TEST_ASSERT_EQUAL_UINT8(StatusMessages::STATUS_SENSOR_NOX, result.messages[0].sensor);
+    TEST_ASSERT_EQUAL_UINT8(StatusMessages::STATUS_YELLOW, result.messages[0].severity);
+    TEST_ASSERT_EQUAL_UINT8(StatusMessages::STATUS_SENSOR_VOC, result.messages[1].sensor);
+    TEST_ASSERT_EQUAL_UINT8(StatusMessages::STATUS_YELLOW, result.messages[1].severity);
+
+    thresholds.voc = {120.0f, 150.0f, 200.0f};
+    thresholds.nox = {40.0f, 60.0f, 90.0f};
+    result = StatusMessages::build_status_messages(data, false, thresholds);
+    TEST_ASSERT_TRUE(result.has_valid);
+    TEST_ASSERT_EQUAL_UINT(0, result.count);
+}
+
 void test_status_messages_humidity_uses_display_thresholds() {
     SensorData data{};
     data.hum_valid = true;
@@ -106,6 +133,7 @@ int main(int, char **) {
     RUN_TEST(test_status_messages_temperature_uses_display_thresholds);
     RUN_TEST(test_status_messages_co_safety_override_uses_display_thresholds);
     RUN_TEST(test_status_messages_co2_uses_display_thresholds);
+    RUN_TEST(test_status_messages_voc_and_nox_use_display_thresholds);
     RUN_TEST(test_status_messages_humidity_uses_display_thresholds);
     RUN_TEST(test_status_messages_dew_point_defaults_match_display_thresholds);
     return UNITY_END();

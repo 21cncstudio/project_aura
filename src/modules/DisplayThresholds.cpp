@@ -172,6 +172,8 @@ bool apply_metrics_update(ArduinoJson::JsonObjectConst metrics, Config &out, Str
     ArduinoJson::JsonObjectConst co2;
     ArduinoJson::JsonObjectConst hcho;
     ArduinoJson::JsonObjectConst co;
+    ArduinoJson::JsonObjectConst voc;
+    ArduinoJson::JsonObjectConst nox;
     return read_object_field(metrics, "temp", temp, error) &&
            read_object_field(metrics, "rh", rh, error) &&
            read_object_field(metrics, "dew_point", dew_point, error) &&
@@ -179,13 +181,17 @@ bool apply_metrics_update(ArduinoJson::JsonObjectConst metrics, Config &out, Str
            read_object_field(metrics, "co2", co2, error) &&
            read_object_field(metrics, "hcho", hcho, error) &&
            read_object_field(metrics, "co", co, error) &&
+           read_object_field(metrics, "voc", voc, error) &&
+           read_object_field(metrics, "nox", nox, error) &&
            read_range(temp, out.temp, error) &&
            read_range(rh, out.rh, error) &&
            read_range(dew_point, out.dew_point, error) &&
            read_range(ah, out.ah, error) &&
            read_high(co2, out.co2, error) &&
            read_high(hcho, out.hcho, error) &&
-           read_high(co, out.co, error);
+           read_high(co, out.co, error) &&
+           read_high(voc, out.voc, error) &&
+           read_high(nox, out.nox, error);
 }
 
 bool apply_background_update(ArduinoJson::JsonObjectConst obj, BackgroundAlerts &alerts, String *error) {
@@ -209,6 +215,8 @@ Config defaults() {
     cfg.co2 = {800.0f, 1000.0f, 1500.0f};
     cfg.hcho = {30.0f, 60.0f, 100.0f};
     cfg.co = {9.0f, 35.0f, 100.0f};
+    cfg.voc = {150.0f, 250.0f, 350.0f};
+    cfg.nox = {50.0f, 100.0f, 200.0f};
     cfg.background_alerts = {};
     return cfg;
 }
@@ -224,7 +232,9 @@ bool validate(const Config &cfg, String *error) {
            validate_range(cfg.ah, "ah", false, error) &&
            validate_high(cfg.co2, "co2", error) &&
            validate_high(cfg.hcho, "hcho", error) &&
-           validate_high(cfg.co, "co", error);
+           validate_high(cfg.co, "co", error) &&
+           validate_high(cfg.voc, "voc", error) &&
+           validate_high(cfg.nox, "nox", error);
 }
 
 Band classifyHigh(float value, const High &thresholds) {
@@ -269,6 +279,8 @@ void writeMetricsJson(ArduinoJson::JsonObject root, const Config &cfg) {
     write_high(root["co2"].to<ArduinoJson::JsonObject>(), cfg.co2);
     write_high(root["hcho"].to<ArduinoJson::JsonObject>(), cfg.hcho);
     write_high(root["co"].to<ArduinoJson::JsonObject>(), cfg.co);
+    write_high(root["voc"].to<ArduinoJson::JsonObject>(), cfg.voc);
+    write_high(root["nox"].to<ArduinoJson::JsonObject>(), cfg.nox);
 }
 
 void writeBackgroundAlertsJson(ArduinoJson::JsonObject root, const BackgroundAlerts &alerts) {

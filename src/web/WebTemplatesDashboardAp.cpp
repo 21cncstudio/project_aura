@@ -820,6 +820,8 @@ function applyThresholdsFromState(stateThresholds) {
   assignHighThreshold('co2', metrics.co2);
   assignHighThreshold('hcho', metrics.hcho);
   assignHighThreshold('co', metrics.co);
+  assignHighThreshold('voc', metrics.voc);
+  assignHighThreshold('nox', metrics.nox);
   assignRangeThreshold('temp', metrics.temp);
   assignRangeThreshold('rh', metrics.rh);
   assignRangeThreshold('dewPoint', metrics.dew_point);

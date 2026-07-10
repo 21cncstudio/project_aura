@@ -53,6 +53,8 @@ struct Config {
     High co2{};
     High hcho{};
     High co{};
+    High voc{};
+    High nox{};
     BackgroundAlerts background_alerts{};
 };
 

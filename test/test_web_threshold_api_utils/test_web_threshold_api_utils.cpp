@@ -86,12 +86,16 @@ void test_web_threshold_api_utils_parse_accepts_switch_and_metric_update() {
     const DisplayThresholds::Config current = DisplayThresholds::defaults();
     const WebThresholdApiUtils::ParseResult result =
         WebThresholdApiUtils::parseUpdateRequestBody(
-            "{\"metrics\":{\"hcho\":{\"green\":25,\"yellow\":50,\"orange\":90}},"
+            "{\"metrics\":{\"hcho\":{\"green\":25,\"yellow\":50,\"orange\":90},"
+            "\"voc\":{\"green\":120,\"yellow\":220,\"orange\":320},"
+            "\"nox\":{\"green\":40,\"yellow\":90,\"orange\":180}},"
             "\"background_alerts\":{\"hcho_enabled\":false,\"co2_enabled\":false}}",
             current);
 
     TEST_ASSERT_TRUE(result.success);
     TEST_ASSERT_FLOAT_WITHIN(0.001f, 25.0f, result.update.hcho.green);
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, 220.0f, result.update.voc.yellow);
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, 180.0f, result.update.nox.orange);
     TEST_ASSERT_FLOAT_WITHIN(0.001f, current.co.orange, result.update.co.orange);
     TEST_ASSERT_FALSE(result.update.background_alerts.hcho_enabled);
     TEST_ASSERT_TRUE(result.update.background_alerts.co_enabled);
@@ -112,7 +116,11 @@ void test_web_threshold_api_utils_fill_state_json_includes_factory_and_active() 
     TEST_ASSERT_EQUAL_INT(1, doc["version"].as<int>());
     TEST_ASSERT_FLOAT_WITHIN(0.001f, 700.0f, doc["metrics"]["co2"]["green"].as<float>());
     TEST_ASSERT_FALSE(doc["background_alerts"]["co_enabled"].as<bool>());
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, 150.0f, doc["metrics"]["voc"]["green"].as<float>());
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, 200.0f, doc["metrics"]["nox"]["orange"].as<float>());
     TEST_ASSERT_FLOAT_WITHIN(0.001f, 800.0f, doc["factory_metrics"]["co2"]["green"].as<float>());
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, 250.0f, doc["factory_metrics"]["voc"]["yellow"].as<float>());
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, 50.0f, doc["factory_metrics"]["nox"]["green"].as<float>());
     TEST_ASSERT_TRUE(doc["factory_background_alerts"]["co_enabled"].as<bool>());
 }
 

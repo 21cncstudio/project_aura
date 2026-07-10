@@ -1609,17 +1609,13 @@ lv_color_t UiController::getPressureDeltaColor(float delta, bool valid, bool is2
 }
 
 lv_color_t UiController::getVOCColor(int voc) {
-    if (voc <= AQ_VOC_GREEN_MAX_INDEX) return color_green();
-    if (voc <= AQ_VOC_YELLOW_MAX_INDEX) return color_yellow();
-    if (voc <= AQ_VOC_ORANGE_MAX_INDEX) return color_orange();
-    return color_red();
+    const DisplayThresholds::Config thresholds = displayThresholds.snapshot();
+    return color_for_display_band(DisplayThresholds::classifyHigh(static_cast<float>(voc), thresholds.voc));
 }
 
 lv_color_t UiController::getNOxColor(int nox) {
-    if (nox <= AQ_NOX_GREEN_MAX_INDEX) return color_green();
-    if (nox <= AQ_NOX_YELLOW_MAX_INDEX) return color_yellow();
-    if (nox <= AQ_NOX_ORANGE_MAX_INDEX) return color_orange();
-    return color_red();
+    const DisplayThresholds::Config thresholds = displayThresholds.snapshot();
+    return color_for_display_band(DisplayThresholds::classifyHigh(static_cast<float>(nox), thresholds.nox));
 }
 
 lv_color_t UiController::getOptionalGasColor(DfrOptionalGasSensor::OptionalGasType type,

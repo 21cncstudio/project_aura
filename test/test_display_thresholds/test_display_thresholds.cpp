@@ -31,6 +31,10 @@ void test_display_threshold_defaults_classify_current_visual_bands() {
                           static_cast<int>(DisplayThresholds::classifyHigh(700.0f, cfg.co2)));
     TEST_ASSERT_EQUAL_INT(static_cast<int>(DisplayThresholds::Band::Red),
                           static_cast<int>(DisplayThresholds::classifyHigh(101.0f, cfg.hcho)));
+    TEST_ASSERT_EQUAL_INT(static_cast<int>(DisplayThresholds::Band::Yellow),
+                          static_cast<int>(DisplayThresholds::classifyHigh(200.0f, cfg.voc)));
+    TEST_ASSERT_EQUAL_INT(static_cast<int>(DisplayThresholds::Band::Orange),
+                          static_cast<int>(DisplayThresholds::classifyHigh(150.0f, cfg.nox)));
 }
 
 void test_display_threshold_boundaries_are_inclusive() {
@@ -44,6 +48,23 @@ void test_display_threshold_boundaries_are_inclusive() {
                           static_cast<int>(DisplayThresholds::classifyHigh(1500.0f, cfg.co2)));
     TEST_ASSERT_EQUAL_INT(static_cast<int>(DisplayThresholds::Band::Red),
                           static_cast<int>(DisplayThresholds::classifyHigh(1500.1f, cfg.co2)));
+
+    TEST_ASSERT_EQUAL_INT(static_cast<int>(DisplayThresholds::Band::Green),
+                          static_cast<int>(DisplayThresholds::classifyHigh(150.0f, cfg.voc)));
+    TEST_ASSERT_EQUAL_INT(static_cast<int>(DisplayThresholds::Band::Yellow),
+                          static_cast<int>(DisplayThresholds::classifyHigh(250.0f, cfg.voc)));
+    TEST_ASSERT_EQUAL_INT(static_cast<int>(DisplayThresholds::Band::Orange),
+                          static_cast<int>(DisplayThresholds::classifyHigh(350.0f, cfg.voc)));
+    TEST_ASSERT_EQUAL_INT(static_cast<int>(DisplayThresholds::Band::Red),
+                          static_cast<int>(DisplayThresholds::classifyHigh(350.1f, cfg.voc)));
+    TEST_ASSERT_EQUAL_INT(static_cast<int>(DisplayThresholds::Band::Green),
+                          static_cast<int>(DisplayThresholds::classifyHigh(50.0f, cfg.nox)));
+    TEST_ASSERT_EQUAL_INT(static_cast<int>(DisplayThresholds::Band::Yellow),
+                          static_cast<int>(DisplayThresholds::classifyHigh(100.0f, cfg.nox)));
+    TEST_ASSERT_EQUAL_INT(static_cast<int>(DisplayThresholds::Band::Orange),
+                          static_cast<int>(DisplayThresholds::classifyHigh(200.0f, cfg.nox)));
+    TEST_ASSERT_EQUAL_INT(static_cast<int>(DisplayThresholds::Band::Red),
+                          static_cast<int>(DisplayThresholds::classifyHigh(200.1f, cfg.nox)));
 
     TEST_ASSERT_EQUAL_INT(static_cast<int>(DisplayThresholds::Band::Orange),
                           static_cast<int>(DisplayThresholds::classifyRange(20.0f, cfg.rh)));
@@ -64,6 +85,16 @@ void test_display_threshold_validation_rejects_bad_order() {
     String error;
 
     cfg.co2.green = 1200.0f;
+    TEST_ASSERT_FALSE(DisplayThresholds::validate(cfg, &error));
+    TEST_ASSERT_TRUE(error.length() > 0);
+
+    cfg = DisplayThresholds::defaults();
+    cfg.voc.yellow = cfg.voc.green;
+    TEST_ASSERT_FALSE(DisplayThresholds::validate(cfg, &error));
+    TEST_ASSERT_TRUE(error.length() > 0);
+
+    cfg = DisplayThresholds::defaults();
+    cfg.nox.orange = cfg.nox.yellow;
     TEST_ASSERT_FALSE(DisplayThresholds::validate(cfg, &error));
     TEST_ASSERT_TRUE(error.length() > 0);
 
@@ -95,6 +126,8 @@ void test_display_threshold_validation_rejects_negative_rh_and_ah_only() {
 void test_display_threshold_serialize_roundtrip_preserves_values_and_switches() {
     DisplayThresholds::Config cfg = DisplayThresholds::defaults();
     cfg.co.orange = 77.0f;
+    cfg.voc.yellow = 240.0f;
+    cfg.nox.orange = 180.0f;
     cfg.temp.good_min = 19.0f;
     cfg.background_alerts.hcho_enabled = false;
     cfg.background_alerts.co2_enabled = false;
@@ -104,6 +137,8 @@ void test_display_threshold_serialize_roundtrip_preserves_values_and_switches() 
     TEST_ASSERT_TRUE(DisplayThresholds::deserialize(json, parsed));
 
     TEST_ASSERT_FLOAT_WITHIN(0.001f, 77.0f, parsed.co.orange);
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, 240.0f, parsed.voc.yellow);
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, 180.0f, parsed.nox.orange);
     TEST_ASSERT_FLOAT_WITHIN(0.001f, 19.0f, parsed.temp.good_min);
     TEST_ASSERT_FALSE(parsed.background_alerts.hcho_enabled);
     TEST_ASSERT_FALSE(parsed.background_alerts.co2_enabled);
@@ -114,7 +149,8 @@ void test_display_threshold_partial_update_keeps_unspecified_values() {
     DisplayThresholds::Config current = DisplayThresholds::defaults();
     ArduinoJson::JsonDocument doc;
     deserializeJson(doc,
-                    "{\"metrics\":{\"co2\":{\"green\":700,\"yellow\":900,\"orange\":1400}},"
+                    "{\"metrics\":{\"co2\":{\"green\":700,\"yellow\":900,\"orange\":1400},"
+                    "\"voc\":{\"green\":120},\"nox\":{\"orange\":180}},"
                     "\"background_alerts\":{\"co_enabled\":false}}");
 
     DisplayThresholds::Config updated{};
@@ -122,6 +158,9 @@ void test_display_threshold_partial_update_keeps_unspecified_values() {
                                                         current,
                                                         updated));
     TEST_ASSERT_FLOAT_WITHIN(0.001f, 700.0f, updated.co2.green);
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, 120.0f, updated.voc.green);
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, current.voc.yellow, updated.voc.yellow);
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, 180.0f, updated.nox.orange);
     TEST_ASSERT_FLOAT_WITHIN(0.001f, current.hcho.orange, updated.hcho.orange);
     TEST_ASSERT_FALSE(updated.background_alerts.co_enabled);
     TEST_ASSERT_TRUE(updated.background_alerts.hcho_enabled);

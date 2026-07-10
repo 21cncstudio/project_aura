@@ -63,11 +63,12 @@ void UiController::ensure_voc_zone_overlay() {
 void UiController::update_voc_zone_overlay(float y_min_display, float y_max_display) {
     ensure_voc_zone_overlay();
 
-    static const float kVocZoneBounds[] = {
+    const DisplayThresholds::High voc = displayThresholds.snapshot().voc;
+    const float kVocZoneBounds[] = {
         kGraphZoneLowerSentinel,
-        static_cast<float>(Config::AQ_VOC_GREEN_MAX_INDEX),
-        static_cast<float>(Config::AQ_VOC_YELLOW_MAX_INDEX),
-        static_cast<float>(Config::AQ_VOC_ORANGE_MAX_INDEX),
+        voc.green,
+        voc.yellow,
+        voc.orange,
         kGraphZoneUpperSentinel};
     static const GraphZoneTone kVocZoneTones[] = {
         GRAPH_ZONE_GREEN,
@@ -198,11 +199,12 @@ void UiController::ensure_nox_zone_overlay() {
 void UiController::update_nox_zone_overlay(float y_min_display, float y_max_display) {
     ensure_nox_zone_overlay();
 
-    static const float kNoxZoneBounds[] = {
+    const DisplayThresholds::High nox = displayThresholds.snapshot().nox;
+    const float kNoxZoneBounds[] = {
         kGraphZoneLowerSentinel,
-        static_cast<float>(Config::AQ_NOX_GREEN_MAX_INDEX),
-        static_cast<float>(Config::AQ_NOX_YELLOW_MAX_INDEX),
-        static_cast<float>(Config::AQ_NOX_ORANGE_MAX_INDEX),
+        nox.green,
+        nox.yellow,
+        nox.orange,
         kGraphZoneUpperSentinel};
     static const GraphZoneTone kNoxZoneTones[] = {
         GRAPH_ZONE_GREEN,
