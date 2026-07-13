@@ -53,6 +53,11 @@ bool recoverFileAtomic(const char *final_path) {
 
 bool replaceFileAtomic(const char *tmp_path, const char *final_path) {
     String backup = String(final_path) + ".bak";
+    if (!LittleFS.exists(final_path) && LittleFS.exists(backup) &&
+        !LittleFS.rename(backup, final_path)) {
+        LittleFS.remove(tmp_path);
+        return false;
+    }
     if (LittleFS.exists(backup)) {
         LittleFS.remove(backup);
     }
@@ -143,6 +148,29 @@ bool recoverFileAtomic(const char *final_path) {
     }
     g_blob_store[final_key] = std::move(backup->second);
     g_blob_store.erase(backup);
+    return true;
+}
+
+bool replaceFileAtomic(const char *tmp_path, const char *final_path) {
+    if (!tmp_path || !final_path) {
+        return false;
+    }
+    const std::string tmp_key(tmp_path);
+    const std::string final_key(final_path);
+    const std::string backup_key = final_key + ".bak";
+    auto tmp = g_blob_store.find(tmp_key);
+    if (tmp == g_blob_store.end()) {
+        return false;
+    }
+    g_blob_store.erase(backup_key);
+    auto final = g_blob_store.find(final_key);
+    if (final != g_blob_store.end()) {
+        g_blob_store[backup_key] = std::move(final->second);
+        g_blob_store.erase(final);
+    }
+    g_blob_store[final_key] = std::move(tmp->second);
+    g_blob_store.erase(tmp);
+    g_blob_store.erase(backup_key);
     return true;
 }
 #endif
@@ -589,8 +617,9 @@ bool StorageManager::saveBlobAtomic(const char *path, const void *data, size_t l
         return false;
     }
     const uint8_t *bytes = reinterpret_cast<const uint8_t *>(data);
-    g_blob_store[path] = std::vector<uint8_t>(bytes, bytes + len);
-    return true;
+    const std::string tmp = std::string(path) + ".tmp";
+    g_blob_store[tmp] = std::vector<uint8_t>(bytes, bytes + len);
+    return replaceFileAtomic(tmp.c_str(), path);
 #endif
 }
 
@@ -662,8 +691,9 @@ bool StorageManager::saveTextAtomic(const char *path, const String &text) {
         return false;
     }
     const char *chars = text.c_str();
-    g_blob_store[path] = std::vector<uint8_t>(chars, chars + text.length());
-    return true;
+    const std::string tmp = std::string(path) + ".tmp";
+    g_blob_store[tmp] = std::vector<uint8_t>(chars, chars + text.length());
+    return replaceFileAtomic(tmp.c_str(), path);
 #endif
 }
 

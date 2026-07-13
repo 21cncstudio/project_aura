@@ -290,6 +290,22 @@ void test_remove_blob_cleans_atomic_artifacts() {
     TEST_ASSERT_FALSE(storage.blobExists("/cleanup.bin.bak"));
 }
 
+void test_new_save_supersedes_an_interrupted_backup() {
+    StorageManager storage;
+    storage.begin();
+    const uint8_t previous = 21;
+    const uint8_t current = 42;
+    TEST_ASSERT_TRUE(storage.saveBlobAtomic(
+        "/retry.bin.bak", &previous, sizeof(previous)));
+
+    TEST_ASSERT_TRUE(storage.saveBlobAtomic("/retry.bin", &current, sizeof(current)));
+
+    uint8_t actual = 0;
+    TEST_ASSERT_TRUE(storage.loadBlob("/retry.bin", &actual, sizeof(actual)));
+    TEST_ASSERT_EQUAL_UINT8(current, actual);
+    TEST_ASSERT_FALSE(storage.blobExists("/retry.bin.bak"));
+}
+
 int main(int, char **) {
     UNITY_BEGIN();
     RUN_TEST(test_save_wifi_settings_preserves_spaces);
@@ -308,5 +324,6 @@ int main(int, char **) {
     RUN_TEST(test_blob_load_recovers_interrupted_atomic_replace);
     RUN_TEST(test_text_load_recovers_interrupted_atomic_replace);
     RUN_TEST(test_remove_blob_cleans_atomic_artifacts);
+    RUN_TEST(test_new_save_supersedes_an_interrupted_backup);
     return UNITY_END();
 }
