@@ -2192,7 +2192,7 @@ function updateNetStatusBanner() {
     meta = 'Last update ' + formatSyncAge(ageS) + '.';
   } else {
     cls = 'err';
-    text = 'Connection stale';
+    text = 'Connection lost';
     meta = 'Last update ' + formatSyncAge(ageS) + '. Check network path.';
   }
 
