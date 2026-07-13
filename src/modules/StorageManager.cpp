@@ -43,6 +43,14 @@ bool g_force_save_failure = false;
 #endif
 
 #ifndef UNIT_TEST
+bool recoverFileAtomic(const char *final_path) {
+    if (!final_path || LittleFS.exists(final_path)) {
+        return final_path && LittleFS.exists(final_path);
+    }
+    String backup = String(final_path) + ".bak";
+    return LittleFS.exists(backup) && LittleFS.rename(backup, final_path);
+}
+
 bool replaceFileAtomic(const char *tmp_path, const char *final_path) {
     String backup = String(final_path) + ".bak";
     if (LittleFS.exists(backup)) {
@@ -50,7 +58,8 @@ bool replaceFileAtomic(const char *tmp_path, const char *final_path) {
     }
     if (LittleFS.exists(final_path)) {
         if (!LittleFS.rename(final_path, backup)) {
-            LittleFS.remove(final_path);
+            LittleFS.remove(tmp_path);
+            return false;
         }
     }
     if (!LittleFS.rename(tmp_path, final_path)) {
@@ -68,6 +77,9 @@ bool replaceFileAtomic(const char *tmp_path, const char *final_path) {
 
 bool copyFileAtomic(const char *src_path, const char *dst_path) {
     if (!src_path || !dst_path) {
+        return false;
+    }
+    if (!recoverFileAtomic(src_path)) {
         return false;
     }
     File in = LittleFS.open(src_path, FILE_READ);
@@ -114,6 +126,24 @@ void readValue(const ArduinoJson::JsonObject &obj, const char *key, T &out) {
         return;
     }
     out = value.as<T>();
+}
+#else
+bool recoverFileAtomic(const char *final_path) {
+    if (!final_path) {
+        return false;
+    }
+    const std::string final_key(final_path);
+    if (g_blob_store.find(final_key) != g_blob_store.end()) {
+        return true;
+    }
+    const std::string backup_key = final_key + ".bak";
+    auto backup = g_blob_store.find(backup_key);
+    if (backup == g_blob_store.end()) {
+        return false;
+    }
+    g_blob_store[final_key] = std::move(backup->second);
+    g_blob_store.erase(backup);
+    return true;
 }
 #endif
 
@@ -229,17 +259,17 @@ void StorageManager::poll(uint32_t now_ms) {
 
 void StorageManager::clearAll() {
 #ifndef UNIT_TEST
-    LittleFS.remove(kConfigPath);
-    LittleFS.remove(kLastGoodPath);
-    LittleFS.remove(kVocStatePath);
-    LittleFS.remove(kPressurePath);
-    LittleFS.remove(kChartsPath);
-    LittleFS.remove(kDacAutoPath);
-    LittleFS.remove(kDisplayThresholdsPath);
-    LittleFS.remove(kMqttCaCertPath);
-    LittleFS.remove(kWifiEapCaCertPath);
-    LittleFS.remove(kWifiEapClientCertPath);
-    LittleFS.remove(kWifiEapClientKeyPath);
+    removeBlob(kConfigPath);
+    removeBlob(kLastGoodPath);
+    removeBlob(kVocStatePath);
+    removeBlob(kPressurePath);
+    removeBlob(kChartsPath);
+    removeBlob(kDacAutoPath);
+    removeBlob(kDisplayThresholdsPath);
+    removeBlob(kMqttCaCertPath);
+    removeBlob(kWifiEapCaCertPath);
+    removeBlob(kWifiEapClientCertPath);
+    removeBlob(kWifiEapClientKeyPath);
 #else
     g_blob_store.clear();
 #endif
@@ -253,7 +283,7 @@ void StorageManager::clearAll() {
 
 bool StorageManager::commitLastGood() {
 #ifndef UNIT_TEST
-    if (!LittleFS.exists(kConfigPath)) {
+    if (!recoverFileAtomic(kConfigPath)) {
         return false;
     }
     return copyFileAtomic(kConfigPath, kLastGoodPath);
@@ -269,7 +299,7 @@ bool StorageManager::commitLastGood() {
 
 bool StorageManager::restoreLastGood() {
 #ifndef UNIT_TEST
-    if (!LittleFS.exists(kLastGoodPath)) {
+    if (!recoverFileAtomic(kLastGoodPath)) {
         return false;
     }
     return copyFileAtomic(kLastGoodPath, kConfigPath);
@@ -503,7 +533,7 @@ void StorageManager::clearVocState() {
 
 bool StorageManager::loadBlob(const char *path, void *out, size_t len) const {
 #ifndef UNIT_TEST
-    if (!path || !out) {
+    if (!path || !out || !recoverFileAtomic(path)) {
         return false;
     }
     File file = LittleFS.open(path, FILE_READ);
@@ -518,6 +548,9 @@ bool StorageManager::loadBlob(const char *path, void *out, size_t len) const {
     file.close();
     return read == len;
 #else
+    if (!out || !recoverFileAtomic(path)) {
+        return false;
+    }
     auto it = g_blob_store.find(path ? path : "");
     if (it == g_blob_store.end()) {
         return false;
@@ -528,6 +561,10 @@ bool StorageManager::loadBlob(const char *path, void *out, size_t len) const {
     memcpy(out, it->second.data(), len);
     return true;
 #endif
+}
+
+bool StorageManager::blobExists(const char *path) const {
+    return recoverFileAtomic(path);
 }
 
 bool StorageManager::saveBlobAtomic(const char *path, const void *data, size_t len) {
@@ -562,18 +599,25 @@ bool StorageManager::removeBlob(const char *path) {
     if (!path) {
         return false;
     }
-    return LittleFS.remove(path);
+    bool removed = LittleFS.remove(path);
+    removed = LittleFS.remove(String(path) + ".tmp") || removed;
+    removed = LittleFS.remove(String(path) + ".bak") || removed;
+    return removed;
 #else
     if (!path) {
         return false;
     }
-    return g_blob_store.erase(path) > 0;
+    const std::string final_key(path);
+    bool removed = g_blob_store.erase(final_key) > 0;
+    removed = g_blob_store.erase(final_key + ".tmp") > 0 || removed;
+    removed = g_blob_store.erase(final_key + ".bak") > 0 || removed;
+    return removed;
 #endif
 }
 
 bool StorageManager::loadText(const char *path, String &out) const {
 #ifndef UNIT_TEST
-    if (!path) {
+    if (!recoverFileAtomic(path)) {
         return false;
     }
     File file = LittleFS.open(path, FILE_READ);
@@ -584,6 +628,9 @@ bool StorageManager::loadText(const char *path, String &out) const {
     file.close();
     return true;
 #else
+    if (!recoverFileAtomic(path)) {
+        return false;
+    }
     auto it = g_blob_store.find(path ? path : "");
     if (it == g_blob_store.end()) {
         return false;
@@ -622,7 +669,7 @@ bool StorageManager::saveTextAtomic(const char *path, const String &text) {
 
 bool StorageManager::loadConfig() {
 #ifndef UNIT_TEST
-    if (!LittleFS.exists(kConfigPath)) {
+    if (!recoverFileAtomic(kConfigPath)) {
         LOGI("Storage", "config not found, using defaults");
         config_loaded_ = false;
         return false;

@@ -57,6 +57,7 @@ public:
     void clearVocState();
 
     bool loadBlob(const char *path, void *out, size_t len) const;
+    bool blobExists(const char *path) const;
     bool saveBlobAtomic(const char *path, const void *data, size_t len);
     bool removeBlob(const char *path);
     bool loadText(const char *path, String &out) const;

@@ -253,6 +253,43 @@ void test_save_rtc_mode_rolls_back_on_failure() {
                           static_cast<int>(storage.config().rtc_mode));
 }
 
+void test_blob_load_recovers_interrupted_atomic_replace() {
+    StorageManager storage;
+    storage.begin();
+    const uint8_t expected[] = {0x21, 0x43, 0x65, 0x87};
+    TEST_ASSERT_TRUE(storage.saveBlobAtomic("/recover.bin.bak", expected, sizeof(expected)));
+
+    uint8_t actual[sizeof(expected)] = {};
+    TEST_ASSERT_TRUE(storage.loadBlob("/recover.bin", actual, sizeof(actual)));
+    TEST_ASSERT_EQUAL_UINT8_ARRAY(expected, actual, sizeof(expected));
+    TEST_ASSERT_TRUE(storage.blobExists("/recover.bin"));
+    TEST_ASSERT_FALSE(storage.blobExists("/recover.bin.bak"));
+}
+
+void test_text_load_recovers_interrupted_atomic_replace() {
+    StorageManager storage;
+    storage.begin();
+    TEST_ASSERT_TRUE(storage.saveTextAtomic("/recover.txt.bak", "recovered"));
+
+    String actual;
+    TEST_ASSERT_TRUE(storage.loadText("/recover.txt", actual));
+    TEST_ASSERT_EQUAL_STRING("recovered", actual.c_str());
+}
+
+void test_remove_blob_cleans_atomic_artifacts() {
+    StorageManager storage;
+    storage.begin();
+    const uint8_t value = 42;
+    TEST_ASSERT_TRUE(storage.saveBlobAtomic("/cleanup.bin", &value, sizeof(value)));
+    TEST_ASSERT_TRUE(storage.saveBlobAtomic("/cleanup.bin.tmp", &value, sizeof(value)));
+    TEST_ASSERT_TRUE(storage.saveBlobAtomic("/cleanup.bin.bak", &value, sizeof(value)));
+
+    TEST_ASSERT_TRUE(storage.removeBlob("/cleanup.bin"));
+    TEST_ASSERT_FALSE(storage.blobExists("/cleanup.bin"));
+    TEST_ASSERT_FALSE(storage.blobExists("/cleanup.bin.tmp"));
+    TEST_ASSERT_FALSE(storage.blobExists("/cleanup.bin.bak"));
+}
+
 int main(int, char **) {
     UNITY_BEGIN();
     RUN_TEST(test_save_wifi_settings_preserves_spaces);
@@ -268,5 +305,8 @@ int main(int, char **) {
     RUN_TEST(test_save_dac_auto_state_rolls_back_on_failure);
     RUN_TEST(test_save_rtc_mode_persists_selection);
     RUN_TEST(test_save_rtc_mode_rolls_back_on_failure);
+    RUN_TEST(test_blob_load_recovers_interrupted_atomic_replace);
+    RUN_TEST(test_text_load_recovers_interrupted_atomic_replace);
+    RUN_TEST(test_remove_blob_cleans_atomic_artifacts);
     return UNITY_END();
 }
