@@ -26,6 +26,7 @@ const int UiDeferredUnload::kScreenIds[UiDeferredUnload::kCount] = {
 
 void UiDeferredUnload::reset() {
     memset(unload_at_ms_, 0, sizeof(unload_at_ms_));
+    memset(scheduled_, 0, sizeof(scheduled_));
 }
 
 void UiDeferredUnload::scheduleOnSwitch(int previous_screen_id, int current_screen_id, uint32_t now_ms) {
@@ -33,8 +34,10 @@ void UiDeferredUnload::scheduleOnSwitch(int previous_screen_id, int current_scre
         const int unload_screen_id = kScreenIds[i];
         if (previous_screen_id == unload_screen_id && current_screen_id != unload_screen_id) {
             unload_at_ms_[i] = now_ms + kDelayMs;
+            scheduled_[i] = true;
         } else if (current_screen_id == unload_screen_id) {
             unload_at_ms_[i] = 0;
+            scheduled_[i] = false;
         }
     }
 }
@@ -43,12 +46,12 @@ bool UiDeferredUnload::ready(size_t index, uint32_t now_ms, int pending_screen_i
     if (index >= kCount) {
         return false;
     }
-    const uint32_t unload_at_ms = unload_at_ms_[index];
-    if (unload_at_ms == 0 || pending_screen_id != 0) {
+    if (!scheduled_[index] || pending_screen_id != 0) {
         return false;
     }
     const int unload_screen_id = kScreenIds[index];
-    return current_screen_id != unload_screen_id && now_ms >= unload_at_ms;
+    return current_screen_id != unload_screen_id &&
+           static_cast<int32_t>(now_ms - unload_at_ms_[index]) >= 0;
 }
 
 int UiDeferredUnload::screenId(size_t index) const {
@@ -61,12 +64,14 @@ int UiDeferredUnload::screenId(size_t index) const {
 void UiDeferredUnload::clear(size_t index) {
     if (index < kCount) {
         unload_at_ms_[index] = 0;
+        scheduled_[index] = false;
     }
 }
 
 void UiDeferredUnload::retry(size_t index, uint32_t now_ms) {
     if (index < kCount) {
         unload_at_ms_[index] = now_ms + kRetryMs;
+        scheduled_[index] = true;
     }
 }
 

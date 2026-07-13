@@ -26,6 +26,7 @@ private:
     static constexpr uint32_t kRetryMs = 100;
 
     uint32_t unload_at_ms_[kCount] = {};
+    bool scheduled_[kCount] = {};
     static const int kScreenIds[kCount];
 };
 
