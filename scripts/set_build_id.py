@@ -21,7 +21,7 @@ def resolve_build_id():
     if not short_sha:
         return "nogit"
 
-    dirty = _run_git(["status", "--porcelain", "--untracked-files=normal"])
+    dirty = _run_git(["status", "--porcelain", "--untracked-files=no"])
     if dirty:
         return f"{short_sha}-dirty"
     return short_sha
