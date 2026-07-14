@@ -141,7 +141,7 @@ void ChartsHistory::saveIfDue(StorageManager &storage, uint32_t now_ms) {
     storage.saveBlobAtomic(StorageManager::kChartsPath, &state_, sizeof(state_));
 }
 
-ChartsHistory::Sample ChartsHistory::makeSample(const SensorData &data) const {
+ChartsHistory::Sample ChartsHistory::makeSample(const SensorData &data, bool gas_warmup) const {
     Sample sample = {};
 
     if (data.co2_valid) {
@@ -164,11 +164,11 @@ ChartsHistory::Sample ChartsHistory::makeSample(const SensorData &data) const {
         sample.valid_mask |= metricBit(METRIC_CO);
         sample.values[METRIC_CO] = data.co_ppm;
     }
-    if (data.voc_valid) {
+    if (!gas_warmup && data.voc_valid) {
         sample.valid_mask |= metricBit(METRIC_VOC);
         sample.values[METRIC_VOC] = static_cast<float>(data.voc_index);
     }
-    if (data.nox_valid) {
+    if (!gas_warmup && data.nox_valid) {
         sample.valid_mask |= metricBit(METRIC_NOX);
         sample.values[METRIC_NOX] = static_cast<float>(data.nox_index);
     }
@@ -255,7 +255,7 @@ void ChartsHistory::appendGapPoints(uint32_t gap_points, const Sample &current_s
     }
 }
 
-void ChartsHistory::update(const SensorData &data, StorageManager &storage) {
+void ChartsHistory::update(const SensorData &data, StorageManager &storage, bool gas_warmup) {
     const uint32_t now_ms = millis();
     const uint32_t step_ms = Config::CHART_HISTORY_STEP_MS;
     const uint32_t step_s = step_ms / 1000UL;
@@ -269,7 +269,7 @@ void ChartsHistory::update(const SensorData &data, StorageManager &storage) {
         last_sample_ms_ = now_ms - step_ms;
     }
 
-    Sample sample = makeSample(data);
+    Sample sample = makeSample(data, gas_warmup);
 
     if (time_valid && state_.epoch != 0) {
         if (now_epoch < state_.epoch) {

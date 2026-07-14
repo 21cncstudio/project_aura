@@ -376,7 +376,7 @@ void loop()
     if (i2c_runtime_ready) {
         sensor_poll = sensorManager.poll(currentData, storage, pressureHistory, co2_asc_enabled);
         uiController.onSensorPoll(sensor_poll);
-        chartsHistory.update(currentData, storage);
+        chartsHistory.update(currentData, storage, sensorManager.isWarmupActive());
     }
     chartsRuntimeState.update(chartsHistory);
     webRuntimeState.update(currentData, sensorManager.isWarmupActive(), fanControl);

@@ -42,7 +42,7 @@ public:
     };
 
     void load(StorageManager &storage);
-    void update(const SensorData &data, StorageManager &storage);
+    void update(const SensorData &data, StorageManager &storage, bool gas_warmup);
     void clear(StorageManager &storage);
 
     uint16_t count() const { return state_.count; }
@@ -86,7 +86,7 @@ private:
     void clearOptionalGasMetric();
     void reset(StorageManager &storage, bool clear_storage);
     void saveIfDue(StorageManager &storage, uint32_t now_ms);
-    Sample makeSample(const SensorData &data) const;
+    Sample makeSample(const SensorData &data, bool gas_warmup) const;
     void appendSample(const Sample &sample);
     void appendGapPoints(uint32_t gap_points, const Sample &current_sample);
     int rawIndexFromOldest(uint16_t offset) const;
