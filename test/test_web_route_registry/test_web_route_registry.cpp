@@ -74,6 +74,7 @@ struct CapturedRoute {
     String uri;
     WebHandlerFn handler = nullptr;
     WebHandlerFn upload_handler = nullptr;
+    WebHandlerFn request_preflight_handler = nullptr;
 };
 
 class NullRequest final : public WebRequest {
@@ -119,8 +120,13 @@ public:
 
     void onPostUpload(const char *uri,
                       WebHandlerFn handler,
-                      WebHandlerFn upload_handler) override {
-        capture(RouteMethod::PostUpload, uri, handler, upload_handler);
+                      WebHandlerFn upload_handler,
+                      WebHandlerFn request_preflight_handler) override {
+        capture(RouteMethod::PostUpload,
+                uri,
+                handler,
+                upload_handler,
+                request_preflight_handler);
     }
 
     void onNotFound(WebHandlerFn handler) override {
@@ -148,7 +154,8 @@ private:
     void capture(RouteMethod method,
                  const char *uri,
                  WebHandlerFn handler,
-                 WebHandlerFn upload_handler) {
+                 WebHandlerFn upload_handler,
+                 WebHandlerFn request_preflight_handler = nullptr) {
         TEST_ASSERT_LESS_THAN_MESSAGE(sizeof(routes) / sizeof(routes[0]),
                                       route_count,
                                       "test route capture capacity exceeded");
@@ -157,6 +164,7 @@ private:
             uri ? String(uri) : String(),
             handler,
             upload_handler,
+            request_preflight_handler,
         };
     }
 
@@ -194,6 +202,7 @@ void test_web_route_registry_registers_ota_upload_endpoints() {
     TEST_ASSERT_NOT_NULL(upload);
     TEST_ASSERT_TRUE(upload->handler == ota_handle_update);
     TEST_ASSERT_TRUE(upload->upload_handler == ota_handle_upload);
+    TEST_ASSERT_NULL(upload->request_preflight_handler);
 }
 
 void test_web_route_registry_registers_history_endpoints() {

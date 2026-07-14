@@ -29,6 +29,13 @@ constexpr uint16_t kHttpServerMaxOpenSockets = 10;
 constexpr uint32_t kMultipartReadIdleTimeoutMs = 90UL * 1000UL;
 constexpr uint32_t kDrainRecvTimeoutMs = 200;
 
+enum class RequestBodyReadResult : uint8_t {
+    Ok,
+    TooLarge,
+    ReadError,
+    AllocationFailed,
+};
+
 bool socket_likely_connected(int sockfd) {
     if (sockfd < 0) {
         return false;
@@ -65,7 +72,10 @@ public:
     WebRequest &request() override;
     void onGet(const char *uri, WebHandlerFn handler) override;
     void onPost(const char *uri, WebHandlerFn handler) override;
-    void onPostUpload(const char *uri, WebHandlerFn handler, WebHandlerFn upload_handler) override;
+    void onPostUpload(const char *uri,
+                      WebHandlerFn handler,
+                      WebHandlerFn upload_handler,
+                      WebHandlerFn request_preflight_handler) override;
     void onNotFound(WebHandlerFn handler) override;
     const char *name() const override;
     void begin() override;
@@ -129,26 +139,50 @@ String read_header_value(httpd_req_t *req, const char *field) {
     return String(buffer.get());
 }
 
-bool read_request_body(httpd_req_t *req, String &out) {
+void send_request_error_and_close(httpd_req_t *req,
+                                  const char *status,
+                                  const char *message) {
+    if (!req) {
+        return;
+    }
+    httpd_resp_set_status(req, status);
+    httpd_resp_set_type(req, "text/plain");
+    httpd_resp_set_hdr(req, "Connection", "close");
+    httpd_resp_send(req, message ? message : "Request rejected", HTTPD_RESP_USE_STRLEN);
+    const int sockfd = httpd_req_to_sockfd(req);
+    if (sockfd >= 0) {
+        httpd_sess_trigger_close(req->handle, sockfd);
+    }
+}
+
+RequestBodyReadResult read_request_body(httpd_req_t *req, String &out) {
     if (!req || req->content_len == 0) {
         out = "";
-        return true;
+        return RequestBodyReadResult::Ok;
+    }
+    if (!WebServerLimits::requestBodySizeAllowed(req->content_len)) {
+        out = "";
+        return RequestBodyReadResult::TooLarge;
     }
 
     out = "";
-    out.reserve(req->content_len);
+    if (!out.reserve(req->content_len)) {
+        return RequestBodyReadResult::AllocationFailed;
+    }
     size_t remaining = req->content_len;
     char buffer[512];
     while (remaining > 0) {
         const size_t chunk_size = remaining < sizeof(buffer) ? remaining : sizeof(buffer);
         const int received = httpd_req_recv(req, buffer, chunk_size);
         if (received <= 0) {
-            return false;
+            return RequestBodyReadResult::ReadError;
         }
-        out.concat(buffer, static_cast<unsigned int>(received));
+        if (!out.concat(buffer, static_cast<unsigned int>(received))) {
+            return RequestBodyReadResult::AllocationFailed;
+        }
         remaining -= static_cast<size_t>(received);
     }
-    return true;
+    return RequestBodyReadResult::Ok;
 }
 
 std::list<EspHttpServerBackend::RouteRegistration> &backend_routes(void *storage) {
@@ -162,6 +196,7 @@ struct EspHttpServerBackend::RouteRegistration {
     httpd_method_t method = HTTP_GET;
     WebHandlerFn handler = nullptr;
     WebHandlerFn upload_handler = nullptr;
+    WebHandlerFn request_preflight_handler = nullptr;
     EspHttpServerBackend *backend = nullptr;
     httpd_uri_t descriptor = {};
 };
@@ -189,14 +224,26 @@ public:
                                       kCrLf + 2);
                 if (it != buffer_.end()) {
                     const size_t line_len = static_cast<size_t>(std::distance(buffer_.begin(), it));
+                    if (!WebServerLimits::multipartHeaderLineSizeAllowed(line_len)) {
+                        limit_exceeded_ = true;
+                        return false;
+                    }
                     line = String(reinterpret_cast<const char *>(buffer_.data()), line_len);
                     buffer_.erase(buffer_.begin(), it + 2);
                     return true;
+                }
+                if (!WebServerLimits::multipartHeaderLineSizeAllowed(buffer_.size())) {
+                    limit_exceeded_ = true;
+                    return false;
                 }
                 if (!receiveMore()) {
                     return false;
                 }
             }
+        }
+
+        bool limitExceeded() const {
+            return limit_exceeded_;
         }
 
         template <typename Callback>
@@ -332,6 +379,7 @@ public:
         std::vector<uint8_t> buffer_{};
         bool timeout_window_active_ = false;
         uint32_t timeout_window_start_ms_ = 0;
+        bool limit_exceeded_ = false;
         static constexpr char kCrLf[2] = {'\r', '\n'};
     };
 
@@ -674,12 +722,14 @@ void EspHttpServerBackend::onPost(const char *uri, WebHandlerFn handler) {
 
 void EspHttpServerBackend::onPostUpload(const char *uri,
                                         WebHandlerFn handler,
-                                        WebHandlerFn upload_handler) {
+                                        WebHandlerFn upload_handler,
+                                        WebHandlerFn request_preflight_handler) {
     RouteRegistration route{};
     route.uri = uri ? uri : "";
     route.method = HTTP_POST;
     route.handler = handler;
     route.upload_handler = upload_handler;
+    route.request_preflight_handler = request_preflight_handler;
     backend_routes(routes_).push_back(route);
     if (server_handle_) {
         registerRoute(backend_routes(routes_).back());
@@ -723,6 +773,14 @@ bool EspHttpServerBackend::prepareRequest(RouteRegistration &route, void *raw_re
     request_->begin(req);
     request_->appendArgsFromQuery();
 
+    if (route.request_preflight_handler != nullptr) {
+        route.request_preflight_handler();
+        if (request_->uploadRejected()) {
+            request_->setPendingBodyBytes(req->content_len);
+            return true;
+        }
+    }
+
     if (req->content_len == 0) {
         return true;
     }
@@ -743,24 +801,49 @@ bool EspHttpServerBackend::prepareRequest(RouteRegistration &route, void *raw_re
             httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Missing multipart boundary");
             return false;
         }
+        if (!WebServerLimits::multipartBoundarySizeAllowed(boundary.length())) {
+            send_request_error_and_close(req,
+                                         "413 Payload Too Large",
+                                         "Multipart boundary is too large");
+            return false;
+        }
 
         EspHttpRequest::BufferedBodyReader reader(request_);
         String line;
         const String expected_first_boundary = String("--") + boundary;
         if (!reader.readLine(line) || line != expected_first_boundary) {
+            if (reader.limitExceeded()) {
+                send_request_error_and_close(req,
+                                             "413 Payload Too Large",
+                                             "Multipart header is too large");
+                return false;
+            }
             httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Malformed multipart body");
             return false;
         }
 
         bool saw_upload_part = false;
         bool final_boundary = false;
+        size_t part_count = 0;
         while (!final_boundary) {
+            if (++part_count > WebServerLimits::kMaxMultipartParts) {
+                send_request_error_and_close(req,
+                                             "413 Payload Too Large",
+                                             "Too many multipart fields");
+                return false;
+            }
             String field_name;
             String filename;
             bool field_is_file = false;
 
             while (true) {
                 if (!reader.readLine(line)) {
+                    if (reader.limitExceeded()) {
+                        send_request_error_and_close(req,
+                                                     "413 Payload Too Large",
+                                                     "Multipart header is too large");
+                        return false;
+                    }
                     if (saw_upload_part) {
                         request_->setPendingBodyBytes(reader.remainingBytesOnSocket());
                         WebUpload aborted{};
@@ -844,18 +927,37 @@ bool EspHttpServerBackend::prepareRequest(RouteRegistration &route, void *raw_re
             }
 
             String value;
+            bool field_too_large = false;
+            bool field_allocation_failed = false;
             const bool part_ok = reader.streamUntilBoundary(
                 boundary,
-                [&value](const uint8_t *data, size_t size) {
+                [&value, &field_too_large, &field_allocation_failed](const uint8_t *data,
+                                                                     size_t size) {
                     if (size == 0) {
                         return true;
                     }
-                    value.concat(reinterpret_cast<const char *>(data), static_cast<unsigned int>(size));
+                    if (!WebServerLimits::multipartFieldAppendAllowed(value.length(), size)) {
+                        field_too_large = true;
+                        return false;
+                    }
+                    if (!value.concat(reinterpret_cast<const char *>(data),
+                                      static_cast<unsigned int>(size))) {
+                        field_allocation_failed = true;
+                        return false;
+                    }
                     return true;
                 },
                 final_boundary);
 
             if (!part_ok) {
+                if (field_too_large || field_allocation_failed) {
+                    send_request_error_and_close(req,
+                                                 "413 Payload Too Large",
+                                                 field_too_large
+                                                     ? "Multipart field is too large"
+                                                     : "Insufficient memory for multipart field");
+                    return false;
+                }
                 if (saw_upload_part) {
                     request_->setPendingBodyBytes(reader.remainingBytesOnSocket());
                     WebUpload aborted{};
@@ -877,8 +979,18 @@ bool EspHttpServerBackend::prepareRequest(RouteRegistration &route, void *raw_re
         return true;
     }
 
-    if (!read_request_body(req, body)) {
-        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Failed to read request body");
+    const RequestBodyReadResult body_result = read_request_body(req, body);
+    if (body_result != RequestBodyReadResult::Ok) {
+        if (body_result == RequestBodyReadResult::TooLarge ||
+            body_result == RequestBodyReadResult::AllocationFailed) {
+            send_request_error_and_close(req,
+                                         "413 Payload Too Large",
+                                         body_result == RequestBodyReadResult::TooLarge
+                                             ? "Request body is too large"
+                                             : "Insufficient memory for request body");
+        } else {
+            httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Failed to read request body");
+        }
         return false;
     }
 

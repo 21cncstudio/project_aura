@@ -74,7 +74,10 @@ public:
     virtual WebRequest &request() = 0;
     virtual void onGet(const char *uri, WebHandlerFn handler) = 0;
     virtual void onPost(const char *uri, WebHandlerFn handler) = 0;
-    virtual void onPostUpload(const char *uri, WebHandlerFn handler, WebHandlerFn upload_handler) = 0;
+    virtual void onPostUpload(const char *uri,
+                              WebHandlerFn handler,
+                              WebHandlerFn upload_handler,
+                              WebHandlerFn request_preflight_handler = nullptr) = 0;
     virtual void onNotFound(WebHandlerFn handler) = 0;
     virtual const char *name() const = 0;
     virtual void begin() = 0;
