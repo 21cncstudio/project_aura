@@ -1818,13 +1818,30 @@ function renderSdHistoryStatus(payload) {
   const files = (payload && payload.files) || {};
   const mounted = sd.mounted === true;
   const attempted = sd.attempted === true;
+  const sdState = typeof sd.state === 'string'
+    ? sd.state
+    : (mounted ? 'mounted' : (attempted ? 'fault' : 'not_attempted'));
+  const sdFault = sdState === 'fault' || sdState === 'manager_unavailable';
   const dailyCsv = files.daily_csv || null;
   const stateFile = files.current_day_state || null;
   const lastError = typeof sd.last_error === 'string' ? sd.last_error : '';
 
-  setInfoValue('sd-status',
-               mounted ? 'Mounted' : (attempted ? 'Mount failed' : 'Not attempted'),
-               mounted ? 'ok' : (attempted ? 'err' : ''));
+  let statusText = 'Not attempted';
+  let statusClass = '';
+  if (mounted) {
+    statusText = 'Mounted';
+    statusClass = 'ok';
+  } else if (sdState === 'not_detected') {
+    statusText = 'Not detected';
+  } else if (sdState === 'board_unavailable') {
+    statusText = 'Unavailable';
+    statusClass = 'warn';
+  } else if (sdFault) {
+    statusText = 'Fault';
+    statusClass = 'err';
+  }
+
+  setInfoValue('sd-status', statusText, statusClass);
   setInfoValue('sd-capacity', mounted ? formatBytes(Number(sd.card_size_bytes || 0)) : '--');
   setInfoValue('sd-day', formatDayKey(Number(daily.current_day || 0)));
   setInfoValue('sd-csv-units', formatSdCsvUnits(daily));
@@ -1832,8 +1849,8 @@ function renderSdHistoryStatus(payload) {
   setInfoValue('sd-state-file', formatFileStatus(stateFile), stateFile && stateFile.exists === true ? 'ok' : '');
   setInfoValue('sd-daily-csv', formatFileStatus(dailyCsv), dailyCsv && dailyCsv.exists === true ? 'ok' : '');
   setInfoValue('sd-last-write',
-               daily.last_write_ok === true ? 'OK' : 'Failed',
-               daily.last_write_ok === true ? 'ok' : 'err');
+               mounted ? (daily.last_write_ok === true ? 'OK' : 'Failed') : 'Unavailable',
+               mounted ? (daily.last_write_ok === true ? 'ok' : 'err') : '');
 
   const currentReady = isNum(daily.current_sample_count) && daily.current_sample_count > 0;
   const exportReady = mounted && dailyCsv && dailyCsv.exists === true && Number(dailyCsv.size_bytes || 0) > 0;
@@ -1844,8 +1861,13 @@ function renderSdHistoryStatus(payload) {
     if (btn) btn.disabled = !mounted;
   });
 
-  if (!mounted) {
-    setSdNote(lastError || 'SD card is not mounted.', 'err');
+  if (sdState === 'not_detected') {
+    setSdNote('Optional SD card not detected. Device continues without SD history.', '');
+  } else if (sdState === 'board_unavailable') {
+    setSdNote('SD storage unavailable because the board did not initialize.', 'warn');
+  } else if (!mounted) {
+    setSdNote(lastError || (sdFault ? 'SD storage fault.' : 'SD card was not checked.'),
+              sdFault ? 'err' : '');
   } else if (!exportReady) {
     setSdNote('Daily CSV will appear after the first day rollover. Use Export current day to preview today.', 'warn');
   } else {

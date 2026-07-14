@@ -17,6 +17,7 @@
 #include <driver/spi_common.h>
 #include <esp_display_panel.hpp>
 #include <esp_err.h>
+#include <esp_log.h>
 #include <esp_vfs_fat.h>
 #endif
 
@@ -48,8 +49,10 @@ SdCardManager::~SdCardManager() {
 #endif
 }
 
-void SdCardManager::setError(const char *error) {
+void SdCardManager::setState(SdCardPolicy::State state, const char *error, int32_t error_code) {
+    state_ = state;
     last_error_ = error ? error : "";
+    last_error_code_ = error_code;
 }
 
 bool SdCardManager::lock(uint32_t timeout_ms) const {
@@ -92,8 +95,7 @@ bool SdCardManager::setCardSelect(bool selected) {
     if (!expander) {
         return false;
     }
-    expander->digitalWrite(kSdCsExio, selected ? 0 : 1);
-    return true;
+    return expander->digitalWrite(kSdCsExio, selected ? 0 : 1);
 #endif
 }
 
@@ -102,7 +104,7 @@ bool SdCardManager::begin(esp_panel::board::Board *board) {
     (void)board;
     attempted_ = true;
     mounted_ = false;
-    setError("unit test");
+    setState(SdCardPolicy::State::Fault, "unit test");
     return false;
 #else
     attempted_ = true;
@@ -112,13 +114,13 @@ bool SdCardManager::begin(esp_panel::board::Board *board) {
     board_ = board;
     spi_bus_owned_ = false;
     if (!board_) {
-        setError("board unavailable");
-        LOGW("SD", "skip SD mount: board unavailable");
+        setState(SdCardPolicy::State::BoardUnavailable, "board unavailable");
+        LOGI("SD", "optional storage unavailable: board not initialized");
         return false;
     }
     if (!setCardSelect(false)) {
-        setError("CS expander unavailable");
-        LOGW("SD", "skip SD mount: CS expander unavailable");
+        setState(SdCardPolicy::State::Fault, "CS expander unavailable");
+        LOGW("SD", "skip SD mount: failed to deassert CS through IO expander");
         return false;
     }
 
@@ -136,7 +138,7 @@ bool SdCardManager::begin(esp_panel::board::Board *board) {
 
     esp_err_t err = spi_bus_initialize(kSdSpiHost, &bus_cfg, SDSPI_DEFAULT_DMA);
     if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) {
-        setError("SPI bus init failed");
+        setState(SdCardPolicy::State::Fault, "SPI bus init failed", err);
         LOGW("SD", "SPI bus init failed: %s", esp_err_to_name(err));
         setCardSelect(false);
         return false;
@@ -145,7 +147,15 @@ bool SdCardManager::begin(esp_panel::board::Board *board) {
 
     // The Waveshare TF slot CS is on CH422G EXIO4, not an ESP GPIO.
     // FatFS/SDSPI is mounted without GPIO CS and EXIO4 is held active while mounted.
-    setCardSelect(true);
+    if (!setCardSelect(true)) {
+        if (spi_bus_owned_) {
+            spi_bus_free(kSdSpiHost);
+            spi_bus_owned_ = false;
+        }
+        setState(SdCardPolicy::State::Fault, "CS expander write failed");
+        LOGW("SD", "skip SD mount: failed to assert CS through IO expander");
+        return false;
+    }
 
     sdspi_device_config_t slot_config = SDSPI_DEVICE_CONFIG_DEFAULT();
     slot_config.gpio_cs = SDSPI_SLOT_NO_CS;
@@ -156,22 +166,42 @@ bool SdCardManager::begin(esp_panel::board::Board *board) {
     mount_config.max_files = 4;
     mount_config.allocation_unit_size = 16 * 1024;
 
+    // The card slot is optional and has no card-detect signal. Suppress the
+    // mount helper's unconditional error log and emit a classified result below.
+    const esp_log_level_t previous_mount_log_level = esp_log_level_get("vfs_fat_sdmmc");
+    esp_log_level_set("vfs_fat_sdmmc", ESP_LOG_NONE);
     err = esp_vfs_fat_sdspi_mount(kMountPoint, &host, &slot_config, &mount_config, &card_);
+    esp_log_level_set("vfs_fat_sdmmc", previous_mount_log_level);
     if (err != ESP_OK) {
         mounted_ = false;
         card_ = nullptr;
-        setCardSelect(false);
+        const bool cs_released = setCardSelect(false);
         if (spi_bus_owned_) {
             spi_bus_free(kSdSpiHost);
             spi_bus_owned_ = false;
         }
-        setError("SD mount failed");
-        LOGW("SD", "mount failed: %s", esp_err_to_name(err));
+        if (!cs_released) {
+            setState(SdCardPolicy::State::Fault, "CS release failed", err);
+            LOGW("SD", "mount failed and CS release failed: %s", esp_err_to_name(err));
+            return false;
+        }
+
+        const SdCardPolicy::MountOutcome outcome =
+            (err == ESP_ERR_TIMEOUT) ? SdCardPolicy::MountOutcome::NoResponse
+                                     : SdCardPolicy::MountOutcome::Error;
+        const SdCardPolicy::State state = SdCardPolicy::stateForMountOutcome(outcome);
+        if (SdCardPolicy::isFault(state)) {
+            setState(state, "SD mount failed", err);
+            LOGW("SD", "mount failed: %s", esp_err_to_name(err));
+        } else {
+            setState(state);
+            LOGI("SD", "optional card not detected; continuing without SD storage");
+        }
         return false;
     }
 
     mounted_ = true;
-    setError("");
+    setState(SdCardPolicy::State::Mounted);
     LOGI("SD", "mounted card size=%llu MB",
          static_cast<unsigned long long>(status().card_size_bytes / (1024ULL * 1024ULL)));
     return true;
@@ -195,10 +225,12 @@ void SdCardManager::end() {
 
 SdCardManager::Status SdCardManager::status() const {
     Status result{};
+    result.state = state_;
     result.mounted = mounted_;
     result.attempted = attempted_;
     result.mount_point = kMountPoint;
     result.last_error = last_error_;
+    result.last_error_code = last_error_code_;
 #ifndef UNIT_TEST
     if (card_) {
         result.card_size_bytes =

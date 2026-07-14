@@ -12,6 +12,7 @@
 #include <stdio.h>
 
 #include "modules/DailyHistoryStorage.h"
+#include "modules/SdCardPolicy.h"
 
 #ifndef UNIT_TEST
 #include <freertos/FreeRTOS.h>
@@ -28,11 +29,13 @@ class Board;
 class SdCardManager final : public DailyHistoryStorage {
 public:
     struct Status {
+        SdCardPolicy::State state = SdCardPolicy::State::NotAttempted;
         bool mounted = false;
         bool attempted = false;
         uint64_t card_size_bytes = 0;
         const char *mount_point = "/sdcard";
         const char *last_error = "";
+        int32_t last_error_code = 0;
     };
 
     SdCardManager();
@@ -60,7 +63,7 @@ private:
     bool ensureParentDirs(const char *relative_path) const;
     bool lock(uint32_t timeout_ms = 1000) const;
     void unlock() const;
-    void setError(const char *error);
+    void setState(SdCardPolicy::State state, const char *error = "", int32_t error_code = 0);
 
     static constexpr const char *kMountPoint = "/sdcard";
     static constexpr uint8_t kSdMosiPin = 11;
@@ -70,7 +73,9 @@ private:
 
     bool mounted_ = false;
     bool attempted_ = false;
+    SdCardPolicy::State state_ = SdCardPolicy::State::NotAttempted;
     const char *last_error_ = "";
+    int32_t last_error_code_ = 0;
 
 #ifndef UNIT_TEST
     esp_panel::board::Board *board_ = nullptr;

@@ -132,15 +132,21 @@ void handleStatus(WebHandlerContext &context, bool ota_busy, const char *ota_bus
     ArduinoJson::JsonObject sd = root["sd"].to<ArduinoJson::JsonObject>();
     if (context.sd_card) {
         const SdCardManager::Status status = context.sd_card->status();
+        sd["state"] = SdCardPolicy::stateText(status.state);
+        sd["optional"] = true;
         sd["mounted"] = status.mounted;
         sd["attempted"] = status.attempted;
         sd["mount_point"] = status.mount_point;
         sd["card_size_bytes"] = status.card_size_bytes;
         sd["last_error"] = status.last_error;
+        sd["last_error_code"] = status.last_error_code;
     } else {
+        sd["state"] = "manager_unavailable";
+        sd["optional"] = true;
         sd["mounted"] = false;
         sd["attempted"] = false;
         sd["last_error"] = "SD manager unavailable";
+        sd["last_error_code"] = 0;
     }
 
     ArduinoJson::JsonObject daily = root["daily"].to<ArduinoJson::JsonObject>();
