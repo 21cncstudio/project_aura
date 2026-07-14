@@ -45,8 +45,9 @@ public:
                     bool co2_asc_enabled);
 
     void setOffsets(float temp_offset, float hum_offset);
-    bool isOk() const { return sen66_.isOk(); }
-    bool isBusy() const { return sen66_.isBusy(); }
+    bool isInitialized() const { return initialized_; }
+    bool isOk() const { return initialized_ && sen66_.isOk(); }
+    bool isBusy() const { return initialized_ && sen66_.isBusy(); }
     bool isDpsOk() const { return isPressureOk(); }
     bool isSfaOk() const { return currentHchoStatus() == SfaStatus::Ok; }
     bool isSfaPresent() const { return currentHchoStatus() != SfaStatus::Absent; }
@@ -78,20 +79,21 @@ public:
     const char *hchoSensorLabel() const;
     HchoSensorType hchoSensorType() const { return hcho_sensor_type_; }
     Sfa40::Diagnostics sfa40Diagnostics() const { return sfa40_.diagnostics(); }
-    bool deviceReset() { return sen66_.deviceReset(); }
+    bool deviceReset() { return initialized_ && sen66_.deviceReset(); }
     void scheduleRetry(uint32_t delay_ms) {
+        if (!initialized_) return;
         sen66_start_attempts_ = 0;
         sen66_retry_exhausted_logged_ = false;
         sen66_.scheduleRetry(delay_ms);
     }
-    uint32_t retryAtMs() const { return sen66_.retryAtMs(); }
-    bool start(bool asc_enabled) { return sen66_.start(asc_enabled); }
-    bool isWarmupActive() const { return sen66_.isWarmupActive(); }
-    uint32_t lastDataMs() const { return sen66_.lastDataMs(); }
-    bool setAscEnabled(bool enabled) { return sen66_.setAscEnabled(enabled); }
+    uint32_t retryAtMs() const { return initialized_ ? sen66_.retryAtMs() : 0; }
+    bool start(bool asc_enabled) { return initialized_ && sen66_.start(asc_enabled); }
+    bool isWarmupActive() const { return initialized_ && sen66_.isWarmupActive(); }
+    uint32_t lastDataMs() const { return initialized_ ? sen66_.lastDataMs() : 0; }
+    bool setAscEnabled(bool enabled) { return initialized_ && sen66_.setAscEnabled(enabled); }
     bool calibrateFrc(uint16_t ref_ppm, bool has_pressure, float pressure_hpa,
                       uint16_t &correction) {
-        return sen66_.calibrateFRC(ref_ppm, has_pressure, pressure_hpa, correction);
+        return initialized_ && sen66_.calibrateFRC(ref_ppm, has_pressure, pressure_hpa, correction);
     }
 
     void clearVocState(StorageManager &storage);
@@ -120,4 +122,5 @@ private:
     uint8_t sen66_start_attempts_ = 0;
     bool sen66_retry_exhausted_logged_ = false;
     PressureSensorType pressure_sensor_ = PRESSURE_NONE;
+    bool initialized_ = false;
 };

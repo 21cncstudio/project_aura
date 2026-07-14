@@ -61,6 +61,17 @@ void test_web_diag_api_utils_fill_json_populates_network_errors_and_stream() {
     payload.web_stream.stats.last_total = 100;
     payload.web_stream.stats.last_max_write_ms = 220;
     payload.web_stream.stats.last_uri = "/dashboard";
+    payload.boot.reset_reason = "POWERON";
+    payload.boot.auto_recovery_boot = true;
+    payload.boot.i2c_status = "sda_stuck_low";
+    payload.boot.sda_high = false;
+    payload.boot.scl_high = true;
+    payload.boot.board_ready = false;
+    payload.boot.board_rounds = 3;
+    payload.boot.board_begin_attempts = 1;
+    payload.boot.board_stage = "expander";
+    payload.boot.board_failure = "begin";
+    payload.boot.lvgl_ready = false;
 
     const Logger::RecentEntry entries[] = {
         make_entry(10, Logger::Warn, "WiFi", "warn"),
@@ -74,6 +85,13 @@ void test_web_diag_api_utils_fill_json_populates_network_errors_and_stream() {
     TEST_ASSERT_TRUE(doc["success"].as<bool>());
     TEST_ASSERT_TRUE(doc["ota_busy"].as<bool>());
     TEST_ASSERT_EQUAL_UINT32(45678, doc["heap"]["free"].as<uint32_t>());
+    TEST_ASSERT_EQUAL_STRING("POWERON", doc["boot"]["reset_reason"].as<const char *>());
+    TEST_ASSERT_TRUE(doc["boot"]["auto_recovery_boot"].as<bool>());
+    TEST_ASSERT_EQUAL_STRING("sda_stuck_low", doc["boot"]["i2c_status"].as<const char *>());
+    TEST_ASSERT_EQUAL_UINT32(3, doc["boot"]["board_rounds"].as<uint32_t>());
+    TEST_ASSERT_EQUAL_STRING("expander", doc["boot"]["board_stage"].as<const char *>());
+    TEST_ASSERT_EQUAL_STRING("begin", doc["boot"]["board_failure"].as<const char *>());
+    TEST_ASSERT_FALSE(doc["boot"]["lvgl_ready"].as<bool>());
     TEST_ASSERT_EQUAL_STRING("AuraNet", doc["network"]["wifi_ssid"].as<const char *>());
     TEST_ASSERT_EQUAL_INT(-42, doc["network"]["rssi"].as<int>());
     TEST_ASSERT_EQUAL_UINT32(2, doc["error_count"].as<uint32_t>());

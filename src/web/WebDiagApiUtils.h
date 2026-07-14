@@ -16,6 +16,20 @@
 
 namespace WebDiagApiUtils {
 
+struct BootPayload {
+    const char *reset_reason = "UNKNOWN";
+    bool auto_recovery_boot = false;
+    const char *i2c_status = "unknown";
+    bool sda_high = false;
+    bool scl_high = false;
+    bool board_ready = false;
+    uint8_t board_rounds = 0;
+    uint8_t board_begin_attempts = 0;
+    const char *board_stage = "bus";
+    const char *board_failure = "none";
+    bool lvgl_ready = false;
+};
+
 struct Payload {
     uint32_t uptime_s = 0;
     bool ota_busy = false;
@@ -23,6 +37,7 @@ struct Payload {
     uint32_t heap_min_free = 0;
     WebNetworkUtils::Snapshot network{};
     WebTransferSnapshot web_stream{};
+    BootPayload boot{};
 };
 
 bool accessAllowed(bool ap_mode, bool sta_connected);

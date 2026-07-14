@@ -15,6 +15,9 @@ extern esp_reset_reason_t boot_reset_reason;
 extern bool boot_i2c_recovered;
 extern bool boot_touch_detected;
 extern bool boot_ui_auto_recovery_reboot;
+extern bool boot_board_auto_recovery_reboot;
 
 void boot_mark_ui_auto_recovery_reboot();
 bool boot_consume_ui_auto_recovery_reboot();
+void boot_mark_board_auto_recovery_reboot();
+bool boot_consume_board_auto_recovery_reboot();

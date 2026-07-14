@@ -112,6 +112,7 @@ void test_sensor_manager_warmup_change() {
     PressureHistory history;
     SensorManager manager;
     SensorData data;
+    manager.begin(storage, 0.0f, 0.0f);
 
     auto &sen = Sen66::state();
     sen.warmup = false;
@@ -131,6 +132,10 @@ void test_sensor_manager_stale_preserves_other_sensor_data() {
     PressureHistory history;
     SensorManager manager;
     SensorData data;
+    Bmp580::state().start_ok = false;
+    Bmp3xx::state().start_ok = false;
+    Dps310::state().start_ok = false;
+    manager.begin(storage, 0.0f, 0.0f);
 
     data.temp_valid = true;
     data.hum_valid = true;
@@ -179,6 +184,30 @@ void test_sensor_manager_stale_preserves_other_sensor_data() {
     TEST_ASSERT_TRUE(data.co_sensor_present);
     TEST_ASSERT_TRUE(data.co_valid);
     TEST_ASSERT_FLOAT_WITHIN(0.01f, 2.3f, data.co_ppm);
+}
+
+void test_sensor_manager_before_begin_suppresses_poll_and_public_operations() {
+    StorageManager storage;
+    storage.begin();
+    PressureHistory history;
+    SensorManager manager;
+    SensorData data{};
+    uint16_t correction = 123;
+
+    const SensorManager::PollResult result = manager.poll(data, storage, history, true);
+
+    TEST_ASSERT_FALSE(result.data_changed);
+    TEST_ASSERT_FALSE(result.warmup_changed);
+    TEST_ASSERT_FALSE(Sen66::state().save_voc_called);
+    TEST_ASSERT_FALSE(Sen66::state().update_pressure_called);
+    TEST_ASSERT_FALSE(manager.deviceReset());
+    TEST_ASSERT_FALSE(manager.start(true));
+    TEST_ASSERT_FALSE(manager.setAscEnabled(true));
+    TEST_ASSERT_FALSE(manager.calibrateFrc(400, false, 0.0f, correction));
+    manager.scheduleRetry(1000);
+    TEST_ASSERT_EQUAL_UINT32(0, Sen66::state().retry_at_ms);
+    TEST_ASSERT_FALSE(Sen66::state().device_reset_called);
+    TEST_ASSERT_FALSE(Sen66::state().start_called);
 }
 
 void test_sensor_manager_pm05_clamps_to_sensor_limit() {
@@ -810,6 +839,7 @@ int main(int, char **) {
     RUN_TEST(test_sensor_manager_poll_updates_data);
     RUN_TEST(test_sensor_manager_warmup_change);
     RUN_TEST(test_sensor_manager_stale_preserves_other_sensor_data);
+    RUN_TEST(test_sensor_manager_before_begin_suppresses_poll_and_public_operations);
     RUN_TEST(test_sensor_manager_pm05_clamps_to_sensor_limit);
     RUN_TEST(test_sensor_manager_pm1_invalid_resets_stale_value);
     RUN_TEST(test_sensor_manager_without_co_sensor_keeps_pm1_and_clears_co);

@@ -13,6 +13,7 @@
 
 namespace BootHelpers {
     bool isCrashReset(esp_reset_reason_t reason);
+    const char *resetReasonText(esp_reset_reason_t reason);
     I2cBusRecovery::Result recoverI2CBus(gpio_num_t sda, gpio_num_t scl);
     void logGt911Address();
 }

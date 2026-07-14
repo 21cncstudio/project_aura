@@ -238,10 +238,12 @@ Result initBoard(const I2cBusRecovery::LineState &early_state) {
             }
             continue;
         }
+        LOGI("Main", "Board generation %u created @%p", static_cast<unsigned>(round), board);
 
         if (!board->init() || !configureBoard(board)) {
             result.failure = Failure::Init;
             LOGE("Main", "Board init failed in round %u", static_cast<unsigned>(round));
+            LOGI("Main", "Board generation %u deleting @%p", static_cast<unsigned>(round), board);
             delete board;
             logMemory("after init cleanup", round);
             if (round < kMaxRounds) {
@@ -268,7 +270,7 @@ Result initBoard(const I2cBusRecovery::LineState &early_state) {
             // The task was deleted inside vendor code. Destructing the partially
             // active object could touch inconsistent locks or device handles.
             result.failure = Failure::Timeout;
-            LOGE("Main", "Board timeout: retaining unsafe object until restart");
+            LOGE("Main", "Board timeout: retaining unsafe generation @%p until restart", board);
             return result;
         }
 
@@ -278,6 +280,7 @@ Result initBoard(const I2cBusRecovery::LineState &early_state) {
              static_cast<unsigned>(round),
              static_cast<unsigned>(kMaxRounds),
              stageText(result.last_stage));
+        LOGI("Main", "Board generation %u deleting @%p", static_cast<unsigned>(round), board);
         delete board;
         logMemory("after cleanup", round);
 

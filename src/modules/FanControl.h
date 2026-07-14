@@ -124,6 +124,7 @@ private:
     bool auto_resume_blocked_ = false;
     bool boot_auto_resume_pending_ = false;
     uint32_t boot_auto_resume_due_ms_ = 0;
+    bool initialized_ = false;
 
     mutable SemaphoreHandle_t sync_mutex_ = nullptr;
     PendingCommands pending_commands_{};

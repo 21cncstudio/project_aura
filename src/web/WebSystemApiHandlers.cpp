@@ -11,6 +11,9 @@
 #include <ArduinoJson.h>
 
 #include "core/AppVersion.h"
+#include "core/BoardInit.h"
+#include "core/BootDiagnostics.h"
+#include "core/BootHelpers.h"
 #include "core/ConnectivityRuntime.h"
 #include "core/Logger.h"
 #include "core/WebRuntimeState.h"
@@ -84,6 +87,18 @@ void handleDiagData(WebHandlerContext &context,
     payload.heap_min_free = ESP.getMinFreeHeap();
     payload.network = WebRuntimeCapture::captureNetworkSnapshot(context);
     payload.web_stream = web_stream_snapshot;
+    const BootDiagnostics::Snapshot &boot = BootDiagnostics::state;
+    payload.boot.reset_reason = BootHelpers::resetReasonText(boot.reset_reason);
+    payload.boot.auto_recovery_boot = boot.auto_recovery_boot;
+    payload.boot.i2c_status = I2cBusRecovery::statusText(boot.i2c_status);
+    payload.boot.sda_high = boot.sda_high;
+    payload.boot.scl_high = boot.scl_high;
+    payload.boot.board_ready = boot.board_ready;
+    payload.boot.board_rounds = boot.board_rounds;
+    payload.boot.board_begin_attempts = boot.board_begin_attempts;
+    payload.boot.board_stage = BoardInit::stageText(boot.board_stage);
+    payload.boot.board_failure = BoardInit::failureText(boot.board_failure);
+    payload.boot.lvgl_ready = boot.lvgl_ready;
     WebDiagApiUtils::fillJson(doc.to<ArduinoJson::JsonObject>(),
                               payload,
                               g_events_snapshot,

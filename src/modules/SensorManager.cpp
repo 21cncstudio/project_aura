@@ -589,6 +589,7 @@ void log_soft_warnings(const SensorData &data, bool gas_warmup) {
 } // namespace
 
 void SensorManager::begin(StorageManager &storage, float temp_offset, float hum_offset) {
+    initialized_ = true;
     sen66_.begin();
     sen66_.setOffsets(temp_offset, hum_offset);
     sen66_.loadVocState(storage);
@@ -695,6 +696,9 @@ SensorManager::PollResult SensorManager::poll(SensorData &data,
                                               PressureHistory &pressure_history,
                                               bool co2_asc_enabled) {
     PollResult result;
+    if (!initialized_) {
+        return result;
+    }
     bool sen66_changed = false;
     sen66_.poll(data, sen66_changed);
     if (sen66_changed) {
@@ -855,6 +859,9 @@ SensorManager::PollResult SensorManager::poll(SensorData &data,
 }
 
 bool SensorManager::isPressureOk() const {
+    if (!initialized_) {
+        return false;
+    }
     if (pressure_sensor_ == PRESSURE_BMP58X) {
         return bmp580_.isOk();
     }
@@ -978,9 +985,13 @@ const char *SensorManager::hchoSensorLabel() const {
 }
 
 void SensorManager::setOffsets(float temp_offset, float hum_offset) {
-    sen66_.setOffsets(temp_offset, hum_offset);
+    if (initialized_) {
+        sen66_.setOffsets(temp_offset, hum_offset);
+    }
 }
 
 void SensorManager::clearVocState(StorageManager &storage) {
-    sen66_.clearVocState(storage);
+    if (initialized_) {
+        sen66_.clearVocState(storage);
+    }
 }

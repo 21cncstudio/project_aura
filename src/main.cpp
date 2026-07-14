@@ -12,6 +12,8 @@
 
 #include "core/AppInit.h"
 #include "core/BoardInit.h"
+#include "core/BoardRecoveryPolicy.h"
+#include "core/BootDiagnostics.h"
 #include "core/BootPolicy.h"
 #include "core/ChartsRuntimeState.h"
 #include "core/ConnectivityRuntime.h"
@@ -21,6 +23,7 @@
 #include "core/NetworkCommandQueue.h"
 #include "core/NetworkPlane.h"
 #include "core/OtaRollback.h"
+#include "core/RuntimeReadinessPolicy.h"
 #include "core/SafeRestart.h"
 #include "core/WebRuntimeState.h"
 #include "core/Watchdog.h"
@@ -173,6 +176,9 @@ void setup()
     boot_start_ms = millis();
 
     StorageManager::BootAction boot_action = AppInit::handleBootState();
+    BootDiagnostics::state = BootDiagnostics::Snapshot{};
+    BootDiagnostics::state.reset_reason = boot_reset_reason;
+    BootDiagnostics::state.auto_recovery_boot = boot_board_auto_recovery_reboot;
     const bool restart_task_ready = safe_restart_init();
     if (!restart_task_ready) {
         LOGW("Restart", "Core0 restart task init failed; automatic recovery will be suppressed");
@@ -182,6 +188,36 @@ void setup()
     auto *board = board_result.board;
     board_ready = board_result.ready();
     i2c_runtime_ready = board_ready;
+    BootDiagnostics::state.i2c_status = board_result.last_recovery.status;
+    BootDiagnostics::state.sda_high = board_result.last_recovery.after.sda_high;
+    BootDiagnostics::state.scl_high = board_result.last_recovery.after.scl_high;
+    BootDiagnostics::state.board_ready = board_ready;
+    BootDiagnostics::state.board_rounds = board_result.rounds;
+    BootDiagnostics::state.board_begin_attempts = board_result.begin_attempts;
+    BootDiagnostics::state.board_stage = board_result.last_stage;
+    BootDiagnostics::state.board_failure = board_result.failure;
+
+    const BoardRecoveryPolicy::Decision recovery_decision = BoardRecoveryPolicy::decide(
+        board_ready,
+        boot_reset_reason == ESP_RST_POWERON,
+        boot_board_auto_recovery_reboot,
+        restart_task_ready);
+    if (recovery_decision == BoardRecoveryPolicy::Decision::Restart) {
+        LOGE("Main",
+             "Board unavailable after %u rounds; automatic recovery restart requested",
+             static_cast<unsigned>(board_result.rounds));
+        boot_mark_board_auto_recovery_reboot();
+        delay(100);
+        safe_restart_via_core0();
+    }
+    if (!board_ready) {
+        LOGE("Main",
+             "Board automatic recovery suppressed: %s; entering headless mode",
+             BoardRecoveryPolicy::decisionText(recovery_decision));
+        LOGW("Main", "Runtime I2C polling suppressed: board/I2C unavailable");
+    } else if (boot_board_auto_recovery_reboot) {
+        LOGI("Main", "Board recovered after automatic restart");
+    }
 
     AppInit::Context init_ctx{
         storage,
@@ -219,7 +255,8 @@ void setup()
     dailyExtremaHistory.begin(sdCardManager, temp_units_c);
     networkManager.attachDailyHistory(sdCardManager, dailyExtremaHistory);
     lvgl_ready = AppInit::initLvglAndUi(init_ctx, board);
-    operational_ready = board_ready && lvgl_ready;
+    operational_ready = RuntimeReadinessPolicy::operational(board_ready, lvgl_ready);
+    BootDiagnostics::state.lvgl_ready = lvgl_ready;
     memoryMonitor.logNow("boot");
 
     Watchdog::setup(TASK_WDT_TIMEOUT_MS);
@@ -234,15 +271,19 @@ void loop()
 {
     if (WebHandlersConsumeRestartRequest()) {
         LOGI("OTA", "restarting now (main loop)");
-        // Treat controlled restart as a successful boot signal during OTA
-        // rollback validation. Otherwise a user-requested restart from web/UI/MQTT
-        // before the stable gate would roll back firmware that already reached
-        // the management interface. This intentionally favors predictable
-        // controlled restarts over stricter rollback protection for late faults.
-        OtaRollback::markValidIfPending("controlled_restart");
+        // A controlled restart confirms OTA only after display and UI reached
+        // the operational state. Headless management access is intentionally
+        // insufficient to validate a display firmware image.
+        if (RuntimeReadinessPolicy::canConfirmOta(board_ready, lvgl_ready)) {
+            OtaRollback::markValidIfPending("controlled_restart");
+        } else {
+            LOGW("OTA", "rollback validation withheld: controlled restart from headless boot");
+        }
         dailyExtremaHistory.flush();
         WebHandlersBeginRestartShutdown();
-        lvgl_port_prepare_restart();
+        if (lvgl_ready) {
+            lvgl_port_prepare_restart();
+        }
         quiesce_network_for_restart();
         delay(50);
         // Delegate restart to a dedicated Core 0 task so Core 0 is the initiator.
@@ -261,13 +302,16 @@ void loop()
         ota_pause_requested_ms = 0;
         ota_pause_wait_warned = false;
         ota_resume_pending = false;
-        lvgl_port_block_touch_read(OTA_TOUCH_BLOCK_MS);
+        if (lvgl_ready) {
+            lvgl_port_block_touch_read(OTA_TOUCH_BLOCK_MS);
+        }
     } else if (!ota_busy && ota_window_active) {
         ota_window_active = false;
-        if (ota_pause_requested || ota_lvgl_quiesced || lvgl_port_is_paused()) {
+        if (lvgl_ready &&
+            (ota_pause_requested || ota_lvgl_quiesced || lvgl_port_is_paused())) {
             lvgl_port_request_resume();
             ota_resume_pending = true;
-        } else {
+        } else if (lvgl_ready) {
             lvgl_port_block_touch_read(Config::BACKLIGHT_WAKE_BLOCK_MS);
         }
         ota_lvgl_quiesced = false;
@@ -276,7 +320,7 @@ void loop()
         ota_pause_wait_warned = false;
     }
 
-    if (!ota_busy && ota_resume_pending) {
+    if (lvgl_ready && !ota_busy && ota_resume_pending) {
         lvgl_port_request_resume();
         if (!lvgl_port_is_paused()) {
             ota_resume_pending = false;
@@ -292,7 +336,8 @@ void loop()
     }
 
     if (ota_busy) {
-        if (!ota_lvgl_quiesced && static_cast<int32_t>(loop_now - ota_quiesce_due_ms) >= 0) {
+        if (lvgl_ready && !ota_lvgl_quiesced &&
+            static_cast<int32_t>(loop_now - ota_quiesce_due_ms) >= 0) {
             if (!ota_pause_requested) {
                 lvgl_port_request_pause();
                 ota_pause_requested = true;
@@ -327,10 +372,12 @@ void loop()
         return;
     }
 
-    SensorManager::PollResult sensor_poll =
-        sensorManager.poll(currentData, storage, pressureHistory, co2_asc_enabled);
-    uiController.onSensorPoll(sensor_poll);
-    chartsHistory.update(currentData, storage);
+    SensorManager::PollResult sensor_poll{};
+    if (i2c_runtime_ready) {
+        sensor_poll = sensorManager.poll(currentData, storage, pressureHistory, co2_asc_enabled);
+        uiController.onSensorPoll(sensor_poll);
+        chartsHistory.update(currentData, storage);
+    }
     chartsRuntimeState.update(chartsHistory);
     webRuntimeState.update(currentData, sensorManager.isWarmupActive(), fanControl);
     if (!network_plane_running) {
@@ -346,7 +393,11 @@ void loop()
                                boot_stable,
                                boot_count,
                                safe_boot_stage)) {
-        OtaRollback::markValidIfPending("stable_boot");
+        if (RuntimeReadinessPolicy::canConfirmOta(board_ready, lvgl_ready)) {
+            OtaRollback::markValidIfPending("stable_boot");
+        } else {
+            LOGW("OTA", "rollback validation withheld: stable timer reached in headless mode");
+        }
     }
     TimeManager::PollResult time_poll = timeManager.poll(now);
     mqttManager.setSystemTimeValid(timeManager.isSystemTimeValid());
@@ -355,7 +406,9 @@ void loop()
         dailyExtremaHistory.update(currentData, now);
     }
     dailyExtremaHistory.poll(now);
-    fanControl.poll(now, &currentData, sensorManager.isWarmupActive(), displayThresholds.snapshot());
+    if (i2c_runtime_ready) {
+        fanControl.poll(now, &currentData, sensorManager.isWarmupActive(), displayThresholds.snapshot());
+    }
     const FanControl::Snapshot fan_snapshot = fanControl.snapshot();
     webRuntimeState.update(currentData, sensorManager.isWarmupActive(), fanControl);
     mqttRuntimeState.update(currentData,

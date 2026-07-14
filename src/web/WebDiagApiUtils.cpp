@@ -29,6 +29,19 @@ void fillJson(ArduinoJson::JsonObject root,
     heap["free"] = payload.heap_free;
     heap["min_free"] = payload.heap_min_free;
 
+    ArduinoJson::JsonObject boot = root["boot"].to<ArduinoJson::JsonObject>();
+    boot["reset_reason"] = payload.boot.reset_reason;
+    boot["auto_recovery_boot"] = payload.boot.auto_recovery_boot;
+    boot["i2c_status"] = payload.boot.i2c_status;
+    boot["sda_high"] = payload.boot.sda_high;
+    boot["scl_high"] = payload.boot.scl_high;
+    boot["board_ready"] = payload.boot.board_ready;
+    boot["board_rounds"] = payload.boot.board_rounds;
+    boot["board_begin_attempts"] = payload.boot.board_begin_attempts;
+    boot["board_stage"] = payload.boot.board_stage;
+    boot["board_failure"] = payload.boot.board_failure;
+    boot["lvgl_ready"] = payload.boot.lvgl_ready;
+
     ArduinoJson::JsonObject network = root["network"].to<ArduinoJson::JsonObject>();
     WebNetworkUtils::fillDiagJson(network, payload.network);
 

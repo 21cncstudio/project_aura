@@ -213,6 +213,7 @@ FanControl::Snapshot FanControl::snapshot() const {
 
 void FanControl::begin(bool auto_mode_preference, bool auto_armed_preference) {
     ensureSyncPrimitives();
+    initialized_ = true;
 
     mode_ = auto_mode_preference ? Mode::Auto : Mode::Manual;
     manual_step_ = 1;
@@ -273,6 +274,9 @@ void FanControl::poll(uint32_t now_ms,
                       const SensorData *sensor_data,
                       bool gas_warmup,
                       const DisplayThresholds::Config &thresholds) {
+    if (!initialized_) {
+        return;
+    }
     ensureSyncPrimitives();
 
     PendingCommands pending;

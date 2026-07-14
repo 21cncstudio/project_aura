@@ -10,7 +10,9 @@
 namespace {
 
 constexpr uint32_t BOOT_UI_AUTO_RECOVERY_MAGIC = 0xA11A0F5Au;
+constexpr uint32_t BOOT_BOARD_AUTO_RECOVERY_MAGIC = 0xB04D1C2Cu;
 RTC_DATA_ATTR uint32_t boot_ui_auto_recovery_magic = 0;
+RTC_DATA_ATTR uint32_t boot_board_auto_recovery_magic = 0;
 
 } // namespace
 
@@ -20,6 +22,7 @@ esp_reset_reason_t boot_reset_reason = ESP_RST_UNKNOWN;
 bool boot_i2c_recovered = false;
 bool boot_touch_detected = false;
 bool boot_ui_auto_recovery_reboot = false;
+bool boot_board_auto_recovery_reboot = false;
 
 void boot_mark_ui_auto_recovery_reboot() {
     boot_ui_auto_recovery_magic = BOOT_UI_AUTO_RECOVERY_MAGIC;
@@ -28,5 +31,15 @@ void boot_mark_ui_auto_recovery_reboot() {
 bool boot_consume_ui_auto_recovery_reboot() {
     bool flagged = (boot_ui_auto_recovery_magic == BOOT_UI_AUTO_RECOVERY_MAGIC);
     boot_ui_auto_recovery_magic = 0;
+    return flagged;
+}
+
+void boot_mark_board_auto_recovery_reboot() {
+    boot_board_auto_recovery_magic = BOOT_BOARD_AUTO_RECOVERY_MAGIC;
+}
+
+bool boot_consume_board_auto_recovery_reboot() {
+    const bool flagged = (boot_board_auto_recovery_magic == BOOT_BOARD_AUTO_RECOVERY_MAGIC);
+    boot_board_auto_recovery_magic = 0;
     return flagged;
 }
