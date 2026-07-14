@@ -2307,9 +2307,6 @@ void create_screen_page_settings() {
                     lv_obj_set_style_border_width(obj, 2, LV_PART_MAIN | LV_STATE_DEFAULT);
                     lv_obj_set_style_radius(obj, 15, LV_PART_MAIN | LV_STATE_DEFAULT);
                     lv_obj_set_style_bg_opa(obj, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
-                    lv_obj_set_style_bg_color(obj, lv_color_hex(0x1950a1), LV_PART_MAIN | LV_STATE_DEFAULT);
-                    lv_obj_set_style_bg_grad_dir(obj, LV_GRAD_DIR_VER, LV_PART_MAIN | LV_STATE_DEFAULT);
-                    lv_obj_set_style_bg_grad_color(obj, lv_color_hex(0x0b2448), LV_PART_MAIN | LV_STATE_DEFAULT);
                     {
                         lv_obj_t *parent_obj = obj;
                         {
