@@ -6,6 +6,10 @@
 
 #pragma once
 
+#include <stdint.h>
+
+#include "core/I2cBusRecovery.h"
+
 namespace esp_panel {
 namespace board {
 class Board;
@@ -13,5 +17,40 @@ class Board;
 } // namespace esp_panel
 
 namespace BoardInit {
-    esp_panel::board::Board *initBoard();
+
+enum class Failure : uint8_t {
+    None = 0,
+    BusStuck,
+    Allocation,
+    Init,
+    TaskCreate,
+    Begin,
+    Timeout,
+};
+
+enum class Stage : uint8_t {
+    Bus = 0,
+    Expander,
+    Lcd,
+    Touch,
+    Backlight,
+    Complete,
+};
+
+struct Result {
+    esp_panel::board::Board *board = nullptr;
+    Failure failure = Failure::None;
+    Stage last_stage = Stage::Bus;
+    uint8_t rounds = 0;
+    uint8_t begin_attempts = 0;
+    I2cBusRecovery::Result last_recovery{};
+
+    bool ready() const { return board != nullptr && failure == Failure::None; }
+};
+
+Result initBoard(const I2cBusRecovery::LineState &early_state);
+void noteStage(Stage stage);
+const char *failureText(Failure failure);
+const char *stageText(Stage stage);
+
 }

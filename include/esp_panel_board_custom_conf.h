@@ -15,6 +15,8 @@
 
 #pragma once
 
+#include "BoardInitCallbacks.h"
+
 // *INDENT-OFF*
 #define ESP_OPEN_TOUCH 1 // 1 initiates the touch, 0 closes the touch.
 
@@ -342,12 +344,23 @@
  * @param[in] p Pointer to the board object
  * @return true on success, false on failure
  */
+#define ESP_PANEL_BOARD_PRE_BEGIN_FUNCTION(p) \
+    { \
+        auraBoardInitNoteStage(AuraBoardInitStage::Bus); \
+        return true; \
+    }
+
+#define ESP_PANEL_BOARD_EXPANDER_PRE_BEGIN_FUNCTION(p) \
+    { \
+        auraBoardInitNoteStage(AuraBoardInitStage::Expander); \
+        return true; \
+    }
+
 #define ESP_PANEL_BOARD_EXPANDER_POST_BEGIN_FUNCTION(p) \
     {  \
         auto board = static_cast<Board *>(p);  \
         auto expander = static_cast<esp_expander::CH422G*>(board->getIO_Expander()->getBase()); \
-        expander->enableAllIO_Output(); \
-        return true;    \
+        return auraBoardInitStageResult(AuraBoardInitStage::Expander, expander->enableAllIO_Output()); \
     }
 
 /**
@@ -358,14 +371,22 @@
  */
 #define ESP_PANEL_BOARD_LCD_PRE_BEGIN_FUNCTION(p) \
     {  \
+        auraBoardInitNoteStage(AuraBoardInitStage::Lcd); \
         constexpr int LCD_RST = 3; \
         auto board = static_cast<Board *>(p);  \
         auto expander = board->getIO_Expander()->getBase(); \
-        expander->digitalWrite(LCD_RST, 0); \
+        if (!expander->digitalWrite(LCD_RST, 0)) \
+            return auraBoardInitStageResult(AuraBoardInitStage::Lcd, false); \
         vTaskDelay(pdMS_TO_TICKS(10)); \
-        expander->digitalWrite(LCD_RST, 1); \
+        if (!expander->digitalWrite(LCD_RST, 1)) \
+            return auraBoardInitStageResult(AuraBoardInitStage::Lcd, false); \
         vTaskDelay(pdMS_TO_TICKS(100)); \
         return true;    \
+    }
+
+#define ESP_PANEL_BOARD_LCD_POST_BEGIN_FUNCTION(p) \
+    { \
+        return auraBoardInitStageResult(AuraBoardInitStage::Lcd, true); \
     }
 
 #if ESP_PANEL_BOARD_USE_TOUCH
@@ -377,24 +398,53 @@
  */
 #define ESP_PANEL_BOARD_TOUCH_PRE_BEGIN_FUNCTION(p) \
     {  \
+        auraBoardInitNoteStage(AuraBoardInitStage::Touch); \
         constexpr gpio_num_t TP_INT = static_cast<gpio_num_t>(ESP_PANEL_BOARD_TOUCH_INT_IO); \
         constexpr int TP_RST = 1; \
         auto board = static_cast<Board *>(p);  \
         auto expander = board->getIO_Expander()->getBase(); \
-        gpio_set_direction(TP_INT, GPIO_MODE_OUTPUT); \
-        gpio_set_level(TP_INT, 0); \
+        if (gpio_set_direction(TP_INT, GPIO_MODE_OUTPUT) != ESP_OK) \
+            return auraBoardInitStageResult(AuraBoardInitStage::Touch, false); \
+        if (gpio_set_level(TP_INT, 0) != ESP_OK) \
+            return auraBoardInitStageResult(AuraBoardInitStage::Touch, false); \
         vTaskDelay(pdMS_TO_TICKS(50)); \
-        expander->digitalWrite(TP_RST, 0); \
+        if (!expander->digitalWrite(TP_RST, 0)) \
+            return auraBoardInitStageResult(AuraBoardInitStage::Touch, false); \
         vTaskDelay(pdMS_TO_TICKS(50)); \
-        gpio_set_level(TP_INT, 1); \
+        if (gpio_set_level(TP_INT, 1) != ESP_OK) \
+            return auraBoardInitStageResult(AuraBoardInitStage::Touch, false); \
         vTaskDelay(pdMS_TO_TICKS(5)); \
-        expander->digitalWrite(TP_RST, 1); \
+        if (!expander->digitalWrite(TP_RST, 1)) \
+            return auraBoardInitStageResult(AuraBoardInitStage::Touch, false); \
         vTaskDelay(pdMS_TO_TICKS(350)); \
         vTaskDelay(pdMS_TO_TICKS(ESP_PANEL_BOARD_TOUCH_I2C_PRE_INIT_DELAY_MS)); \
-        gpio_reset_pin(TP_INT); \
+        if (gpio_reset_pin(TP_INT) != ESP_OK) \
+            return auraBoardInitStageResult(AuraBoardInitStage::Touch, false); \
         return true;    \
     }
+
+#define ESP_PANEL_BOARD_TOUCH_POST_BEGIN_FUNCTION(p) \
+    { \
+        return auraBoardInitStageResult(AuraBoardInitStage::Touch, true); \
+    }
 #endif
+
+#define ESP_PANEL_BOARD_BACKLIGHT_PRE_BEGIN_FUNCTION(p) \
+    { \
+        auraBoardInitNoteStage(AuraBoardInitStage::Backlight); \
+        return true; \
+    }
+
+#define ESP_PANEL_BOARD_BACKLIGHT_POST_BEGIN_FUNCTION(p) \
+    { \
+        return auraBoardInitStageResult(AuraBoardInitStage::Backlight, true); \
+    }
+
+#define ESP_PANEL_BOARD_POST_BEGIN_FUNCTION(p) \
+    { \
+        auraBoardInitNoteStage(AuraBoardInitStage::Complete); \
+        return true; \
+    }
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 /////////////////////////////////////////////// File Version ///////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////

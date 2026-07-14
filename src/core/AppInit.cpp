@@ -15,7 +15,6 @@
 #include "core/BootPolicy.h"
 #include "core/BootHelpers.h"
 #include "core/BootState.h"
-#include "core/BoardInit.h"
 #include "core/InitConfig.h"
 #include "core/Logger.h"
 #include "lvgl_v8_port.h"
@@ -111,16 +110,6 @@ StorageManager::BootAction AppInit::handleBootState() {
     return boot_action;
 }
 
-bool AppInit::recoverI2cBus(gpio_num_t sda, gpio_num_t scl) {
-    boot_i2c_recovered = BootHelpers::recoverI2CBus(sda, scl);
-    if (!boot_i2c_recovered) {
-        LOGW("Main", "I2C bus recovery failed");
-    } else {
-        LOGI("Main", "I2C bus recovered");
-    }
-    return boot_i2c_recovered;
-}
-
 void AppInit::initManagersAndConfig(Context &ctx, StorageManager::BootAction boot_action) {
     ctx.storage.begin(boot_action);
     ctx.displayThresholds.begin(ctx.storage);
@@ -184,11 +173,10 @@ void AppInit::initManagersAndConfig(Context &ctx, StorageManager::BootAction boo
     ctx.connectivityRuntime.update(ctx.networkManager, ctx.mqttManager);
 }
 
-esp_panel::board::Board *AppInit::initBoardAndPeripherals(Context &ctx) {
-    esp_panel::board::Board *board = BoardInit::initBoard();
+bool AppInit::initBoardAndPeripherals(Context &ctx, esp_panel::board::Board *board) {
     if (board == nullptr) {
         LOGE("Main", "Board unavailable, skip display/backlight/touch init");
-        return nullptr;
+        return false;
     }
     ctx.backlightManager.attachBacklight(board->getBacklight());
     ctx.timeManager.initRtc();
@@ -214,7 +202,7 @@ esp_panel::board::Board *AppInit::initBoardAndPeripherals(Context &ctx) {
     ctx.webRuntimeState.update(ctx.currentData, ctx.sensorManager.isWarmupActive(), ctx.fanControl);
     ctx.chartsRuntimeState.update(ctx.chartsHistory);
 
-    return board;
+    return true;
 }
 
 bool AppInit::initLvglAndUi(Context &ctx, esp_panel::board::Board *board) {

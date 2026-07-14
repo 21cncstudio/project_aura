@@ -51,43 +51,8 @@ bool BootHelpers::isCrashReset(esp_reset_reason_t reason) {
     }
 }
 
-bool BootHelpers::recoverI2CBus(gpio_num_t sda, gpio_num_t scl) {
-    gpio_set_direction(sda, GPIO_MODE_INPUT_OUTPUT_OD);
-    gpio_set_direction(scl, GPIO_MODE_INPUT_OUTPUT_OD);
-    // Leave the bus floating here so recovery uses only hardware pull-ups.
-    gpio_set_pull_mode(sda, GPIO_FLOATING);
-    gpio_set_pull_mode(scl, GPIO_FLOATING);
-    gpio_set_level(sda, 1);
-    gpio_set_level(scl, 1);
-    delayMicroseconds(5);
-
-    if (gpio_get_level(sda) == 1 && gpio_get_level(scl) == 1) {
-        return true;
-    }
-
-    for (int i = 0; i < 9; ++i) {
-        gpio_set_level(scl, 0);
-        delayMicroseconds(5);
-        gpio_set_level(scl, 1);
-        delayMicroseconds(5);
-        if (gpio_get_level(sda) == 1) {
-            break;
-        }
-    }
-
-    gpio_set_level(sda, 0);
-    delayMicroseconds(5);
-    gpio_set_level(scl, 1);
-    delayMicroseconds(5);
-    gpio_set_level(sda, 1);
-    delayMicroseconds(5);
-
-    bool ok = (gpio_get_level(sda) == 1 && gpio_get_level(scl) == 1);
-    gpio_set_direction(sda, GPIO_MODE_INPUT);
-    gpio_set_direction(scl, GPIO_MODE_INPUT);
-    gpio_set_pull_mode(sda, GPIO_FLOATING);
-    gpio_set_pull_mode(scl, GPIO_FLOATING);
-    return ok;
+I2cBusRecovery::Result BootHelpers::recoverI2CBus(gpio_num_t sda, gpio_num_t scl) {
+    return I2cBusRecovery::recover(sda, scl);
 }
 
 void BootHelpers::logGt911Address() {

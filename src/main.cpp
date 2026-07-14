@@ -11,6 +11,7 @@
 #include "config/AppData.h"
 
 #include "core/AppInit.h"
+#include "core/BoardInit.h"
 #include "core/BootPolicy.h"
 #include "core/ChartsRuntimeState.h"
 #include "core/ConnectivityRuntime.h"
@@ -131,6 +132,10 @@ uint32_t ota_pause_requested_ms = 0;
 bool ota_pause_wait_warned = false;
 bool ota_resume_pending = false;
 bool network_plane_running = false;
+bool board_ready = false;
+bool i2c_runtime_ready = false;
+bool lvgl_ready = false;
+bool operational_ready = false;
 
 void quiesce_network_for_restart() {
     const wifi_mode_t wifi_mode = WiFi.getMode();
@@ -146,6 +151,9 @@ void quiesce_network_for_restart() {
 
 void setup()
 {
+    const I2cBusRecovery::LineState early_i2c_state = I2cBusRecovery::sample(
+        static_cast<gpio_num_t>(I2C_SDA_PIN),
+        static_cast<gpio_num_t>(I2C_SCL_PIN));
     delay(3000);
     Serial.begin(115200);
     Logger::begin(Serial, static_cast<Logger::Level>(Config::LOG_LEVEL));
@@ -165,8 +173,15 @@ void setup()
     boot_start_ms = millis();
 
     StorageManager::BootAction boot_action = AppInit::handleBootState();
-    AppInit::recoverI2cBus(static_cast<gpio_num_t>(I2C_SDA_PIN),
-                           static_cast<gpio_num_t>(I2C_SCL_PIN));
+    const bool restart_task_ready = safe_restart_init();
+    if (!restart_task_ready) {
+        LOGW("Restart", "Core0 restart task init failed; automatic recovery will be suppressed");
+    }
+
+    BoardInit::Result board_result = BoardInit::initBoard(early_i2c_state);
+    auto *board = board_result.board;
+    board_ready = board_result.ready();
+    i2c_runtime_ready = board_ready;
 
     AppInit::Context init_ctx{
         storage,
@@ -199,17 +214,15 @@ void setup()
     };
 
     AppInit::initManagersAndConfig(init_ctx, boot_action);
-    auto *board = AppInit::initBoardAndPeripherals(init_ctx);
+    AppInit::initBoardAndPeripherals(init_ctx, board);
     sdCardManager.begin(board);
     dailyExtremaHistory.begin(sdCardManager, temp_units_c);
     networkManager.attachDailyHistory(sdCardManager, dailyExtremaHistory);
-    AppInit::initLvglAndUi(init_ctx, board);
+    lvgl_ready = AppInit::initLvglAndUi(init_ctx, board);
+    operational_ready = board_ready && lvgl_ready;
     memoryMonitor.logNow("boot");
 
     Watchdog::setup(TASK_WDT_TIMEOUT_MS);
-    if (!safe_restart_init()) {
-        LOGW("Restart", "Core0 restart task init failed; controlled restart requests will abort");
-    }
     webUiBridge.setDispatchMode(WebUiBridge::DispatchMode::DeferredReply);
     network_plane_running = NetworkPlane::start(network_plane_context);
     if (!network_plane_running) {

@@ -68,9 +68,8 @@ struct Context {
 };
 
 StorageManager::BootAction handleBootState();
-bool recoverI2cBus(gpio_num_t sda, gpio_num_t scl);
 void initManagersAndConfig(Context &ctx, StorageManager::BootAction boot_action);
-esp_panel::board::Board *initBoardAndPeripherals(Context &ctx);
+bool initBoardAndPeripherals(Context &ctx, esp_panel::board::Board *board);
 bool initLvglAndUi(Context &ctx, esp_panel::board::Board *board);
 void pollDeferredRuntime();
 
