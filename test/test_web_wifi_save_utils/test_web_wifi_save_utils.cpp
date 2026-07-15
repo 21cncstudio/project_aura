@@ -7,14 +7,45 @@ void tearDown() {}
 
 void test_web_wifi_save_utils_parse_accepts_valid_input() {
     const WebWifiSaveUtils::ParseResult result =
-        WebWifiSaveUtils::parseSaveInput("AuraNet", "secret");
+        WebWifiSaveUtils::parseSaveInput("AuraNet", "secret12");
 
     TEST_ASSERT_TRUE(result.success);
     TEST_ASSERT_EQUAL_STRING("AuraNet", result.update.settings.ssid.c_str());
-    TEST_ASSERT_EQUAL_STRING("secret", result.update.settings.pass.c_str());
+    TEST_ASSERT_EQUAL_STRING("secret12", result.update.settings.pass.c_str());
     TEST_ASSERT_TRUE(result.update.settings.enabled);
     TEST_ASSERT_EQUAL_INT(static_cast<int>(Config::WifiAuthMode::Personal),
                           static_cast<int>(result.update.settings.auth_mode));
+}
+
+void test_web_wifi_save_utils_parse_validates_personal_password_length() {
+    WebWifiSaveUtils::ParseResult result =
+        WebWifiSaveUtils::parseSaveInput("OpenNet", "");
+    TEST_ASSERT_TRUE(result.success);
+    TEST_ASSERT_EQUAL_STRING("", result.update.settings.pass.c_str());
+
+    result = WebWifiSaveUtils::parseSaveInput("AuraNet", "1234567");
+    TEST_ASSERT_FALSE(result.success);
+    TEST_ASSERT_EQUAL_UINT16(400, result.status_code);
+    TEST_ASSERT_EQUAL_STRING(
+        "WiFi password must be empty for an open network or 8-63 bytes",
+        result.error_message.c_str());
+
+    result = WebWifiSaveUtils::parseSaveInput("AuraNet", "12345678");
+    TEST_ASSERT_TRUE(result.success);
+
+    const String password_63 =
+        "123456789012345678901234567890123456789012345678901234567890123";
+    result = WebWifiSaveUtils::parseSaveInput("AuraNet", password_63);
+    TEST_ASSERT_TRUE(result.success);
+
+    const String password_64 =
+        "1234567890123456789012345678901234567890123456789012345678901234";
+    result = WebWifiSaveUtils::parseSaveInput("AuraNet", password_64);
+    TEST_ASSERT_FALSE(result.success);
+    TEST_ASSERT_EQUAL_UINT16(400, result.status_code);
+    TEST_ASSERT_EQUAL_STRING(
+        "WiFi password must be empty for an open network or 8-63 bytes",
+        result.error_message.c_str());
 }
 
 void test_web_wifi_save_utils_parse_rejects_missing_ssid_and_bad_password() {
@@ -229,6 +260,7 @@ void test_web_wifi_save_utils_parse_rejects_large_tls_private_key() {
 int main(int, char **) {
     UNITY_BEGIN();
     RUN_TEST(test_web_wifi_save_utils_parse_accepts_valid_input);
+    RUN_TEST(test_web_wifi_save_utils_parse_validates_personal_password_length);
     RUN_TEST(test_web_wifi_save_utils_parse_rejects_missing_ssid_and_bad_password);
     RUN_TEST(test_web_wifi_save_utils_parse_rejects_unknown_enterprise_options);
     RUN_TEST(test_web_wifi_save_utils_parse_accepts_peap_and_defaults_identity);
