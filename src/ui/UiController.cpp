@@ -1750,6 +1750,7 @@ void UiController::update_main_screen_background_alert() {
 void UiController::set_dot_color(lv_obj_t *obj, lv_color_t color) {
     if (!obj) return;
     lv_obj_set_style_bg_color(obj, color, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_border_color(obj, color, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_shadow_color(obj, color, LV_PART_MAIN | LV_STATE_DEFAULT);
     if (color.full == color_inactive().full) {
         lv_obj_set_style_shadow_opa(obj, LV_OPA_TRANSP, LV_PART_MAIN | LV_STATE_DEFAULT);

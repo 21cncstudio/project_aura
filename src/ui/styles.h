@@ -37,6 +37,11 @@ lv_style_t *get_style_style_preview_text_primary_MAIN_DEFAULT();
 void add_style_style_preview_text_primary(lv_obj_t *obj);
 void remove_style_style_preview_text_primary(lv_obj_t *obj);
 
+// Style: style_status_dot
+lv_style_t *get_style_style_status_dot_MAIN_DEFAULT();
+void add_style_style_status_dot(lv_obj_t *obj);
+void remove_style_style_status_dot(lv_obj_t *obj);
+
 
 
 #ifdef __cplusplus
