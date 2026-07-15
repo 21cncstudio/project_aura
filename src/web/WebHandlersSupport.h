@@ -45,7 +45,7 @@ void pollDeferred();
 bool allowOtaPhysicalConfirm();
 bool denyOtaPhysicalConfirm();
 
-WebOtaSnapshot otaSnapshot();
+WebOtaSnapshot otaSnapshotForHttpRequest();
 WebTransferSnapshot streamSnapshot(uint32_t now_ms);
 WebResponseUtils::StreamContext responseContext();
 WebDeferredActionsState &deferredActions();

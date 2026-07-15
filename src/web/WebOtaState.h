@@ -59,7 +59,7 @@ public:
     bool hasError() const;
     void setTotalTimeoutMs(uint32_t timeout_ms);
     bool totalTimeoutExceeded(uint32_t now_ms) const;
-    void poll(uint32_t now_ms);
+    void expireTerminalResult(uint32_t now_ms);
     void setStartRssi(int rssi);
     void setSlotSize(size_t slot_size);
     void setExpectedSize(bool known, size_t expected_size);

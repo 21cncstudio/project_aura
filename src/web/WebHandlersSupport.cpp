@@ -268,7 +268,6 @@ void pollDeferred() {
     }
 
     g_restart_controller.poll(now_ms);
-    g_ota_state.poll(now_ms);
 }
 
 bool allowOtaPhysicalConfirm() {
@@ -305,7 +304,11 @@ bool denyOtaPhysicalConfirm() {
     return denied;
 }
 
-WebOtaSnapshot otaSnapshot() {
+WebOtaSnapshot otaSnapshotForHttpRequest() {
+    // All non-atomic WebOtaState fields are owned by the ESP HTTP server task.
+    // Expire terminal results lazily here instead of mutating the state from
+    // the separate network task in pollDeferred().
+    g_ota_state.expireTerminalResult(millis());
     return g_ota_state.snapshot();
 }
 
