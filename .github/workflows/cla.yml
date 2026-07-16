@@ -42,7 +42,8 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           path-to-document: https://github.com/21cncstudio/project_aura/blob/main/CLA.md
-          path-to-signatures: signatures/cla.json
+          # Change this path when CLA.md moves to a new version so contributors re-sign.
+          path-to-signatures: signatures/v1.0/cla.json
           branch: cla-signatures
           # The action compares GitHub logins case-sensitively; keep both owner spellings.
           allowlist: 21cncstudio,21CNCStudio,dependabot[bot],github-actions[bot],renovate[bot]
