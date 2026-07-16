@@ -8,7 +8,13 @@ open-source community such an amazing place to learn, inspire, and create.
 Project Aura uses a **Dual Licensing** model (GPLv3 for open source, Commercial for proprietary use).
 To maintain this model, I require all contributors to agree to a Contributor License Agreement (CLA).
 
-**By submitting a pull request, you automatically agree to the terms in [CLA.md](CLA.md).**
+Agreement is explicit, not automatic. When you open your first pull request, the CLA check will ask
+you to read [CLA.md](CLA.md) and post this exact comment in the pull request:
+
+`I have read the CLA Document and I hereby sign the CLA`
+
+The pull request cannot be merged until every contributor has signed the current CLA version. The
+signature is normally required only once; a changed CLA version may require a new signature.
 
 This agreement gives 21CNCStudio the right to use your contribution in both the open-source and
 commercial versions of the firmware, while you retain copyright ownership of your code.
@@ -35,6 +41,7 @@ I love pull requests! Here's a quick guide:
 4.  **Pull Request**:
     *   Open a PR against the `main` branch.
     *   Describe your changes clearly.
+    *   Complete the CLA signature requested by the automated check.
 
 ## Questions?
 
