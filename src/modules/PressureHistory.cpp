@@ -51,6 +51,7 @@ void PressureHistory::reset(SensorData &data, StorageManager &storage, bool clea
     count_ = 0;
     epoch_ = 0;
     restored_ = false;
+    restore_wait_started_ms_ = 0;
     memset(history_, 0, sizeof(history_));
     data.pressure_delta_3h_valid = false;
     data.pressure_delta_24h_valid = false;
@@ -70,6 +71,8 @@ bool PressureHistory::isStale(uint32_t now_epoch) const {
 }
 
 void PressureHistory::load(StorageManager &storage, SensorData &data) {
+    data.pressure_delta_3h_valid = false;
+    data.pressure_delta_24h_valid = false;
     PressureHistoryBlob blob = {};
     if (!storage.loadBlob(StorageManager::kPressurePath, &blob, sizeof(blob))) {
         restored_ = false;
@@ -96,6 +99,12 @@ void PressureHistory::load(StorageManager &storage, SensorData &data) {
         return;
     }
 
+    if (count_ > 0 && epoch_ == 0) {
+        LOGW("PressureHistory", "stored history has no timestamp, reset");
+        reset(data, storage, true);
+        return;
+    }
+
     uint32_t now_epoch = 0;
     if (getNowEpoch(now_epoch) && isStale(now_epoch)) {
         LOGW("PressureHistory", "stored history stale, reset");
@@ -103,6 +112,7 @@ void PressureHistory::load(StorageManager &storage, SensorData &data) {
         return;
     }
     last_sample_ms_ = millis() - Config::PRESSURE_HISTORY_STEP_MS;
+    restore_wait_started_ms_ = millis();
     restored_ = true;
     Logger::log(Logger::Info, "PressureHistory",
                 "restored count=%d idx=%d epoch=%u",
@@ -168,6 +178,20 @@ void PressureHistory::update(float pressure, SensorData &data, StorageManager &s
     uint32_t now_ms = millis();
     uint32_t now_epoch = 0;
     bool time_valid = getNowEpoch(now_epoch);
+    if (restored_ && !time_valid) {
+        data.pressure_delta_3h_valid = false;
+        data.pressure_delta_24h_valid = false;
+        if (now_ms - restore_wait_started_ms_ <
+            Config::PRESSURE_HISTORY_RESTORE_TIME_WAIT_MS) {
+            return;
+        }
+        Logger::log(Logger::Warn,
+                    "PressureHistory",
+                    "time unavailable after %ums, reset restored history",
+                    static_cast<unsigned>(Config::PRESSURE_HISTORY_RESTORE_TIME_WAIT_MS));
+        reset(data, storage, true);
+        last_sample_ms_ = now_ms - Config::PRESSURE_HISTORY_STEP_MS;
+    }
     if (time_valid) {
         if (isStale(now_epoch)) {
             LOGW("PressureHistory", "history stale, reset");

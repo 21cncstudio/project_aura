@@ -225,6 +225,32 @@ void test_time_manager_init_rtc_marks_unset_pcf8523_as_time_unset_not_fault() {
     TEST_ASSERT_EQUAL_STRING("PCF8523", manager.rtcLabel());
 }
 
+void test_time_manager_does_not_trust_plausible_rtc_time_after_power_loss() {
+    seedPcf8523WithFreshValidTime();
+    const uint8_t seconds = I2cMock::getRegister(
+        Config::PCF8523_ADDR, Config::PCF8523_REG_SECONDS);
+    I2cMock::setRegister(
+        Config::PCF8523_ADDR,
+        Config::PCF8523_REG_SECONDS,
+        static_cast<uint8_t>(seconds | 0x80));
+
+    StorageManager storage;
+    storage.begin();
+
+    TimeManager manager;
+    manager.begin(storage);
+
+    TEST_ASSERT_FALSE(manager.initRtc());
+    TEST_ASSERT_TRUE(manager.isRtcPresent());
+    TEST_ASSERT_FALSE(manager.isRtcValid());
+    TEST_ASSERT_TRUE(manager.isRtcLostPower());
+    TEST_ASSERT_TRUE(manager.isRtcTimeUnset());
+    TEST_ASSERT_EQUAL_INT64(0, static_cast<long long>(mockNow()));
+    TEST_ASSERT_BITS_HIGH(
+        0x80,
+        I2cMock::getRegister(Config::PCF8523_ADDR, Config::PCF8523_REG_SECONDS));
+}
+
 void test_time_manager_set_local_time_initializes_unset_rtc() {
     seedPcf8523WithUnsetTime();
 
@@ -507,6 +533,7 @@ int main(int, char **) {
     RUN_TEST(test_time_manager_init_rtc_handles_absent_rtc);
     RUN_TEST(test_time_manager_init_rtc_selects_pcf8523);
     RUN_TEST(test_time_manager_init_rtc_marks_unset_pcf8523_as_time_unset_not_fault);
+    RUN_TEST(test_time_manager_does_not_trust_plausible_rtc_time_after_power_loss);
     RUN_TEST(test_time_manager_set_local_time_initializes_unset_rtc);
     RUN_TEST(test_time_manager_init_rtc_selects_ds3231);
     RUN_TEST(test_time_manager_init_rtc_keeps_dirty_ds3231_visible);

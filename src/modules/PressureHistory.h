@@ -30,6 +30,7 @@ private:
 
     uint32_t last_sample_ms_ = 0;
     uint32_t last_save_ms_ = 0;
+    uint32_t restore_wait_started_ms_ = 0;
     float history_[Config::PRESSURE_HISTORY_24H_SAMPLES] = {};
     int index_ = 0;
     int count_ = 0;
