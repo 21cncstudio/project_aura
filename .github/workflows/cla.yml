@@ -51,8 +51,9 @@ jobs:
           signed-commit-message: '$contributorName signed the Project Aura CLA in #$pullRequestNo'
           custom-notsigned-prcomment: |
             Thank you for contributing to Project Aura. Before this pull request can be merged,
-            every contributor must read the [Project Aura CLA]($pathToCLADocument) and add this
-            exact comment to the pull request:
+            every contributor must read the
+            [Project Aura CLA](https://github.com/21cncstudio/project_aura/blob/main/CLA.md)
+            and add this exact comment to the pull request:
 
             `I have read the CLA Document and I hereby sign the CLA`
           custom-allsigned-prcomment: All contributors have signed the Project Aura CLA.
