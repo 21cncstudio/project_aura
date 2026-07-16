@@ -1,0 +1,55 @@
+name: CLA
+
+on:
+  issue_comment:
+    types: [created]
+  pull_request_target:
+    types: [opened, synchronize, closed]
+
+# This workflow runs from the trusted base branch and never checks out PR code.
+permissions:
+  actions: write
+  contents: write
+  pull-requests: write
+  statuses: write
+
+jobs:
+  agreement:
+    name: CLA agreement
+    if: ${{ github.repository == '21cncstudio/project_aura' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify contributor signatures
+        if: |
+          (
+            github.event_name == 'pull_request_target' &&
+            (
+              github.event.action == 'opened' ||
+              github.event.action == 'synchronize' ||
+              (github.event.action == 'closed' && github.event.pull_request.merged == true)
+            )
+          ) ||
+          (
+            github.event_name == 'issue_comment' &&
+            (
+              github.event.comment.body == 'recheck' ||
+              github.event.comment.body == 'I have read the CLA Document and I hereby sign the CLA'
+            )
+          )
+        uses: contributor-assistant/github-action@ca4a40a7d1004f18d9960b404b97e5f30a505a08 # v2.6.1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          path-to-document: https://github.com/21cncstudio/project_aura/blob/main/CLA.md
+          path-to-signatures: signatures/cla.json
+          branch: cla-signatures
+          allowlist: 21cncstudio,dependabot[bot],github-actions[bot],renovate[bot]
+          create-file-commit-message: Create Project Aura CLA signature registry
+          signed-commit-message: '$contributorName signed the Project Aura CLA in #$pullRequestNo'
+          custom-notsigned-prcomment: |
+            Thank you for contributing to Project Aura. Before this pull request can be merged,
+            every contributor must read the [Project Aura CLA]($pathToCLADocument) and add this
+            exact comment to the pull request:
+
+            `I have read the CLA Document and I hereby sign the CLA`
+          custom-allsigned-prcomment: All contributors have signed the Project Aura CLA.
