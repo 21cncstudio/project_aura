@@ -34,7 +34,7 @@ jobs:
             github.event_name == 'issue_comment' &&
             (
               github.event.comment.body == 'recheck' ||
-              github.event.comment.body == 'I have read the CLA Document and I hereby sign the CLA'
+              github.event.comment.body == 'I have read and agree to the Project Aura Individual Contributor License Agreement v2.0, and I hereby sign it.'
             )
           )
         uses: contributor-assistant/github-action@ca4a40a7d1004f18d9960b404b97e5f30a505a08 # v2.6.1
@@ -43,7 +43,7 @@ jobs:
         with:
           path-to-document: https://github.com/21cncstudio/project_aura/blob/main/CLA.md
           # Change this path when CLA.md moves to a new version so contributors re-sign.
-          path-to-signatures: signatures/v1.0/cla.json
+          path-to-signatures: signatures/v2.0/cla.json
           branch: cla-signatures
           # The action compares GitHub logins case-sensitively; keep both owner spellings.
           allowlist: 21cncstudio,21CNCStudio,dependabot[bot],github-actions[bot],renovate[bot]
@@ -53,7 +53,6 @@ jobs:
             Thank you for contributing to Project Aura. Before this pull request can be merged,
             every contributor must read the
             [Project Aura CLA](https://github.com/21cncstudio/project_aura/blob/main/CLA.md)
-            and add this exact comment to the pull request:
-
-            `I have read the CLA Document and I hereby sign the CLA`
+            and post the exact signature statement shown below.
+          custom-pr-sign-comment: I have read and agree to the Project Aura Individual Contributor License Agreement v2.0, and I hereby sign it.
           custom-allsigned-prcomment: All contributors have signed the Project Aura CLA.
