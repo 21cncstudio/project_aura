@@ -11,13 +11,20 @@ To maintain this model, I require all contributors to agree to a Contributor Lic
 Agreement is explicit, not automatic. When you open your first pull request, the CLA check will ask
 you to read [CLA.md](CLA.md) and post this exact comment in the pull request:
 
-`I have read the CLA Document and I hereby sign the CLA`
+`I have read and agree to the Project Aura Individual Contributor License Agreement v2.0, and I hereby sign it.`
 
 The pull request cannot be merged until every contributor has signed the current CLA version. The
 signature is normally required only once; a changed CLA version may require a new signature.
 
-This agreement gives 21CNCStudio the right to use your contribution in both the open-source and
-commercial versions of the firmware, while you retain copyright ownership of your code.
+This agreement gives Volodymyr Papush personally the right to use your contribution in both the
+open-source and commercial versions of the firmware, while you retain copyright ownership of your
+code. The agreement allows those rights to be licensed or transferred to a company later.
+
+If an employer, client, university, or another organisation may own rights in your contribution,
+obtain its written permission before signing. If the organisation owns the contribution and you
+cannot bind it, contact the maintainer before submitting; an authorised representative must sign a
+separate written agreement before the contribution can be accepted.
+Disclose all third-party code or other material, together with its source and license, in the PR.
 
 ## Found a Bug?
 
