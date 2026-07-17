@@ -405,6 +405,7 @@ the experience of building a real device themselves.
 
 ## Contributing
 Contributions are welcome! Please read [`CONTRIBUTING.md`](CONTRIBUTING.md) for details on the process for submitting pull requests and the Contributor License Agreement (CLA).
+Community contributions that were manually integrated or reworked are acknowledged in [`CONTRIBUTORS.md`](CONTRIBUTORS.md).
 
 Found a bug? Open an Issue: https://github.com/21cncstudio/project_aura/issues
 Have a question? Ask in Discussions: https://github.com/21cncstudio/project_aura/discussions
