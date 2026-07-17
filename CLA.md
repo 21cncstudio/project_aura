@@ -125,14 +125,12 @@ version unless both parties expressly agree in writing.
 
 ## 9. Transfer and assignment
 
-The Licensor may transfer or assign this Agreement and any rights granted under it, in whole or in
-part, to a person or entity that acquires, operates, maintains, distributes, licenses, or
-commercialises Project Aura or related products or services. The rights granted to existing
-licensees and sublicensees survive such a transfer.
-
-For clarity, the Licensor may license or sublicense the Contributions to, or assign this Agreement
-and its rights to, an existing or future company owned or controlled by the Licensor without
-obtaining further consent from You.
+Without obtaining further consent from You, the Licensor may license or sublicense Contributions
+to, and may transfer or assign this Agreement and any rights granted under it, in whole or in part,
+to any person or entity, whether or not affiliated with, owned by, or controlled by the Licensor.
+This includes an existing or future company, purchaser, investor, business partner, customer, or
+other successor or licensee. The rights granted to existing licensees and sublicensees survive any
+such transfer or assignment.
 
 You may not assign this Agreement without the Licensor's prior written consent, except that Your
 ownership of the Contribution may be transferred subject to the licenses already granted here.
