@@ -17,4 +17,12 @@ the maintainer instead of merging the original pull request directly.
   [PR #124](https://github.com/21cncstudio/project_aura/pull/124), incorporated in reworked form in
   [343a78b](https://github.com/21cncstudio/project_aura/commit/343a78b).
 
+### [marekpetak](https://github.com/marekpetak)
+
+- Home Assistant and MQTT setup documentation from
+  [PR #112](https://github.com/21cncstudio/project_aura/pull/112). The contribution identified the
+  important distinction between the Home Assistant web interface and MQTT broker ports and informed
+  the expanded setup, TLS, certificate, and troubleshooting documentation added in
+  [fd3fbf6](https://github.com/21cncstudio/project_aura/commit/fd3fbf6).
+
 Thank you for helping make Project Aura more useful and accessible.
