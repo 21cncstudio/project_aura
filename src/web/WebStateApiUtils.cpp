@@ -126,14 +126,24 @@ void fillJson(ArduinoJson::JsonObject root, const Payload &payload) {
         data.optional_gas_ppm >= 0.0f;
     WebJsonUtils::jsonSetFloatOrNull(sensors, "optional_gas", optional_gas_valid, data.optional_gas_ppm);
     if (optional_gas_present) {
-        sensors["optional_gas_ppm_decimals"] =
+        const uint8_t optional_gas_decimals =
             data.optional_gas_ppm_decimals <= 2 ? data.optional_gas_ppm_decimals : 1;
+        sensors["optional_gas_decimals"] = optional_gas_decimals;
+        sensors["optional_gas_ppm_decimals"] = optional_gas_decimals;
+        sensors["optional_gas_unit"] = DfrOptionalGasSensor::unitForType(optional_gas_type);
     } else {
+        sensors["optional_gas_decimals"] = nullptr;
         sensors["optional_gas_ppm_decimals"] = nullptr;
+        sensors["optional_gas_unit"] = nullptr;
     }
     sensors["optional_gas_type"] = optional_gas_present
         ? DfrOptionalGasSensor::optionalGasLabel(optional_gas_type)
         : nullptr;
+    WebJsonUtils::jsonSetFloatOrNull(
+        sensors,
+        "o2",
+        optional_gas_valid && optional_gas_type == DfrOptionalGasSensor::OptionalGasType::O2,
+        data.optional_gas_ppm);
     WebJsonUtils::jsonSetFloatOrNull(sensors, "nh3", data.nh3_valid && data.nh3_sensor_present, data.nh3_ppm);
     sensors["co_sensor_present"] = data.co_sensor_present;
     sensors["co_warmup"] = data.co_warmup;

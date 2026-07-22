@@ -6,6 +6,7 @@
 #include "config/AppConfig.h"
 #include "core/Logger.h"
 #include "drivers/DfrOptionalGasSensor.h"
+#include "drivers/Sen0466.h"
 
 namespace {
 
@@ -48,6 +49,7 @@ void setReadGasResponse(uint16_t raw_ppm, uint8_t gas_type, uint8_t decimals) {
 
 static_assert(Config::DFR_GAS_TYPE_NH3 == 0x02, "DFR NH3 gas type drifted");
 static_assert(Config::DFR_GAS_TYPE_H2S == 0x03, "DFR H2S gas type drifted");
+static_assert(Config::DFR_GAS_TYPE_O2 == 0x05, "DFR O2 gas type drifted");
 static_assert(Config::DFR_GAS_TYPE_O3 == 0x2A, "DFR O3 gas type drifted");
 static_assert(Config::DFR_GAS_TYPE_SO2 == 0x2B, "DFR SO2 gas type drifted");
 static_assert(Config::DFR_GAS_TYPE_NO2 == 0x2C, "DFR NO2 gas type drifted");
@@ -176,6 +178,67 @@ void test_optional_gas_detects_no2_after_warmup() {
     TEST_ASSERT_EQUAL_STRING("NO2", sensor.optionalGasLabel());
 }
 
+void test_optional_gas_detects_o2_after_warmup() {
+    I2cMock::setDevicePresent(Config::DFR_OPTIONAL_GAS_ADDR, true);
+    setPassiveModeAck();
+
+    DfrOptionalGasSensor sensor;
+    TEST_ASSERT_TRUE(sensor.begin());
+    TEST_ASSERT_TRUE(sensor.start());
+
+    setReadGasResponse(209, Config::DFR_GAS_TYPE_O2, 1);
+    setMillis(Config::DFR_GAS_WARMUP_MS + Config::DFR_GAS_POLL_MS);
+    sensor.poll();
+
+    TEST_ASSERT_EQUAL(static_cast<int>(DfrOptionalGasSensor::OptionalGasType::O2),
+                      static_cast<int>(sensor.optionalGasType()));
+    TEST_ASSERT_TRUE(sensor.isDataValid());
+    TEST_ASSERT_FLOAT_WITHIN(0.01f, 20.9f, sensor.concentration());
+    TEST_ASSERT_EQUAL_UINT8(1, sensor.concentrationDecimals());
+    TEST_ASSERT_EQUAL_STRING("O2", sensor.optionalGasLabel());
+    TEST_ASSERT_EQUAL_STRING("%Vol", DfrOptionalGasSensor::unitForType(sensor.optionalGasType()));
+}
+
+void test_dedicated_co_sensor_rejects_o2_type() {
+    I2cMock::setDevicePresent(Config::SEN0466_ADDR, true);
+
+    uint8_t passive_ack[9] = {
+        0xFF, Config::DFR_GAS_CMD_CHANGE_MODE, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
+    passive_ack[8] = checksum7(passive_ack);
+    I2cMock::setCommandRead(Config::SEN0466_ADDR,
+                            Config::DFR_GAS_CMD_CHANGE_MODE,
+                            passive_ack,
+                            sizeof(passive_ack));
+
+    Sen0466 sensor;
+    TEST_ASSERT_TRUE(sensor.begin());
+    TEST_ASSERT_TRUE(sensor.start());
+
+    uint8_t o2_response[9] = {
+        0xFF,
+        Config::DFR_GAS_CMD_READ_GAS,
+        0x00,
+        0xD1,
+        Config::DFR_GAS_TYPE_O2,
+        0x01,
+        0x00,
+        0x00,
+        0x00,
+    };
+    o2_response[8] = checksum7(o2_response);
+    I2cMock::setCommandRead(Config::SEN0466_ADDR,
+                            Config::DFR_GAS_CMD_READ_GAS,
+                            o2_response,
+                            sizeof(o2_response));
+
+    setMillis(Config::DFR_GAS_WARMUP_MS + Config::DFR_GAS_POLL_MS);
+    sensor.poll();
+
+    TEST_ASSERT_FALSE(sensor.isDataValid());
+    TEST_ASSERT_EQUAL(static_cast<int>(DfrMultiGasSensor::GasType::O2),
+                      static_cast<int>(sensor.gasType()));
+}
+
 void test_optional_gas_rejects_unsupported_gas_type() {
     I2cMock::setDevicePresent(Config::DFR_OPTIONAL_GAS_ADDR, true);
     setPassiveModeAck();
@@ -226,6 +289,14 @@ void test_optional_gas_clamps_detected_type_range() {
     TEST_ASSERT_EQUAL(static_cast<int>(DfrOptionalGasSensor::OptionalGasType::NO2),
                       static_cast<int>(sensor.optionalGasType()));
     TEST_ASSERT_FLOAT_WITHIN(0.01f, Config::SEN0471_NO2_MAX_PPM, sensor.ppm());
+
+    setReadGasResponse(300, Config::DFR_GAS_TYPE_O2, 1);
+    advanceMillis(Config::DFR_GAS_POLL_MS);
+    sensor.poll();
+    TEST_ASSERT_TRUE(sensor.isDataValid());
+    TEST_ASSERT_EQUAL(static_cast<int>(DfrOptionalGasSensor::OptionalGasType::O2),
+                      static_cast<int>(sensor.optionalGasType()));
+    TEST_ASSERT_FLOAT_WITHIN(0.01f, Config::SEN0465_O2_MAX_PERCENT_VOL, sensor.concentration());
 }
 
 void test_optional_gas_keeps_known_type_when_recovery_fails_but_address_acks() {
@@ -352,6 +423,8 @@ int main(int, char **) {
     RUN_TEST(test_optional_gas_preserves_dfrobot_decimal_places);
     RUN_TEST(test_optional_gas_detects_h2s_after_warmup);
     RUN_TEST(test_optional_gas_detects_no2_after_warmup);
+    RUN_TEST(test_optional_gas_detects_o2_after_warmup);
+    RUN_TEST(test_dedicated_co_sensor_rejects_o2_type);
     RUN_TEST(test_optional_gas_rejects_unsupported_gas_type);
     RUN_TEST(test_optional_gas_clamps_detected_type_range);
     RUN_TEST(test_optional_gas_keeps_known_type_when_recovery_fails_but_address_acks);

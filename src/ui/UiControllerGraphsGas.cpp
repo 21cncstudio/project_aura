@@ -359,9 +359,9 @@ void UiController::update_optional_gas_graph_overlays(bool has_values,
     char min_buf[32];
     char now_buf[32];
     char max_buf[32];
-    snprintf(min_buf, sizeof(min_buf), "MIN %s ppm", min_value);
-    snprintf(now_buf, sizeof(now_buf), "NOW %s ppm", now_value);
-    snprintf(max_buf, sizeof(max_buf), "MAX %s ppm", max_value);
+    snprintf(min_buf, sizeof(min_buf), "MIN %s %s", min_value, profile.unit);
+    snprintf(now_buf, sizeof(now_buf), "NOW %s %s", now_value, profile.unit);
+    snprintf(max_buf, sizeof(max_buf), "MAX %s %s", max_value, profile.unit);
     safe_label_set_text(optional_gas_graph_label_min_, min_buf);
     safe_label_set_text(optional_gas_graph_label_now_, now_buf);
     safe_label_set_text(optional_gas_graph_label_max_, max_buf);
@@ -382,6 +382,30 @@ void UiController::update_optional_gas_zone_overlay(float y_min_display, float y
     using OptionalGasType = DfrOptionalGasSensor::OptionalGasType;
     const OptionalGasType type = static_cast<OptionalGasType>(currentData.optional_gas_type);
     const UiOptionalGasProfile::Profile &profile = UiOptionalGasProfile::forType(type);
+    if (profile.classification == UiOptionalGasProfile::ClassificationMode::NormalRange) {
+        const float zone_bounds[] = {
+            kGraphZoneLowerSentinel,
+            profile.normal_min,
+            profile.normal_max,
+            kGraphZoneUpperSentinel,
+        };
+        const GraphZoneTone zone_tones[] = {
+            GRAPH_ZONE_RED,
+            GRAPH_ZONE_GREEN,
+            GRAPH_ZONE_RED,
+        };
+        update_graph_zone_overlay(objects.chart_optional_gas_info,
+                                  optional_gas_graph_zone_overlay_,
+                                  optional_gas_graph_zone_bands_,
+                                  kMaxGraphZoneBands,
+                                  zone_bounds,
+                                  zone_tones,
+                                  3,
+                                  y_min_display,
+                                  y_max_display);
+        return;
+    }
+
     const float zone_bounds[] = {
         kGraphZoneLowerSentinel,
         profile.green_max_ppm,
@@ -395,15 +419,13 @@ void UiController::update_optional_gas_zone_overlay(float y_min_display, float y
         GRAPH_ZONE_ORANGE,
         GRAPH_ZONE_RED,
     };
-    constexpr uint8_t kZoneCount = 4;
-
     update_graph_zone_overlay(objects.chart_optional_gas_info,
                               optional_gas_graph_zone_overlay_,
                               optional_gas_graph_zone_bands_,
                               kMaxGraphZoneBands,
                               zone_bounds,
                               zone_tones,
-                              kZoneCount,
+                              4,
                               y_min_display,
                               y_max_display);
 }
@@ -457,6 +479,10 @@ void UiController::update_optional_gas_info_graph() {
 
     float scale_min = has_values ? min_ppm : 0.0f;
     float scale_max = has_values ? max_ppm : profile.orange_max_ppm;
+    if (profile.classification == UiOptionalGasProfile::ClassificationMode::NormalRange) {
+        scale_min = fminf(scale_min, profile.normal_min - 0.5f);
+        scale_max = fmaxf(scale_max, profile.normal_max + 0.5f);
+    }
     GraphAxisConfig axis_config{};
     axis_config.fallback_center = profile.graph_fallback_ppm;
     axis_config.min_span = profile.graph_min_span_ppm;

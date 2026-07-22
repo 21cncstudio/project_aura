@@ -12,11 +12,12 @@ class DfrOptionalGasSensor : public DfrMultiGasSensor {
 public:
     enum class OptionalGasType : uint8_t {
         None = 0,
-        NH3,
-        SO2,
-        NO2,
-        H2S,
-        O3,
+        NH3 = 1,
+        SO2 = 2,
+        NO2 = 3,
+        H2S = 4,
+        O3 = 5,
+        O2 = 6,
     };
 
     DfrOptionalGasSensor();
@@ -27,6 +28,7 @@ public:
     const char *optionalGasLabel() const;
 
     static const char *optionalGasLabel(OptionalGasType type);
+    static const char *unitForType(OptionalGasType type);
     static float minPpmForType(OptionalGasType type);
     static float maxPpmForType(OptionalGasType type);
 };

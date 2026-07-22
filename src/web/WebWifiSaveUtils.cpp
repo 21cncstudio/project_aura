@@ -16,6 +16,8 @@ namespace WebWifiSaveUtils {
 namespace {
 
 constexpr size_t kEnterpriseFieldMaxBytes = 64;
+constexpr size_t kPersonalPasswordMinBytes = 8;
+constexpr size_t kPersonalPasswordMaxBytes = 63;
 
 bool string_is_empty(const String &value) {
     return value.length() == 0;
@@ -240,6 +242,13 @@ ParseResult parseSaveInput(const SaveInput &input) {
     if (auth_mode == Config::WifiAuthMode::Personal) {
         if (WebInputValidation::hasControlChars(input.pass)) {
             fail(result, "Password contains unsupported control characters");
+            return result;
+        }
+        const size_t password_bytes = input.pass.length();
+        if (password_bytes != 0 &&
+            (password_bytes < kPersonalPasswordMinBytes ||
+             password_bytes > kPersonalPasswordMaxBytes)) {
+            fail(result, "WiFi password must be empty for an open network or 8-63 bytes");
             return result;
         }
         settings.pass = input.pass;

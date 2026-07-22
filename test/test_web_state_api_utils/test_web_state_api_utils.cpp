@@ -95,8 +95,11 @@ void test_web_state_api_utils_fill_json_populates_sensor_network_and_settings_fi
     TEST_ASSERT_EQUAL_FLOAT(4.5f, doc["sensors"]["co"].as<float>());
     TEST_ASSERT_TRUE(doc["sensors"]["co_sensor_present"].as<bool>());
     TEST_ASSERT_EQUAL_FLOAT(0.23f, doc["sensors"]["optional_gas"].as<float>());
+    TEST_ASSERT_EQUAL_UINT8(2, doc["sensors"]["optional_gas_decimals"].as<uint8_t>());
     TEST_ASSERT_EQUAL_UINT8(2, doc["sensors"]["optional_gas_ppm_decimals"].as<uint8_t>());
     TEST_ASSERT_EQUAL_STRING("O3", doc["sensors"]["optional_gas_type"].as<const char *>());
+    TEST_ASSERT_EQUAL_STRING("ppm", doc["sensors"]["optional_gas_unit"].as<const char *>());
+    TEST_ASSERT_TRUE(doc["sensors"]["o2"].isNull());
     TEST_ASSERT_FALSE(doc["derived"]["dew_point"].isNull());
     TEST_ASSERT_EQUAL_STRING("AuraNet", doc["network"]["wifi_ssid"].as<const char *>());
     TEST_ASSERT_EQUAL_STRING("192.168.1.2", doc["network"]["mqtt_broker"].as<const char *>());
@@ -137,6 +140,9 @@ void test_web_state_api_utils_fill_json_sets_nulls_when_values_are_unavailable()
     TEST_ASSERT_FALSE(doc["sensors"]["hcho_sensor_present"].as<bool>());
     TEST_ASSERT_FALSE(doc["sensors"]["hcho_warmup"].as<bool>());
     TEST_ASSERT_TRUE(doc["sensors"]["optional_gas_ppm_decimals"].isNull());
+    TEST_ASSERT_TRUE(doc["sensors"]["optional_gas_decimals"].isNull());
+    TEST_ASSERT_TRUE(doc["sensors"]["optional_gas_unit"].isNull());
+    TEST_ASSERT_TRUE(doc["sensors"]["o2"].isNull());
     TEST_ASSERT_TRUE(doc["derived"]["mold"].isNull());
     TEST_ASSERT_TRUE(doc["network"]["rssi"].isNull());
     TEST_ASSERT_EQUAL_STRING("idle", doc["ota"]["status"].as<const char *>());
@@ -149,6 +155,26 @@ void test_web_state_api_utils_fill_json_sets_nulls_when_values_are_unavailable()
     TEST_ASSERT_TRUE(doc["settings"]["ntp_enabled"].isNull());
     TEST_ASSERT_TRUE(doc["settings"]["ntp_server"].isNull());
     TEST_ASSERT_EQUAL_STRING("Aura-AP", doc["network"]["wifi_ssid"].as<const char *>());
+}
+
+void test_web_state_api_utils_exposes_o2_value_unit_and_compatibility_fields() {
+    WebStateApiUtils::Payload payload{};
+    payload.data.optional_gas_sensor_present = true;
+    payload.data.optional_gas_valid = true;
+    payload.data.optional_gas_ppm = 20.9f;
+    payload.data.optional_gas_ppm_decimals = 1;
+    payload.data.optional_gas_type =
+        static_cast<uint8_t>(DfrOptionalGasSensor::OptionalGasType::O2);
+
+    ArduinoJson::JsonDocument doc;
+    WebStateApiUtils::fillJson(doc.to<ArduinoJson::JsonObject>(), payload);
+
+    TEST_ASSERT_EQUAL_FLOAT(20.9f, doc["sensors"]["optional_gas"].as<float>());
+    TEST_ASSERT_EQUAL_FLOAT(20.9f, doc["sensors"]["o2"].as<float>());
+    TEST_ASSERT_EQUAL_STRING("O2", doc["sensors"]["optional_gas_type"].as<const char *>());
+    TEST_ASSERT_EQUAL_STRING("%Vol", doc["sensors"]["optional_gas_unit"].as<const char *>());
+    TEST_ASSERT_EQUAL_UINT8(1, doc["sensors"]["optional_gas_decimals"].as<uint8_t>());
+    TEST_ASSERT_EQUAL_UINT8(1, doc["sensors"]["optional_gas_ppm_decimals"].as<uint8_t>());
 }
 
 void test_web_state_api_utils_hides_reactive_gas_metrics_during_warmup() {
@@ -212,6 +238,7 @@ int main(int, char **) {
     RUN_TEST(test_web_state_api_utils_fill_json_sets_nulls_when_values_are_unavailable);
     RUN_TEST(test_web_state_api_utils_hides_reactive_gas_metrics_during_warmup);
     RUN_TEST(test_web_state_api_utils_hides_hcho_when_only_raw_sample_exists_from_sfa40_warmup_model);
+    RUN_TEST(test_web_state_api_utils_exposes_o2_value_unit_and_compatibility_fields);
     RUN_TEST(test_web_state_api_utils_reports_failed_ota_with_device_error_code);
     return UNITY_END();
 }

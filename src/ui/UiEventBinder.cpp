@@ -379,22 +379,65 @@ void UiEventBinder::bindAvailableEvents(UiController &owner, int screen_id) {
         lv_obj_set_ext_click_area(objects.chip_rtc_status, kExtendedHitAreaPx);
     }
 
-    auto bind_events = [screen_root](const EventBinding *bindings, size_t count) {
+    auto binding_available = [screen_root](const EventBinding &binding) {
+        return binding.obj && binding.cb &&
+               objectBelongsToScreen(binding.obj, screen_root);
+    };
+
+    auto callback_seen = [](const EventBinding &binding,
+                            const EventBinding *bindings,
+                            size_t count) {
+        if (!bindings) {
+            return false;
+        }
+        for (size_t i = 0; i < count; ++i) {
+            if (bindings[i].obj == binding.obj && bindings[i].cb == binding.cb) {
+                return true;
+            }
+        }
+        return false;
+    };
+
+    auto remove_callbacks_once = [&](const EventBinding *bindings,
+                                     size_t count,
+                                     const EventBinding *previous_bindings,
+                                     size_t previous_count) {
+        // LVGL removes every descriptor registered with a callback, regardless
+        // of its event filter. Clear each object/callback pair once, then add
+        // all of the filters below.
         for (size_t i = 0; i < count; ++i) {
             const EventBinding &binding = bindings[i];
-            if (!binding.obj || !binding.cb) {
+            if (!binding_available(binding)) {
                 continue;
             }
-            if (!objectBelongsToScreen(binding.obj, screen_root)) {
+            if (callback_seen(binding, bindings, i) ||
+                callback_seen(binding, previous_bindings, previous_count)) {
                 continue;
             }
             lv_obj_remove_event_cb(binding.obj, binding.cb);
+        }
+    };
+
+    auto add_events = [&](const EventBinding *bindings, size_t count) {
+        for (size_t i = 0; i < count; ++i) {
+            const EventBinding &binding = bindings[i];
+            if (!binding_available(binding)) {
+                continue;
+            }
             lv_obj_add_event_cb(binding.obj, binding.cb, binding.code, nullptr);
         }
     };
 
-    bind_events(click_bindings, sizeof(click_bindings) / sizeof(click_bindings[0]));
-    bind_events(value_bindings, sizeof(value_bindings) / sizeof(value_bindings[0]));
+    const size_t click_binding_count = sizeof(click_bindings) / sizeof(click_bindings[0]);
+    const size_t value_binding_count = sizeof(value_bindings) / sizeof(value_bindings[0]);
+
+    remove_callbacks_once(click_bindings, click_binding_count, nullptr, 0);
+    remove_callbacks_once(value_bindings,
+                          value_binding_count,
+                          click_bindings,
+                          click_binding_count);
+    add_events(click_bindings, click_binding_count);
+    add_events(value_bindings, value_binding_count);
 }
 
 void UiEventBinder::applyToggleStylesForAvailableObjects(UiController &owner, int screen_id) {

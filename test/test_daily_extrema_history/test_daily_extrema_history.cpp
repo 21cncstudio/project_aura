@@ -515,6 +515,25 @@ void test_daily_extrema_keeps_previous_day_when_csv_append_fails() {
     TEST_ASSERT_TRUE(daily_csv.find("2026-06-27,co2,ppm,700") != std::string::npos);
 }
 
+void test_daily_extrema_exports_o2_as_percent_volume() {
+    FakeDailyStorage storage;
+    DailyExtremaHistory history;
+    history.begin(storage, true);
+
+    SensorData data;
+    data.optional_gas_sensor_present = true;
+    data.optional_gas_valid = true;
+    data.optional_gas_type = static_cast<uint8_t>(DfrOptionalGasSensor::OptionalGasType::O2);
+    data.optional_gas_ppm = 20.9f;
+    history.update(data, getMillis());
+
+    setNowEpoch(kDayTwoNoon);
+    history.update(data, getMillis());
+
+    const std::string csv = storage.text_files[DailyExtremaHistory::kDailyCsvPath];
+    TEST_ASSERT_TRUE(csv.find("2026-06-27,optional_gas,%Vol,20.9") != std::string::npos);
+}
+
 void test_daily_extrema_failed_state_save_retries_after_short_backoff() {
     FakeDailyStorage storage;
     DailyExtremaHistory history;
@@ -561,6 +580,7 @@ int main(int, char **) {
     RUN_TEST(test_daily_extrema_restores_v2_units_from_state);
     RUN_TEST(test_daily_extrema_migrates_v1_state_as_metric);
     RUN_TEST(test_daily_extrema_resets_optional_gas_when_type_changes);
+    RUN_TEST(test_daily_extrema_exports_o2_as_percent_volume);
     RUN_TEST(test_daily_extrema_keeps_previous_day_when_csv_append_fails);
     RUN_TEST(test_daily_extrema_failed_state_save_retries_after_short_backoff);
     return UNITY_END();

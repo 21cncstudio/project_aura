@@ -10,6 +10,7 @@
 
 #include "core/ChartsRuntimeState.h"
 #include "modules/ChartsHistory.h"
+#include "modules/SensorManager.h"
 #include "web/WebChartsApiUtils.h"
 #include "web/WebResponseUtils.h"
 
@@ -63,9 +64,17 @@ void handleData(WebHandlerContext &context, bool ota_busy) {
     WebRequest &server = *context.server;
     const ChartsRuntimeState &history = *context.charts_runtime;
     const ChartsRuntimeHistoryView history_view(history);
+    const DfrOptionalGasSensor::OptionalGasType optional_gas_type =
+        context.sensor_manager
+            ? context.sensor_manager->optionalGasType()
+            : DfrOptionalGasSensor::OptionalGasType::None;
     ArduinoJson::JsonDocument doc;
     WebChartsApiUtils::fillJson(
-        doc.to<ArduinoJson::JsonObject>(), history_view, server.arg("window"), server.arg("group"));
+        doc.to<ArduinoJson::JsonObject>(),
+        history_view,
+        server.arg("window"),
+        server.arg("group"),
+        DfrOptionalGasSensor::unitForType(optional_gas_type));
 
     String json;
     serializeJson(doc, json);

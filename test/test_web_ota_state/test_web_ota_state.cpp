@@ -114,14 +114,33 @@ void test_web_ota_state_terminal_result_expires_after_ttl() {
     state.setErrorOnce("timeout", 150);
     TEST_ASSERT_TRUE(state.snapshot().hasTerminalResult(200));
 
-    state.poll(150 + WebOtaState::terminalResultTtlMs() - 1);
+    state.expireTerminalResult(150 + WebOtaState::terminalResultTtlMs() - 1);
     TEST_ASSERT_TRUE(state.snapshot().hasTerminalResult(150 + WebOtaState::terminalResultTtlMs() - 1));
 
-    state.poll(150 + WebOtaState::terminalResultTtlMs());
+    state.expireTerminalResult(150 + WebOtaState::terminalResultTtlMs());
     const WebOtaSnapshot snapshot = state.snapshot();
     TEST_ASSERT_FALSE(snapshot.upload_seen);
     TEST_ASSERT_EQUAL_UINT32(0, snapshot.session_id);
     TEST_ASSERT_FALSE(snapshot.hasTerminalResult(150 + WebOtaState::terminalResultTtlMs()));
+}
+
+void test_web_ota_state_new_upload_supersedes_expired_terminal_result() {
+    WebOtaState state;
+    state.beginUpload(100);
+    state.setErrorOnce("old failure", 150);
+    const uint32_t old_session_id = state.snapshot().session_id;
+    state.clearBusy();
+
+    state.beginUpload(200);
+    state.expireTerminalResult(150 + WebOtaState::terminalResultTtlMs());
+    const WebOtaSnapshot snapshot = state.snapshot();
+
+    TEST_ASSERT_TRUE(snapshot.upload_seen);
+    TEST_ASSERT_TRUE(snapshot.active);
+    TEST_ASSERT_TRUE(state.isBusy());
+    TEST_ASSERT_NOT_EQUAL(old_session_id, snapshot.session_id);
+    TEST_ASSERT_EQUAL_UINT32(200, snapshot.upload_start_ms);
+    TEST_ASSERT_FALSE(snapshot.hasError());
 }
 
 int main(int, char **) {
@@ -132,5 +151,6 @@ int main(int, char **) {
     RUN_TEST(test_web_ota_state_success_and_expected_size_match);
     RUN_TEST(test_web_ota_state_total_timeout_expires_from_upload_start);
     RUN_TEST(test_web_ota_state_terminal_result_expires_after_ttl);
+    RUN_TEST(test_web_ota_state_new_upload_supersedes_expired_terminal_result);
     return UNITY_END();
 }

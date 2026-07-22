@@ -263,12 +263,14 @@ namespace Config {
     constexpr uint8_t DFR_GAS_TYPE_NH3 = 0x02;
     constexpr uint8_t DFR_GAS_TYPE_H2S = 0x03;
     constexpr uint8_t DFR_GAS_TYPE_CO = 0x04;
+    constexpr uint8_t DFR_GAS_TYPE_O2 = 0x05;
     constexpr uint8_t DFR_GAS_TYPE_O3 = 0x2A;
     constexpr uint8_t DFR_GAS_TYPE_SO2 = 0x2B;
     constexpr uint8_t DFR_GAS_TYPE_NO2 = 0x2C;
     constexpr uint8_t SEN0466_ADDR = 0x74;
     constexpr uint8_t SEN0466_GAS_TYPE_CO = DFR_GAS_TYPE_CO;
     constexpr uint8_t DFR_OPTIONAL_GAS_ADDR = 0x75;
+    constexpr uint8_t SEN0465_GAS_TYPE_O2 = DFR_GAS_TYPE_O2;
     constexpr uint8_t SEN0469_ADDR = DFR_OPTIONAL_GAS_ADDR;
     constexpr uint8_t SEN0467_GAS_TYPE_H2S = DFR_GAS_TYPE_H2S;
     constexpr uint8_t SEN0469_GAS_TYPE_NH3 = DFR_GAS_TYPE_NH3;
@@ -462,6 +464,10 @@ namespace Config {
     constexpr float SFA40_HCHO_MAX_PPB = 2000.0f;
     constexpr float SEN0466_CO_MIN_PPM = 0.0f;
     constexpr float SEN0466_CO_MAX_PPM = 1000.0f;
+    constexpr float SEN0465_O2_MIN_PERCENT_VOL = 0.0f;
+    constexpr float SEN0465_O2_MAX_PERCENT_VOL = 25.0f;
+    constexpr float SEN0465_O2_NORMAL_MIN_PERCENT_VOL = 19.5f;
+    constexpr float SEN0465_O2_NORMAL_MAX_PERCENT_VOL = 23.5f;
     constexpr float SEN0467_H2S_MIN_PPM = 0.0f;
     constexpr float SEN0467_H2S_MAX_PPM = 100.0f;
     constexpr float SEN0469_NH3_MIN_PPM = 0.0f;
@@ -580,6 +586,7 @@ namespace Config {
         (PRESSURE_HISTORY_STEP_MS / 1000UL) * PRESSURE_HISTORY_24H_SAMPLES;
     constexpr uint32_t PRESSURE_HISTORY_FILL_SHORT_S = 15UL * 60UL;
     constexpr uint32_t PRESSURE_HISTORY_FILL_LONG_S = 4UL * 60UL * 60UL;
+    constexpr uint32_t PRESSURE_HISTORY_RESTORE_TIME_WAIT_MS = 30UL * 1000UL;
     constexpr int16_t PRESSURE_ALTITUDE_MIN_M = -500;
     constexpr int16_t PRESSURE_ALTITUDE_MAX_M = 5000;
     constexpr int16_t PRESSURE_ALTITUDE_DEFAULT_M = 0;

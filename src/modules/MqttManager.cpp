@@ -1053,7 +1053,7 @@ void MqttManager::publishDiscovery(const MqttRuntimeSnapshot &runtime) {
                            "", "", "{{ value_json.main_issue }}", "mdi:alert-circle-outline");
     publishDiscoverySensor("co", "CO", "ppm",
                            "carbon_monoxide", "measurement", "{{ value_json.co }}", "mdi:molecule-co");
-    publishDiscoverySensor("optional_gas", "Optional Gas", "ppm",
+    publishDiscoverySensor("optional_gas", "Optional Gas", "",
                            "", "measurement", "{{ value_json.optional_gas }}", "mdi:molecule");
     publishDiscoverySensor("optional_gas_type", "Optional Gas Type", "",
                            "", "", "{{ value_json.optional_gas_type }}", "mdi:molecule");
@@ -1067,6 +1067,8 @@ void MqttManager::publishDiscovery(const MqttRuntimeSnapshot &runtime) {
                            "", "measurement", "{{ value_json.so2 }}", "mdi:molecule");
     publishDiscoverySensor("no2", "NO2", "ppm",
                            "", "measurement", "{{ value_json.no2 }}", "mdi:molecule");
+    publishDiscoverySensor("o2", "O2", "%",
+                           "", "measurement", "{{ value_json.o2 }}", "mdi:molecule");
     publishDiscoverySensor("voc_index", "VOC Index", "index",
                            "", "measurement", "{{ value_json.voc_index }}", "mdi:blur");
     publishDiscoverySensor("nox_index", "NOx Index", "index",

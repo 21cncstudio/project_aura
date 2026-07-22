@@ -142,7 +142,8 @@ void diag_handle_root() {
 
 void diag_handle_data() {
     with_context([](WebHandlerContext &context) {
-        const WebOtaSnapshot ota_snapshot = WebHandlersSupport::otaSnapshot();
+        const WebOtaSnapshot ota_snapshot =
+            WebHandlersSupport::otaSnapshotForHttpRequest();
         WebSystemApiHandlers::handleDiagData(
             context,
             WebHandlersSupport::isOtaStatusBusy(ota_snapshot),
@@ -294,7 +295,8 @@ void daily_history_clear_current_day_handle() {
 
 void state_handle_data() {
     with_context([](WebHandlerContext &context) {
-        const WebOtaSnapshot ota_snapshot = WebHandlersSupport::otaSnapshot();
+        const WebOtaSnapshot ota_snapshot =
+            WebHandlersSupport::otaSnapshotForHttpRequest();
         WebSystemApiHandlers::handleStateData(
             context,
             WebHandlersSupport::isOtaStatusBusy(ota_snapshot),

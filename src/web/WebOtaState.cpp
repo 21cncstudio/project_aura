@@ -99,7 +99,7 @@ bool WebOtaState::totalTimeoutExceeded(uint32_t now_ms) const {
            static_cast<uint32_t>(now_ms - upload_start_ms_) >= total_timeout_ms_;
 }
 
-void WebOtaState::poll(uint32_t now_ms) {
+void WebOtaState::expireTerminalResult(uint32_t now_ms) {
     if (!upload_seen_ || active_.load(std::memory_order_acquire) || result_set_ms_ == 0 ||
         result_ttl_ms_ == 0) {
         return;

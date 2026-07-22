@@ -5,6 +5,7 @@
 // Purchase a Commercial License: see COMMERCIAL_LICENSE_SUMMARY.md
 
 #include "web/WebTransport.h"
+#include "web/WebHttpResponseStorage.h"
 #include "web/WebMultipart.h"
 #include "web/WebQueryString.h"
 
@@ -385,6 +386,7 @@ public:
 
     void begin(httpd_req_t *req) {
         req_ = req;
+        response_storage_.reset();
         args_.clear();
         raw_body_ = "";
         upload_ = {};
@@ -397,6 +399,7 @@ public:
 
     void reset() {
         req_ = nullptr;
+        response_storage_.reset();
         args_.clear();
         raw_body_ = "";
         upload_ = {};
@@ -486,8 +489,18 @@ public:
     }
 
     void sendHeader(const char *name, const String &value, bool) override {
-        if (req_ && name) {
-            httpd_resp_set_hdr(req_, name, value.c_str());
+        if (!req_ || !name) {
+            return;
+        }
+
+        WebHttpResponseStorage::HeaderView stored;
+        if (!response_storage_.storeHeader(name, value, stored)) {
+            LOGW("WEB", "response header storage failed: %s", name);
+            return;
+        }
+        const esp_err_t err = httpd_resp_set_hdr(req_, stored.name, stored.value);
+        if (err != ESP_OK) {
+            LOGW("WEB", "response header rejected: %s (%s)", name, esp_err_to_name(err));
         }
     }
 
@@ -499,10 +512,29 @@ public:
         if (!req_) {
             return;
         }
-        const String status = status_line_for_code(status_code);
-        httpd_resp_set_status(req_, status.c_str());
+        const char *stored_status = nullptr;
+        if (!response_storage_.storeStatus(status_line_for_code(status_code), stored_status)) {
+            LOGE("WEB", "response status storage failed: %d", status_code);
+            return;
+        }
+        const esp_err_t status_err = httpd_resp_set_status(req_, stored_status);
+        if (status_err != ESP_OK) {
+            LOGE("WEB", "response status rejected: %d (%s)",
+                 status_code,
+                 esp_err_to_name(status_err));
+            return;
+        }
         if (content_type) {
-            httpd_resp_set_type(req_, content_type);
+            const char *stored_content_type = nullptr;
+            if (!response_storage_.storeContentType(content_type, stored_content_type)) {
+                LOGE("WEB", "response content type storage failed");
+                return;
+            }
+            const esp_err_t type_err = httpd_resp_set_type(req_, stored_content_type);
+            if (type_err != ESP_OK) {
+                LOGE("WEB", "response content type rejected: %s", esp_err_to_name(type_err));
+                return;
+            }
         }
         httpd_resp_send(req_, content ? content : "", HTTPD_RESP_USE_STRLEN);
     }
@@ -605,13 +637,22 @@ public:
         if (!req_) {
             return false;
         }
-        const String status = status_line_for_code(status_code);
-        httpd_resp_set_status(req_, status.c_str());
+        const char *stored_status = nullptr;
+        if (!response_storage_.storeStatus(status_line_for_code(status_code), stored_status) ||
+            httpd_resp_set_status(req_, stored_status) != ESP_OK) {
+            LOGE("WEB", "stream response status setup failed: %d", status_code);
+            return false;
+        }
         if (content_type) {
-            httpd_resp_set_type(req_, content_type);
+            const char *stored_content_type = nullptr;
+            if (!response_storage_.storeContentType(content_type, stored_content_type) ||
+                httpd_resp_set_type(req_, stored_content_type) != ESP_OK) {
+                LOGE("WEB", "stream response content type setup failed");
+                return false;
+            }
         }
         if (gzip_encoded) {
-            httpd_resp_set_hdr(req_, "Content-Encoding", "gzip");
+            sendHeader("Content-Encoding", "gzip", false);
         }
         stream_open_ = true;
         return true;
@@ -671,6 +712,7 @@ public:
 
 private:
     httpd_req_t *req_ = nullptr;
+    WebHttpResponseStorage::Storage response_storage_{};
     std::vector<WebQueryArg> args_{};
     String raw_body_;
     WebUpload upload_{};
@@ -1041,7 +1083,7 @@ void EspHttpServerBackend::begin() {
     config.max_open_sockets = kHttpServerMaxOpenSockets;
     config.lru_purge_enable = true;
     config.max_uri_handlers = WebServerLimits::kHttpServerMaxUriHandlers;
-    config.max_resp_headers = 16;
+    config.max_resp_headers = WebHttpResponseStorage::Storage::kMaxHeaders;
     config.global_user_ctx = this;
     config.global_user_ctx_free_fn = nullptr;
     config.uri_match_fn = nullptr;

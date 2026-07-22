@@ -1621,15 +1621,22 @@ lv_color_t UiController::getNOxColor(int nox) {
 lv_color_t UiController::getOptionalGasColor(DfrOptionalGasSensor::OptionalGasType type,
                                              float ppm,
                                              bool valid) {
-    if (!valid || !isfinite(ppm) || ppm < 0.0f) return color_inactive();
-
     const UiOptionalGasProfile::Profile &profile = UiOptionalGasProfile::forType(type);
     if (!UiOptionalGasProfile::isKnown(type)) return color_inactive();
 
-    if (ppm <= profile.green_max_ppm) return color_green();
-    if (ppm <= profile.yellow_max_ppm) return color_yellow();
-    if (ppm <= profile.orange_max_ppm) return color_orange();
-    return color_red();
+    switch (UiOptionalGasProfile::classify(profile, ppm, valid)) {
+        case UiOptionalGasProfile::Band::Green:
+            return color_green();
+        case UiOptionalGasProfile::Band::Yellow:
+            return color_yellow();
+        case UiOptionalGasProfile::Band::Orange:
+            return color_orange();
+        case UiOptionalGasProfile::Band::Red:
+            return color_red();
+        case UiOptionalGasProfile::Band::Inactive:
+        default:
+            return color_inactive();
+    }
 }
 
 lv_color_t UiController::getHCHOColor(float hcho_ppb, bool valid) {
@@ -1750,6 +1757,7 @@ void UiController::update_main_screen_background_alert() {
 void UiController::set_dot_color(lv_obj_t *obj, lv_color_t color) {
     if (!obj) return;
     lv_obj_set_style_bg_color(obj, color, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_border_color(obj, color, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_shadow_color(obj, color, LV_PART_MAIN | LV_STATE_DEFAULT);
     if (color.full == color_inactive().full) {
         lv_obj_set_style_shadow_opa(obj, LV_OPA_TRANSP, LV_PART_MAIN | LV_STATE_DEFAULT);

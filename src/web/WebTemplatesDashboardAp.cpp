@@ -1040,6 +1040,10 @@ function buildChartSvg(data, keys, colors, height, options) {
   const lineNames = Array.isArray(opts.lineNames) ? opts.lineNames : [];
   const lineUnits = Array.isArray(opts.lineUnits) ? opts.lineUnits : [];
   const lineDigits = Array.isArray(opts.lineDigits) ? opts.lineDigits : [];
+  const normalRange = Array.isArray(opts.normalRange) && opts.normalRange.length === 2 &&
+    isNum(opts.normalRange[0]) && isNum(opts.normalRange[1]) && opts.normalRange[0] < opts.normalRange[1]
+      ? opts.normalRange
+      : null;
 
   const allVals = [];
   keys.forEach(k => data.forEach(row => { if (isNum(row[k])) allVals.push(row[k]); }));
@@ -1047,6 +1051,10 @@ function buildChartSvg(data, keys, colors, height, options) {
 
   let yMin = Math.min(...allVals);
   let yMax = Math.max(...allVals);
+  if (normalRange) {
+    yMin = Math.min(yMin, normalRange[0] - 0.5);
+    yMax = Math.max(yMax, normalRange[1] + 0.5);
+  }
   const spread = yMax - yMin;
   const pad = spread > 1e-6 ? spread * 0.12 : Math.max(Math.abs(yMax) * 0.08, 1);
   yMin -= pad;
@@ -1071,6 +1079,16 @@ function buildChartSvg(data, keys, colors, height, options) {
   const grid = `<line x1="0" y1="25" x2="100" y2="25" stroke="#374151" stroke-width="0.7" stroke-dasharray="2.5 2.5" vector-effect="non-scaling-stroke"/>
     <line x1="0" y1="50" x2="100" y2="50" stroke="#374151" stroke-width="0.7" stroke-dasharray="2.5 2.5" vector-effect="non-scaling-stroke"/>
     <line x1="0" y1="75" x2="100" y2="75" stroke="#374151" stroke-width="0.7" stroke-dasharray="2.5 2.5" vector-effect="non-scaling-stroke"/>`;
+
+  let referenceBands = '';
+  if (normalRange) {
+    const upperY = clamp(yFor(normalRange[1]), 0, 100);
+    const lowerY = clamp(yFor(normalRange[0]), 0, 100);
+    referenceBands =
+      `<rect x="0" y="0" width="100" height="${upperY.toFixed(2)}" fill="#ef4444" opacity="0.10"/>` +
+      `<rect x="0" y="${upperY.toFixed(2)}" width="100" height="${Math.max(0, lowerY - upperY).toFixed(2)}" fill="#22c55e" opacity="0.12"/>` +
+      `<rect x="0" y="${lowerY.toFixed(2)}" width="100" height="${Math.max(0, 100 - lowerY).toFixed(2)}" fill="#ef4444" opacity="0.10"/>`;
+  }
 
   let areas = '';
   let lines2 = '';
@@ -1108,7 +1126,7 @@ function buildChartSvg(data, keys, colors, height, options) {
     }
   });
 
-  return `<svg viewBox="0 0 100 100" preserveAspectRatio="none" style="width:100%;height:${h}px;display:block;overflow:visible;">${defs}${grid}${areas}${lines2}${pointsHtml}</svg>`;
+  return `<svg viewBox="0 0 100 100" preserveAspectRatio="none" style="width:100%;height:${h}px;display:block;overflow:visible;">${defs}${referenceBands}${grid}${areas}${lines2}${pointsHtml}</svg>`;
 }
 
 function buildMiniChartSvg(data, key, color) {
@@ -1326,10 +1344,13 @@ const OPTIONAL_GAS_PROFILES = {
   NO2: { label:'NO2', unit:'ppm', max:1.0,  thr:{ good:0.05, moderate:0.10, bad:1.0 }, digits:1 },
   H2S: { label:'H2S', unit:'ppm', max:10.0, thr:{ good:0.5, moderate:1.0, bad:10.0 }, digits:0 },
   O3:  { label:'O3',  unit:'ppm', max:0.5,  thr:{ good:0.05, moderate:0.10, bad:0.5 }, digits:1 },
+  O2:  { label:'O2',  unit:'%Vol', max:25.0, thr:{ good:[19.5,23.5], moderate:[19.5,23.5], bad:[19.5,23.5] }, normalRange:[19.5,23.5], digits:1 },
 };
 
 function optionalGasDigits(sensors, profile, fallback) {
-  const raw = sensors ? sensors.optional_gas_ppm_decimals : undefined;
+  const raw = sensors
+    ? (sensors.optional_gas_decimals ?? sensors.optional_gas_ppm_decimals)
+    : undefined;
   if (raw !== null && raw !== undefined) {
     const d = Number(raw);
     if (Number.isInteger(d) && d >= 0 && d <= 2) return d;
@@ -1358,7 +1379,7 @@ function buildGasMetrics(sensors) {
     metrics.push({
       key: 'optional_gas',
       label: profile.label,
-      unit: profile.unit,
+      unit: typeof s.optional_gas_unit === 'string' ? s.optional_gas_unit : profile.unit,
       max: profile.max,
       thr: profile.thr,
       digits: optionalGasDigits(s, profile, 1),
@@ -1490,16 +1511,20 @@ function chartCardForState(card) {
     unit: 'ppm',
     digits: 1,
   };
+  const unit = typeof sensors.optional_gas_unit === 'string'
+    ? sensors.optional_gas_unit
+    : (profile.unit || card.unit || 'ppm');
   return {
     ...card,
     title: profile.label + ' Concentration',
-    unit: profile.unit || card.unit || 'ppm',
+    unit,
+    normalRange: Array.isArray(profile.normalRange) ? profile.normalRange : null,
     lines: card.lines.map(line => {
       if (!line || line.key !== 'optional_gas') return line;
       return {
         ...line,
         name: profile.label,
-        unit: profile.unit || line.unit || 'ppm',
+        unit,
         digits: optionalGasDigits(sensors, profile, line.digits),
       };
     }),
@@ -1663,7 +1688,13 @@ function renderCharts(payload) {
     const mmMax = vals.length ? Math.max(...vals) : null;
 
     const svgHtml = rows.length >= 2
-      ? buildChartSvg(rows, lineKeys, lineColors, 140, { lineNames, lineUnits, lineDigits, showPoints: true })
+      ? buildChartSvg(rows, lineKeys, lineColors, 140, {
+          lineNames,
+          lineUnits,
+          lineDigits,
+          normalRange: card.normalRange,
+          showPoints: true,
+        })
       : '<div class="no-data">Awaiting data</div>';
 
     return `<div class="card-g7 chart-box">

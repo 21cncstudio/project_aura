@@ -138,9 +138,27 @@ void test_web_charts_api_utils_fill_json_uses_null_timestamps_without_valid_epoc
     TEST_ASSERT_TRUE(series[0]["values"][Config::CHART_HISTORY_3H_STEPS - 1].isNull());
 }
 
+void test_web_charts_api_utils_uses_o2_unit_for_optional_gas_history() {
+    FakeHistoryView history;
+    FakeSample sample{};
+    sample.valid[ChartsHistory::METRIC_OPTIONAL_GAS] = true;
+    sample.values[ChartsHistory::METRIC_OPTIONAL_GAS] = 20.9f;
+    history.samples.push_back(sample);
+
+    ArduinoJson::JsonDocument doc;
+    WebChartsApiUtils::fillJson(
+        doc.to<ArduinoJson::JsonObject>(), history, "1h", "gases", "%Vol");
+
+    const ArduinoJson::JsonArrayConst series = doc["series"].as<ArduinoJson::JsonArrayConst>();
+    TEST_ASSERT_EQUAL_STRING("optional_gas", series[4]["key"].as<const char *>());
+    TEST_ASSERT_EQUAL_STRING("%Vol", series[4]["unit"].as<const char *>());
+    TEST_ASSERT_EQUAL_FLOAT(20.9f, series[4]["latest"].as<float>());
+}
+
 int main(int, char **) {
     UNITY_BEGIN();
     RUN_TEST(test_web_charts_api_utils_fill_json_populates_core_series_and_missing_prefix);
     RUN_TEST(test_web_charts_api_utils_fill_json_uses_null_timestamps_without_valid_epoch_and_null_latest_for_nan);
+    RUN_TEST(test_web_charts_api_utils_uses_o2_unit_for_optional_gas_history);
     return UNITY_END();
 }

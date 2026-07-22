@@ -77,8 +77,8 @@ bool localtimeInto(const time_t &epoch, tm &out) {
 #endif
 }
 
-bool rtcTimeLooksUnset(bool time_valid, bool osc_stop, time_t epoch) {
-    return osc_stop && (!time_valid || epoch <= Config::TIME_VALID_EPOCH);
+bool rtcTimeLooksUnset(bool osc_stop) {
+    return osc_stop;
 }
 
 // Frozen compatibility list for configs saved before named timezones.
@@ -298,14 +298,14 @@ bool TimeManager::initRtc() {
     last_rtc_status_poll_ms_ = millis();
     if (!time_valid) {
         rtc_valid_ = false;
-        rtc_time_unset_ = rtcTimeLooksUnset(time_valid, osc_stop, static_cast<time_t>(-1));
+        rtc_time_unset_ = rtcTimeLooksUnset(osc_stop);
         if (rtc_time_unset_) {
             LOGI("RTC", "%s time not set; waiting for NTP or manual time", rtcLabel());
         }
         return false;
     }
     time_t epoch = makeUtcEpoch(utc_tm);
-    rtc_time_unset_ = rtcTimeLooksUnset(time_valid, osc_stop, epoch);
+    rtc_time_unset_ = rtcTimeLooksUnset(osc_stop);
     if (rtc_time_unset_) {
         rtc_valid_ = false;
         LOGI("RTC", "%s time not set; waiting for NTP or manual time", rtcLabel());
@@ -574,7 +574,7 @@ bool TimeManager::getLocalTime(tm &out) {
                 noteRtcReadSuccess(false);
                 rtc_lost_power_ = osc_stop;
                 const time_t epoch = time_valid ? makeUtcEpoch(utc_tm) : static_cast<time_t>(-1);
-                rtc_time_unset_ = rtcTimeLooksUnset(time_valid, osc_stop, epoch);
+                rtc_time_unset_ = rtcTimeLooksUnset(osc_stop);
                 rtc_valid_ = time_valid && !osc_stop && !rtc_time_unset_;
                 if (rtc_valid_) {
                     if (setSystemTime(epoch)) {
@@ -825,8 +825,7 @@ TimeManager::PollResult TimeManager::pollRtcStatus(uint32_t now_ms) {
     bool time_valid = false;
     if (rtcReadTime(utc_tm, osc_stop, time_valid)) {
         noteRtcReadSuccess(true);
-        const time_t epoch = time_valid ? makeUtcEpoch(utc_tm) : static_cast<time_t>(-1);
-        const bool rtc_time_unset = rtcTimeLooksUnset(time_valid, osc_stop, epoch);
+        const bool rtc_time_unset = rtcTimeLooksUnset(osc_stop);
         const bool rtc_valid = time_valid && !osc_stop && !rtc_time_unset;
         if (rtc_lost_power_ != osc_stop ||
             rtc_valid_ != rtc_valid ||

@@ -126,7 +126,10 @@ void UiController::update_sensor_info_ui() {
             if (objects.label_sensor_info_title) {
                 safe_label_set_text(objects.label_sensor_info_title, profile.label);
             }
-            safe_label_set_text(objects.label_sensor_info_unit, present ? "ppm" : "");
+            safe_label_set_text(objects.label_sensor_info_unit, present ? profile.unit : "");
+            if (objects.label_optional_gas_text) {
+                safe_label_set_text(objects.label_optional_gas_text, profile.description);
+            }
 
             if (valid) {
                 char buf[16];
@@ -142,7 +145,7 @@ void UiController::update_sensor_info_ui() {
                 safe_label_set_text(objects.label_sensor_value, UiText::ValueMissing());
             }
 
-            char band[96];
+            char band[160];
             UiOptionalGasProfile::formatBandLabel(profile, 0, band, sizeof(band));
             safe_label_set_text(objects.label_optional_gas_excellent, band);
             UiOptionalGasProfile::formatBandLabel(profile, 1, band, sizeof(band));
