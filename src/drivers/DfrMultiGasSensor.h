@@ -30,6 +30,7 @@ public:
         Unknown,
         H2S,
         O3,
+        O2,
     };
 
     explicit DfrMultiGasSensor(const DfrMultiGasSensorConfig &config) : config_(config) {}
@@ -43,6 +44,8 @@ public:
     bool isWarmupActive() const;
     float ppm() const { return ppm_; }
     uint8_t ppmDecimals() const { return ppm_decimals_; }
+    float concentration() const { return ppm_; }
+    uint8_t concentrationDecimals() const { return ppm_decimals_; }
     GasType gasType() const { return gas_type_; }
     uint8_t rawGasType() const { return raw_gas_type_; }
     uint32_t lastDataMs() const { return last_data_ms_; }

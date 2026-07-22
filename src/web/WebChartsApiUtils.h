@@ -29,6 +29,7 @@ public:
 void fillJson(ArduinoJson::JsonObject root,
               const HistoryView &history,
               const String &window_arg,
-              const String &group_arg);
+              const String &group_arg,
+              const char *optional_gas_unit = "ppm");
 
 } // namespace WebChartsApiUtils

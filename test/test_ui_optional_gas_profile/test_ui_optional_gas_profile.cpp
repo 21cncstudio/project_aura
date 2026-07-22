@@ -37,6 +37,7 @@ void test_optional_gas_values_match_dfrobot_resolution() {
     assertFormatValue(OptionalGasType::SO2, 7.54f, "7.5");
     assertFormatValue(OptionalGasType::NO2, 5.55f, "5.6");
     assertFormatValue(OptionalGasType::O3, 0.14f, "0.1");
+    assertFormatValue(OptionalGasType::O2, 20.94f, "20.9");
 }
 
 void test_optional_gas_values_can_use_source_decimal_places() {
@@ -52,6 +53,26 @@ void test_optional_gas_threshold_labels_keep_reference_precision() {
     assertBandContains(OptionalGasType::H2S, 0, "<=0.5 ppm");
     assertBandContains(OptionalGasType::SO2, 0, "<=0.05 ppm");
     assertBandContains(OptionalGasType::O3, 2, ">0.1-0.5 ppm");
+    assertBandContains(OptionalGasType::O2, 0, "19.5-23.5 %Vol");
+    assertBandContains(OptionalGasType::O2, 1, "<19.5 %Vol");
+    assertBandContains(OptionalGasType::O2, 2, ">23.5 %Vol");
+}
+
+void test_o2_profile_uses_binary_normal_range_classification() {
+    const UiOptionalGasProfile::Profile &profile =
+        UiOptionalGasProfile::forType(OptionalGasType::O2);
+
+    TEST_ASSERT_EQUAL_STRING("%Vol", profile.unit);
+    TEST_ASSERT_EQUAL(static_cast<int>(UiOptionalGasProfile::Band::Green),
+                      static_cast<int>(UiOptionalGasProfile::classify(profile, 19.5f, true)));
+    TEST_ASSERT_EQUAL(static_cast<int>(UiOptionalGasProfile::Band::Green),
+                      static_cast<int>(UiOptionalGasProfile::classify(profile, 23.5f, true)));
+    TEST_ASSERT_EQUAL(static_cast<int>(UiOptionalGasProfile::Band::Red),
+                      static_cast<int>(UiOptionalGasProfile::classify(profile, 19.4f, true)));
+    TEST_ASSERT_EQUAL(static_cast<int>(UiOptionalGasProfile::Band::Red),
+                      static_cast<int>(UiOptionalGasProfile::classify(profile, 23.6f, true)));
+    TEST_ASSERT_EQUAL(static_cast<int>(UiOptionalGasProfile::Band::Inactive),
+                      static_cast<int>(UiOptionalGasProfile::classify(profile, 20.9f, false)));
 }
 
 int main(int argc, char **argv) {
@@ -59,5 +80,6 @@ int main(int argc, char **argv) {
     RUN_TEST(test_optional_gas_values_match_dfrobot_resolution);
     RUN_TEST(test_optional_gas_values_can_use_source_decimal_places);
     RUN_TEST(test_optional_gas_threshold_labels_keep_reference_precision);
+    RUN_TEST(test_o2_profile_uses_binary_normal_range_classification);
     return UNITY_END();
 }

@@ -367,7 +367,9 @@ void UiController::update_sensor_cards(const AirQuality &aq, bool gas_warmup, bo
     }
     if (objects.label_nox_unit_1) {
         safe_label_set_text_static(objects.label_nox_unit_1,
-                                   nox_card_is_optional_gas ? "ppm" : UiText::UnitIndex());
+                                   nox_card_is_optional_gas
+                                       ? UiOptionalGasProfile::forType(optional_gas_type).unit
+                                       : UiText::UnitIndex());
         nox_card_warmup ? lv_obj_add_flag(objects.label_nox_unit_1, LV_OBJ_FLAG_HIDDEN)
                         : lv_obj_clear_flag(objects.label_nox_unit_1, LV_OBJ_FLAG_HIDDEN);
     }

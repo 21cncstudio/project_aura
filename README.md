@@ -74,7 +74,7 @@ testing, and the 180-degree screen rotation setting for the 7" build.
 
 **Telemetry**
 - Particulate: PM0.5 / PM1 / PM2.5 / PM4 / PM10
-- Gases: CO, CO2, VOC, NOx, HCHO, plus one optional electrochemical gas (NH3, SO2, NO2, H2S, or O3)
+- Gases: CO, CO2, VOC, NOx, HCHO, plus one optional electrochemical gas (NH3, SO2, NO2, H2S, O3, or O2)
 - Climate: temperature, humidity, absolute humidity (AH), pressure
 
 **UI and integration**
@@ -158,7 +158,7 @@ only when they make sense for your room, workshop, printer setup, or automation 
 | Recommended Sensor Hub | [Project Aura AQ Sensor Hub PCB v1.1](https://www.pcbway.com/project/shareproject/Project_Aura_AQ_Sensor_Hub_PCB_v1_1_e4aa6e80.html) with built-in BMP388 pressure sensor, RTC module, capacitor, and the required sensor connectors (optional but recommended) |
 | Carbon Monoxide (CO) | [DFRobot SEN0466 — Factory Calibrated Electrochemical CO (0-1000 ppm, I2C & UART)](https://www.dfrobot.com/product-2508.html?tracking=aJ5V32) (optional) |
 | Formaldehyde (HCHO) | Sensirion SFA30 (0-1000 ppb) **or** SFA40 — both autodetected. SFA40 available as the [DFRobot SEN0661 breakout](https://www.dfrobot.com/product-3020.html?tracking=aJ5V32) (optional) |
-| Optional DFR Gas Slot | One DFRobot electrochemical sensor at a time: [SEN0469 NH3](https://www.dfrobot.com/product-2513.html?tracking=aJ5V32), [SEN0470 SO2](https://www.dfrobot.com/product-2514.html?tracking=aJ5V32), [SEN0471 NO2](https://www.dfrobot.com/product-2515.html?tracking=aJ5V32), [SEN0467 H2S](https://www.dfrobot.com/product-2511.html?tracking=aJ5V32), or [SEN0472 O3](https://www.dfrobot.com/product-2516.html?tracking=aJ5V32). Set the module's I2C address to `0x75` per the [DFRobot wiki](https://wiki.dfrobot.com/sen0465/docs/21907) (optional) |
+| Optional DFR Gas Slot | One DFRobot electrochemical sensor at a time: [SEN0469 NH3](https://www.dfrobot.com/product-2513.html?tracking=aJ5V32), [SEN0470 SO2](https://www.dfrobot.com/product-2514.html?tracking=aJ5V32), [SEN0471 NO2](https://www.dfrobot.com/product-2515.html?tracking=aJ5V32), [SEN0467 H2S](https://www.dfrobot.com/product-2511.html?tracking=aJ5V32), [SEN0472 O3](https://www.dfrobot.com/product-2516.html?tracking=aJ5V32), or [SEN0465 O2 (0-25 %Vol)](https://www.dfrobot.com/product-2510.html?tracking=aJ5V32). Set the module's I2C address to `0x75` per the [DFRobot SEN0465 documentation](https://wiki.dfrobot.com/sen0465/) (optional) |
 | Pressure | Adafruit BMP580 or DPS310. Firmware autodetects BMP580/581, BMP585, BMP388, BMP390, and DPS310 (recommended) |
 | RTC | Adafruit PCF8523. Firmware autodetects PCF8523 and DS3231; a manual RTC override is also available (recommended) |
 | DAC Output | [DFRobot GP8403 2-Channel I2C DAC (0-10V), DFR0971](https://www.dfrobot.com/product-2613.html?tracking=aJ5V32) — VOUT0 used (optional) |
@@ -168,6 +168,8 @@ only when they make sense for your room, workshop, printer setup, or automation 
 - SEN66 VOC/NOx require about 5 minutes of warmup for reliable readings; the UI shows WARMUP during this period.
 - If the CO sensor (SEN0466) is not detected at boot, CO is marked unavailable and the rest of the telemetry stays active.
 - Aura auto-detects which DFR gas variant is installed on the optional slot and exposes the matching local UI and MQTT/Home Assistant entities.
+- SEN0465 ships at I2C address `0x74`, which conflicts with the dedicated SEN0466 CO sensor. Set SEN0465 to `0x75` before connecting it to Aura.
+- SEN0465 measures ambient oxygen only (`0-25 %Vol`, `0.1 %Vol` resolution). Its specified detection error is `+/-10%` of the reading or `+/-5%` of full scale, whichever is greater. Aura uses the [OSHA definitions](https://www.osha.gov/laws-regs/regulations/standardnumber/1926/1926.1202) of oxygen-deficient (`<19.5 %Vol`) and oxygen-enriched (`>23.5 %Vol`) atmospheres as reference thresholds, not as a safety guarantee. Aura is not a certified safety monitor and SEN0465 is not suitable for Nitrox analysis or other breathing-gas decisions.
 - Affiliate disclosure: the Waveshare and DFRobot links above are affiliate links and help support Project Aura at no extra cost.
 
 Recommended retailers: Mouser, DigiKey, LCSC, Adafruit, Seeed Studio, DFRobot, and Waveshare.
@@ -182,7 +184,7 @@ Optional sensors let one build focus on the environment it is actually monitorin
   adhesives, resins, laser-cut materials, and new interiors.
 - CO sensing is useful around combustion appliances, garages, workshops, and ventilation experiments.
   It is telemetry, not a certified CO alarm.
-- The optional DFR electrochemical gas slot can target NH3, SO2, NO2, H2S, or O3. That makes Aura
+- The optional DFR electrochemical gas slot can target NH3, SO2, NO2, H2S, O3, or ambient O2. That makes Aura
   interesting for farms and animal rooms, small production spaces, labs, classrooms, print rooms,
   laser rooms, storage areas, and custom ventilation projects.
 - Pressure, RTC, DAC output, MQTT, and Home Assistant support make the readings actionable: log
@@ -369,7 +371,7 @@ cp    include/secrets.h.example include/secrets.h    # macOS / Linux
 - Availability topic: `<base>/status`
 - Commands: `<base>/command/*` (night_mode, alert_blink, backlight, restart)
 - Home Assistant discovery: `homeassistant/*/config`
-- Discovery payload includes dedicated sensors for `CO` (`co`), `PM0.5` (`pm05`), and the optional DFR gas slot (`nh3`, `so2`, `no2`, `h2s`, `o3`, plus generic optional gas state/type sensors as applicable).
+- Discovery payload includes dedicated sensors for `CO` (`co`), `PM0.5` (`pm05`), and the optional DFR gas slot (`nh3`, `so2`, `no2`, `h2s`, `o3`, `o2`, plus generic optional gas value/type/unit fields as applicable).
 
 MQTT stays idle until configured and enabled.
 

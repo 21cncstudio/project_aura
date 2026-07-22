@@ -201,9 +201,35 @@ void test_state_payload_includes_optional_gas_generic_and_nh3_compat_fields() {
 
     assert_contains(payload, "\"optional_gas\":12.5");
     assert_contains(payload, "\"optional_gas_type\":\"NH3\"");
+    assert_contains(payload, "\"optional_gas_unit\":\"ppm\"");
+    assert_contains(payload, "\"optional_gas_decimals\":1");
+    assert_contains(payload, "\"optional_gas_ppm_decimals\":1");
     assert_contains(payload, "\"nh3\":12.5");
     assert_contains(payload, "\"so2\":null");
     assert_contains(payload, "\"no2\":null");
+}
+
+void test_state_payload_includes_o2_percent_volume_fields_only_for_o2() {
+    SensorData data{};
+    data.optional_gas_sensor_present = true;
+    data.optional_gas_valid = true;
+    data.optional_gas_ppm = 20.9f;
+    data.optional_gas_ppm_decimals = 1;
+    data.optional_gas_type = static_cast<uint8_t>(DfrOptionalGasSensor::OptionalGasType::O2);
+
+    String payload = MqttPayloadBuilder::buildStatePayload(data, false, false, false, false);
+
+    assert_contains(payload, "\"optional_gas\":20.9");
+    assert_contains(payload, "\"optional_gas_type\":\"O2\"");
+    assert_contains(payload, "\"optional_gas_unit\":\"%Vol\"");
+    assert_contains(payload, "\"optional_gas_decimals\":1");
+    assert_contains(payload, "\"optional_gas_ppm_decimals\":1");
+    assert_contains(payload, "\"o2\":20.9");
+    assert_contains(payload, "\"nh3\":null");
+    assert_contains(payload, "\"o3\":null");
+    assert_contains(payload, "\"so2\":null");
+    assert_contains(payload, "\"no2\":null");
+    assert_contains(payload, "\"h2s\":null");
 }
 
 void test_state_payload_includes_specific_so2_and_hides_legacy_nh3() {
@@ -397,6 +423,7 @@ int main(int, char **) {
     RUN_TEST(test_state_payload_keeps_aqi_available_during_warmup_when_pm_is_ready);
     RUN_TEST(test_state_payload_hides_hcho_when_only_raw_sample_exists_from_sfa40_warmup_model);
     RUN_TEST(test_state_payload_includes_optional_gas_generic_and_nh3_compat_fields);
+    RUN_TEST(test_state_payload_includes_o2_percent_volume_fields_only_for_o2);
     RUN_TEST(test_state_payload_includes_specific_so2_and_hides_legacy_nh3);
     RUN_TEST(test_state_payload_includes_specific_o3_and_hides_other_optional_gases);
     RUN_TEST(test_state_payload_includes_specific_h2s_and_hides_other_optional_gases);

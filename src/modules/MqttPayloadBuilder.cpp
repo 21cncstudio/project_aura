@@ -398,6 +398,12 @@ const char *optional_gas_type_text(const SensorData &data) {
                : nullptr;
 }
 
+const char *optional_gas_unit_text(const SensorData &data) {
+    return optional_gas_type_known(data)
+               ? DfrOptionalGasSensor::unitForType(optional_gas_type_from_data(data))
+               : nullptr;
+}
+
 int optional_gas_ppm_decimals(const SensorData &data, float value) {
     const int decimals = data.optional_gas_ppm_decimals <= 2 ? data.optional_gas_ppm_decimals : 1;
     if (decimals == 2 && isfinite(value) && value >= 1.0f) {
@@ -696,7 +702,9 @@ size_t buildStatePayload(char *out,
     const bool no2_valid = optional_gas_value_valid_for_type(data, OptionalGasType::NO2);
     const bool h2s_valid = optional_gas_value_valid_for_type(data, OptionalGasType::H2S);
     const bool o3_valid = optional_gas_value_valid_for_type(data, OptionalGasType::O3);
+    const bool o2_valid = optional_gas_value_valid_for_type(data, OptionalGasType::O2);
     const bool optional_gas_valid = optional_gas_value_valid(data);
+    const bool optional_gas_known = optional_gas_type_known(data);
     const bool voc_publish_valid = !gas_warmup && data.voc_valid;
     const bool nox_publish_valid = !gas_warmup && data.nox_valid;
     const bool fan_output_valid = fan.present && fan.output_known;
@@ -714,11 +722,15 @@ size_t buildStatePayload(char *out,
     if (!add_float("co", co_valid, data.co_ppm, 1) ||
         !add_float("optional_gas", optional_gas_valid, data.optional_gas_ppm, optional_decimals) ||
         !add_nullable_cstr("optional_gas_type", optional_gas_type_text(data)) ||
+        !add_nullable_cstr("optional_gas_unit", optional_gas_unit_text(data)) ||
+        !add_int("optional_gas_decimals", optional_gas_known, optional_decimals) ||
+        !add_int("optional_gas_ppm_decimals", optional_gas_known, optional_decimals) ||
         !add_float("nh3", nh3_valid, data.nh3_ppm, nh3_decimals) ||
         !add_float("o3", o3_valid, data.optional_gas_ppm, optional_decimals) ||
         !add_float("so2", so2_valid, data.optional_gas_ppm, optional_decimals) ||
         !add_float("no2", no2_valid, data.optional_gas_ppm, optional_decimals) ||
         !add_float("h2s", h2s_valid, data.optional_gas_ppm, optional_decimals) ||
+        !add_float("o2", o2_valid, data.optional_gas_ppm, optional_decimals) ||
         !add_int("voc_index", voc_publish_valid, data.voc_index) ||
         !add_int("nox_index", nox_publish_valid, data.nox_index) ||
         !add_float("hcho", data.hcho_valid, data.hcho, 1) ||

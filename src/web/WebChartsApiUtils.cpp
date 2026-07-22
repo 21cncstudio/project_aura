@@ -31,7 +31,8 @@ bool history_latest_metric(const HistoryView &history,
 void fillJson(ArduinoJson::JsonObject root,
               const HistoryView &history,
               const String &window_arg,
-              const String &group_arg) {
+              const String &group_arg,
+              const char *optional_gas_unit) {
     const char *window_name = "3h";
     const uint16_t window_points = WebChartsUtils::chartWindowPoints(window_arg, window_name);
 
@@ -70,7 +71,9 @@ void fillJson(ArduinoJson::JsonObject root,
         const WebChartsUtils::ChartMetricSpec &spec = metrics[i];
         ArduinoJson::JsonObject entry = series.add<ArduinoJson::JsonObject>();
         entry["key"] = spec.key;
-        entry["unit"] = spec.unit;
+        entry["unit"] = spec.metric == ChartsHistory::METRIC_OPTIONAL_GAS && optional_gas_unit
+                            ? optional_gas_unit
+                            : spec.unit;
 
         float latest_value = 0.0f;
         if (history_latest_metric(history, spec.metric, latest_value)) {

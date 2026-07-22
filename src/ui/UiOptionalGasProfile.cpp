@@ -10,6 +10,8 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "config/AppConfig.h"
+
 namespace UiOptionalGasProfile {
 namespace {
 
@@ -25,15 +27,21 @@ constexpr Profile kFallbackProfile{
     0.0f,
     1.0f,
     100.0f,
+    "ppm",
+    ClassificationMode::Increasing,
+    0.0f,
+    0.0f,
+    "Optional DFRobot electrochemical gas sensor.",
 };
 
 // Keep in sync with dashboard OPTIONAL_GAS_PROFILES until these values are served by firmware state/API.
 constexpr Profile kProfiles[] = {
-    {OptionalGasType::NH3, "NH3", "Ammonia (NH3)", 0, 0, 5.0f, 25.0f, 35.0f, 5.0f, 10.0f, 100.0f},
-    {OptionalGasType::SO2, "SO2", "Sulfur dioxide (SO2)", 1, 2, 0.05f, 0.10f, 2.0f, 0.05f, 0.5f, 100.0f},
-    {OptionalGasType::NO2, "NO2", "Nitrogen dioxide (NO2)", 1, 2, 0.05f, 0.10f, 1.0f, 0.05f, 0.3f, 100.0f},
-    {OptionalGasType::H2S, "H2S", "Hydrogen sulfide (H2S)", 0, 1, 0.5f, 1.0f, 10.0f, 0.5f, 2.0f, 100.0f},
-    {OptionalGasType::O3, "O3", "Ozone (O3)", 1, 2, 0.05f, 0.10f, 0.50f, 0.05f, 0.2f, 100.0f},
+    {OptionalGasType::NH3, "NH3", "Ammonia (NH3)", 0, 0, 5.0f, 25.0f, 35.0f, 5.0f, 10.0f, 100.0f, "ppm", ClassificationMode::Increasing, 0.0f, 0.0f, "Optional DFRobot electrochemical gas sensor. Higher ppm means higher gas concentration."},
+    {OptionalGasType::SO2, "SO2", "Sulfur dioxide (SO2)", 1, 2, 0.05f, 0.10f, 2.0f, 0.05f, 0.5f, 100.0f, "ppm", ClassificationMode::Increasing, 0.0f, 0.0f, "Optional DFRobot electrochemical gas sensor. Higher ppm means higher gas concentration."},
+    {OptionalGasType::NO2, "NO2", "Nitrogen dioxide (NO2)", 1, 2, 0.05f, 0.10f, 1.0f, 0.05f, 0.3f, 100.0f, "ppm", ClassificationMode::Increasing, 0.0f, 0.0f, "Optional DFRobot electrochemical gas sensor. Higher ppm means higher gas concentration."},
+    {OptionalGasType::H2S, "H2S", "Hydrogen sulfide (H2S)", 0, 1, 0.5f, 1.0f, 10.0f, 0.5f, 2.0f, 100.0f, "ppm", ClassificationMode::Increasing, 0.0f, 0.0f, "Optional DFRobot electrochemical gas sensor. Higher ppm means higher gas concentration."},
+    {OptionalGasType::O3, "O3", "Ozone (O3)", 1, 2, 0.05f, 0.10f, 0.50f, 0.05f, 0.2f, 100.0f, "ppm", ClassificationMode::Increasing, 0.0f, 0.0f, "Optional DFRobot electrochemical gas sensor. Higher ppm means higher gas concentration."},
+    {OptionalGasType::O2, "O2", "Oxygen (O2)", 1, 1, 0.0f, 0.0f, 25.0f, 21.5f, 5.0f, 10.0f, "%Vol", ClassificationMode::NormalRange, Config::SEN0465_O2_NORMAL_MIN_PERCENT_VOL, Config::SEN0465_O2_NORMAL_MAX_PERCENT_VOL, "SEN0465 ambient oxygen reading (0-25 %Vol). Reference only; Aura is not a certified safety monitor or breathing-gas analyzer."},
 };
 
 void trim_decimal(char *buf) {
@@ -103,6 +111,21 @@ bool isKnown(OptionalGasType type) {
     return forType(type).type != OptionalGasType::None;
 }
 
+Band classify(const Profile &profile, float value, bool valid) {
+    if (!valid || !isfinite(value) || value < 0.0f) {
+        return Band::Inactive;
+    }
+    if (profile.classification == ClassificationMode::NormalRange) {
+        return value >= profile.normal_min && value <= profile.normal_max
+                   ? Band::Green
+                   : Band::Red;
+    }
+    if (value <= profile.green_max_ppm) return Band::Green;
+    if (value <= profile.yellow_max_ppm) return Band::Yellow;
+    if (value <= profile.orange_max_ppm) return Band::Orange;
+    return Band::Red;
+}
+
 void formatValue(const Profile &profile, float ppm, char *buf, size_t buf_size) {
     format_number(ppm, profile.value_decimals, buf, buf_size);
 }
@@ -123,6 +146,29 @@ void formatBandLabel(const Profile &profile, uint8_t band, char *buf, size_t buf
         return;
     }
 
+    if (profile.classification == ClassificationMode::NormalRange) {
+        char normal_min[16];
+        char normal_max[16];
+        formatThreshold(profile, profile.normal_min, normal_min, sizeof(normal_min));
+        formatThreshold(profile, profile.normal_max, normal_max, sizeof(normal_max));
+        switch (band) {
+            case 0:
+                snprintf(buf, buf_size, "Normal reference: %s-%s %s\nWithin the reference range", normal_min, normal_max, profile.unit);
+                break;
+            case 1:
+                snprintf(buf, buf_size, "Oxygen-deficient: <%s %s\nLeave the area and verify with safety equipment", normal_min, profile.unit);
+                break;
+            case 2:
+                snprintf(buf, buf_size, "Oxygen-enriched: >%s %s\nIncreased fire risk; verify with safety equipment", normal_max, profile.unit);
+                break;
+            case 3:
+            default:
+                snprintf(buf, buf_size, "Reference only\nNot a certified safety monitor or breathing-gas analyzer");
+                break;
+        }
+        return;
+    }
+
     char green[16];
     char yellow[16];
     char orange[16];
@@ -134,30 +180,34 @@ void formatBandLabel(const Profile &profile, uint8_t band, char *buf, size_t buf
         case 0:
             snprintf(buf,
                      buf_size,
-                     "Low: <=%s ppm\nLowest reference band for %s",
+                     "Low: <=%s %s\nLowest reference band for %s",
                      green,
+                     profile.unit,
                      profile.label);
             break;
         case 1:
             snprintf(buf,
                      buf_size,
-                     "Slight elevation: >%s-%s ppm\nKeep air moving and watch trend",
+                     "Slight elevation: >%s-%s %s\nKeep air moving and watch trend",
                      green,
-                     yellow);
+                     yellow,
+                     profile.unit);
             break;
         case 2:
             snprintf(buf,
                      buf_size,
-                     "Elevated: >%s-%s ppm\nVentilate and check source",
+                     "Elevated: >%s-%s %s\nVentilate and check source",
                      yellow,
-                     orange);
+                     orange,
+                     profile.unit);
             break;
         case 3:
         default:
             snprintf(buf,
                      buf_size,
-                     "High: >%s ppm\nReduce exposure; verify with safety equipment",
-                     orange);
+                     "High: >%s %s\nReduce exposure; verify with safety equipment",
+                     orange,
+                     profile.unit);
             break;
     }
 }

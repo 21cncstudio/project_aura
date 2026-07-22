@@ -10,6 +10,7 @@ struct DfrOptionalGasSensorTestState {
         NO2,
         H2S,
         O3,
+        O2 = 6,
     };
 
     bool present = false;
@@ -74,10 +75,16 @@ public:
                 return "H2S";
             case OptionalGasType::O3:
                 return "O3";
+            case OptionalGasType::O2:
+                return "O2";
             case OptionalGasType::None:
             default:
                 return "None";
         }
+    }
+
+    static const char *unitForType(OptionalGasType type) {
+        return type == OptionalGasType::O2 ? "%Vol" : "ppm";
     }
 
     static float minPpmForType(OptionalGasType type) {
@@ -87,6 +94,7 @@ public:
             case OptionalGasType::NO2:
             case OptionalGasType::H2S:
             case OptionalGasType::O3:
+            case OptionalGasType::O2:
             case OptionalGasType::None:
             default:
                 return 0.0f;
@@ -103,6 +111,8 @@ public:
                 return 20.0f;
             case OptionalGasType::O3:
                 return 10.0f;
+            case OptionalGasType::O2:
+                return 25.0f;
             case OptionalGasType::None:
             default:
                 return 0.0f;

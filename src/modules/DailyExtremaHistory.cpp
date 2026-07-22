@@ -11,6 +11,7 @@
 #include <string.h>
 
 #include "core/Logger.h"
+#include "drivers/DfrOptionalGasSensor.h"
 
 #ifndef UNIT_TEST
 #include <freertos/FreeRTOS.h>
@@ -69,7 +70,13 @@ float csv_metric_value(ChartsHistory::Metric metric, float value, bool units_c) 
     return value;
 }
 
-const char *csv_metric_unit(const DailyExtremaHistory::MetricDef &def, bool units_c) {
+const char *csv_metric_unit(const DailyExtremaHistory::MetricDef &def,
+                            bool units_c,
+                            uint8_t optional_gas_type) {
+    if (def.metric == ChartsHistory::METRIC_OPTIONAL_GAS) {
+        return DfrOptionalGasSensor::unitForType(
+            static_cast<DfrOptionalGasSensor::OptionalGasType>(optional_gas_type));
+    }
     if (units_c) {
         return def.unit;
     }
@@ -82,7 +89,13 @@ const char *csv_metric_unit(const DailyExtremaHistory::MetricDef &def, bool unit
     return def.unit;
 }
 
-uint8_t csv_metric_decimals(const DailyExtremaHistory::MetricDef &def, bool units_c) {
+uint8_t csv_metric_decimals(const DailyExtremaHistory::MetricDef &def,
+                            bool units_c,
+                            uint8_t optional_gas_type) {
+    if (def.metric == ChartsHistory::METRIC_OPTIONAL_GAS &&
+        optional_gas_type == static_cast<uint8_t>(DfrOptionalGasSensor::OptionalGasType::O2)) {
+        return 1;
+    }
     if (!units_c && def.metric == ChartsHistory::METRIC_PRESSURE) {
         return 2;
     }
@@ -515,15 +528,15 @@ bool DailyExtremaHistory::appendCsvRows(String &rows, bool include_header) const
         rows += ',';
         rows += def.key;
         rows += ',';
-        rows += csv_metric_unit(def, state_.units_c != 0);
+        rows += csv_metric_unit(def, state_.units_c != 0, state_.optional_gas_type);
         rows += ',';
         rows += format_value(csv_metric_value(def.metric, metric.min_value, state_.units_c != 0),
-                             csv_metric_decimals(def, state_.units_c != 0));
+                             csv_metric_decimals(def, state_.units_c != 0, state_.optional_gas_type));
         rows += ',';
         rows += min_time;
         rows += ',';
         rows += format_value(csv_metric_value(def.metric, metric.max_value, state_.units_c != 0),
-                             csv_metric_decimals(def, state_.units_c != 0));
+                             csv_metric_decimals(def, state_.units_c != 0, state_.optional_gas_type));
         rows += ',';
         rows += max_time;
         rows += ',';

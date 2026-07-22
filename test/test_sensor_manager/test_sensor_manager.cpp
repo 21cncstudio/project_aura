@@ -407,6 +407,37 @@ void test_sensor_manager_optional_gas_o3_updates_generic_without_nh3_compat_fiel
     TEST_ASSERT_FLOAT_WITHIN(0.001f, 0.0f, data.nh3_ppm);
 }
 
+void test_sensor_manager_optional_gas_o2_updates_generic_without_nh3_compat_fields() {
+    StorageManager storage;
+    storage.begin();
+    PressureHistory history;
+    SensorManager manager;
+    SensorData data;
+
+    auto &optional_gas = DfrOptionalGasSensor::state();
+    optional_gas.start_ok = true;
+    optional_gas.present = true;
+    optional_gas.data_valid = true;
+    optional_gas.warmup = false;
+    optional_gas.ppm = 20.9f;
+    optional_gas.ppm_decimals = 1;
+    optional_gas.gas_type = DfrOptionalGasSensor::OptionalGasType::O2;
+
+    manager.begin(storage, 0.0f, 0.0f);
+    SensorManager::PollResult result = manager.poll(data, storage, history, true);
+
+    TEST_ASSERT_TRUE(result.data_changed);
+    TEST_ASSERT_TRUE(data.optional_gas_sensor_present);
+    TEST_ASSERT_TRUE(data.optional_gas_valid);
+    TEST_ASSERT_FLOAT_WITHIN(0.01f, 20.9f, data.optional_gas_ppm);
+    TEST_ASSERT_EQUAL_UINT8(1, data.optional_gas_ppm_decimals);
+    TEST_ASSERT_EQUAL(static_cast<uint8_t>(DfrOptionalGasSensor::OptionalGasType::O2),
+                      data.optional_gas_type);
+    TEST_ASSERT_FALSE(data.nh3_sensor_present);
+    TEST_ASSERT_FALSE(data.nh3_valid);
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, 0.0f, data.nh3_ppm);
+}
+
 void test_sensor_manager_sfa_absent_is_not_fault() {
     StorageManager storage;
     storage.begin();
@@ -847,6 +878,7 @@ int main(int, char **) {
     RUN_TEST(test_sensor_manager_optional_gas_so2_does_not_populate_nh3_compat_fields);
     RUN_TEST(test_sensor_manager_optional_gas_h2s_updates_generic_without_nh3_compat_fields);
     RUN_TEST(test_sensor_manager_optional_gas_o3_updates_generic_without_nh3_compat_fields);
+    RUN_TEST(test_sensor_manager_optional_gas_o2_updates_generic_without_nh3_compat_fields);
     RUN_TEST(test_sensor_manager_sfa_absent_is_not_fault);
     RUN_TEST(test_sensor_manager_falls_back_to_sfa30_when_sfa40_probe_is_rejected);
     RUN_TEST(test_sensor_manager_warm_restart_prefers_confirmed_sfa30_before_sfa40);
