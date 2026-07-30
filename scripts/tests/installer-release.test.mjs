@@ -41,4 +41,3 @@ test("invalid versions and overlapping layouts are rejected", () => {
     ),
   );
 });
-

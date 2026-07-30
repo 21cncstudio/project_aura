@@ -21,4 +21,3 @@ await Promise.all([
   writeFile(privateOut, privateKey, { encoding: "utf8", mode: 0o600, flag: "wx" }),
   writeFile(publicOut, publicKey, { encoding: "utf8", mode: 0o644, flag: "wx" }),
 ]);
-
