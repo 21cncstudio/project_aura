@@ -14,6 +14,8 @@ top-tier sensors, flash the firmware from a browser, and get a touchscreen air-q
 local web dashboard, OTA updates, MQTT/Home Assistant integration, optional 0-10V ventilation
 control, and no cloud dependency.
 
+Project Aura AQ was created and is maintained by **Volodymyr Papush (21CNCStudio)**.
+
 This repository contains the firmware source code and configuration needed to flash and customize the device.
 
 > **Support the project:** back the MakerWorld project to get the detailed build guide, 3D-printable
