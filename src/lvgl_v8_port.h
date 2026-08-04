@@ -253,7 +253,8 @@ bool lvgl_port_block_touch_read(uint32_t duration_ms);
  * @brief Enable/disable wake-touch probe mode.
  *
  * In probe mode touch reads do not generate LVGL pressed events.
- * Touch is only sampled to latch a pending wake request.
+ * When the controller exposes an interrupt line, touch is sampled only after
+ * a new interrupt, with a sparse polling fallback if interrupts are lost.
  *
  * @param enabled True to enable wake-touch probe mode.
  *

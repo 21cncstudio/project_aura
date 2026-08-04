@@ -94,6 +94,12 @@ uint32_t BacklightManager::normalizeTimeoutMs(uint32_t timeout_ms) const {
 
 void BacklightManager::setTimeoutMs(uint32_t timeout_ms) {
     timeout_ms = normalizeTimeoutMs(timeout_ms);
+    if (backlight_on_) {
+        // Start a newly selected preset from this interaction instead of
+        // inheriting an older LVGL inactivity interval.
+        lv_disp_trig_activity(nullptr);
+        last_inactive_ms_ = 0;
+    }
     if (timeout_ms == backlight_timeout_ms_) {
         return;
     }

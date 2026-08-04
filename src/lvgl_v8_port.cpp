@@ -13,6 +13,7 @@
 #define ESP_UTILS_LOG_TAG "LvPort"
 #include "esp_lib_utils.h"
 #include "core/BootState.h"
+#include "core/TouchWakePolicy.h"
 #include "lvgl_v8_port.h"
 
 using namespace esp_panel::drivers;
@@ -32,8 +33,10 @@ static void *lvgl_port_rotated_fb = nullptr;
 static void *lvgl_buf[LVGL_PORT_BUFFER_NUM_MAX] = {};
 static uint32_t lvgl_touch_read_block_until_ms = 0;
 static bool lvgl_touch_wait_release_after_block = false;
-static bool lvgl_touch_wake_probe_enabled = false;
-static bool lvgl_touch_wake_pending = false;
+static TouchWakePolicy::StateMachine lvgl_touch_wake_policy;
+static SemaphoreHandle_t lvgl_touch_interrupt_sem = nullptr;
+static StaticSemaphore_t lvgl_touch_interrupt_sem_buffer;
+static bool lvgl_touch_interrupt_gated = false;
 static uint32_t lvgl_touch_last_sample_ms = 0;
 static lv_indev_state_t lvgl_touch_cached_state = LV_INDEV_STATE_RELEASED;
 static TouchPoint lvgl_touch_cached_point = {};
@@ -120,6 +123,31 @@ static inline void lvgl_port_wake_task()
 static inline bool is_before_deadline(uint32_t now_ms, uint32_t deadline_ms)
 {
     return static_cast<int32_t>(deadline_ms - now_ms) > 0;
+}
+
+static bool IRAM_ATTR lvgl_touch_interrupt_callback(void *user_data)
+{
+    (void)user_data;
+    BaseType_t higher_priority_task_woken = pdFALSE;
+    SemaphoreHandle_t sem = lvgl_touch_interrupt_sem;
+    if (sem != nullptr) {
+        xSemaphoreGiveFromISR(sem, &higher_priority_task_woken);
+    }
+    return higher_priority_task_woken == pdTRUE;
+}
+
+static inline bool lvgl_touch_take_interrupt()
+{
+    return lvgl_touch_interrupt_gated &&
+           (lvgl_touch_interrupt_sem != nullptr &&
+            xSemaphoreTake(lvgl_touch_interrupt_sem, 0) == pdTRUE);
+}
+
+static inline void lvgl_touch_clear_interrupt()
+{
+    if (lvgl_touch_interrupt_sem != nullptr) {
+        xSemaphoreTake(lvgl_touch_interrupt_sem, 0);
+    }
 }
 
 static void lvgl_port_copy_frame_180(const lv_color_t *src, lv_color_t *dst, uint32_t width, uint32_t height)
@@ -1003,14 +1031,42 @@ static void touchpad_read(lv_indev_drv_t *indev_drv, lv_indev_data_t *data)
         return;
     }
 
-    if (lvgl_touch_wake_probe_enabled) {
+    if (lvgl_touch_wake_policy.isEnabled()) {
+        if (lvgl_touch_read_block_until_ms != 0) {
+            if (is_before_deadline(now_ms, lvgl_touch_read_block_until_ms)) {
+                lvgl_touch_cached_state = LV_INDEV_STATE_RELEASED;
+                data->state = lvgl_touch_cached_state;
+                return;
+            }
+            lvgl_touch_read_block_until_ms = 0;
+        }
+
+        if (lvgl_touch_wake_policy.hasPendingWake()) {
+            lvgl_touch_cached_state = LV_INDEV_STATE_RELEASED;
+            data->state = lvgl_touch_cached_state;
+            return;
+        }
+
+        const bool interrupt_pending = lvgl_touch_take_interrupt();
+        // Prefer a fresh GT911 interrupt. A sparse fallback probe prevents a
+        // lost interrupt from making the dark screen impossible to wake while
+        // avoiding the continuous I2C traffic which caused the original fault.
+        if (!lvgl_touch_wake_policy.shouldProbe(
+                lvgl_touch_interrupt_gated, interrupt_pending, now_ms)) {
+            lvgl_touch_cached_state = LV_INDEV_STATE_RELEASED;
+            data->state = lvgl_touch_cached_state;
+            return;
+        }
+
         int wake_probe = lvgl_touch_read_points_with_retry(tp, &point);
         if (wake_probe > 0) {
-            lvgl_touch_wake_pending = true;
+            lvgl_touch_wake_policy.recordProbe(TouchWakePolicy::Sample::Pressed, now_ms);
             lvgl_touch_note_success();
         } else if (wake_probe < 0) {
+            lvgl_touch_wake_policy.recordProbe(TouchWakePolicy::Sample::Error, now_ms);
             lvgl_touch_note_error(tp, now_ms, "wake_probe");
         } else {
+            lvgl_touch_wake_policy.recordProbe(TouchWakePolicy::Sample::Released, now_ms);
             lvgl_touch_note_success();
         }
         lvgl_touch_cached_state = LV_INDEV_STATE_RELEASED;
@@ -1075,6 +1131,19 @@ static lv_indev_t *indev_init(Touch *tp)
     ESP_UTILS_CHECK_FALSE_RETURN(tp->getPanelHandle() != nullptr, nullptr, "Touch device is not initialized");
 
     static lv_indev_drv_t indev_drv_tp;
+
+    if (tp->isInterruptEnabled()) {
+        lvgl_touch_interrupt_sem =
+            xSemaphoreCreateBinaryStatic(&lvgl_touch_interrupt_sem_buffer);
+        if (lvgl_touch_interrupt_sem != nullptr &&
+            tp->attachInterruptCallback(lvgl_touch_interrupt_callback, nullptr)) {
+            lvgl_touch_interrupt_gated = true;
+            lvgl_touch_clear_interrupt();
+        } else {
+            lvgl_touch_interrupt_sem = nullptr;
+            ESP_LOGW("LVGL", "touch interrupt gate unavailable; wake probe will use polling fallback");
+        }
+    }
 
     ESP_UTILS_LOGD("Register input driver to LVGL");
     lv_indev_drv_init(&indev_drv_tp);
@@ -1191,8 +1260,9 @@ bool lvgl_port_init(LCD *lcd, Touch *tp)
 
     lvgl_touch_read_block_until_ms = 0;
     lvgl_touch_wait_release_after_block = false;
-    lvgl_touch_wake_probe_enabled = false;
-    lvgl_touch_wake_pending = false;
+    lvgl_touch_wake_policy = TouchWakePolicy::StateMachine{};
+    lvgl_touch_interrupt_sem = nullptr;
+    lvgl_touch_interrupt_gated = false;
     lvgl_touch_last_sample_ms = 0;
     lvgl_touch_cached_state = LV_INDEV_STATE_RELEASED;
     lvgl_touch_cached_point = {};
@@ -1333,18 +1403,21 @@ bool lvgl_port_block_touch_read(uint32_t duration_ms)
 
 bool lvgl_port_set_wake_touch_probe(bool enabled)
 {
-    lvgl_touch_wake_probe_enabled = enabled;
-    if (enabled) {
-        lvgl_touch_wake_pending = false;
+    if (enabled == lvgl_touch_wake_policy.isEnabled()) {
+        return true;
     }
+
+    const uint32_t now_ms = get_monotonic_ms();
+    const bool touch_released = lvgl_touch_cached_state != LV_INDEV_STATE_PRESSED;
+    lvgl_touch_wake_policy.setEnabled(enabled, touch_released, now_ms);
+    lvgl_touch_cached_state = LV_INDEV_STATE_RELEASED;
+    lvgl_touch_clear_interrupt();
     return true;
 }
 
 bool lvgl_port_take_wake_touch_pending(void)
 {
-    const bool pending = lvgl_touch_wake_pending;
-    lvgl_touch_wake_pending = false;
-    return pending;
+    return lvgl_touch_wake_policy.takePendingWake();
 }
 
 bool lvgl_port_get_diagnostics(lvgl_port_diagnostics_t *out)
