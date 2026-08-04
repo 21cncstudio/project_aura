@@ -27,7 +27,10 @@ release-assets/
 
 # Generated web assets
 src/web/generated/*.inc
-scripts/__pycache__/
+__pycache__/
+
+# Local EEZ Studio build manifest
+src/ui/.eez-project-build
 
 # Local ESP-IDF / component-manager artifacts
 /.dummy/
