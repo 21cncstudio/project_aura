@@ -25,6 +25,9 @@ web-installer/
 # Local release bundles
 release-assets/
 
+# Local browser automation artifacts
+/.playwright-cli/
+
 # Generated web assets
 src/web/generated/*.inc
 __pycache__/
