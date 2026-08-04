@@ -26,17 +26,17 @@ void create_screen_page_boot_logo() {
             lv_obj_t *obj = lv_img_create(parent_obj);
             lv_obj_set_pos(obj, 0, 0);
             lv_obj_set_size(obj, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
-            lv_img_set_src(obj, &img_project_aura_logo);
+            lv_img_set_src(obj, &img_page_boot_logo_new);
         }
         {
             // label_boot_ver
             lv_obj_t *obj = lv_label_create(parent_obj);
             objects.label_boot_ver = obj;
-            lv_obj_set_pos(obj, 275, 327);
+            lv_obj_set_pos(obj, 275, 422);
             lv_obj_set_size(obj, 250, LV_SIZE_CONTENT);
             lv_obj_clear_flag(obj, LV_OBJ_FLAG_CLICK_FOCUSABLE|LV_OBJ_FLAG_GESTURE_BUBBLE|LV_OBJ_FLAG_PRESS_LOCK|LV_OBJ_FLAG_SCROLLABLE|LV_OBJ_FLAG_SCROLL_CHAIN_HOR|LV_OBJ_FLAG_SCROLL_CHAIN_VER|LV_OBJ_FLAG_SCROLL_ELASTIC|LV_OBJ_FLAG_SCROLL_MOMENTUM|LV_OBJ_FLAG_SCROLL_WITH_ARROW|LV_OBJ_FLAG_SNAPPABLE);
             lv_obj_set_style_text_font(obj, &ui_font_jet_reg_14, LV_PART_MAIN | LV_STATE_DEFAULT);
-            lv_obj_set_style_text_color(obj, lv_color_hex(0xffffffff), LV_PART_MAIN | LV_STATE_DEFAULT);
+            lv_obj_set_style_text_color(obj, lv_color_hex(0xff68d8ae), LV_PART_MAIN | LV_STATE_DEFAULT);
             lv_obj_set_style_text_align(obj, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN | LV_STATE_DEFAULT);
             lv_label_set_text(obj, "v1.0.0");
         }
