@@ -15,4 +15,13 @@ Action decide(AttemptOutcome outcome, uint8_t round, uint8_t max_rounds) {
     return Action::RetryFresh;
 }
 
+uint32_t coldPowerSettleDelayMs(bool cold_start,
+                                uint32_t uptime_ms,
+                                uint32_t settle_until_ms) {
+    if (!cold_start || uptime_ms >= settle_until_ms) {
+        return 0;
+    }
+    return settle_until_ms - uptime_ms;
+}
+
 } // namespace BoardInitPolicy

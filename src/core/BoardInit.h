@@ -8,6 +8,7 @@
 
 #include <stdint.h>
 
+#include "core/Ch422gReadyProbe.h"
 #include "core/I2cBusRecovery.h"
 
 namespace esp_panel {
@@ -21,6 +22,7 @@ namespace BoardInit {
 enum class Failure : uint8_t {
     None = 0,
     BusStuck,
+    ExpanderNotReady,
     Allocation,
     Init,
     TaskCreate,
@@ -43,6 +45,9 @@ struct Result {
     Stage last_stage = Stage::Bus;
     uint8_t rounds = 0;
     uint8_t begin_attempts = 0;
+    bool cold_power_start = false;
+    uint32_t cold_power_wait_ms = 0;
+    Ch422gReadyProbe::Result expander_probe{};
     I2cBusRecovery::Result last_recovery{};
 
     bool ready() const { return board != nullptr && failure == Failure::None; }

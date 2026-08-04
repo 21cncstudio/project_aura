@@ -67,6 +67,12 @@ void wifi_state_change_cb(AuraNetworkManager::WifiState,
 StorageManager::BootAction AppInit::handleBootState() {
     esp_reset_reason_t reset_reason = esp_reset_reason();
     boot_reset_reason = reset_reason;
+    // Some cold starts on the 7-inch board reach the application as ESP_RST_SW,
+    // so the retained power-settle marker is the primary source of truth.
+    boot_board_cold_start =
+        !boot_board_power_settle_completed() ||
+        reset_reason == ESP_RST_POWERON ||
+        reset_reason == ESP_RST_BROWNOUT;
     boot_ui_auto_recovery_reboot = boot_consume_ui_auto_recovery_reboot();
     boot_board_auto_recovery_reboot = boot_consume_board_auto_recovery_reboot();
     bool crash_reset = BootHelpers::isCrashReset(reset_reason);
@@ -79,6 +85,7 @@ StorageManager::BootAction AppInit::handleBootState() {
          reset_reason,
          BootHelpers::resetReasonText(reset_reason),
          boot_count);
+    LOGI("Main", "Board power start: %s", boot_board_cold_start ? "cold" : "warm");
     if (boot_ui_auto_recovery_reboot) {
         LOGW("Main", "Previous boot ended with UI auto-recovery reboot");
     }

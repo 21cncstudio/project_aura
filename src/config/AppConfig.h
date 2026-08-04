@@ -548,6 +548,11 @@ namespace Config {
     constexpr uint32_t UI_TICK_MS = 30;
     constexpr uint32_t BOOT_LOGO_MS = 5000;
     constexpr uint32_t BOOT_DIAG_MS = 3000;
+    // If the display board rejects its first cold initialization, finish the
+    // headless boot and use the normal controlled restart path once. This
+    // matches the web restart that successfully recovers the tested 7-inch
+    // board, instead of restarting directly from the middle of setup().
+    constexpr uint32_t BOARD_RECOVERY_RESTART_DELAY_MS = 15UL * 1000UL;
     constexpr uint32_t WIFI_CONNECT_TIMEOUT_MS = 45000;
     constexpr uint32_t WIFI_CONNECT_RETRY_DELAY_MS = 1000;
     constexpr uint8_t WIFI_CONNECT_MAX_RETRIES = 3;

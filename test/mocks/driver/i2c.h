@@ -28,6 +28,10 @@ typedef struct MockI2cCmd *i2c_cmd_handle_t;
 #define ESP_ERR_NO_MEM -3
 #endif
 
+#ifndef ESP_ERR_TIMEOUT
+#define ESP_ERR_TIMEOUT -4
+#endif
+
 #ifndef I2C_MASTER_WRITE
 #define I2C_MASTER_WRITE 0
 #endif

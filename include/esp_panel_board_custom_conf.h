@@ -216,8 +216,8 @@
     /* For host */
     #define ESP_PANEL_BOARD_TOUCH_I2C_CLK_HZ            (100 * 1000)
                                                                 // Typically set to 400K
-    #define ESP_PANEL_BOARD_TOUCH_I2C_SCL_PULLUP        (0)     // External pull-ups are already present on the board
-    #define ESP_PANEL_BOARD_TOUCH_I2C_SDA_PULLUP        (0)     // External pull-ups are already present on the board
+    #define ESP_PANEL_BOARD_TOUCH_I2C_SCL_PULLUP        (1)     // Must match the expander host configuration
+    #define ESP_PANEL_BOARD_TOUCH_I2C_SDA_PULLUP        (1)     // Must match the expander host configuration
     #define ESP_PANEL_BOARD_TOUCH_I2C_IO_SCL            (9)
     #define ESP_PANEL_BOARD_TOUCH_I2C_IO_SDA            (8)
     #define ESP_PANEL_BOARD_TOUCH_I2C_PRE_INIT_DELAY_MS (150)
@@ -324,8 +324,8 @@
 #if !ESP_PANEL_BOARD_EXPANDER_SKIP_INIT_HOST
 #define ESP_PANEL_BOARD_EXPANDER_I2C_CLK_HZ         (100 * 1000)
                                                             // Typically set to 400K
-#define ESP_PANEL_BOARD_EXPANDER_I2C_SCL_PULLUP     (0)     // External pull-ups are already present on the board
-#define ESP_PANEL_BOARD_EXPANDER_I2C_SDA_PULLUP     (0)     // External pull-ups are already present on the board
+#define ESP_PANEL_BOARD_EXPANDER_I2C_SCL_PULLUP     (1)     // Match the official Waveshare board configuration
+#define ESP_PANEL_BOARD_EXPANDER_I2C_SDA_PULLUP     (1)     // Match the official Waveshare board configuration
 #define ESP_PANEL_BOARD_EXPANDER_I2C_IO_SCL         (9)
 #define ESP_PANEL_BOARD_EXPANDER_I2C_IO_SDA         (8)
 #endif // ESP_PANEL_BOARD_EXPANDER_SKIP_INIT_HOST
@@ -334,6 +334,19 @@
                                                             // the I2C address may be different, and confirmation based on
                                                             // the actual hardware connection is required
 #endif // ESP_PANEL_BOARD_USE_EXPANDER
+
+#if ESP_PANEL_BOARD_USE_TOUCH && ESP_PANEL_BOARD_USE_EXPANDER && \
+    (ESP_PANEL_BOARD_TOUCH_BUS_TYPE == ESP_PANEL_BUS_TYPE_I2C) && \
+    !ESP_PANEL_BOARD_TOUCH_BUS_SKIP_INIT_HOST && !ESP_PANEL_BOARD_EXPANDER_SKIP_INIT_HOST
+#if (ESP_PANEL_BOARD_TOUCH_I2C_HOST_ID != ESP_PANEL_BOARD_EXPANDER_I2C_HOST_ID) || \
+    (ESP_PANEL_BOARD_TOUCH_I2C_CLK_HZ != ESP_PANEL_BOARD_EXPANDER_I2C_CLK_HZ) || \
+    (ESP_PANEL_BOARD_TOUCH_I2C_SCL_PULLUP != ESP_PANEL_BOARD_EXPANDER_I2C_SCL_PULLUP) || \
+    (ESP_PANEL_BOARD_TOUCH_I2C_SDA_PULLUP != ESP_PANEL_BOARD_EXPANDER_I2C_SDA_PULLUP) || \
+    (ESP_PANEL_BOARD_TOUCH_I2C_IO_SCL != ESP_PANEL_BOARD_EXPANDER_I2C_IO_SCL) || \
+    (ESP_PANEL_BOARD_TOUCH_I2C_IO_SDA != ESP_PANEL_BOARD_EXPANDER_I2C_IO_SDA)
+#error "Touch and expander must use the same configuration for their shared I2C host"
+#endif
+#endif
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 /////////////////////// Please utilize the following macros to execute any additional code if required /////////////////

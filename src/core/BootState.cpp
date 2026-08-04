@@ -11,8 +11,12 @@ namespace {
 
 constexpr uint32_t BOOT_UI_AUTO_RECOVERY_MAGIC = 0xA11A0F5Au;
 constexpr uint32_t BOOT_BOARD_AUTO_RECOVERY_MAGIC = 0xB04D1C2Cu;
-RTC_DATA_ATTR uint32_t boot_ui_auto_recovery_magic = 0;
-RTC_DATA_ATTR uint32_t boot_board_auto_recovery_magic = 0;
+constexpr uint32_t BOOT_BOARD_POWER_SETTLED_MAGIC = 0xB04D5E77u;
+// These markers must survive esp_restart(). Their magic values also make the
+// undefined RTC contents after a real power loss safe to reject.
+RTC_NOINIT_ATTR uint32_t boot_ui_auto_recovery_magic;
+RTC_NOINIT_ATTR uint32_t boot_board_auto_recovery_magic;
+RTC_NOINIT_ATTR uint32_t boot_board_power_settled_magic;
 
 } // namespace
 
@@ -23,6 +27,7 @@ bool boot_i2c_recovered = false;
 bool boot_touch_detected = false;
 bool boot_ui_auto_recovery_reboot = false;
 bool boot_board_auto_recovery_reboot = false;
+bool boot_board_cold_start = false;
 
 void boot_mark_ui_auto_recovery_reboot() {
     boot_ui_auto_recovery_magic = BOOT_UI_AUTO_RECOVERY_MAGIC;
@@ -42,4 +47,12 @@ bool boot_consume_board_auto_recovery_reboot() {
     const bool flagged = (boot_board_auto_recovery_magic == BOOT_BOARD_AUTO_RECOVERY_MAGIC);
     boot_board_auto_recovery_magic = 0;
     return flagged;
+}
+
+bool boot_board_power_settle_completed() {
+    return boot_board_power_settled_magic == BOOT_BOARD_POWER_SETTLED_MAGIC;
+}
+
+void boot_mark_board_power_settle_complete() {
+    boot_board_power_settled_magic = BOOT_BOARD_POWER_SETTLED_MAGIC;
 }

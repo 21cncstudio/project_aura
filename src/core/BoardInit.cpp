@@ -11,10 +11,7 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 
-#include "config/AppConfig.h"
 #include "BoardInitCallbacks.h"
-#include "core/BoardInitPolicy.h"
-#include "core/BootHelpers.h"
 #include "core/BootState.h"
 #include "core/Logger.h"
 #include "lvgl_v8_port.h"
@@ -25,11 +22,7 @@ namespace {
 using esp_panel::board::Board;
 using esp_panel::drivers::BusRGB;
 
-constexpr uint8_t kMaxRounds = 3;
-constexpr uint32_t kRetryDelayMs = 300;
 constexpr uint32_t kBeginTimeoutMs = 10000;
-constexpr uint32_t kColdReleaseWaitMs = 2000;
-constexpr uint32_t kColdReleasePollMs = 100;
 
 enum class BeginResult : uint8_t {
     Success = 0,
@@ -98,52 +91,6 @@ BeginResult runBoardBeginOnce(Board *board) {
     return success ? BeginResult::Success : BeginResult::Failed;
 }
 
-BoardInitPolicy::AttemptOutcome policyOutcome(BeginResult result) {
-    switch (result) {
-        case BeginResult::Success: return BoardInitPolicy::AttemptOutcome::Success;
-        case BeginResult::TaskCreateFailed: return BoardInitPolicy::AttemptOutcome::TaskCreateFailed;
-        case BeginResult::Timeout: return BoardInitPolicy::AttemptOutcome::Timeout;
-        case BeginResult::Failed:
-        default: return BoardInitPolicy::AttemptOutcome::Failed;
-    }
-}
-
-void logRecovery(uint8_t round, const I2cBusRecovery::Result &result, uint32_t waited_ms) {
-    LOGI("Main",
-         "I2C round %u: status=%s before=%u/%u after=%u/%u pulses=%u wait=%lu ms",
-         static_cast<unsigned>(round),
-         I2cBusRecovery::statusText(result.status),
-         result.before.sda_high ? 1u : 0u,
-         result.before.scl_high ? 1u : 0u,
-         result.after.sda_high ? 1u : 0u,
-         result.after.scl_high ? 1u : 0u,
-         static_cast<unsigned>(result.pulses),
-         static_cast<unsigned long>(waited_ms));
-}
-
-I2cBusRecovery::Result prepareBus(uint8_t round) {
-    const gpio_num_t sda = static_cast<gpio_num_t>(Config::I2C_SDA_PIN);
-    const gpio_num_t scl = static_cast<gpio_num_t>(Config::I2C_SCL_PIN);
-    I2cBusRecovery::Result result = BootHelpers::recoverI2CBus(sda, scl);
-    uint32_t waited_ms = 0;
-
-    if (!result.busReady() && round == 1 && boot_reset_reason == ESP_RST_POWERON) {
-        const uint32_t wait_start_ms = millis();
-        while (waited_ms < kColdReleaseWaitMs) {
-            vTaskDelay(pdMS_TO_TICKS(kColdReleasePollMs));
-            waited_ms = millis() - wait_start_ms;
-            if (I2cBusRecovery::sample(sda, scl).idle()) {
-                break;
-            }
-        }
-        result = BootHelpers::recoverI2CBus(sda, scl);
-    }
-
-    logRecovery(round, result, waited_ms);
-    boot_i2c_recovered = result.busReady();
-    return result;
-}
-
 bool configureBoard(Board *board) {
     auto lcd = board->getLCD();
     if (lcd == nullptr) {
@@ -163,13 +110,28 @@ bool configureBoard(Board *board) {
     return true;
 }
 
-void logMemory(const char *phase, uint8_t round) {
+void logMemory(const char *phase) {
     LOGI("Main",
-         "Board round %u %s: heap=%u psram=%u",
-         static_cast<unsigned>(round),
+         "Board %s: heap=%u psram=%u",
          phase,
          static_cast<unsigned>(ESP.getFreeHeap()),
          static_cast<unsigned>(ESP.getFreePsram()));
+}
+
+I2cBusRecovery::Result observeBus(const I2cBusRecovery::LineState &state) {
+    I2cBusRecovery::Result result{};
+    result.before = state;
+    result.after = state;
+    if (state.sda_high && state.scl_high) {
+        result.status = I2cBusRecovery::Status::Idle;
+    } else if (!state.sda_high && !state.scl_high) {
+        result.status = I2cBusRecovery::Status::BothStuckLow;
+    } else if (!state.sda_high) {
+        result.status = I2cBusRecovery::Status::SdaStuckLow;
+    } else {
+        result.status = I2cBusRecovery::Status::SclStuckLow;
+    }
+    return result;
 }
 
 } // namespace
@@ -183,6 +145,7 @@ const char *failureText(Failure failure) {
     switch (failure) {
         case Failure::None: return "none";
         case Failure::BusStuck: return "bus_stuck";
+        case Failure::ExpanderNotReady: return "expander_not_ready";
         case Failure::Allocation: return "allocation";
         case Failure::Init: return "init";
         case Failure::TaskCreate: return "task_create";
@@ -206,95 +169,65 @@ const char *stageText(Stage stage) {
 
 Result initBoard(const I2cBusRecovery::LineState &early_state) {
     Result result{};
+    result.rounds = 1;
+    result.cold_power_start = boot_board_cold_start;
+    result.last_recovery = observeBus(early_state);
     LOGI("Main",
          "Early I2C sample: SDA=%u SCL=%u",
          early_state.sda_high ? 1u : 0u,
          early_state.scl_high ? 1u : 0u);
-    LOGI("Main", "Initializing board with %u clean rounds", static_cast<unsigned>(kMaxRounds));
+    if (result.cold_power_start) {
+        boot_mark_board_power_settle_complete();
+        LOGI("Main", "Cold power start: using vendor board init without an I2C pre-probe");
+    }
+    LOGI("Main", "Initializing board with one vendor attempt and no I2C pre-probe");
 
-    for (uint8_t round = 1; round <= kMaxRounds; ++round) {
-        result.rounds = round;
-        result.last_stage = Stage::Bus;
-        g_stage.store(static_cast<uint8_t>(Stage::Bus), std::memory_order_relaxed);
-        result.last_recovery = prepareBus(round);
+    result.last_stage = Stage::Bus;
+    g_stage.store(static_cast<uint8_t>(Stage::Bus), std::memory_order_relaxed);
+    logMemory("before allocation");
+    Board *board = new (std::nothrow) Board();
+    if (board == nullptr) {
+        result.failure = Failure::Allocation;
+        LOGE("Main", "Board allocation failed");
+        return result;
+    }
+    LOGI("Main", "Board created @%p", board);
 
-        if (!result.last_recovery.busReady()) {
-            result.failure = Failure::BusStuck;
-            LOGW("Main", "Board round %u/%u skipped: I2C bus not idle",
-                 static_cast<unsigned>(round), static_cast<unsigned>(kMaxRounds));
-            if (round < kMaxRounds) {
-                vTaskDelay(pdMS_TO_TICKS(kRetryDelayMs));
-            }
-            continue;
-        }
-
-        logMemory("before allocation", round);
-        Board *board = new (std::nothrow) Board();
-        if (board == nullptr) {
-            result.failure = Failure::Allocation;
-            LOGE("Main", "Board allocation failed in round %u", static_cast<unsigned>(round));
-            if (round < kMaxRounds) {
-                vTaskDelay(pdMS_TO_TICKS(kRetryDelayMs));
-            }
-            continue;
-        }
-        LOGI("Main", "Board generation %u created @%p", static_cast<unsigned>(round), board);
-
-        if (!board->init() || !configureBoard(board)) {
-            result.failure = Failure::Init;
-            LOGE("Main", "Board init failed in round %u", static_cast<unsigned>(round));
-            LOGI("Main", "Board generation %u deleting @%p", static_cast<unsigned>(round), board);
-            delete board;
-            logMemory("after init cleanup", round);
-            if (round < kMaxRounds) {
-                vTaskDelay(pdMS_TO_TICKS(kRetryDelayMs));
-            }
-            continue;
-        }
-
-        ++result.begin_attempts;
-        const BeginResult begin_result = runBoardBeginOnce(board);
-        result.last_stage = static_cast<Stage>(g_stage.load(std::memory_order_acquire));
-        const BoardInitPolicy::Action action = BoardInitPolicy::decide(policyOutcome(begin_result), round, kMaxRounds);
-
-        if (action == BoardInitPolicy::Action::ReturnSuccess) {
-            noteStage(Stage::Complete);
-            result.board = board;
-            result.failure = Failure::None;
-            result.last_stage = Stage::Complete;
-            LOGI("Main", "Board initialized in round %u", static_cast<unsigned>(round));
-            return result;
-        }
-
-        if (begin_result == BeginResult::Timeout) {
-            // The task was deleted inside vendor code. Destructing the partially
-            // active object could touch inconsistent locks or device handles.
-            result.failure = Failure::Timeout;
-            LOGE("Main", "Board timeout: retaining unsafe generation @%p until restart", board);
-            return result;
-        }
-
-        result.failure = (begin_result == BeginResult::TaskCreateFailed) ? Failure::TaskCreate : Failure::Begin;
-        LOGW("Main",
-             "Board round %u/%u failed at stage=%s; destroying generation before recovery",
-             static_cast<unsigned>(round),
-             static_cast<unsigned>(kMaxRounds),
-             stageText(result.last_stage));
-        LOGI("Main", "Board generation %u deleting @%p", static_cast<unsigned>(round), board);
+    if (!board->init() || !configureBoard(board)) {
+        result.failure = Failure::Init;
+        LOGE("Main", "Board init failed");
+        LOGI("Main", "Deleting board @%p", board);
         delete board;
-        logMemory("after cleanup", round);
-
-        if (action == BoardInitPolicy::Action::RetryFresh) {
-            vTaskDelay(pdMS_TO_TICKS(kRetryDelayMs));
-        }
+        logMemory("after init cleanup");
+        return result;
     }
 
-    LOGE("Main",
-         "Board init failed: reason=%s stage=%s rounds=%u begin_attempts=%u",
-         failureText(result.failure),
-         stageText(result.last_stage),
-         static_cast<unsigned>(result.rounds),
-         static_cast<unsigned>(result.begin_attempts));
+    ++result.begin_attempts;
+    const BeginResult begin_result = runBoardBeginOnce(board);
+    result.last_stage = static_cast<Stage>(g_stage.load(std::memory_order_acquire));
+    if (begin_result == BeginResult::Success) {
+        noteStage(Stage::Complete);
+        result.board = board;
+        result.failure = Failure::None;
+        result.last_stage = Stage::Complete;
+        boot_i2c_recovered = true;
+        LOGI("Main", "Board initialized by vendor path");
+        return result;
+    }
+
+    if (begin_result == BeginResult::Timeout) {
+        // The task was deleted inside vendor code. Destructing the partially
+        // active object could touch inconsistent locks or device handles.
+        result.failure = Failure::Timeout;
+        LOGE("Main", "Board timeout: retaining unsafe object @%p until restart", board);
+        return result;
+    }
+
+    result.failure = (begin_result == BeginResult::TaskCreateFailed) ? Failure::TaskCreate : Failure::Begin;
+    LOGW("Main", "Vendor board begin failed at stage=%s", stageText(result.last_stage));
+    LOGI("Main", "Deleting board @%p", board);
+    delete board;
+    logMemory("after cleanup");
     return result;
 }
 

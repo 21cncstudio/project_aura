@@ -11,12 +11,12 @@ enum class Decision : uint8_t {
     NotNeeded = 0,
     Restart,
     SuppressAlreadyAttempted,
-    SuppressResetReason,
+    SuppressNotEligible,
     SuppressRestartUnavailable,
 };
 
 Decision decide(bool board_ready,
-                bool power_on_reset,
+                bool recovery_eligible,
                 bool auto_recovery_boot,
                 bool restart_task_ready);
 const char *decisionText(Decision decision);

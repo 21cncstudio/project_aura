@@ -8,6 +8,11 @@ bool boot_i2c_recovered = false;
 bool boot_touch_detected = false;
 bool boot_ui_auto_recovery_reboot = false;
 bool boot_board_auto_recovery_reboot = false;
+bool boot_board_cold_start = true;
+
+namespace {
+bool board_power_settle_completed = false;
+}
 
 void boot_mark_ui_auto_recovery_reboot() {
     boot_ui_auto_recovery_reboot = true;
@@ -27,4 +32,12 @@ bool boot_consume_board_auto_recovery_reboot() {
     const bool flagged = boot_board_auto_recovery_reboot;
     boot_board_auto_recovery_reboot = false;
     return flagged;
+}
+
+bool boot_board_power_settle_completed() {
+    return board_power_settle_completed;
+}
+
+void boot_mark_board_power_settle_complete() {
+    board_power_settle_completed = true;
 }

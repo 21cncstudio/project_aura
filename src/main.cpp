@@ -194,26 +194,52 @@ void setup()
     BootDiagnostics::state.board_ready = board_ready;
     BootDiagnostics::state.board_rounds = board_result.rounds;
     BootDiagnostics::state.board_begin_attempts = board_result.begin_attempts;
+    BootDiagnostics::state.cold_power_start = board_result.cold_power_start;
+    BootDiagnostics::state.cold_power_wait_ms = board_result.cold_power_wait_ms;
+    BootDiagnostics::state.expander_probe_status = board_result.expander_probe.status;
+    BootDiagnostics::state.expander_probe_attempts = board_result.expander_probe.attempts;
+    BootDiagnostics::state.expander_probe_wait_ms = board_result.expander_probe.waited_ms;
+    BootDiagnostics::state.expander_probe_error = board_result.expander_probe.last_error;
+    BootDiagnostics::state.expander_probe_phase = board_result.expander_probe.phase;
+    BootDiagnostics::state.expander_probe_failed_address = board_result.expander_probe.failed_address;
+    BootDiagnostics::state.expander_probe_failed_value = board_result.expander_probe.failed_value;
+    BootDiagnostics::state.expander_probe_bus_recoveries = board_result.expander_probe.bus_recoveries;
+    BootDiagnostics::state.expander_probe_failure_lines_valid = board_result.expander_probe.failure_lines_valid;
+    BootDiagnostics::state.expander_probe_failure_sda_high = board_result.expander_probe.failure_sda_high;
+    BootDiagnostics::state.expander_probe_failure_scl_high = board_result.expander_probe.failure_scl_high;
+    BootDiagnostics::state.expander_probe_recovery_sda_high = board_result.expander_probe.recovery_sda_high;
+    BootDiagnostics::state.expander_probe_recovery_scl_high = board_result.expander_probe.recovery_scl_high;
+    BootDiagnostics::state.expander_probe_recovery_pulses = board_result.expander_probe.recovery_pulses;
     BootDiagnostics::state.board_stage = board_result.last_stage;
     BootDiagnostics::state.board_failure = board_result.failure;
 
+    const bool board_recovery_eligible =
+        boot_board_cold_start ||
+        board_result.failure == BoardInit::Failure::Begin ||
+        board_result.failure == BoardInit::Failure::Timeout;
     const BoardRecoveryPolicy::Decision recovery_decision = BoardRecoveryPolicy::decide(
         board_ready,
-        boot_reset_reason == ESP_RST_POWERON,
+        board_recovery_eligible,
         boot_board_auto_recovery_reboot,
         restart_task_ready);
     if (recovery_decision == BoardRecoveryPolicy::Decision::Restart) {
         LOGE("Main",
-             "Board unavailable after %u rounds; automatic recovery restart requested",
+             "Board unavailable after %u rounds; controlled recovery restart will be scheduled",
              static_cast<unsigned>(board_result.rounds));
+        // Arm the one-shot guard before completing the headless boot. The
+        // restart itself is scheduled after WebHandlers and the network plane
+        // are initialized, so it follows the same shutdown path as the
+        // successful restart requested from the web interface.
         boot_mark_board_auto_recovery_reboot();
-        delay(100);
-        safe_restart_via_core0();
     }
     if (!board_ready) {
-        LOGE("Main",
-             "Board automatic recovery suppressed: %s; entering headless mode",
-             BoardRecoveryPolicy::decisionText(recovery_decision));
+        if (recovery_decision == BoardRecoveryPolicy::Decision::Restart) {
+            LOGW("Main", "Entering temporary headless mode before controlled recovery restart");
+        } else {
+            LOGE("Main",
+                 "Board automatic recovery suppressed: %s; entering headless mode",
+                 BoardRecoveryPolicy::decisionText(recovery_decision));
+        }
         LOGW("Main", "Runtime I2C polling suppressed: board/I2C unavailable");
     } else if (boot_board_auto_recovery_reboot) {
         LOGI("Main", "Board recovered after automatic restart");
@@ -264,6 +290,12 @@ void setup()
     network_plane_running = NetworkPlane::start(network_plane_context);
     if (!network_plane_running) {
         LOGW("Main", "network task unavailable, falling back to main-loop networking");
+    }
+    if (recovery_decision == BoardRecoveryPolicy::Decision::Restart) {
+        LOGW("Main",
+             "Scheduling one controlled board recovery restart in %lu ms",
+             static_cast<unsigned long>(Config::BOARD_RECOVERY_RESTART_DELAY_MS));
+        WebHandlersRequestRestart(Config::BOARD_RECOVERY_RESTART_DELAY_MS);
     }
 }
 

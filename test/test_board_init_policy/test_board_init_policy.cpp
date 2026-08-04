@@ -37,6 +37,22 @@ void test_timeout_always_aborts_without_destructor_or_retry() {
                           static_cast<int>(BoardInitPolicy::decide(AttemptOutcome::Timeout, 1, 3)));
 }
 
+void test_cold_power_settle_waits_only_for_remaining_cold_start_window() {
+    TEST_ASSERT_EQUAL_UINT32(7000,
+                             BoardInitPolicy::coldPowerSettleDelayMs(true, 3000, 10000));
+    TEST_ASSERT_EQUAL_UINT32(1,
+                             BoardInitPolicy::coldPowerSettleDelayMs(true, 9999, 10000));
+}
+
+void test_cold_power_settle_skips_warm_start_or_completed_window() {
+    TEST_ASSERT_EQUAL_UINT32(0,
+                             BoardInitPolicy::coldPowerSettleDelayMs(false, 3000, 10000));
+    TEST_ASSERT_EQUAL_UINT32(0,
+                             BoardInitPolicy::coldPowerSettleDelayMs(true, 10000, 10000));
+    TEST_ASSERT_EQUAL_UINT32(0,
+                             BoardInitPolicy::coldPowerSettleDelayMs(true, 15000, 10000));
+}
+
 int main(int, char **) {
     UNITY_BEGIN();
     RUN_TEST(test_success_returns_without_cleanup);
@@ -44,5 +60,7 @@ int main(int, char **) {
     RUN_TEST(test_task_creation_failure_is_retryable);
     RUN_TEST(test_last_round_failure_aborts);
     RUN_TEST(test_timeout_always_aborts_without_destructor_or_retry);
+    RUN_TEST(test_cold_power_settle_waits_only_for_remaining_cold_start_window);
+    RUN_TEST(test_cold_power_settle_skips_warm_start_or_completed_window);
     return UNITY_END();
 }
