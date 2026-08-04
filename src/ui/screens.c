@@ -3224,7 +3224,7 @@ void create_screen_page_settings() {
                             lv_obj_set_style_text_font(obj, &ui_font_jet_reg_18, LV_PART_MAIN | LV_STATE_DEFAULT);
                             lv_obj_set_style_text_align(obj, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN | LV_STATE_DEFAULT);
                             lv_obj_set_style_text_line_space(obj, 5, LV_PART_MAIN | LV_STATE_DEFAULT);
-                            lv_label_set_text(obj, "Project Aura\nVersion: v1.0.6\n© Volodymyr Papush (21CNCStudio)\nOpen-source firmware (GPL-3.0-or-later)\n21cncstudio.com");
+                            lv_label_set_text(obj, "Project Aura\nVersion: v1.0.6\n© Volodymyr Papush (21CNCStudio)\nOpen-source firmware (GPL-3.0-or-later)\naura-aq.com");
                         }
                         {
                             // about_qr
@@ -3232,7 +3232,7 @@ void create_screen_page_settings() {
                             objects.about_qr = obj;
                             lv_obj_set_pos(obj, 66, 156);
                             lv_obj_set_size(obj, 170, 170);
-                            lv_qrcode_update(obj, "https://www.21cncstudio.com/project-aura/", 41);
+                            lv_qrcode_update(obj, "https://aura-aq.com/", 20);
                             lv_obj_add_flag(obj, LV_OBJ_FLAG_CLICKABLE);
                         }
                         {
