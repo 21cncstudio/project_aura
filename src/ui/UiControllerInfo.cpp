@@ -441,7 +441,11 @@ void UiController::update_sensor_info_ui() {
             const bool co_valid = currentData.co_valid && isfinite(currentData.co_ppm) && currentData.co_ppm >= 0.0f;
             if (co_valid) {
                 char buf[16];
-                snprintf(buf, sizeof(buf), "%.0f", currentData.co_ppm);
+                if (currentData.co_ppm > 0.0f && currentData.co_ppm < 10.0f) {
+                    snprintf(buf, sizeof(buf), "%.1f", currentData.co_ppm);
+                } else {
+                    snprintf(buf, sizeof(buf), "%.0f", currentData.co_ppm);
+                }
                 safe_label_set_text(objects.label_sensor_value, buf);
             } else {
                 safe_label_set_text(objects.label_sensor_value, UiText::ValueMissingShort());

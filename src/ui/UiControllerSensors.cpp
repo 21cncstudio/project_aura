@@ -463,7 +463,11 @@ void UiController::update_sensor_cards(const AirQuality &aq, bool gas_warmup, bo
         if (co_sensor_present) {
             if (co_available) {
                 float co_ppm = get_co_ppm_value(currentData);
-                snprintf(buf, sizeof(buf), "%.0f", co_ppm);
+                if (co_ppm > 0.0f && co_ppm < 10.0f) {
+                    snprintf(buf, sizeof(buf), "%.1f", co_ppm);
+                } else {
+                    snprintf(buf, sizeof(buf), "%.0f", co_ppm);
+                }
             } else {
                 strcpy(buf, UiText::ValueMissingShort());
             }
