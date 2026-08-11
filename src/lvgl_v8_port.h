@@ -277,6 +277,8 @@ typedef struct {
     uint32_t flush_age_ms;
     uint32_t vsync_count;
     uint32_t vsync_age_ms;
+    uint32_t vsync_wait_timeout_count;
+    bool display_sync_fault;
     uint32_t lock_fail_count;
     uint32_t touch_read_error_count;
     bool paused;

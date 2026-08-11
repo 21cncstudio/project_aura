@@ -34,10 +34,11 @@ void init(WebHandlerContext *context);
 WebHandlerContext *context();
 
 bool isOtaBusy();
+bool isOtaUploadActive();
 bool isOtaStatusBusy(const WebOtaSnapshot &ota_snapshot);
 bool consumeRestartRequest();
 void requestRestart(uint32_t delay_ms);
-void beginRestartShutdown();
+bool tryBeginRestartShutdown();
 bool shouldPauseMqttForTransfer();
 void noteMqttConnectDeferred();
 void noteMqttPublishDeferred();

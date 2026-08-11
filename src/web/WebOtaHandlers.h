@@ -29,6 +29,8 @@ struct Runtime {
     void (*cancel_preflight_ui)() = nullptr;
     void (*set_ui_screen)(WebUiBridge::FirmwareUpdateScreenMode mode) = nullptr;
     void (*set_error)(const String &error) = nullptr;
+    bool (*try_begin_upload)() = nullptr;
+    void (*end_upload)() = nullptr;
     OtaPhysicalConfirm::PrepareDecision (*prepare_physical_confirm)(size_t image_size_bytes,
                                                                     bool has_confirm_id,
                                                                     uint32_t confirm_id) = nullptr;

@@ -67,7 +67,8 @@ public:
     explicit UiController(const UiContext &context);
 
     void setLvglReady(bool ready);
-    void begin();
+    bool begin();
+    bool isLvglRuntimeHealthy() const;
     void onSensorPoll(const SensorManager::PollResult &poll);
     void onTimePoll(const TimeManager::PollResult &poll);
     void markDatetimeDirty();
@@ -1037,9 +1038,12 @@ private:
     uint32_t lvgl_diag_last_heartbeat_ms = 0;
     uint32_t lvgl_diag_prev_heartbeat_lock_fail_count = 0;
     uint32_t lvgl_diag_prev_heartbeat_touch_err_count = 0;
+    uint32_t lvgl_diag_prev_heartbeat_vsync_timeout_count = 0;
     uint32_t lvgl_diag_last_stall_warn_ms = 0;
     bool lvgl_diag_stall_active = false;
     uint32_t lvgl_diag_stall_since_ms = 0;
+    bool lvgl_diag_auto_recovery_restart_requested_ = false;
+    bool lvgl_diag_auto_recovery_suppressed_ = false;
     bool firmware_update_screen_active_ = false;
     WebUiBridge::FirmwareUpdateScreenMode firmware_update_screen_mode_ =
         WebUiBridge::FirmwareUpdateScreenMode::Hidden;

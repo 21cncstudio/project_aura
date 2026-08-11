@@ -15,6 +15,7 @@
 #include "core/SafeRestart.h"
 #include "core/Watchdog.h"
 #include "lvgl_v8_port.h"
+#include "web/OtaRestartGate.h"
 #include "web/OtaPhysicalConfirm.h"
 #include "web/WebOtaState.h"
 #include "web/WebUiBridge.h"
@@ -33,7 +34,7 @@ OtaDeferredRestart::Controller g_restart_controller;
 WebDeferredActionsState g_deferred_actions;
 WebOtaState g_ota_state;
 WebStreamState g_web_stream_state;
-std::atomic<bool> g_restart_in_progress{false};
+OtaRestartGate g_ota_restart_gate;
 bool g_ota_wifi_ps_saved = false;
 wifi_ps_type_t g_ota_wifi_ps_prev = WIFI_PS_NONE;
 std::atomic<uint32_t> g_ota_preflight_ui_due_ms{0};
@@ -182,6 +183,14 @@ void ota_restore_wifi_power_save() {
     g_ota_wifi_ps_prev = WIFI_PS_NONE;
 }
 
+bool ota_try_begin_upload() {
+    return g_ota_restart_gate.tryBeginUpload();
+}
+
+void ota_end_upload() {
+    g_ota_restart_gate.endUpload();
+}
+
 }  // namespace
 
 namespace WebHandlersSupport {
@@ -195,7 +204,7 @@ void init(WebHandlerContext *context) {
     g_deferred_actions.reset();
     g_web_stream_state.reset();
     g_restart_controller.reset();
-    g_restart_in_progress.store(false, std::memory_order_release);
+    g_ota_restart_gate.reset();
     ota_cancel_preflight_ui();
     ota_reset_state();
     OtaPhysicalConfirm::reset();
@@ -206,12 +215,16 @@ WebHandlerContext *context() {
 }
 
 bool isOtaBusy() {
-    return g_restart_in_progress.load(std::memory_order_acquire) ||
+    return g_ota_restart_gate.busy() ||
            g_restart_controller.is_busy(g_ota_state.isBusy());
 }
 
+bool isOtaUploadActive() {
+    return g_ota_restart_gate.uploadActive();
+}
+
 bool isOtaStatusBusy(const WebOtaSnapshot &ota_snapshot) {
-    return g_ota_state.isBusy() || ota_snapshot.reboot_pending;
+    return isOtaBusy() || ota_snapshot.reboot_pending;
 }
 
 bool consumeRestartRequest() {
@@ -222,8 +235,8 @@ void requestRestart(uint32_t delay_ms) {
     g_restart_controller.schedule(millis(), delay_ms);
 }
 
-void beginRestartShutdown() {
-    g_restart_in_progress.store(true, std::memory_order_release);
+bool tryBeginRestartShutdown() {
+    return g_ota_restart_gate.tryBeginRestart();
 }
 
 bool shouldPauseMqttForTransfer() {
@@ -347,6 +360,8 @@ WebOtaHandlers::Runtime otaRuntime(WebHandlerContext &context) {
         ota_cancel_preflight_ui,
         ota_set_ui_screen,
         ota_set_error,
+        ota_try_begin_upload,
+        ota_end_upload,
         ota_prepare_physical_confirm,
         ota_consume_physical_confirm,
     };

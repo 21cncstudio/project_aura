@@ -16,7 +16,8 @@ enum class Decision : uint8_t {
 };
 
 Decision decide(bool board_ready,
-                bool recovery_eligible,
+                bool lvgl_ready,
+                bool board_recovery_eligible,
                 bool auto_recovery_boot,
                 bool restart_task_ready);
 const char *decisionText(Decision decision);

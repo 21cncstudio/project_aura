@@ -6,6 +6,6 @@
 namespace RuntimeReadinessPolicy {
 
 bool operational(bool board_ready, bool lvgl_ready);
-bool canConfirmOta(bool board_ready, bool lvgl_ready);
+bool canConfirmOta(bool board_ready, bool lvgl_ready, bool lvgl_runtime_healthy);
 
 } // namespace RuntimeReadinessPolicy

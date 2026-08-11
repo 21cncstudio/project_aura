@@ -57,6 +57,10 @@ bool WebHandlersIsOtaBusy() {
     return WebHandlersSupport::isOtaBusy();
 }
 
+bool WebHandlersIsOtaUploadActive() {
+    return WebHandlersSupport::isOtaUploadActive();
+}
+
 bool WebHandlersConsumeRestartRequest() {
     return WebHandlersSupport::consumeRestartRequest();
 }
@@ -65,8 +69,8 @@ void WebHandlersRequestRestart(uint32_t delay_ms) {
     WebHandlersSupport::requestRestart(delay_ms);
 }
 
-void WebHandlersBeginRestartShutdown() {
-    WebHandlersSupport::beginRestartShutdown();
+bool WebHandlersTryBeginRestartShutdown() {
+    return WebHandlersSupport::tryBeginRestartShutdown();
 }
 
 bool WebHandlersAllowOtaPhysicalConfirm() {

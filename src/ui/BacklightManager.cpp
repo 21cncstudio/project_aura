@@ -108,25 +108,48 @@ void BacklightManager::setTimeoutMs(uint32_t timeout_ms) {
     ui_dirty_ = true;
 }
 
-void BacklightManager::setOn(bool on) {
+bool BacklightManager::setOn(bool on) {
     if (!panel_backlight_) {
-        return;
+        LOGE("Backlight", "cannot turn backlight %s: driver unavailable", on ? "on" : "off");
+        return false;
     }
     if (on == backlight_on_) {
+        const bool cancelled_retry = pending_command_.active();
+        pending_command_.clear();
+        if (on && cancelled_retry) {
+            lv_disp_trig_activity(nullptr);
+            last_inactive_ms_ = 0;
+        }
         lvgl_port_set_wake_touch_probe(!on);
-        return;
+        return true;
     }
-    if (on) {
-        panel_backlight_->on();
-    } else {
-        panel_backlight_->off();
+
+    const bool driver_succeeded = on ? panel_backlight_->on() : panel_backlight_->off();
+    const BacklightStatePolicy::Transition transition =
+        BacklightStatePolicy::resolve(backlight_on_, on, driver_succeeded);
+    backlight_on_ = transition.actual_on;
+    lvgl_port_set_wake_touch_probe(transition.wake_probe_enabled);
+
+    if (!transition.command_succeeded) {
+        ++command_failure_count_;
+        pending_command_.recordFailure(on, millis());
+        const uint32_t retry_delay_ms =
+            BacklightStatePolicy::retryDelayMs(pending_command_.consecutiveFailures());
+        LOGE("Backlight",
+             "failed to turn backlight %s (failures=%lu); keeping state %s, retry in %lu ms",
+             on ? "on" : "off",
+             static_cast<unsigned long>(command_failure_count_),
+             backlight_on_ ? "on" : "off",
+             static_cast<unsigned long>(retry_delay_ms));
+        return false;
     }
-    backlight_on_ = on;
-    lvgl_port_set_wake_touch_probe(!on);
+
+    pending_command_.clear();
     if (on) {
         lv_disp_trig_activity(nullptr);
         last_inactive_ms_ = 0;
     }
+    return true;
 }
 
 void BacklightManager::storeSchedulePrefs() {
@@ -223,11 +246,7 @@ void BacklightManager::refreshSchedule() {
     }
     if (active != schedule_active_) {
         schedule_active_ = active;
-        if (active) {
-            setOn(false);
-        } else {
-            setOn(true);
-        }
+        setOn(!active);
     }
 }
 
@@ -308,17 +327,39 @@ void BacklightManager::poll(bool lvgl_ready) {
     }
     uint32_t now_ms = millis();
     uint32_t inactive_ms = lv_disp_get_inactive_time(disp);
+    const bool input_activity =
+        BacklightStatePolicy::inputActivitySince(last_inactive_ms_, inactive_ms);
     last_inactive_ms_ = inactive_ms;
 
     refreshSchedule();
 
-    if (!backlight_on_) {
-        bool wake_touch = lvgl_port_take_wake_touch_pending();
-        if (wake_touch || (alarm_wake_enabled_ && alarm_wake_active_)) {
-            setOn(true);
+    const bool alarm_wake_requested = alarm_wake_enabled_ && alarm_wake_active_;
+    if (backlight_on_ && pending_command_.active() && !pending_command_.targetOn() &&
+        (input_activity || alarm_wake_requested)) {
+        // Touch activity and an active alarm are newer ON requests. They cancel
+        // a failed OFF command before its retry can blank an active display.
+        setOn(true);
+    }
+
+    if (pending_command_.ready(now_ms)) {
+        const bool retry_target_on = pending_command_.targetOn();
+        const bool was_on = backlight_on_;
+        if (setOn(retry_target_on) && retry_target_on && !was_on) {
             block_input_until_ms_ = now_ms + Config::BACKLIGHT_WAKE_BLOCK_MS;
             lvgl_port_block_touch_read(Config::BACKLIGHT_WAKE_BLOCK_MS);
             consumeInput();
+        }
+    }
+
+    if (!backlight_on_) {
+        bool wake_touch = lvgl_port_take_wake_touch_pending();
+        const bool wake_requested = wake_touch || alarm_wake_requested;
+        if (wake_requested && !pending_command_.active()) {
+            if (setOn(true)) {
+                block_input_until_ms_ = now_ms + Config::BACKLIGHT_WAKE_BLOCK_MS;
+                lvgl_port_block_touch_read(Config::BACKLIGHT_WAKE_BLOCK_MS);
+                consumeInput();
+            }
         }
         return;
     }
@@ -333,10 +374,16 @@ void BacklightManager::poll(bool lvgl_ready) {
     if (schedule_active_ && effective_timeout_ms == 0) {
         effective_timeout_ms = Config::BACKLIGHT_SCHEDULE_WAKE_MS;
     }
-    if (alarm_wake_enabled_ && alarm_wake_active_) {
+    if (alarm_wake_requested) {
         return;
     }
-    if (effective_timeout_ms > 0 && inactive_ms >= effective_timeout_ms) {
+    // A successful scheduled or retried ON command triggers LVGL activity.
+    // Re-read the timer so the stale pre-command value cannot switch the
+    // display straight back off in this same poll.
+    inactive_ms = lv_disp_get_inactive_time(disp);
+    last_inactive_ms_ = inactive_ms;
+    if (effective_timeout_ms > 0 && inactive_ms >= effective_timeout_ms &&
+        !pending_command_.active()) {
         setOn(false);
     }
 }

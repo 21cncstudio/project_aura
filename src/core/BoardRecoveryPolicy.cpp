@@ -6,15 +6,17 @@
 namespace BoardRecoveryPolicy {
 
 Decision decide(bool board_ready,
-                bool recovery_eligible,
+                bool lvgl_ready,
+                bool board_recovery_eligible,
                 bool auto_recovery_boot,
                 bool restart_task_ready) {
-    if (board_ready) {
+    if (board_ready && lvgl_ready) {
         return Decision::NotNeeded;
     }
     if (auto_recovery_boot) {
         return Decision::SuppressAlreadyAttempted;
     }
+    const bool recovery_eligible = board_ready ? !lvgl_ready : board_recovery_eligible;
     if (!recovery_eligible) {
         return Decision::SuppressNotEligible;
     }

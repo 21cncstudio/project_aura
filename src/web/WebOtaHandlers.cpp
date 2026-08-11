@@ -325,6 +325,9 @@ void cleanup_after_update_response(WebOtaHandlers::Runtime &runtime, bool succes
         runtime.restore_wifi_power_save();
     }
     runtime.ota_state.clearBusy();
+    if (runtime.end_upload) {
+        runtime.end_upload();
+    }
 }
 
 void ota_log_abort_summary(WebRequest &server,
@@ -456,7 +459,7 @@ void handleUpload(Runtime &runtime, bool ota_busy) {
     const WebUpload upload = server.upload();
 
     if (upload.status == WebUploadStatus::Start) {
-        if (ota_busy) {
+        if (ota_busy || !runtime.try_begin_upload || !runtime.try_begin_upload()) {
             LOGW("OTA", "reject upload start while OTA is busy");
             server.rejectUpload();
             return;

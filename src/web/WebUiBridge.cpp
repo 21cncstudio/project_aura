@@ -67,7 +67,6 @@ void WebUiBridge::setDispatchMode(DispatchMode mode) {
 void WebUiBridge::publishSnapshot(const Snapshot &snapshot) {
     lock();
     snapshot_ = snapshot;
-    snapshot_.available = true;
     unlock();
 }
 

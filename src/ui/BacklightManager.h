@@ -7,6 +7,7 @@
 #pragma once
 #include <Arduino.h>
 #include "config/AppConfig.h"
+#include "core/BacklightStatePolicy.h"
 
 namespace esp_panel {
 namespace drivers {
@@ -24,8 +25,9 @@ public:
     void updateUi();
     void savePrefs(StorageManager &storage);
 
-    void setOn(bool on);
+    bool setOn(bool on);
     bool isOn() const { return backlight_on_; }
+    uint32_t commandFailureCount() const { return command_failure_count_; }
 
     void setTimeoutMs(uint32_t timeout_ms);
     void setScheduleEnabled(bool enabled);
@@ -53,6 +55,8 @@ private:
 
     esp_panel::drivers::Backlight *panel_backlight_ = nullptr;
     bool backlight_on_ = true;
+    uint32_t command_failure_count_ = 0;
+    BacklightStatePolicy::PendingCommand pending_command_;
     uint32_t backlight_timeout_ms_ = 0;
     bool schedule_enabled_ = false;
     bool alarm_wake_enabled_ = false;

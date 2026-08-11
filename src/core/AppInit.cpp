@@ -197,29 +197,34 @@ bool AppInit::initBoardAndPeripherals(Context &ctx, esp_panel::board::Board *boa
     return true;
 }
 
-bool AppInit::initLvglAndUi(Context &ctx, esp_panel::board::Board *board) {
+AppInit::LvglInitResult AppInit::initLvglAndUi(Context &ctx, esp_panel::board::Board *board) {
+    LvglInitResult result{};
     if (board == nullptr) {
         LOGE("Main", "Skipping LVGL/UI: board init failed");
         ctx.uiController.setLvglReady(false);
-        return false;
+        return result;
     }
     LOGI("Main", "Initializing LVGL");
-    bool lvgl_ready = lvgl_port_init(board->getLCD(), board->getTouch());
-    if (!lvgl_ready) {
+    result.port_ready = lvgl_port_init(board->getLCD(), board->getTouch());
+    if (!result.port_ready) {
         LOGE("Main", "LVGL init failed");
     } else if (!lvgl_port_set_screen_flip_180(ctx.storage.config().screen_flip_180)) {
         LOGW("Main", "Failed to apply saved screen rotation");
     }
 
     LOGI("Main", "Creating UI");
-    ctx.uiController.setLvglReady(lvgl_ready);
-    if (lvgl_ready) {
-        ctx.uiController.begin();
+    ctx.uiController.setLvglReady(result.port_ready);
+    if (result.port_ready) {
+        result.ui_ready = ctx.uiController.begin();
+        if (!result.ui_ready) {
+            LOGE("Main", "UI init failed after LVGL port startup");
+            ctx.uiController.setLvglReady(false);
+        }
         // Keep startup diagnostics, but mute low-level runtime touch/I2C spam.
         esp_log_level_set("lcd_panel.io.i2c", ESP_LOG_NONE);
         esp_log_level_set("Panel", ESP_LOG_NONE);
     }
-    return lvgl_ready;
+    return result;
 }
 
 void AppInit::pollDeferredRuntime() {

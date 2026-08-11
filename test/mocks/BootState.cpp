@@ -12,16 +12,22 @@ bool boot_board_cold_start = true;
 
 namespace {
 bool board_power_settle_completed = false;
+bool ui_auto_recovery_restart_pending = false;
 }
 
 void boot_mark_ui_auto_recovery_reboot() {
     boot_ui_auto_recovery_reboot = true;
+    ui_auto_recovery_restart_pending = true;
 }
 
 bool boot_consume_ui_auto_recovery_reboot() {
     bool flagged = boot_ui_auto_recovery_reboot;
     boot_ui_auto_recovery_reboot = false;
     return flagged;
+}
+
+bool boot_ui_auto_recovery_restart_pending() {
+    return ui_auto_recovery_restart_pending;
 }
 
 void boot_mark_board_auto_recovery_reboot() {

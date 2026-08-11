@@ -8,9 +8,10 @@
 
 void WebHandlersPollDeferred();
 bool WebHandlersIsOtaBusy();
+bool WebHandlersIsOtaUploadActive();
 bool WebHandlersConsumeRestartRequest();
 void WebHandlersRequestRestart(uint32_t delay_ms = 0);
-void WebHandlersBeginRestartShutdown();
+bool WebHandlersTryBeginRestartShutdown();
 bool WebHandlersAllowOtaPhysicalConfirm();
 bool WebHandlersDenyOtaPhysicalConfirm();
 bool WebHandlersShouldPauseMqttConnect();

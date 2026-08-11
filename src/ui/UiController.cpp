@@ -15,7 +15,6 @@
 #include <math.h>
 #include <string.h>
 #include <time.h>
-#include <esp_system.h>
 #include <esp_wifi.h>
 
 #include "lvgl_v8_port.h"
@@ -42,6 +41,7 @@
 #include "ui/BacklightManager.h"
 #include "ui/NightModeManager.h"
 #include "ui/UiEventBinder.h"
+#include "ui/UiAutoRecoveryPolicy.h"
 #include "ui/UiOptionalGasProfile.h"
 
 using namespace Config;
@@ -50,6 +50,7 @@ namespace {
 
 constexpr uint32_t STATUS_ROTATE_MS = 5000;
 constexpr int UI_LVGL_LOCK_TIMEOUT_MS = 500;
+constexpr int UI_LVGL_STARTUP_LOCK_TIMEOUT_MS = 2000;
 constexpr uint32_t UI_LVGL_LOCK_WARN_MS = 60000;
 constexpr uint16_t UI_LVGL_LOCK_WARN_FAIL_STREAK = 3;
 constexpr uint32_t UI_LVGL_DIAG_HEARTBEAT_MS = 60000;
@@ -59,7 +60,6 @@ constexpr uint32_t UI_LVGL_DIAG_FLUSH_STALL_MS = 15000;
 constexpr uint32_t UI_LVGL_DIAG_STALL_LOG_COOLDOWN_MS = 30000;
 constexpr uint32_t UI_LVGL_DIAG_RECOVER_MS = 3000;
 constexpr uint32_t UI_LVGL_DIAG_REBOOT_STALL_MS = 45000;
-constexpr uint32_t UI_LVGL_DIAG_REBOOT_FLUSH_LOG_MS = 80;
 constexpr uint32_t UI_LVGL_DIAG_AGE_UNKNOWN_MS = 0xFFFFFFFFu;
 constexpr uint32_t UI_LVGL_DIAG_TOUCH_WARN_DELTA = 3;
 constexpr uint32_t UI_POOR_GAS_BG_HEX = 0xEB0000;
@@ -362,6 +362,18 @@ void UiController::setLvglReady(bool ready) {
     lvgl_ready = ready;
 }
 
+bool UiController::isLvglRuntimeHealthy() const {
+    if (!lvgl_ready ||
+        lvgl_diag_stall_active ||
+        lvgl_diag_auto_recovery_restart_requested_ ||
+        lvgl_diag_auto_recovery_suppressed_) {
+        return false;
+    }
+    lvgl_port_diagnostics_t diagnostics = {};
+    return lvgl_port_get_diagnostics(&diagnostics) &&
+           !diagnostics.display_sync_fault;
+}
+
 void UiController::refreshConnectivitySnapshot() {
     connectivity_ = connectivityRuntime.snapshot();
     if (!wifi_override_active_) {
@@ -390,7 +402,7 @@ void UiController::syncConnectivityRuntime() {
 
 WebUiBridge::Snapshot UiController::buildWebUiSnapshot() const {
     WebUiBridge::Snapshot snapshot;
-    snapshot.available = true;
+    snapshot.available = lvgl_ready;
     snapshot.night_mode = night_mode;
     snapshot.night_mode_locked = nightModeManager.isAutoEnabled();
     snapshot.backlight_on = backlightManager.isOn();
@@ -407,6 +419,14 @@ WebUiBridge::Snapshot UiController::buildWebUiSnapshot() const {
     snapshot.ntp_last_sync_ms = timeManager.lastNtpSyncMs();
     snapshot.ntp_server = timeManager.ntpServerPref();
     snapshot.display_name = storage.config().web_display_name;
+    snapshot.theme_preview_colors = themeManager.previewOrCurrent();
+    if (!lvgl_ready) {
+        snapshot.mqtt_screen_open = false;
+        snapshot.theme_screen_open = false;
+        snapshot.theme_custom_screen_open = false;
+        return snapshot;
+    }
+
     snapshot.mqtt_screen_open = current_screen_id == SCREEN_ID_PAGE_MQTT ||
                                 pending_screen_id == SCREEN_ID_PAGE_MQTT;
     const bool theme_screen_open = current_screen_id == SCREEN_ID_PAGE_THEME ||
@@ -416,7 +436,6 @@ WebUiBridge::Snapshot UiController::buildWebUiSnapshot() const {
         lv_obj_has_state(objects.btn_theme_custom, LV_STATE_CHECKED);
     snapshot.theme_screen_open = theme_screen_open;
     snapshot.theme_custom_screen_open = theme_screen_open && custom_tab_selected;
-    snapshot.theme_preview_colors = themeManager.previewOrCurrent();
     return snapshot;
 }
 
@@ -679,7 +698,7 @@ WebUiBridge::ApplyResult UiController::applyThemePreviewBridge(
     if (!controller->lvgl_ready) {
         return finalize(false, 503, "LVGL unavailable");
     }
-    if (!lvgl_port_lock(-1)) {
+    if (!lvgl_port_lock(UI_LVGL_LOCK_TIMEOUT_MS)) {
         return finalize(false, 503, "LVGL unavailable");
     }
 
@@ -837,14 +856,14 @@ void UiController::refresh_texts_for_screen(int screen_id) {
     UiLocalization::refreshTextsForScreen(*this, screen_id);
 }
 
-void UiController::begin() {
+bool UiController::begin() {
     instance_ = this;
     if (!lvgl_ready) {
-        return;
+        return false;
     }
-    if (!lvgl_port_lock(-1)) {
-        LOGE("UI", "LVGL lock failed in begin");
-        return;
+    if (!lvgl_port_lock(UI_LVGL_STARTUP_LOCK_TIMEOUT_MS)) {
+        LOGE("UI", "LVGL lock timed out in begin after %d ms", UI_LVGL_STARTUP_LOCK_TIMEOUT_MS);
+        return false;
     }
     ui_init();
     themeManager.initAfterUi(storage, night_mode, datetime_ui_dirty);
@@ -868,9 +887,12 @@ void UiController::begin() {
     lvgl_diag_last_heartbeat_ms = millis();
     lvgl_diag_prev_heartbeat_lock_fail_count = 0;
     lvgl_diag_prev_heartbeat_touch_err_count = 0;
+    lvgl_diag_prev_heartbeat_vsync_timeout_count = 0;
     lvgl_diag_last_stall_warn_ms = 0;
     lvgl_diag_stall_active = false;
     lvgl_diag_stall_since_ms = 0;
+    lvgl_diag_auto_recovery_restart_requested_ = false;
+    lvgl_diag_auto_recovery_suppressed_ = false;
     boot_release_at_ms = 0;
     boot_ui_released = false;
     deferred_unload_.reset();
@@ -893,10 +915,12 @@ void UiController::begin() {
          static_cast<unsigned long>(UI_LVGL_DIAG_STALL_MS),
          static_cast<unsigned long>(UI_LVGL_DIAG_REBOOT_STALL_MS));
     if (!lvgl_port_unlock()) {
-        LOGW("UI", "LVGL unlock failed in begin");
+        LOGE("UI", "LVGL unlock failed in begin");
+        return false;
     }
     last_clock_tick_ms = millis();
     publishWebUiSnapshot();
+    return true;
 }
 
 void UiController::onSensorPoll(const SensorManager::PollResult &poll) {
@@ -958,14 +982,32 @@ bool UiController::webSetNightMode(bool enabled) {
 }
 
 bool UiController::webSetBacklight(bool enabled) {
+    if (!lvgl_ready) {
+        // Do not re-arm wake-touch probing or issue display I/O after the
+        // LVGL runtime has been permanently quiesced. A no-op request can
+        // still succeed as part of an otherwise non-LVGL settings update.
+        return backlightManager.isOn() == enabled;
+    }
+
+    const bool lock_required = lvgl_ready;
+    if (lock_required && !lvgl_port_lock(UI_LVGL_LOCK_TIMEOUT_MS)) {
+        LOGW("UI", "LVGL lock timed out while applying web backlight command");
+        return false;
+    }
+
     bool previous = backlightManager.isOn();
-    backlightManager.setOn(enabled);
+    const bool applied = backlightManager.setOn(enabled);
     bool changed = backlightManager.isOn() != previous;
     if (changed) {
         data_dirty = true;
         mqttRuntimeState.requestPublish();
     }
-    return backlightManager.isOn() == enabled;
+    const bool target_reached = backlightManager.isOn() == enabled;
+    const bool unlock_ok = !lock_required || lvgl_port_unlock();
+    if (!unlock_ok) {
+        LOGE("UI", "LVGL unlock failed after web backlight command");
+    }
+    return applied && target_reached && unlock_ok;
 }
 
 bool UiController::webSetNtpEnabled(bool enabled) {
@@ -999,7 +1041,9 @@ bool UiController::webSetUnitsC(bool units_c) {
         return false;
     }
     clock_ui_dirty = true;
-    sync_display_threshold_labels();
+    if (lvgl_ready) {
+        sync_display_threshold_labels();
+    }
     dailyExtremaHistory.setPreferredUnitsC(temp_units_c);
     data_dirty = true;
     mqttRuntimeState.requestPublish();
@@ -1019,7 +1063,9 @@ void UiController::apply_contextual_date_format_default(Config::Language previou
     storage.config().date_format = date_format_;
     clock_ui_dirty = true;
     datetime_ui_dirty = true;
-    update_date_format_button();
+    if (lvgl_ready) {
+        update_date_format_button();
+    }
 }
 
 bool UiController::webSetOffsets(float temp_offset_c, float hum_offset_pct) {
@@ -1099,6 +1145,16 @@ void UiController::apply_pending_screen_now_from_web() {
 }
 
 void UiController::webSetFirmwareUpdateScreen(WebUiBridge::FirmwareUpdateScreenMode mode) {
+    if (!lvgl_ready) {
+        // Firmware-screen commands may still arrive while OTA/network
+        // management remains available in permanent headless mode. Consume
+        // them without touching stale LVGL objects.
+        firmware_update_screen_active_ = false;
+        firmware_update_screen_mode_ = WebUiBridge::FirmwareUpdateScreenMode::Hidden;
+        firmware_update_autoclose_due_ms_ = 0;
+        return;
+    }
+
     auto is_restore_target = [](int screen_id) {
         return screen_id >= SCREEN_ID_PAGE_MAIN_PRO &&
                screen_id <= SCREEN_ID_PAGE_DAC_SETTINGS;
@@ -1170,8 +1226,47 @@ void UiController::sync_display_threshold_revision() {
 }
 
 void UiController::poll(uint32_t now) {
+    lvgl_port_diagnostics_t early_lvgl_diag = {};
+    if (lvgl_ready &&
+        lvgl_port_get_diagnostics(&early_lvgl_diag) &&
+        early_lvgl_diag.display_sync_fault) {
+        lvgl_diag_stall_active = true;
+        lvgl_diag_stall_since_ms = now;
+
+        const UiAutoRecoveryPolicy::Decision recovery_decision =
+            UiAutoRecoveryPolicy::decide(
+                boot_ui_auto_recovery_reboot,
+                lvgl_diag_auto_recovery_restart_requested_);
+        if (recovery_decision == UiAutoRecoveryPolicy::Decision::RequestRestart) {
+            LOGE("UI",
+                 "Display sync fault detected (vsync_timeout=%lu); requesting controlled restart",
+                 static_cast<unsigned long>(early_lvgl_diag.vsync_wait_timeout_count));
+            lvgl_diag_auto_recovery_restart_requested_ = true;
+            boot_mark_ui_auto_recovery_reboot();
+            WebHandlersRequestRestart();
+        } else if (recovery_decision ==
+                   UiAutoRecoveryPolicy::Decision::SuppressRecoveryBoot) {
+            lvgl_diag_auto_recovery_suppressed_ = true;
+            LOGE("UI",
+                 "Display sync fault persisted after automatic UI recovery; restart loop suppressed");
+        }
+
+        // The LVGL task intentionally fail-stops while owning the framebuffer.
+        // Detach its timers and callbacks, then continue as a web-managed
+        // headless runtime until restart or power cycle.
+        lvgl_port_prepare_restart();
+        lvgl_ready = false;
+        publishWebUiSnapshot();
+        return;
+    }
+
     refreshConnectivitySnapshot();
     processWebUiBridgeCommands();
+    if (!lvgl_ready) {
+        publishWebUiSnapshot();
+        return;
+    }
+
     if (firmware_update_autoclose_due_ms_ != 0 &&
         static_cast<int32_t>(now - firmware_update_autoclose_due_ms_) >= 0) {
         webSetFirmwareUpdateScreen(WebUiBridge::FirmwareUpdateScreenMode::Hidden);
@@ -1212,13 +1307,14 @@ void UiController::poll(uint32_t now) {
         data_dirty = true;
     }
 
-    if (!lvgl_ready) {
-        publishWebUiSnapshot();
-        return;
-    }
-
     lvgl_port_diagnostics_t lvgl_diag = {};
     if (lvgl_port_get_diagnostics(&lvgl_diag)) {
+        const uint32_t vsync_timeout_delta =
+            (lvgl_diag.vsync_wait_timeout_count >=
+             lvgl_diag_prev_heartbeat_vsync_timeout_count)
+                ? (lvgl_diag.vsync_wait_timeout_count -
+                   lvgl_diag_prev_heartbeat_vsync_timeout_count)
+                : lvgl_diag.vsync_wait_timeout_count;
         if ((now - lvgl_diag_last_heartbeat_ms) >= UI_LVGL_DIAG_HEARTBEAT_MS) {
             lvgl_diag_last_heartbeat_ms = now;
             const uint32_t lock_fail_delta =
@@ -1231,6 +1327,8 @@ void UiController::poll(uint32_t now) {
                     : lvgl_diag.touch_read_error_count;
             lvgl_diag_prev_heartbeat_lock_fail_count = lvgl_diag.lock_fail_count;
             lvgl_diag_prev_heartbeat_touch_err_count = lvgl_diag.touch_read_error_count;
+            lvgl_diag_prev_heartbeat_vsync_timeout_count =
+                lvgl_diag.vsync_wait_timeout_count;
 
             const bool suppress_expected_lock_fail_warning =
                 co2_overlay_progress_active &&
@@ -1239,15 +1337,18 @@ void UiController::poll(uint32_t now) {
                 touch_err_delta < UI_LVGL_DIAG_TOUCH_WARN_DELTA;
             if (lvgl_diag.paused ||
                 (!suppress_expected_lock_fail_warning && lock_fail_delta > 0) ||
+                vsync_timeout_delta > 0 ||
                 touch_err_delta >= UI_LVGL_DIAG_TOUCH_WARN_DELTA) {
                 LOGW("UI",
-                     "LVGL heartbeat: handler=%lu(age=%lu ms), flush=%lu(age=%lu ms), vsync=%lu(age=%lu ms), lock_fail=%lu(+%lu), touch_err=%lu(+%lu), paused=%s",
+                     "LVGL heartbeat: handler=%lu(age=%lu ms), flush=%lu(age=%lu ms), vsync=%lu(age=%lu ms), vsync_timeout=%lu(+%lu), lock_fail=%lu(+%lu), touch_err=%lu(+%lu), paused=%s",
                      static_cast<unsigned long>(lvgl_diag.timer_handler_count),
                      static_cast<unsigned long>(lvgl_diag.timer_handler_age_ms),
                      static_cast<unsigned long>(lvgl_diag.flush_count),
                      static_cast<unsigned long>(lvgl_diag.flush_age_ms),
                      static_cast<unsigned long>(lvgl_diag.vsync_count),
                      static_cast<unsigned long>(lvgl_diag.vsync_age_ms),
+                     static_cast<unsigned long>(lvgl_diag.vsync_wait_timeout_count),
+                     static_cast<unsigned long>(vsync_timeout_delta),
                      static_cast<unsigned long>(lvgl_diag.lock_fail_count),
                      static_cast<unsigned long>(lock_fail_delta),
                      static_cast<unsigned long>(lvgl_diag.touch_read_error_count),
@@ -1271,6 +1372,7 @@ void UiController::poll(uint32_t now) {
         const bool stall_suspected = !lvgl_diag.paused &&
                                      (handler_stall || vsync_stall);
         const bool firmware_update_watchdog_exempt =
+            WebHandlersIsOtaUploadActive() ||
             firmware_update_screen_active_ ||
             current_screen_id == SCREEN_ID_PAGE_FW_UPDATE ||
             pending_screen_id == SCREEN_ID_PAGE_FW_UPDATE;
@@ -1283,7 +1385,7 @@ void UiController::poll(uint32_t now) {
             if (can_log) {
                 lvgl_diag_last_stall_warn_ms = now;
                 LOGW("UI",
-                     "LVGL/display stall suspected (screen=%d, backlight=%s, handler=%s, vsync=%s, flush=%s, handler_age=%lu ms, flush_age=%lu ms, vsync_age=%lu ms, lock_fail=%lu, touch_err=%lu)",
+                     "LVGL/display stall suspected (screen=%d, backlight=%s, handler=%s, vsync=%s, flush=%s, handler_age=%lu ms, flush_age=%lu ms, vsync_age=%lu ms, vsync_timeout=%lu(+%lu), lock_fail=%lu, touch_err=%lu)",
                      current_screen_id,
                      backlightManager.isOn() ? "ON" : "OFF",
                      handler_stall ? "STALL" : "OK",
@@ -1292,26 +1394,55 @@ void UiController::poll(uint32_t now) {
                      static_cast<unsigned long>(lvgl_diag.timer_handler_age_ms),
                      static_cast<unsigned long>(lvgl_diag.flush_age_ms),
                      static_cast<unsigned long>(lvgl_diag.vsync_age_ms),
+                     static_cast<unsigned long>(lvgl_diag.vsync_wait_timeout_count),
+                     static_cast<unsigned long>(vsync_timeout_delta),
                      static_cast<unsigned long>(lvgl_diag.lock_fail_count),
                      static_cast<unsigned long>(lvgl_diag.touch_read_error_count));
             }
             lvgl_diag_stall_active = true;
 
-            if ((now - lvgl_diag_stall_since_ms) >= UI_LVGL_DIAG_REBOOT_STALL_MS) {
+            if ((now - lvgl_diag_stall_since_ms) >= UI_LVGL_DIAG_REBOOT_STALL_MS &&
+                !lvgl_diag_auto_recovery_suppressed_) {
                 if (firmware_update_watchdog_exempt) {
                     if (can_log) {
                         LOGW("UI", "LVGL stall persisted during firmware update screen, auto-reboot suppressed");
                     }
                     lvgl_diag_stall_since_ms = now;
                 } else {
-                    const uint32_t stall_for_ms = now - lvgl_diag_stall_since_ms;
-                    LOGE("UI",
-                         "LVGL stall persisted %lu ms, scheduling controlled reboot",
-                         static_cast<unsigned long>(stall_for_ms));
-                    boot_mark_ui_auto_recovery_reboot();
-                    delay(UI_LVGL_DIAG_REBOOT_FLUSH_LOG_MS);
-                    esp_restart();
-                    return;
+                    const UiAutoRecoveryPolicy::Decision recovery_decision =
+                        UiAutoRecoveryPolicy::decide(
+                            boot_ui_auto_recovery_reboot,
+                            lvgl_diag_auto_recovery_restart_requested_);
+                    if (recovery_decision ==
+                        UiAutoRecoveryPolicy::Decision::RequestRestart) {
+                        const uint32_t stall_for_ms = now - lvgl_diag_stall_since_ms;
+                        LOGE("UI",
+                             "LVGL stall persisted %lu ms, requesting controlled restart",
+                             static_cast<unsigned long>(stall_for_ms));
+                        lvgl_diag_auto_recovery_restart_requested_ = true;
+                        boot_mark_ui_auto_recovery_reboot();
+                        WebHandlersRequestRestart();
+                        // Restart may be deferred while OTA owns the restart
+                        // gate. Quiesce the stalled display runtime now so
+                        // touch, callbacks and I2C cannot continue meanwhile.
+                        lvgl_port_prepare_restart();
+                        lvgl_ready = false;
+                        publishWebUiSnapshot();
+                        return;
+                    }
+                    if (recovery_decision ==
+                        UiAutoRecoveryPolicy::Decision::SuppressRecoveryBoot) {
+                        lvgl_diag_auto_recovery_suppressed_ = true;
+                        LOGE("UI",
+                             "LVGL stall persisted after an automatic UI recovery boot; restart loop suppressed");
+                        // No restart will follow on the guarded recovery boot.
+                        // Quiesce the stalled LVGL task, display callbacks and
+                        // touch IRQ before entering permanent headless mode.
+                        lvgl_port_prepare_restart();
+                        lvgl_ready = false;
+                        publishWebUiSnapshot();
+                        return;
+                    }
                 }
             }
         } else if (lvgl_diag_stall_active &&
@@ -1407,6 +1538,9 @@ void UiController::safe_label_set_text_static(lv_obj_t *obj, const char *new_tex
 }
 
 void UiController::sync_display_threshold_labels() {
+    if (!lvgl_ready) {
+        return;
+    }
     update_sensor_info_texts();
 }
 
@@ -2203,7 +2337,7 @@ void UiController::update_clock_labels() {
 }
 
 void UiController::update_date_format_button() {
-    if (!objects.label_btn_date_format) {
+    if (!lvgl_ready || !objects.label_btn_date_format) {
         return;
     }
     const char *text = "DMY";
@@ -2249,8 +2383,8 @@ void UiController::set_night_mode_state(bool enabled, bool save_pref) {
     }
 
     // Theme/style updates must be serialized with LVGL rendering.
-    if (!lvgl_port_lock(-1)) {
-        LOGE("UI", "LVGL lock failed in set_night_mode_state");
+    if (!lvgl_port_lock(UI_LVGL_LOCK_TIMEOUT_MS)) {
+        LOGE("UI", "LVGL lock timed out in set_night_mode_state");
         return;
     }
     night_mode = enabled;
@@ -2282,7 +2416,7 @@ void UiController::apply_auto_night_now() {
 }
 
 void UiController::sync_night_mode_toggle_ui() {
-    if (!objects.btn_night_mode) {
+    if (!lvgl_ready || !objects.btn_night_mode) {
         return;
     }
     set_button_enabled(objects.btn_night_mode, !nightModeManager.isAutoEnabled());

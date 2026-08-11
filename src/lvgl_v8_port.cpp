@@ -13,6 +13,7 @@
 #define ESP_UTILS_LOG_TAG "LvPort"
 #include "esp_lib_utils.h"
 #include "core/BootState.h"
+#include "core/LvglWaitPolicy.h"
 #include "core/TouchWakePolicy.h"
 #include "lvgl_v8_port.h"
 
@@ -26,8 +27,10 @@ static TaskHandle_t lvgl_task_handle = nullptr;
 static esp_timer_handle_t lvgl_tick_timer = NULL;
 static std::atomic<bool> lvgl_port_paused{false};
 static std::atomic<bool> lvgl_pause_requested{false};
-static volatile bool lvgl_vsync_notify_enabled = true;
+static std::atomic<bool> lvgl_display_sync_fault{false};
+static volatile bool lvgl_vsync_notify_enabled = false;
 static LCD *lvgl_port_lcd = nullptr;
+static Touch *lvgl_port_touch = nullptr;
 static bool lvgl_port_screen_flip_180 = false;
 static void *lvgl_port_rotated_fb = nullptr;
 static void *lvgl_buf[LVGL_PORT_BUFFER_NUM_MAX] = {};
@@ -54,6 +57,7 @@ static volatile uint32_t lvgl_diag_flush_count = 0;
 static volatile uint32_t lvgl_diag_flush_last_ms = 0;
 static volatile uint32_t lvgl_diag_vsync_count = 0;
 static volatile uint32_t lvgl_diag_vsync_last_ms = 0;
+static volatile uint32_t lvgl_diag_vsync_wait_timeout_count = 0;
 static volatile uint32_t lvgl_diag_lock_fail_count = 0;
 static volatile uint32_t lvgl_diag_touch_read_error_count = 0;
 static constexpr uint32_t LVGL_TOUCH_POLL_INTERVAL_MS = 12;
@@ -106,6 +110,68 @@ static inline uint32_t lvgl_diag_age_ms(uint32_t now_ms, uint32_t stamp_ms)
     }
     return age_ms;
 }
+
+#if LVGL_PORT_AVOID_TEAR
+static void lvgl_port_latch_display_sync_fault(const char *reason)
+{
+    const bool already_faulted =
+        lvgl_display_sync_fault.exchange(true, std::memory_order_acq_rel);
+    if (!already_faulted) {
+        ESP_UTILS_LOGE("%s; LVGL display task will fail-stop", reason);
+    }
+}
+
+static bool lvgl_port_wait_for_vsync_after(uint32_t baseline_vsync_count)
+{
+    // eNoAction updates the notification state, not its value. Clear a stale
+    // pending state after taking the baseline, then re-check the counter to
+    // cover a VSYNC racing with that clear. Only a strictly newer counter is
+    // accepted as ownership acknowledgement for this framebuffer.
+    (void)xTaskNotifyStateClear(NULL);
+    if (LvglWaitPolicy::hasNewVsync(
+            baseline_vsync_count, lvgl_diag_vsync_count)) {
+        return true;
+    }
+
+    TickType_t timeout_ticks = pdMS_TO_TICKS(LvglWaitPolicy::VSYNC_WAIT_TIMEOUT_MS);
+    if (timeout_ticks == 0) {
+        timeout_ticks = 1;
+    }
+    (void)xTaskNotifyWait(0, 0, nullptr, timeout_ticks);
+    if (LvglWaitPolicy::hasNewVsync(
+            baseline_vsync_count, lvgl_diag_vsync_count)) {
+        return true;
+    }
+
+    const uint32_t timeout_count = ++lvgl_diag_vsync_wait_timeout_count;
+    if (LvglWaitPolicy::shouldLogVsyncTimeout(timeout_count)) {
+        ESP_UTILS_LOGE(
+            "VSYNC wait timed out after %lu ms (count=%lu)",
+            static_cast<unsigned long>(LvglWaitPolicy::VSYNC_WAIT_TIMEOUT_MS),
+            static_cast<unsigned long>(timeout_count)
+        );
+    }
+    lvgl_port_latch_display_sync_fault("VSYNC acknowledgement timed out");
+    return false;
+}
+
+static bool lvgl_port_switch_and_confirm_vsync(LCD *lcd, void *frame_buffer)
+{
+    if (!lcd->switchFrameBufferTo(frame_buffer)) {
+        lvgl_port_latch_display_sync_fault("LCD framebuffer switch failed");
+        return false;
+    }
+    const uint32_t baseline_vsync_count = lvgl_diag_vsync_count;
+    return lvgl_port_wait_for_vsync_after(baseline_vsync_count);
+}
+
+[[noreturn]] static void lvgl_port_fail_stop_display_task()
+{
+    for (;;) {
+        vTaskSuspend(nullptr);
+    }
+}
+#endif
 
 static inline uint32_t get_monotonic_ms()
 {
@@ -661,12 +727,9 @@ static void flush_callback(lv_disp_drv_t *drv, const lv_area_t *area, lv_color_t
                 LV_HOR_RES, LV_VER_RES, LVGL_PORT_ROTATION_DEGREE
             );
 
-            /* Switch the current LCD frame buffer to `next_fb` */
-            lcd->switchFrameBufferTo(next_fb);
-
-            /* Waiting for the current frame buffer to complete transmission */
-            ulTaskNotifyValueClear(NULL, ULONG_MAX);
-            ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+            if (!lvgl_port_switch_and_confirm_vsync(lcd, next_fb)) {
+                lvgl_port_fail_stop_display_task();
+            }
 
             /* Synchronously update the dirty area for another frame buffer */
             flush_dirty_copy(flush_get_next_buf(lcd), color_map, &dirty_area);
@@ -692,12 +755,9 @@ static void flush_callback(lv_disp_drv_t *drv, const lv_area_t *area, lv_color_t
                 flush_dirty_save(&dirty_area);
                 flush_dirty_copy(next_fb, color_map, &dirty_area);
 
-                /* Switch the current LCD frame buffer to `next_fb` */
-                lcd->switchFrameBufferTo(next_fb);
-
-                /* Waiting for the current frame buffer to complete transmission */
-                ulTaskNotifyValueClear(NULL, ULONG_MAX);
-                ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+                if (!lvgl_port_switch_and_confirm_vsync(lcd, next_fb)) {
+                    lvgl_port_fail_stop_display_task();
+                }
 
                 if (probe_result == FLUSH_PROBE_PART_COPY) {
                     /* Synchronously update the dirty area for another frame buffer */
@@ -721,19 +781,17 @@ static void flush_callback(lv_disp_drv_t *drv, const lv_area_t *area, lv_color_t
 
     /* Action after last area refresh */
     if (lv_disp_flush_is_last(drv)) {
+        void *next_frame_buffer = color_map;
         if (lvgl_port_screen_flip_180 && lvgl_port_rotated_fb != nullptr) {
             lvgl_port_copy_frame_180(
                 color_map, static_cast<lv_color_t *>(lvgl_port_rotated_fb), drv->hor_res, drv->ver_res
             );
-            lcd->switchFrameBufferTo(lvgl_port_rotated_fb);
-        } else {
-            /* Switch the current LCD frame buffer to `color_map` */
-            lcd->switchFrameBufferTo(color_map);
+            next_frame_buffer = lvgl_port_rotated_fb;
         }
 
-        /* Waiting for the last frame buffer to complete transmission */
-        ulTaskNotifyValueClear(NULL, ULONG_MAX);
-        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+        if (!lvgl_port_switch_and_confirm_vsync(lcd, next_frame_buffer)) {
+            lvgl_port_fail_stop_display_task();
+        }
     }
 
     lv_disp_flush_ready(drv);
@@ -747,12 +805,9 @@ static void flush_callback(lv_disp_drv_t *drv, const lv_area_t *area, lv_color_t
     lvgl_diag_mark_flush();
     LCD *lcd = (LCD *)drv->user_data;
 
-    /* Switch the current LCD frame buffer to `color_map` */
-    lcd->switchFrameBufferTo(color_map);
-
-    /* Waiting for the last frame buffer to complete transmission */
-    ulTaskNotifyValueClear(NULL, ULONG_MAX);
-    ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+    if (!lvgl_port_switch_and_confirm_vsync(lcd, color_map)) {
+        lvgl_port_fail_stop_display_task();
+    }
 
     lv_disp_flush_ready(drv);
 }
@@ -783,15 +838,21 @@ void flush_callback(lv_disp_drv_t *drv, const lv_area_t *area, lv_color_t *color
         LV_VER_RES, LVGL_PORT_ROTATION_DEGREE
     );
 
-    /* Switch the current LCD frame buffer to `next_fb` */
-    lcd->switchFrameBufferTo(next_fb);
+    /* Triple-buffer mode tracks ownership in the VSYNC callback. */
+    if (!lcd->switchFrameBufferTo(next_fb)) {
+        lvgl_port_latch_display_sync_fault("LCD framebuffer switch failed");
+        lvgl_port_fail_stop_display_task();
+    }
 #else
     drv->draw_buf->buf1 = color_map;
     drv->draw_buf->buf2 = lvgl_port_flush_next_buf;
     lvgl_port_flush_next_buf = color_map;
 
-    /* Switch the current LCD frame buffer to `color_map` */
-    lcd->switchFrameBufferTo(color_map);
+    /* Triple-buffer mode tracks ownership in the VSYNC callback. */
+    if (!lcd->switchFrameBufferTo(color_map)) {
+        lvgl_port_latch_display_sync_fault("LCD framebuffer switch failed");
+        lvgl_port_fail_stop_display_task();
+    }
 
     lvgl_port_lcd_next_buf = color_map;
 #endif
@@ -820,7 +881,7 @@ IRAM_ATTR bool onLcdVsyncCallback(void *user_data)
     }
 #else
     // Notify that the current LCD frame buffer has been transmitted
-    xTaskNotifyFromISR(task_handle, ULONG_MAX, eNoAction, &need_yield);
+    xTaskNotifyFromISR(task_handle, 0, eNoAction, &need_yield);
 #endif
     return (need_yield == pdTRUE);
 }
@@ -1200,11 +1261,8 @@ static void lvgl_port_task(void *arg)
         if (lvgl_pause_requested.load(std::memory_order_acquire)) {
             if (!lvgl_port_paused.load(std::memory_order_acquire)) {
                 lvgl_vsync_notify_enabled = false;
-#if LVGL_PORT_AVOID_TEAR
-                if (lvgl_port_lcd != nullptr) {
-                    lvgl_port_lcd->attachRefreshFinishCallback(nullptr, (void *)lvgl_task_handle);
-                }
-#endif
+                // In avoid-tear builds the IRAM-safe vendor wrapper rejects a
+                // null refresh callback. Keep it installed but inert here.
 #if !LV_TICK_CUSTOM
                 if (lvgl_tick_timer != nullptr) {
                     esp_timer_stop(lvgl_tick_timer);
@@ -1258,6 +1316,11 @@ bool lvgl_port_init(LCD *lcd, Touch *tp)
 {
     ESP_UTILS_CHECK_FALSE_RETURN(lcd != nullptr, false, "Invalid LCD device");
 
+    lvgl_display_sync_fault.store(false, std::memory_order_release);
+    lvgl_diag_vsync_wait_timeout_count = 0;
+    lvgl_vsync_notify_enabled = false;
+    lvgl_port_lcd = nullptr;
+    lvgl_port_touch = nullptr;
     lvgl_touch_read_block_until_ms = 0;
     lvgl_touch_wait_release_after_block = false;
     lvgl_touch_wake_policy = TouchWakePolicy::StateMachine{};
@@ -1314,6 +1377,7 @@ bool lvgl_port_init(LCD *lcd, Touch *tp)
 
     if (tp != nullptr) {
         ESP_UTILS_LOGD("Initialize LVGL input driver");
+        lvgl_port_touch = tp;
         indev = indev_init(tp);
         ESP_UTILS_CHECK_NULL_RETURN(indev, false, "Initialize LVGL input driver failed");
 
@@ -1377,7 +1441,9 @@ bool lvgl_port_unlock(void)
 
 bool lvgl_port_set_screen_flip_180(bool enabled)
 {
-    ESP_UTILS_CHECK_FALSE_RETURN(lvgl_port_lock(-1), false, "Lock LVGL failed");
+    ESP_UTILS_CHECK_FALSE_RETURN(
+        lvgl_port_lock(LvglWaitPolicy::SCREEN_FLIP_LOCK_TIMEOUT_MS), false, "Lock LVGL failed"
+    );
     const bool ok = lvgl_port_apply_screen_flip_180(enabled);
     ESP_UTILS_CHECK_FALSE_RETURN(lvgl_port_unlock(), false, "Unlock LVGL failed");
     return ok;
@@ -1436,6 +1502,9 @@ bool lvgl_port_get_diagnostics(lvgl_port_diagnostics_t *out)
     out->flush_age_ms = lvgl_diag_age_ms(now_ms, flush_last_ms);
     out->vsync_count = lvgl_diag_vsync_count;
     out->vsync_age_ms = lvgl_diag_age_ms(now_ms, vsync_last_ms);
+    out->vsync_wait_timeout_count = lvgl_diag_vsync_wait_timeout_count;
+    out->display_sync_fault =
+        lvgl_display_sync_fault.load(std::memory_order_acquire);
     out->lock_fail_count = lvgl_diag_lock_fail_count;
     out->touch_read_error_count = lvgl_diag_touch_read_error_count;
     out->paused = lvgl_port_paused.load(std::memory_order_acquire);
@@ -1511,11 +1580,18 @@ bool lvgl_port_prepare_restart(void)
 {
     // Prevent VSYNC ISR from notifying a task handle during reboot teardown.
     lvgl_vsync_notify_enabled = false;
-#if LVGL_PORT_AVOID_TEAR
     if (lvgl_port_lcd != nullptr) {
-        lvgl_port_lcd->attachRefreshFinishCallback(nullptr, (void *)lvgl_task_handle);
+        lvgl_port_lcd->attachDrawBitmapFinishCallback(nullptr, nullptr);
     }
-#endif
+    // ESP32_Display_Panel rejects a null refresh callback when
+    // CONFIG_LCD_RGB_ISR_IRAM_SAFE is enabled. Do not pretend to detach it:
+    // the gate above makes the retained callback inert, and the task handle
+    // is cleared below after the LVGL task has been suspended.
+    if (lvgl_port_touch != nullptr && lvgl_port_touch->isInterruptEnabled()) {
+        lvgl_port_touch->attachInterruptCallback(nullptr, nullptr);
+    }
+    lvgl_touch_interrupt_gated = false;
+    lvgl_touch_interrupt_sem = nullptr;
 #if !LV_TICK_CUSTOM
     if (lvgl_tick_timer != nullptr) {
         esp_timer_stop(lvgl_tick_timer);

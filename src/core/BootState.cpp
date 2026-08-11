@@ -28,15 +28,21 @@ bool boot_touch_detected = false;
 bool boot_ui_auto_recovery_reboot = false;
 bool boot_board_auto_recovery_reboot = false;
 bool boot_board_cold_start = false;
+bool boot_ui_auto_recovery_restart_requested = false;
 
 void boot_mark_ui_auto_recovery_reboot() {
     boot_ui_auto_recovery_magic = BOOT_UI_AUTO_RECOVERY_MAGIC;
+    boot_ui_auto_recovery_restart_requested = true;
 }
 
 bool boot_consume_ui_auto_recovery_reboot() {
     bool flagged = (boot_ui_auto_recovery_magic == BOOT_UI_AUTO_RECOVERY_MAGIC);
     boot_ui_auto_recovery_magic = 0;
     return flagged;
+}
+
+bool boot_ui_auto_recovery_restart_pending() {
+    return boot_ui_auto_recovery_restart_requested;
 }
 
 void boot_mark_board_auto_recovery_reboot() {

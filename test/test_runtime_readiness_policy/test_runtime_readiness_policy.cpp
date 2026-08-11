@@ -13,9 +13,10 @@ void test_operational_requires_board_and_lvgl() {
 }
 
 void test_only_operational_boot_can_confirm_ota() {
-    TEST_ASSERT_TRUE(RuntimeReadinessPolicy::canConfirmOta(true, true));
-    TEST_ASSERT_FALSE(RuntimeReadinessPolicy::canConfirmOta(true, false));
-    TEST_ASSERT_FALSE(RuntimeReadinessPolicy::canConfirmOta(false, false));
+    TEST_ASSERT_TRUE(RuntimeReadinessPolicy::canConfirmOta(true, true, true));
+    TEST_ASSERT_FALSE(RuntimeReadinessPolicy::canConfirmOta(true, true, false));
+    TEST_ASSERT_FALSE(RuntimeReadinessPolicy::canConfirmOta(true, false, true));
+    TEST_ASSERT_FALSE(RuntimeReadinessPolicy::canConfirmOta(false, false, true));
 }
 
 int main(int, char **) {

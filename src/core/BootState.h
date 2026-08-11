@@ -20,6 +20,7 @@ extern bool boot_board_cold_start;
 
 void boot_mark_ui_auto_recovery_reboot();
 bool boot_consume_ui_auto_recovery_reboot();
+bool boot_ui_auto_recovery_restart_pending();
 void boot_mark_board_auto_recovery_reboot();
 bool boot_consume_board_auto_recovery_reboot();
 bool boot_board_power_settle_completed();

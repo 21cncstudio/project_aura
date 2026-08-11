@@ -9,8 +9,8 @@ bool operational(bool board_ready, bool lvgl_ready) {
     return board_ready && lvgl_ready;
 }
 
-bool canConfirmOta(bool board_ready, bool lvgl_ready) {
-    return operational(board_ready, lvgl_ready);
+bool canConfirmOta(bool board_ready, bool lvgl_ready, bool lvgl_runtime_healthy) {
+    return operational(board_ready, lvgl_ready) && lvgl_runtime_healthy;
 }
 
 } // namespace RuntimeReadinessPolicy

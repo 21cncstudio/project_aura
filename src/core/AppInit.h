@@ -67,10 +67,15 @@ struct Context {
     float &hum_offset;
 };
 
+struct LvglInitResult {
+    bool port_ready = false;
+    bool ui_ready = false;
+};
+
 StorageManager::BootAction handleBootState();
 void initManagersAndConfig(Context &ctx, StorageManager::BootAction boot_action);
 bool initBoardAndPeripherals(Context &ctx, esp_panel::board::Board *board);
-bool initLvglAndUi(Context &ctx, esp_panel::board::Board *board);
+LvglInitResult initLvglAndUi(Context &ctx, esp_panel::board::Board *board);
 void pollDeferredRuntime();
 
 } // namespace AppInit

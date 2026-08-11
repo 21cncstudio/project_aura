@@ -867,8 +867,26 @@ bool EspHttpServerBackend::prepareRequest(RouteRegistration &route, void *raw_re
         bool saw_upload_part = false;
         bool final_boundary = false;
         size_t part_count = 0;
+        auto abort_started_upload = [&]() {
+            if (!saw_upload_part) {
+                return false;
+            }
+            const WebUpload previous = request_->upload();
+            request_->setPendingBodyBytes(reader.remainingBytesOnSocket());
+            WebUpload aborted{};
+            aborted.status = WebUploadStatus::Aborted;
+            aborted.abort_reason = request_->uploadAbortReason();
+            aborted.filename = previous.filename;
+            aborted.totalSize = previous.totalSize;
+            request_->setUpload(aborted);
+            route.upload_handler();
+            return true;
+        };
         while (!final_boundary) {
             if (++part_count > WebServerLimits::kMaxMultipartParts) {
+                if (abort_started_upload()) {
+                    return true;
+                }
                 send_request_error_and_close(req,
                                              "413 Payload Too Large",
                                              "Too many multipart fields");
@@ -880,20 +898,14 @@ bool EspHttpServerBackend::prepareRequest(RouteRegistration &route, void *raw_re
 
             while (true) {
                 if (!reader.readLine(line)) {
+                    if (abort_started_upload()) {
+                        return true;
+                    }
                     if (reader.limitExceeded()) {
                         send_request_error_and_close(req,
                                                      "413 Payload Too Large",
                                                      "Multipart header is too large");
                         return false;
-                    }
-                    if (saw_upload_part) {
-                        request_->setPendingBodyBytes(reader.remainingBytesOnSocket());
-                        WebUpload aborted{};
-                        aborted.status = WebUploadStatus::Aborted;
-                        aborted.abort_reason = request_->uploadAbortReason();
-                        request_->setUpload(aborted);
-                        route.upload_handler();
-                        return true;
                     }
                     httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Malformed multipart headers");
                     return false;
@@ -912,6 +924,13 @@ bool EspHttpServerBackend::prepareRequest(RouteRegistration &route, void *raw_re
             }
 
             if (field_is_file) {
+                if (saw_upload_part) {
+                    // Upload routes own one streaming file. Converting a
+                    // second file part into Aborted guarantees the route's
+                    // final handler releases OTA state and admission gates.
+                    abort_started_upload();
+                    return true;
+                }
                 saw_upload_part = true;
 
                 WebUpload start{};
@@ -992,6 +1011,9 @@ bool EspHttpServerBackend::prepareRequest(RouteRegistration &route, void *raw_re
                 final_boundary);
 
             if (!part_ok) {
+                if (abort_started_upload()) {
+                    return true;
+                }
                 if (field_too_large || field_allocation_failed) {
                     send_request_error_and_close(req,
                                                  "413 Payload Too Large",
@@ -999,15 +1021,6 @@ bool EspHttpServerBackend::prepareRequest(RouteRegistration &route, void *raw_re
                                                      ? "Multipart field is too large"
                                                      : "Insufficient memory for multipart field");
                     return false;
-                }
-                if (saw_upload_part) {
-                    request_->setPendingBodyBytes(reader.remainingBytesOnSocket());
-                    WebUpload aborted{};
-                    aborted.status = WebUploadStatus::Aborted;
-                    aborted.abort_reason = request_->uploadAbortReason();
-                    request_->setUpload(aborted);
-                    route.upload_handler();
-                    return true;
                 }
                 httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Malformed multipart content");
                 return false;

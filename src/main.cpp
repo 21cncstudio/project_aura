@@ -174,11 +174,13 @@ void setup()
 
     memoryMonitor.begin(Config::MEM_LOG_INTERVAL_MS);
     boot_start_ms = millis();
+    Watchdog::setup(TASK_WDT_TIMEOUT_MS);
 
     StorageManager::BootAction boot_action = AppInit::handleBootState();
     BootDiagnostics::state = BootDiagnostics::Snapshot{};
     BootDiagnostics::state.reset_reason = boot_reset_reason;
-    BootDiagnostics::state.auto_recovery_boot = boot_board_auto_recovery_reboot;
+    BootDiagnostics::state.auto_recovery_boot =
+        boot_board_auto_recovery_reboot || boot_ui_auto_recovery_reboot;
     const bool restart_task_ready = safe_restart_init();
     if (!restart_task_ready) {
         LOGW("Restart", "Core0 restart task init failed; automatic recovery will be suppressed");
@@ -217,29 +219,10 @@ void setup()
         boot_board_cold_start ||
         board_result.failure == BoardInit::Failure::Begin ||
         board_result.failure == BoardInit::Failure::Timeout;
-    const BoardRecoveryPolicy::Decision recovery_decision = BoardRecoveryPolicy::decide(
-        board_ready,
-        board_recovery_eligible,
-        boot_board_auto_recovery_reboot,
-        restart_task_ready);
-    if (recovery_decision == BoardRecoveryPolicy::Decision::Restart) {
-        LOGE("Main",
-             "Board unavailable after %u rounds; controlled recovery restart will be scheduled",
-             static_cast<unsigned>(board_result.rounds));
-        // Arm the one-shot guard before completing the headless boot. The
-        // restart itself is scheduled after WebHandlers and the network plane
-        // are initialized, so it follows the same shutdown path as the
-        // successful restart requested from the web interface.
-        boot_mark_board_auto_recovery_reboot();
-    }
     if (!board_ready) {
-        if (recovery_decision == BoardRecoveryPolicy::Decision::Restart) {
-            LOGW("Main", "Entering temporary headless mode before controlled recovery restart");
-        } else {
-            LOGE("Main",
-                 "Board automatic recovery suppressed: %s; entering headless mode",
-                 BoardRecoveryPolicy::decisionText(recovery_decision));
-        }
+        LOGE("Main",
+             "Board unavailable after %u rounds; continuing startup in headless mode",
+             static_cast<unsigned>(board_result.rounds));
         LOGW("Main", "Runtime I2C polling suppressed: board/I2C unavailable");
     } else if (boot_board_auto_recovery_reboot) {
         LOGI("Main", "Board recovered after automatic restart");
@@ -280,12 +263,42 @@ void setup()
     sdCardManager.begin(board);
     dailyExtremaHistory.begin(sdCardManager, temp_units_c);
     networkManager.attachDailyHistory(sdCardManager, dailyExtremaHistory);
-    lvgl_ready = AppInit::initLvglAndUi(init_ctx, board);
+    const AppInit::LvglInitResult lvgl_result = AppInit::initLvglAndUi(init_ctx, board);
+    lvgl_ready = lvgl_result.ui_ready;
     operational_ready = RuntimeReadinessPolicy::operational(board_ready, lvgl_ready);
     BootDiagnostics::state.lvgl_ready = lvgl_ready;
+
+    const bool auto_recovery_boot =
+        boot_board_auto_recovery_reboot || boot_ui_auto_recovery_reboot;
+    const BoardRecoveryPolicy::Decision recovery_decision = BoardRecoveryPolicy::decide(
+        board_ready,
+        lvgl_ready,
+        board_recovery_eligible,
+        auto_recovery_boot,
+        restart_task_ready);
+    if (recovery_decision == BoardRecoveryPolicy::Decision::Restart) {
+        if (!board_ready) {
+            LOGE("Main", "Board startup failed; controlled recovery restart will be scheduled");
+            boot_mark_board_auto_recovery_reboot();
+        } else {
+            LOGE("Main", "LVGL/UI startup failed; controlled recovery restart will be scheduled");
+            boot_mark_ui_auto_recovery_reboot();
+        }
+    } else if (!operational_ready) {
+        LOGE("Main",
+             "Startup automatic recovery suppressed: %s; continuing in headless mode",
+             BoardRecoveryPolicy::decisionText(recovery_decision));
+    } else if (boot_ui_auto_recovery_reboot) {
+        LOGI("Main", "LVGL/UI recovered after automatic restart");
+    }
+    if (!lvgl_ready) {
+        // lvgl_port_init() may have completed before UI startup failed. Make
+        // every headless path quiescent even when recovery is unavailable or
+        // has already been attempted.
+        lvgl_port_prepare_restart();
+    }
     memoryMonitor.logNow("boot");
 
-    Watchdog::setup(TASK_WDT_TIMEOUT_MS);
     webUiBridge.setDispatchMode(WebUiBridge::DispatchMode::DeferredReply);
     network_plane_running = NetworkPlane::start(network_plane_context);
     if (!network_plane_running) {
@@ -293,7 +306,7 @@ void setup()
     }
     if (recovery_decision == BoardRecoveryPolicy::Decision::Restart) {
         LOGW("Main",
-             "Scheduling one controlled board recovery restart in %lu ms",
+             "Scheduling one controlled startup recovery restart in %lu ms",
              static_cast<unsigned long>(Config::BOARD_RECOVERY_RESTART_DELAY_MS));
         WebHandlersRequestRestart(Config::BOARD_RECOVERY_RESTART_DELAY_MS);
     }
@@ -302,29 +315,43 @@ void setup()
 void loop()
 {
     if (WebHandlersConsumeRestartRequest()) {
-        LOGI("OTA", "restarting now (main loop)");
-        // A controlled restart confirms OTA only after display and UI reached
-        // the operational state. Headless management access is intentionally
-        // insufficient to validate a display firmware image.
-        if (RuntimeReadinessPolicy::canConfirmOta(board_ready, lvgl_ready)) {
-            OtaRollback::markValidIfPending("controlled_restart");
+        // Upload admission and restart shutdown use one atomic gate. Whichever
+        // side wins first excludes the other without a cross-task check/use gap.
+        if (!WebHandlersTryBeginRestartShutdown()) {
+            LOGW("Restart", "restart deferred until OTA upload completes");
+            WebHandlersRequestRestart();
         } else {
-            LOGW("OTA", "rollback validation withheld: controlled restart from headless boot");
-        }
-        dailyExtremaHistory.flush();
-        WebHandlersBeginRestartShutdown();
-        if (lvgl_ready) {
+            LOGI("OTA", "restarting now (main loop)");
+            // A controlled restart confirms OTA only after display and UI reached
+            // the operational state. Headless management access is intentionally
+            // insufficient to validate a display firmware image.
+            const bool ui_auto_recovery_restart =
+                boot_ui_auto_recovery_restart_pending();
+            const bool ui_runtime_healthy = uiController.isLvglRuntimeHealthy();
+            if (ui_auto_recovery_restart) {
+                LOGW("OTA", "rollback validation withheld: automatic UI recovery restart");
+            } else if (RuntimeReadinessPolicy::canConfirmOta(
+                           board_ready, lvgl_ready, ui_runtime_healthy)) {
+                OtaRollback::markValidIfPending("controlled_restart");
+            } else {
+                LOGW("OTA", "rollback validation withheld: display runtime not operational");
+            }
+            dailyExtremaHistory.flush();
+            // This function is intentionally safe after a failed or only
+            // partially completed lvgl_port_init().
             lvgl_port_prepare_restart();
+            quiesce_network_for_restart();
+            delay(50);
+            // Delegate restart to a dedicated Core 0 task so Core 0 is the initiator.
+            // This avoids using the small IPC task stack and reduces restart races.
+            // This eliminates the RUNSTALL timing race that caused "Cache disabled" panics.
+            safe_restart_via_core0();
         }
-        quiesce_network_for_restart();
-        delay(50);
-        // Delegate restart to a dedicated Core 0 task so Core 0 is the initiator.
-        // This avoids using the small IPC task stack and reduces restart races.
-        // This eliminates the RUNSTALL timing race that caused "Cache disabled" panics.
-        safe_restart_via_core0();
     }
 
     const bool ota_busy = WebHandlersIsOtaBusy();
+    const bool lvgl_runtime_available =
+        lvgl_ready && uiController.isLvglRuntimeHealthy();
     const uint32_t loop_now = millis();
     if (ota_busy && !ota_window_active) {
         ota_window_active = true;
@@ -334,16 +361,16 @@ void loop()
         ota_pause_requested_ms = 0;
         ota_pause_wait_warned = false;
         ota_resume_pending = false;
-        if (lvgl_ready) {
+        if (lvgl_runtime_available) {
             lvgl_port_block_touch_read(OTA_TOUCH_BLOCK_MS);
         }
     } else if (!ota_busy && ota_window_active) {
         ota_window_active = false;
-        if (lvgl_ready &&
+        if (lvgl_runtime_available &&
             (ota_pause_requested || ota_lvgl_quiesced || lvgl_port_is_paused())) {
             lvgl_port_request_resume();
             ota_resume_pending = true;
-        } else if (lvgl_ready) {
+        } else if (lvgl_runtime_available) {
             lvgl_port_block_touch_read(Config::BACKLIGHT_WAKE_BLOCK_MS);
         }
         ota_lvgl_quiesced = false;
@@ -352,7 +379,7 @@ void loop()
         ota_pause_wait_warned = false;
     }
 
-    if (lvgl_ready && !ota_busy && ota_resume_pending) {
+    if (lvgl_runtime_available && !ota_busy && ota_resume_pending) {
         lvgl_port_request_resume();
         if (!lvgl_port_is_paused()) {
             ota_resume_pending = false;
@@ -368,7 +395,7 @@ void loop()
     }
 
     if (ota_busy) {
-        if (lvgl_ready && !ota_lvgl_quiesced &&
+        if (lvgl_runtime_available && !ota_lvgl_quiesced &&
             static_cast<int32_t>(loop_now - ota_quiesce_due_ms) >= 0) {
             if (!ota_pause_requested) {
                 lvgl_port_request_pause();
@@ -425,10 +452,11 @@ void loop()
                                boot_stable,
                                boot_count,
                                safe_boot_stage)) {
-        if (RuntimeReadinessPolicy::canConfirmOta(board_ready, lvgl_ready)) {
+        if (RuntimeReadinessPolicy::canConfirmOta(
+                board_ready, lvgl_ready, uiController.isLvglRuntimeHealthy())) {
             OtaRollback::markValidIfPending("stable_boot");
         } else {
-            LOGW("OTA", "rollback validation withheld: stable timer reached in headless mode");
+            LOGW("OTA", "rollback validation withheld: stable timer reached without healthy display runtime");
         }
     }
     TimeManager::PollResult time_poll = timeManager.poll(now);
