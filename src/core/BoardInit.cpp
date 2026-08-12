@@ -185,9 +185,9 @@ Result initBoard(const I2cBusRecovery::LineState &early_state,
         pre_init_state.sda_high,
         pre_init_state.scl_high,
     };
-    if (BoardInitPolicy::shouldRecoverI2cBeforeInit(
-            auto_recovery_boot,
-            recovery_samples)) {
+    const BoardInitPolicy::PreInitAction pre_init_action =
+        BoardInitPolicy::preInitAction(auto_recovery_boot, recovery_samples);
+    if (pre_init_action == BoardInitPolicy::PreInitAction::RecoverThenVendorInit) {
         LOGW("Main", "Marked recovery boot found stuck I2C lines; applying one pre-init recovery");
         result.last_recovery = I2cBusRecovery::recover(
             static_cast<gpio_num_t>(Config::I2C_SDA_PIN),
@@ -199,9 +199,8 @@ Result initBoard(const I2cBusRecovery::LineState &early_state,
              result.last_recovery.after.sda_high ? 1u : 0u,
              result.last_recovery.after.scl_high ? 1u : 0u);
         if (!result.last_recovery.busReady()) {
-            result.failure = Failure::BusStuck;
-            LOGE("Main", "I2C lines remain stuck after bounded recovery");
-            return result;
+            LOGW("Main",
+                 "I2C lines remain stuck after bounded recovery; continuing with one vendor init attempt");
         }
         delay(5);
     }
@@ -209,7 +208,7 @@ Result initBoard(const I2cBusRecovery::LineState &early_state,
         boot_mark_board_power_settle_complete();
         LOGI("Main", "Cold power start: using vendor board init without an I2C pre-probe");
     }
-    LOGI("Main", "Initializing board with one vendor attempt and no I2C pre-probe");
+    LOGI("Main", "Initializing board with one bounded vendor attempt and no I2C pre-probe");
 
     result.last_stage = Stage::Bus;
     g_stage.store(static_cast<uint8_t>(Stage::Bus), std::memory_order_relaxed);

@@ -79,6 +79,8 @@ StorageManager::BootAction AppInit::handleBootState() {
             reset_reason == ESP_RST_BROWNOUT);
     boot_board_cold_start = power_start.board_cold_start;
     boot_peripherals_cold_start = power_start.peripherals_cold_start;
+    boot_peripherals_may_have_lost_power =
+        power_start.peripherals_may_have_lost_power;
     boot_ui_auto_recovery_reboot = boot_consume_ui_auto_recovery_reboot();
     boot_board_auto_recovery_reboot = boot_consume_board_auto_recovery_reboot();
     bool crash_reset = BootHelpers::isCrashReset(reset_reason);
@@ -95,6 +97,9 @@ StorageManager::BootAction AppInit::handleBootState() {
     LOGI("Main",
          "Peripheral power state: %s",
          boot_peripherals_cold_start ? "cold" : "unknown/retained");
+    if (!boot_peripherals_cold_start && boot_peripherals_may_have_lost_power) {
+        LOGW("Main", "Peripheral power may have been interrupted by brownout");
+    }
     if (boot_ui_auto_recovery_reboot) {
         LOGW("Main", "Previous boot ended with UI auto-recovery reboot");
     }

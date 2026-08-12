@@ -59,6 +59,9 @@ public:
     void setSharedI2cActiveUsersForTest(uint32_t count) {
         shared_i2c_active_users_.store(count, std::memory_order_release);
     }
+    uint32_t sen66NextRetryMsForTest() const {
+        return sen66_probe_.nextDueMs();
+    }
 #endif
 
     void setOffsets(float temp_offset, float hum_offset);
@@ -118,12 +121,12 @@ public:
     bool calibrateFrc(uint16_t ref_ppm, bool has_pressure, float pressure_hpa,
                       uint16_t &correction);
 
-    void clearVocState(StorageManager &storage);
+    bool resetVocState(StorageManager &storage, uint32_t retry_delay_ms);
 
 private:
     class SharedI2cLease {
     public:
-        explicit SharedI2cLease(SensorManager &owner);
+        explicit SharedI2cLease(SensorManager &owner, uint32_t wait_ms = 0U);
         ~SharedI2cLease();
 
         SharedI2cLease(const SharedI2cLease &) = delete;
@@ -167,8 +170,10 @@ private:
     uint32_t currentHchoLastDataMs() const;
     float currentHchoMinPpb() const;
     float currentHchoMaxPpb() const;
-    bool tryAcquireSharedI2c();
+    bool acquireSharedI2c(uint32_t wait_ms);
     void releaseSharedI2c();
+
+    static constexpr uint32_t COMMAND_ACQUIRE_TIMEOUT_MS = 500U;
 
     Bmp3xx bmp3xx_;
     Bmp580 bmp580_;

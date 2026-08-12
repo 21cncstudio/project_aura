@@ -26,6 +26,7 @@
 #include "core/RuntimeI2cRecoveryPolicy.h"
 #include "core/RuntimeReadinessPolicy.h"
 #include "core/SafeRestart.h"
+#include "core/SharedI2cShutdownPolicy.h"
 #include "core/WebRuntimeState.h"
 #include "core/Watchdog.h"
 
@@ -86,6 +87,7 @@ constexpr uint32_t OTA_TOUCH_BLOCK_MS = 15UL * 60UL * 1000UL;
 constexpr uint32_t RUNTIME_I2C_MONITOR_START_MS = 10UL * 1000UL;
 constexpr uint32_t SHARED_I2C_LVGL_QUIESCE_TIMEOUT_MS = 250U;
 constexpr uint32_t SHARED_I2C_OWNER_DRAIN_TIMEOUT_MS = 250U;
+constexpr uint32_t SHARED_I2C_SENSOR_DRAIN_TIMEOUT_MS = 6000U;
 
 bool night_mode = false;
 bool temp_units_c = true;
@@ -198,7 +200,7 @@ bool drain_runtime_shared_i2c_owners() {
     const bool backlight_idle =
         backlightManager.waitForSharedBusIdle(SHARED_I2C_OWNER_DRAIN_TIMEOUT_MS);
     const bool sensors_idle =
-        sensorManager.waitForSharedI2cIdle(SHARED_I2C_OWNER_DRAIN_TIMEOUT_MS);
+        sensorManager.waitForSharedI2cIdle(SHARED_I2C_SENSOR_DRAIN_TIMEOUT_MS);
     if (!touch_idle || !rtc_idle || !backlight_idle || !sensors_idle) {
         LOGE("I2C",
              "shared-bus owner drain timed out (touch=%s rtc=%s backlight=%s sensors=%s)",
@@ -245,12 +247,24 @@ void poll_runtime_i2c_recovery(uint32_t now_ms) {
 
         // A suppressed recovery has no later restart shutdown path. Make one
         // bounded best-effort attempt to clear retained DAC output, but only
-        // after LVGL confirmed it no longer owns the legacy I2C driver.
+        // after every gated runtime shared-I2C owner has drained. CH422G SD
+        // card-select writes are startup/teardown-only and cannot run here.
         if (decision != RuntimeI2cRecoveryPolicy::Decision::Restart) {
-            if (!lvgl_quiesced || !owners_drained) {
+            const SharedI2cShutdownPolicy::SafeOutputDecision safe_output_decision =
+                SharedI2cShutdownPolicy::decideSafeOutput(lvgl_quiesced,
+                                                          owners_drained);
+            if (!SharedI2cShutdownPolicy::shouldAttemptSafeOutput(
+                    safe_output_decision)) {
                 LOGE("I2C", "DAC safe-output write skipped: shared-I2C owners still active");
-            } else if (!fanControl.prepareForI2cOffline()) {
-                LOGW("I2C", "DAC safe-output write failed before disabling shared-bus polling");
+            } else {
+                if (SharedI2cShutdownPolicy::shouldWarnUnconfirmedLvglPause(
+                        safe_output_decision)) {
+                    LOGW("I2C",
+                         "LVGL pause not acknowledged; shared-I2C owners are drained");
+                }
+                if (!fanControl.prepareForI2cOffline()) {
+                    LOGW("I2C", "DAC safe-output write failed before disabling shared-bus polling");
+                }
             }
         }
         LOGE("I2C",
@@ -480,10 +494,21 @@ void loop()
             const bool lvgl_quiesced =
                 quiesce_lvgl_for_shared_i2c("DAC safe write for restart");
             const bool owners_drained = drain_runtime_shared_i2c_owners();
-            if (!lvgl_quiesced || !owners_drained) {
+            const SharedI2cShutdownPolicy::SafeOutputDecision safe_output_decision =
+                SharedI2cShutdownPolicy::decideSafeOutput(lvgl_quiesced,
+                                                          owners_drained);
+            if (!SharedI2cShutdownPolicy::shouldAttemptSafeOutput(
+                    safe_output_decision)) {
                 LOGE("Restart", "DAC safe output skipped: shared-I2C owners still active");
-            } else if (!fanControl.prepareForRestart()) {
-                LOGW("Restart", "DAC safe output could not be confirmed before restart");
+            } else {
+                if (SharedI2cShutdownPolicy::shouldWarnUnconfirmedLvglPause(
+                        safe_output_decision)) {
+                    LOGW("Restart",
+                         "LVGL pause not acknowledged; shared-I2C owners are drained");
+                }
+                if (!fanControl.prepareForRestart()) {
+                    LOGW("Restart", "DAC safe output could not be confirmed before restart");
+                }
             }
             dailyExtremaHistory.flush();
             // This remains safe after a failed or only partially completed

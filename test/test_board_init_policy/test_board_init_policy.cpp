@@ -5,6 +5,7 @@
 
 using BoardInitPolicy::BeginOutcome;
 using BoardInitPolicy::CompletionAction;
+using BoardInitPolicy::PreInitAction;
 
 void setUp() {}
 void tearDown() {}
@@ -13,30 +14,35 @@ void test_power_start_classifies_cold_sw_from_missing_retained_marker() {
     const auto classification = PowerStartPolicy::classify(false, false, false);
     TEST_ASSERT_TRUE(classification.board_cold_start);
     TEST_ASSERT_TRUE(classification.peripherals_cold_start);
+    TEST_ASSERT_TRUE(classification.peripherals_may_have_lost_power);
 }
 
 void test_power_start_keeps_brownout_peripherals_in_unknown_retained_state() {
     const auto classification = PowerStartPolicy::classify(true, false, true);
     TEST_ASSERT_TRUE(classification.board_cold_start);
     TEST_ASSERT_FALSE(classification.peripherals_cold_start);
+    TEST_ASSERT_TRUE(classification.peripherals_may_have_lost_power);
 }
 
 void test_brownout_remains_conservative_when_retained_marker_is_missing() {
     const auto classification = PowerStartPolicy::classify(false, false, true);
     TEST_ASSERT_TRUE(classification.board_cold_start);
     TEST_ASSERT_FALSE(classification.peripherals_cold_start);
+    TEST_ASSERT_TRUE(classification.peripherals_may_have_lost_power);
 }
 
 void test_power_start_classifies_normal_software_restart_as_warm() {
     const auto classification = PowerStartPolicy::classify(true, false, false);
     TEST_ASSERT_FALSE(classification.board_cold_start);
     TEST_ASSERT_FALSE(classification.peripherals_cold_start);
+    TEST_ASSERT_FALSE(classification.peripherals_may_have_lost_power);
 }
 
 void test_power_on_is_cold_for_board_and_peripherals() {
     const auto classification = PowerStartPolicy::classify(true, true, false);
     TEST_ASSERT_TRUE(classification.board_cold_start);
     TEST_ASSERT_TRUE(classification.peripherals_cold_start);
+    TEST_ASSERT_TRUE(classification.peripherals_may_have_lost_power);
 }
 
 void test_success_uses_initialized_board() {
@@ -63,23 +69,31 @@ void test_timeout_retains_unsafe_board_until_restart() {
         static_cast<int>(BoardInitPolicy::completionAction(BeginOutcome::Timeout)));
 }
 
-void test_i2c_gpio_recovery_is_only_used_on_marked_recovery_boot() {
+void test_marked_recovery_boot_with_low_line_recovers_then_attempts_vendor_init() {
     BoardInitPolicy::PreInitI2cSamples samples{};
     samples.pre_init_sda_high = false;
     samples.pre_init_scl_high = true;
-    TEST_ASSERT_TRUE(BoardInitPolicy::shouldRecoverI2cBeforeInit(true, samples));
+    TEST_ASSERT_EQUAL_INT(
+        static_cast<int>(PreInitAction::RecoverThenVendorInit),
+        static_cast<int>(BoardInitPolicy::preInitAction(true, samples)));
 
     samples.pre_init_sda_high = true;
     samples.pre_init_scl_high = false;
-    TEST_ASSERT_TRUE(BoardInitPolicy::shouldRecoverI2cBeforeInit(true, samples));
+    TEST_ASSERT_EQUAL_INT(
+        static_cast<int>(PreInitAction::RecoverThenVendorInit),
+        static_cast<int>(BoardInitPolicy::preInitAction(true, samples)));
 
     samples.pre_init_sda_high = true;
     samples.pre_init_scl_high = true;
-    TEST_ASSERT_FALSE(BoardInitPolicy::shouldRecoverI2cBeforeInit(true, samples));
+    TEST_ASSERT_EQUAL_INT(
+        static_cast<int>(PreInitAction::VendorInit),
+        static_cast<int>(BoardInitPolicy::preInitAction(true, samples)));
 
     samples.pre_init_sda_high = false;
     samples.pre_init_scl_high = false;
-    TEST_ASSERT_FALSE(BoardInitPolicy::shouldRecoverI2cBeforeInit(false, samples));
+    TEST_ASSERT_EQUAL_INT(
+        static_cast<int>(PreInitAction::VendorInit),
+        static_cast<int>(BoardInitPolicy::preInitAction(false, samples)));
 }
 
 void test_i2c_recovery_decision_uses_fresh_pre_init_sample_not_early_diagnostic() {
@@ -88,13 +102,17 @@ void test_i2c_recovery_decision_uses_fresh_pre_init_sample_not_early_diagnostic(
     samples.early_diagnostic_scl_high = false;
     samples.pre_init_sda_high = true;
     samples.pre_init_scl_high = true;
-    TEST_ASSERT_FALSE(BoardInitPolicy::shouldRecoverI2cBeforeInit(true, samples));
+    TEST_ASSERT_EQUAL_INT(
+        static_cast<int>(PreInitAction::VendorInit),
+        static_cast<int>(BoardInitPolicy::preInitAction(true, samples)));
 
     samples.early_diagnostic_sda_high = true;
     samples.early_diagnostic_scl_high = true;
     samples.pre_init_sda_high = false;
     samples.pre_init_scl_high = true;
-    TEST_ASSERT_TRUE(BoardInitPolicy::shouldRecoverI2cBeforeInit(true, samples));
+    TEST_ASSERT_EQUAL_INT(
+        static_cast<int>(PreInitAction::RecoverThenVendorInit),
+        static_cast<int>(BoardInitPolicy::preInitAction(true, samples)));
 }
 
 int main(int, char **) {
@@ -108,7 +126,7 @@ int main(int, char **) {
     RUN_TEST(test_normal_failure_deletes_failed_board_without_retry_policy);
     RUN_TEST(test_task_creation_failure_deletes_unstarted_board);
     RUN_TEST(test_timeout_retains_unsafe_board_until_restart);
-    RUN_TEST(test_i2c_gpio_recovery_is_only_used_on_marked_recovery_boot);
+    RUN_TEST(test_marked_recovery_boot_with_low_line_recovers_then_attempts_vendor_init);
     RUN_TEST(test_i2c_recovery_decision_uses_fresh_pre_init_sample_not_early_diagnostic);
     return UNITY_END();
 }

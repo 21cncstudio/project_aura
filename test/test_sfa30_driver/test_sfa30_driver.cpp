@@ -68,6 +68,7 @@ void setUp() {
     boot_reset_reason = ESP_RST_POWERON;
     boot_board_cold_start = true;
     boot_peripherals_cold_start = true;
+    boot_peripherals_may_have_lost_power = true;
 }
 
 void tearDown() {}
@@ -111,6 +112,7 @@ void test_real_sfa30_warm_restart_stop_failure_marks_fault_when_device_acks() {
     boot_reset_reason = ESP_RST_SW;
     boot_board_cold_start = false;
     boot_peripherals_cold_start = false;
+    boot_peripherals_may_have_lost_power = false;
 
     Sfa30 sfa;
 
@@ -249,12 +251,34 @@ void test_real_sfa30_warm_restart_does_not_report_powerup_warmup() {
     boot_reset_reason = ESP_RST_SW;
     boot_board_cold_start = false;
     boot_peripherals_cold_start = false;
+    boot_peripherals_may_have_lost_power = false;
 
     Sfa30 sfa;
 
     TEST_ASSERT_TRUE(sfa.begin());
     sfa.start();
 
+    TEST_ASSERT_FALSE(sfa.isWarmupActive());
+}
+
+void test_real_sfa30_brownout_preserves_unknown_state_and_applies_warmup() {
+    I2cMock::setDevicePresent(Config::SFA3X_ADDR, true);
+    setValidDeviceMarkingResponse();
+    boot_reset_reason = ESP_RST_BROWNOUT;
+    boot_board_cold_start = true;
+    boot_peripherals_cold_start = false;
+    boot_peripherals_may_have_lost_power = true;
+
+    Sfa30 sfa;
+
+    TEST_ASSERT_TRUE(sfa.begin());
+    sfa.start();
+    TEST_ASSERT_TRUE(sfa.isOk());
+
+    setMillis(Config::SFA30_POWERUP_SUPPRESS_MS - 1U);
+    TEST_ASSERT_TRUE(sfa.isWarmupActive());
+
+    setMillis(Config::SFA30_POWERUP_SUPPRESS_MS);
     TEST_ASSERT_FALSE(sfa.isWarmupActive());
 }
 
@@ -339,6 +363,7 @@ void test_real_sfa30_cooperative_warm_stop_failure_preserves_identification() {
     boot_reset_reason = ESP_RST_SW;
     boot_board_cold_start = false;
     boot_peripherals_cold_start = false;
+    boot_peripherals_may_have_lost_power = false;
     I2cMock::setDevicePresent(Config::SFA3X_ADDR, true);
     setValidDeviceMarkingResponse();
     I2cMock::setCommandFailure(Config::SFA3X_ADDR,
@@ -369,6 +394,7 @@ int main(int, char **) {
     RUN_TEST(test_real_sfa30_can_restart_after_runtime_stop_failure_once_bus_recovers);
     RUN_TEST(test_real_sfa30_reports_warmup_only_during_first_powerup_10_seconds);
     RUN_TEST(test_real_sfa30_warm_restart_does_not_report_powerup_warmup);
+    RUN_TEST(test_real_sfa30_brownout_preserves_unknown_state_and_applies_warmup);
     RUN_TEST(test_real_sfa30_start_marks_fault_when_device_marking_read_fails);
     RUN_TEST(test_real_sfa30_start_marks_fault_when_device_marking_is_empty);
     RUN_TEST(test_real_sfa30_cooperative_late_start_honors_command_delays);

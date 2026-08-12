@@ -29,7 +29,7 @@ bool Sfa30::begin() {
     ok_ = true;
     measuring_ = false;
     measurement_state_unknown_ = sfa30StateUnknownAfterBoot();
-    warmup_active_ = boot_peripherals_cold_start;
+    warmup_active_ = boot_peripherals_may_have_lost_power;
     data_valid_ = false;
     has_new_data_ = false;
     last_hcho_ppb_ = 0.0f;

@@ -27,6 +27,11 @@ void test_ineligible_failure_does_not_auto_restart() {
                           static_cast<int>(BoardRecoveryPolicy::decide(false, false, false, false, true)));
 }
 
+void test_eligible_recovery_boot_failure_does_not_request_second_restart() {
+    TEST_ASSERT_EQUAL_INT(static_cast<int>(Decision::SuppressAlreadyAttempted),
+                          static_cast<int>(BoardRecoveryPolicy::decide(false, false, true, true, true)));
+}
+
 void test_missing_restart_task_stays_headless() {
     TEST_ASSERT_EQUAL_INT(static_cast<int>(Decision::SuppressRestartUnavailable),
                           static_cast<int>(BoardRecoveryPolicy::decide(false, false, true, false, false)));
@@ -52,6 +57,7 @@ int main(int, char **) {
     RUN_TEST(test_ready_board_never_requests_restart);
     RUN_TEST(test_first_eligible_failure_requests_one_restart);
     RUN_TEST(test_recovery_boot_failure_stays_headless);
+    RUN_TEST(test_eligible_recovery_boot_failure_does_not_request_second_restart);
     RUN_TEST(test_ineligible_failure_does_not_auto_restart);
     RUN_TEST(test_missing_restart_task_stays_headless);
     RUN_TEST(test_ready_board_with_failed_lvgl_requests_restart);

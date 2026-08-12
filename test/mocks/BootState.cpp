@@ -10,6 +10,7 @@ bool boot_ui_auto_recovery_reboot = false;
 bool boot_board_auto_recovery_reboot = false;
 bool boot_board_cold_start = true;
 bool boot_peripherals_cold_start = true;
+bool boot_peripherals_may_have_lost_power = true;
 
 namespace {
 bool board_power_settle_completed = false;

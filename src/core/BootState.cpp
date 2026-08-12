@@ -29,6 +29,7 @@ bool boot_ui_auto_recovery_reboot = false;
 bool boot_board_auto_recovery_reboot = false;
 bool boot_board_cold_start = false;
 bool boot_peripherals_cold_start = false;
+bool boot_peripherals_may_have_lost_power = false;
 bool boot_ui_auto_recovery_restart_requested = false;
 bool boot_board_auto_recovery_restart_requested = false;
 

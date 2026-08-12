@@ -734,19 +734,13 @@ void UiController::on_confirm_ok_event(lv_event_t *e) {
     confirm_hide();
     if (action == CONFIRM_VOC_RESET) {
         LOGI("UI", "VOC state reset requested");
-        sensorManager.clearVocState(storage);
+        if (!sensorManager.resetVocState(storage, SEN66_START_RETRY_MS)) {
+            LOGW("UI", "SEN66 VOC state reset failed or sensor is busy");
+            return;
+        }
         currentData.voc_valid = false;
         currentData.nox_valid = false;
         data_dirty = true;
-        if (!sensorManager.isOk()) {
-            LOGW("UI", "SEN66 not ready for VOC reset");
-            return;
-        }
-        if (!sensorManager.deviceReset()) {
-            LOGW("UI", "SEN66 device reset failed");
-            return;
-        }
-        sensorManager.scheduleRetry(SEN66_START_RETRY_MS);
         LOGI("UI", "SEN66 device reset done");
     } else if (action == CONFIRM_RESTART) {
         LOGW("UI", "restart requested");

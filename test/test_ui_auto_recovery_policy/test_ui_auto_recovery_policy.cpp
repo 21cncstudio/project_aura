@@ -55,16 +55,20 @@ void test_ui_recovery_boot_can_recover_stuck_i2c_without_second_restart() {
     samples.pre_init_scl_high = true;
 
     const bool auto_recovery_boot = boot_any_auto_recovery_boot();
-    TEST_ASSERT_TRUE(BoardInitPolicy::shouldRecoverI2cBeforeInit(
-        auto_recovery_boot, samples));
+    TEST_ASSERT_EQUAL_INT(
+        static_cast<int>(BoardInitPolicy::PreInitAction::RecoverThenVendorInit),
+        static_cast<int>(BoardInitPolicy::preInitAction(
+            auto_recovery_boot, samples)));
     TEST_ASSERT_EQUAL_INT(
         static_cast<int>(BoardRecoveryPolicy::Decision::SuppressAlreadyAttempted),
         static_cast<int>(BoardRecoveryPolicy::decide(
             false, false, false, auto_recovery_boot, true)));
 
     samples.pre_init_sda_high = true;
-    TEST_ASSERT_FALSE(BoardInitPolicy::shouldRecoverI2cBeforeInit(
-        auto_recovery_boot, samples));
+    TEST_ASSERT_EQUAL_INT(
+        static_cast<int>(BoardInitPolicy::PreInitAction::VendorInit),
+        static_cast<int>(BoardInitPolicy::preInitAction(
+            auto_recovery_boot, samples)));
 }
 
 int main(int, char **) {

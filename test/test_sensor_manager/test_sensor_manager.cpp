@@ -42,6 +42,7 @@ void setUp() {
     boot_reset_reason = ESP_RST_POWERON;
     boot_board_cold_start = true;
     boot_peripherals_cold_start = true;
+    boot_peripherals_may_have_lost_power = true;
     resetDriverStates();
 }
 
@@ -260,6 +261,7 @@ void test_sensor_manager_before_begin_suppresses_poll_and_public_operations() {
     TEST_ASSERT_FALSE(manager.start(true));
     TEST_ASSERT_FALSE(manager.setAscEnabled(true));
     TEST_ASSERT_FALSE(manager.calibrateFrc(400, false, 0.0f, correction));
+    TEST_ASSERT_FALSE(manager.resetVocState(storage, 1000U));
     manager.scheduleRetry(1000);
     TEST_ASSERT_FALSE(Sen66::state().device_reset_called);
     TEST_ASSERT_FALSE(Sen66::state().start_called);
@@ -298,7 +300,7 @@ void test_sensor_manager_shared_i2c_gate_blocks_runtime_driver_paths() {
     TEST_ASSERT_FALSE(manager.start(true));
     TEST_ASSERT_FALSE(manager.setAscEnabled(false));
     TEST_ASSERT_FALSE(manager.calibrateFrc(420U, false, 0.0f, correction));
-    manager.clearVocState(storage);
+    TEST_ASSERT_FALSE(manager.resetVocState(storage, 1000U));
 
     TEST_ASSERT_FALSE(result.data_changed);
     TEST_ASSERT_FALSE(result.warmup_changed);
@@ -356,6 +358,70 @@ void test_sensor_manager_disable_closes_gate_without_waiting_for_active_user() {
     TEST_ASSERT_FALSE(manager.isSharedI2cAvailable());
     TEST_ASSERT_EQUAL_UINT32(1234U, getMillis());
     manager.setSharedI2cActiveUsersForTest(0U);
+}
+
+void test_sensor_manager_exclusive_lease_blocks_poll_without_waiting() {
+    StorageManager storage;
+    storage.begin();
+    PressureHistory history;
+    SensorManager manager;
+    SensorData data{};
+    manager.begin(storage, 0.0f, 0.0f);
+    manager.setSharedI2cActiveUsersForTest(1U);
+    setMillis(1234U);
+
+    const SensorManager::PollResult result =
+        manager.poll(data, storage, history, true);
+
+    TEST_ASSERT_FALSE(result.data_changed);
+    TEST_ASSERT_EQUAL_UINT32(0U, Sen66::state().poll_call_count);
+    TEST_ASSERT_EQUAL_UINT32(1234U, getMillis());
+    manager.setSharedI2cActiveUsersForTest(0U);
+}
+
+void test_sensor_manager_command_lease_timeout_is_bounded_across_rollover() {
+    StorageManager storage;
+    storage.begin();
+    SensorManager manager;
+    manager.begin(storage, 0.0f, 0.0f);
+    manager.setSharedI2cActiveUsersForTest(1U);
+    setMillis(UINT32_MAX - 200U);
+
+    TEST_ASSERT_FALSE(manager.setAscEnabled(false));
+    TEST_ASSERT_EQUAL_UINT32(299U, getMillis());
+    TEST_ASSERT_EQUAL_UINT32(0U, Sen66::state().asc_call_count);
+
+    manager.setSharedI2cActiveUsersForTest(0U);
+    TEST_ASSERT_TRUE(manager.setAscEnabled(false));
+    TEST_ASSERT_EQUAL_UINT32(1U, Sen66::state().asc_call_count);
+}
+
+void test_sensor_manager_voc_reset_is_one_exclusive_operation() {
+    StorageManager storage;
+    storage.begin();
+    SensorManager manager;
+    manager.begin(storage, 0.0f, 0.0f);
+
+    setMillis(250U);
+    TEST_ASSERT_TRUE(manager.resetVocState(storage, 1000U));
+    TEST_ASSERT_TRUE(Sen66::state().clear_voc_called);
+    TEST_ASSERT_TRUE(Sen66::state().device_reset_called);
+    TEST_ASSERT_EQUAL_UINT32(1250U, manager.sen66NextRetryMsForTest());
+
+    Sen66::state().clear_voc_called = false;
+    Sen66::state().device_reset_called = false;
+    manager.setSharedI2cActiveUsersForTest(1U);
+    TEST_ASSERT_FALSE(manager.resetVocState(storage, 1000U));
+    TEST_ASSERT_FALSE(Sen66::state().clear_voc_called);
+    TEST_ASSERT_FALSE(Sen66::state().device_reset_called);
+    manager.setSharedI2cActiveUsersForTest(0U);
+
+    Sen66::state().device_reset_ok = false;
+    Sen66::state().clear_voc_called = false;
+    setMillis(500U);
+    TEST_ASSERT_FALSE(manager.resetVocState(storage, 2000U));
+    TEST_ASSERT_FALSE(Sen66::state().clear_voc_called);
+    TEST_ASSERT_EQUAL_UINT32(1250U, manager.sen66NextRetryMsForTest());
 }
 
 void test_sensor_manager_wait_for_shared_i2c_idle_handles_idle_and_zero_timeout() {
@@ -1273,6 +1339,9 @@ int main(int, char **) {
     RUN_TEST(test_sensor_manager_shared_i2c_gate_blocks_runtime_driver_paths);
     RUN_TEST(test_sensor_manager_begin_is_only_path_that_reopens_shared_i2c_gate);
     RUN_TEST(test_sensor_manager_disable_closes_gate_without_waiting_for_active_user);
+    RUN_TEST(test_sensor_manager_exclusive_lease_blocks_poll_without_waiting);
+    RUN_TEST(test_sensor_manager_command_lease_timeout_is_bounded_across_rollover);
+    RUN_TEST(test_sensor_manager_voc_reset_is_one_exclusive_operation);
     RUN_TEST(test_sensor_manager_wait_for_shared_i2c_idle_handles_idle_and_zero_timeout);
     RUN_TEST(test_sensor_manager_wait_for_shared_i2c_idle_is_bounded_across_rollover);
     RUN_TEST(test_sensor_manager_pm05_clamps_to_sensor_limit);

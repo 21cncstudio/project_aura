@@ -588,8 +588,9 @@ void log_soft_warnings(const SensorData &data, bool gas_warmup) {
 
 } // namespace
 
-SensorManager::SharedI2cLease::SharedI2cLease(SensorManager &owner)
-    : owner_(owner), acquired_(owner_.tryAcquireSharedI2c()) {}
+SensorManager::SharedI2cLease::SharedI2cLease(SensorManager &owner,
+                                             uint32_t wait_ms)
+    : owner_(owner), acquired_(owner_.acquireSharedI2c(wait_ms)) {}
 
 SensorManager::SharedI2cLease::~SharedI2cLease() {
     if (acquired_) {
@@ -597,21 +598,31 @@ SensorManager::SharedI2cLease::~SharedI2cLease() {
     }
 }
 
-bool SensorManager::tryAcquireSharedI2c() {
-    if (!shared_i2c_available_.load(std::memory_order_acquire)) {
-        return false;
+bool SensorManager::acquireSharedI2c(uint32_t wait_ms) {
+    const uint32_t wait_started_ms = millis();
+    while (shared_i2c_available_.load(std::memory_order_acquire)) {
+        uint32_t expected = 0U;
+        if (shared_i2c_active_users_.compare_exchange_strong(
+                expected,
+                1U,
+                std::memory_order_acq_rel,
+                std::memory_order_acquire)) {
+            if (shared_i2c_available_.load(std::memory_order_acquire)) {
+                return true;
+            }
+            shared_i2c_active_users_.store(0U, std::memory_order_release);
+            return false;
+        }
+        if (static_cast<uint32_t>(millis() - wait_started_ms) >= wait_ms) {
+            return false;
+        }
+        delay(1);
     }
-
-    shared_i2c_active_users_.fetch_add(1U, std::memory_order_acq_rel);
-    if (!shared_i2c_available_.load(std::memory_order_acquire)) {
-        shared_i2c_active_users_.fetch_sub(1U, std::memory_order_acq_rel);
-        return false;
-    }
-    return true;
+    return false;
 }
 
 void SensorManager::releaseSharedI2c() {
-    shared_i2c_active_users_.fetch_sub(1U, std::memory_order_release);
+    shared_i2c_active_users_.store(0U, std::memory_order_release);
 }
 
 void SensorManager::disableSharedI2c() {
@@ -1249,7 +1260,7 @@ void SensorManager::setOffsets(float temp_offset, float hum_offset) {
     if (!initialized_) {
         return;
     }
-    SharedI2cLease shared_i2c(*this);
+    SharedI2cLease shared_i2c(*this, COMMAND_ACQUIRE_TIMEOUT_MS);
     if (!shared_i2c) {
         return;
     }
@@ -1260,12 +1271,16 @@ bool SensorManager::deviceReset() {
     if (!initialized_) {
         return false;
     }
-    SharedI2cLease shared_i2c(*this);
+    SharedI2cLease shared_i2c(*this, COMMAND_ACQUIRE_TIMEOUT_MS);
     return shared_i2c && sen66_.deviceReset();
 }
 
 void SensorManager::scheduleRetry(uint32_t delay_ms) {
-    if (!initialized_ || !isSharedI2cAvailable()) {
+    if (!initialized_) {
+        return;
+    }
+    SharedI2cLease shared_i2c(*this, COMMAND_ACQUIRE_TIMEOUT_MS);
+    if (!shared_i2c) {
         return;
     }
     sen66_probe_.reset(millis() + delay_ms);
@@ -1275,7 +1290,7 @@ bool SensorManager::start(bool asc_enabled) {
     if (!initialized_) {
         return false;
     }
-    SharedI2cLease shared_i2c(*this);
+    SharedI2cLease shared_i2c(*this, COMMAND_ACQUIRE_TIMEOUT_MS);
     return shared_i2c && sen66_.start(asc_enabled);
 }
 
@@ -1283,7 +1298,7 @@ bool SensorManager::setAscEnabled(bool enabled) {
     if (!initialized_) {
         return false;
     }
-    SharedI2cLease shared_i2c(*this);
+    SharedI2cLease shared_i2c(*this, COMMAND_ACQUIRE_TIMEOUT_MS);
     return shared_i2c && sen66_.setAscEnabled(enabled);
 }
 
@@ -1294,18 +1309,24 @@ bool SensorManager::calibrateFrc(uint16_t ref_ppm,
     if (!initialized_) {
         return false;
     }
-    SharedI2cLease shared_i2c(*this);
+    SharedI2cLease shared_i2c(*this, COMMAND_ACQUIRE_TIMEOUT_MS);
     return shared_i2c &&
            sen66_.calibrateFRC(ref_ppm, has_pressure, pressure_hpa, correction);
 }
 
-void SensorManager::clearVocState(StorageManager &storage) {
+bool SensorManager::resetVocState(StorageManager &storage,
+                                  uint32_t retry_delay_ms) {
     if (!initialized_) {
-        return;
+        return false;
     }
-    SharedI2cLease shared_i2c(*this);
-    if (!shared_i2c) {
-        return;
+    SharedI2cLease shared_i2c(*this, COMMAND_ACQUIRE_TIMEOUT_MS);
+    if (!shared_i2c || !sen66_.isOk()) {
+        return false;
+    }
+    if (!sen66_.deviceReset()) {
+        return false;
     }
     sen66_.clearVocState(storage);
+    sen66_probe_.reset(millis() + retry_delay_ms);
+    return true;
 }

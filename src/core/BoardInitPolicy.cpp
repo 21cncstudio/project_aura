@@ -18,10 +18,13 @@ CompletionAction completionAction(BeginOutcome outcome) {
     }
 }
 
-bool shouldRecoverI2cBeforeInit(bool recovery_boot,
-                                const PreInitI2cSamples &samples) {
-    return recovery_boot &&
-           (!samples.pre_init_sda_high || !samples.pre_init_scl_high);
+PreInitAction preInitAction(bool recovery_boot,
+                            const PreInitI2cSamples &samples) {
+    if (recovery_boot &&
+        (!samples.pre_init_sda_high || !samples.pre_init_scl_high)) {
+        return PreInitAction::RecoverThenVendorInit;
+    }
+    return PreInitAction::VendorInit;
 }
 
 } // namespace BoardInitPolicy

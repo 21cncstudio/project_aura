@@ -20,6 +20,11 @@ enum class CompletionAction : uint8_t {
     RetainUntilRestart,
 };
 
+enum class PreInitAction : uint8_t {
+    VendorInit = 0,
+    RecoverThenVendorInit,
+};
+
 struct PreInitI2cSamples {
     bool early_diagnostic_sda_high = false;
     bool early_diagnostic_scl_high = false;
@@ -28,7 +33,7 @@ struct PreInitI2cSamples {
 };
 
 CompletionAction completionAction(BeginOutcome outcome);
-bool shouldRecoverI2cBeforeInit(bool recovery_boot,
-                                const PreInitI2cSamples &samples);
+PreInitAction preInitAction(bool recovery_boot,
+                            const PreInitI2cSamples &samples);
 
 } // namespace BoardInitPolicy

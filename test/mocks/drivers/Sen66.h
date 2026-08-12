@@ -29,6 +29,7 @@ struct Sen66TestState {
     bool load_voc_called = false;
     bool save_voc_called = false;
     bool device_reset_called = false;
+    bool device_reset_ok = true;
     bool asc_enabled = true;
     uint32_t last_data_ms = 0;
     float last_pressure = 0.0f;
@@ -102,7 +103,7 @@ public:
     }
     bool deviceReset() {
         state().device_reset_called = true;
-        return true;
+        return state().device_reset_ok;
     }
 
     bool isOk() const { return state().ok; }
