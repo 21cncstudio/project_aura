@@ -12,6 +12,7 @@ struct Sen66TestState {
     bool provide_data = false;
     bool poll_changed = false;
     bool update_last_data_on_poll = false;
+    uint32_t poll_delay_ms = 0;
     bool start_ok = true;
     bool start_called = false;
     uint8_t start_call_count = 0;
@@ -75,6 +76,7 @@ public:
     bool stop() { return true; }
     void poll(SensorData &data, bool &changed) {
         ++state().poll_call_count;
+        delay(state().poll_delay_ms);
         changed = state().poll_changed;
         if (state().provide_data) {
             data = state().poll_data;

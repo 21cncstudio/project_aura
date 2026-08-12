@@ -693,13 +693,13 @@ SensorManager::PollResult SensorManager::poll(SensorData &data,
     if (!shared_i2c) {
         return result;
     }
-    const uint32_t now = millis();
+    const uint32_t probe_now = millis();
 
     const LateProbeKind late_probe_at_entry = late_probe_kind_;
     if (late_probe_kind_ != LateProbeKind::None) {
-        pollActiveLateProbe(now, result);
+        pollActiveLateProbe(probe_now, result);
     } else {
-        startNextLateProbe(now, co2_asc_enabled);
+        startNextLateProbe(probe_now, co2_asc_enabled);
     }
     const bool pressure_late_this_poll =
         late_probe_at_entry == LateProbeKind::Pressure ||
@@ -827,15 +827,17 @@ SensorManager::PollResult SensorManager::poll(SensorData &data,
         result.data_changed = true;
     }
 
-    uint32_t sen66_last_ms = sen66_.lastDataMs();
-    if (sen66_last_ms != 0 && (now - sen66_last_ms > Config::SEN66_STALE_MS)) {
+    const uint32_t freshness_now = millis();
+    const uint32_t sen66_last_ms = sen66_.lastDataMs();
+    if (sen66_last_ms != 0 &&
+        (freshness_now - sen66_last_ms > Config::SEN66_STALE_MS)) {
         if (invalidate_sen66_fields(data)) {
             result.data_changed = true;
         }
     }
-    uint32_t sfa_last_ms = currentHchoLastDataMs();
+    const uint32_t sfa_last_ms = currentHchoLastDataMs();
     if (data.hcho_valid && sfa_last_ms != 0 &&
-        (now - sfa_last_ms > Config::SFA3X_STALE_MS)) {
+        (freshness_now - sfa_last_ms > Config::SFA3X_STALE_MS)) {
         data.hcho_valid = false;
         currentHchoInvalidate();
         result.data_changed = true;

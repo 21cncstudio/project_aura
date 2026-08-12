@@ -188,6 +188,60 @@ void test_sensor_manager_stale_preserves_other_sensor_data() {
     TEST_ASSERT_FLOAT_WITHIN(0.01f, 2.3f, data.co_ppm);
 }
 
+void test_sensor_manager_fresh_samples_are_not_invalidated_when_poll_crosses_millis_tick() {
+    StorageManager storage;
+    storage.begin();
+    PressureHistory history;
+    SensorManager manager;
+    SensorData data;
+    manager.begin(storage, 0.0f, 0.0f);
+
+    auto &sen = Sen66::state();
+    sen.provide_data = true;
+    sen.poll_changed = true;
+    sen.update_last_data_on_poll = true;
+    sen.poll_delay_ms = 1U;
+    sen.poll_data.temp_valid = true;
+    sen.poll_data.temperature = 21.5f;
+    sen.poll_data.hum_valid = true;
+    sen.poll_data.humidity = 42.0f;
+    sen.poll_data.co2_valid = true;
+    sen.poll_data.co2 = 650U;
+    sen.poll_data.voc_valid = true;
+    sen.poll_data.voc_index = 80U;
+    sen.poll_data.nox_valid = true;
+    sen.poll_data.nox_index = 12U;
+    sen.poll_data.pm05_valid = true;
+    sen.poll_data.pm05 = 123.0f;
+    sen.poll_data.pm1_valid = true;
+    sen.poll_data.pm1 = 4.0f;
+    sen.poll_data.pm_valid = true;
+    sen.poll_data.pm25 = 5.0f;
+    sen.poll_data.pm4 = 6.0f;
+    sen.poll_data.pm10 = 7.0f;
+
+    auto &sfa = Sfa40::state();
+    sfa.has_new_data = true;
+    sfa.hcho_ppb = 8.0f;
+
+    setMillis(Config::SEN66_POLL_MS);
+    const SensorManager::PollResult result =
+        manager.poll(data, storage, history, true);
+
+    TEST_ASSERT_TRUE(result.data_changed);
+    TEST_ASSERT_TRUE(data.temp_valid);
+    TEST_ASSERT_TRUE(data.hum_valid);
+    TEST_ASSERT_TRUE(data.co2_valid);
+    TEST_ASSERT_TRUE(data.voc_valid);
+    TEST_ASSERT_TRUE(data.nox_valid);
+    TEST_ASSERT_TRUE(data.pm05_valid);
+    TEST_ASSERT_TRUE(data.pm1_valid);
+    TEST_ASSERT_TRUE(data.pm_valid);
+    TEST_ASSERT_TRUE(data.hcho_valid);
+    TEST_ASSERT_FLOAT_WITHIN(0.01f, 21.5f, data.temperature);
+    TEST_ASSERT_FLOAT_WITHIN(0.01f, 8.0f, data.hcho);
+}
+
 void test_sensor_manager_before_begin_suppresses_poll_and_public_operations() {
     StorageManager storage;
     storage.begin();
@@ -1214,6 +1268,7 @@ int main(int, char **) {
     RUN_TEST(test_sensor_manager_poll_updates_data);
     RUN_TEST(test_sensor_manager_warmup_change);
     RUN_TEST(test_sensor_manager_stale_preserves_other_sensor_data);
+    RUN_TEST(test_sensor_manager_fresh_samples_are_not_invalidated_when_poll_crosses_millis_tick);
     RUN_TEST(test_sensor_manager_before_begin_suppresses_poll_and_public_operations);
     RUN_TEST(test_sensor_manager_shared_i2c_gate_blocks_runtime_driver_paths);
     RUN_TEST(test_sensor_manager_begin_is_only_path_that_reopens_shared_i2c_gate);
