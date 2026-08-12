@@ -350,8 +350,8 @@ void AuraNetworkManager::begin(StorageManager &storage) {
 
     if (wifi_enabled_) {
         if (!wifi_ssid_.isEmpty()) {
-            wifi_cold_boot_warmup_pending_ = (boot_reset_reason == ESP_RST_POWERON);
-            wifi_cold_boot_targeted_connect_active_ = (boot_reset_reason == ESP_RST_POWERON);
+            wifi_cold_boot_warmup_pending_ = boot_board_cold_start;
+            wifi_cold_boot_targeted_connect_active_ = boot_board_cold_start;
             setWifiState(WIFI_STATE_OFF);
             wifi_retry_count_ = 0;
             wifi_retry_at_ms_ = millis() + kInitialWifiConnectDelayMs;

@@ -10,6 +10,15 @@ using TouchWakePolicy::StateMachine;
 void setUp() {}
 void tearDown() {}
 
+void test_boot_quiet_window_uses_reliable_cold_start_classification() {
+    TEST_ASSERT_EQUAL_UINT32(
+        TouchWakePolicy::BOOT_QUIET_COLD_MS,
+        TouchWakePolicy::bootQuietWindowMs(true));
+    TEST_ASSERT_EQUAL_UINT32(
+        TouchWakePolicy::BOOT_QUIET_WARM_MS,
+        TouchWakePolicy::bootQuietWindowMs(false));
+}
+
 void test_disabled_policy_never_probes_or_wakes() {
     StateMachine policy;
 
@@ -186,6 +195,7 @@ void test_sparse_wake_errors_form_a_recovery_streak() {
 
 int main(int, char **) {
     UNITY_BEGIN();
+    RUN_TEST(test_boot_quiet_window_uses_reliable_cold_start_classification);
     RUN_TEST(test_disabled_policy_never_probes_or_wakes);
     RUN_TEST(test_fresh_interrupt_and_valid_point_wake_immediately);
     RUN_TEST(test_touch_held_while_sleep_starts_requires_release_before_wake);

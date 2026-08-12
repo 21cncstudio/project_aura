@@ -16,7 +16,7 @@
 namespace {
 
 bool sfa30StateUnknownAfterBoot() {
-    return boot_reset_reason != ESP_RST_POWERON;
+    return !boot_peripherals_cold_start;
 }
 
 bool deadlineReached(uint32_t now_ms, uint32_t deadline_ms) {
@@ -29,7 +29,7 @@ bool Sfa30::begin() {
     ok_ = true;
     measuring_ = false;
     measurement_state_unknown_ = sfa30StateUnknownAfterBoot();
-    warmup_active_ = (boot_reset_reason == ESP_RST_POWERON);
+    warmup_active_ = boot_peripherals_cold_start;
     data_valid_ = false;
     has_new_data_ = false;
     last_hcho_ppb_ = 0.0f;

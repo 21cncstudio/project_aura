@@ -7,17 +7,17 @@
 
 namespace BoardInitPolicy {
 
-enum class AttemptOutcome : uint8_t {
+enum class BeginOutcome : uint8_t {
     Success = 0,
     Failed,
     TaskCreateFailed,
     Timeout,
 };
 
-enum class Action : uint8_t {
-    ReturnSuccess = 0,
-    RetryFresh,
-    Abort,
+enum class CompletionAction : uint8_t {
+    UseBoard = 0,
+    DeleteBoard,
+    RetainUntilRestart,
 };
 
 struct PreInitI2cSamples {
@@ -27,10 +27,7 @@ struct PreInitI2cSamples {
     bool pre_init_scl_high = false;
 };
 
-Action decide(AttemptOutcome outcome, uint8_t round, uint8_t max_rounds);
-uint32_t coldPowerSettleDelayMs(bool cold_start,
-                                uint32_t uptime_ms,
-                                uint32_t settle_until_ms);
+CompletionAction completionAction(BeginOutcome outcome);
 bool shouldRecoverI2cBeforeInit(bool recovery_boot,
                                 const PreInitI2cSamples &samples);
 

@@ -9,6 +9,7 @@ bool boot_touch_detected = false;
 bool boot_ui_auto_recovery_reboot = false;
 bool boot_board_auto_recovery_reboot = false;
 bool boot_board_cold_start = true;
+bool boot_peripherals_cold_start = true;
 
 namespace {
 bool board_power_settle_completed = false;

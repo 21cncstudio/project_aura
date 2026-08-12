@@ -5,23 +5,17 @@
 
 namespace BoardInitPolicy {
 
-Action decide(AttemptOutcome outcome, uint8_t round, uint8_t max_rounds) {
-    if (outcome == AttemptOutcome::Success) {
-        return Action::ReturnSuccess;
+CompletionAction completionAction(BeginOutcome outcome) {
+    switch (outcome) {
+        case BeginOutcome::Success:
+            return CompletionAction::UseBoard;
+        case BeginOutcome::Timeout:
+            return CompletionAction::RetainUntilRestart;
+        case BeginOutcome::Failed:
+        case BeginOutcome::TaskCreateFailed:
+        default:
+            return CompletionAction::DeleteBoard;
     }
-    if (outcome == AttemptOutcome::Timeout || round >= max_rounds) {
-        return Action::Abort;
-    }
-    return Action::RetryFresh;
-}
-
-uint32_t coldPowerSettleDelayMs(bool cold_start,
-                                uint32_t uptime_ms,
-                                uint32_t settle_until_ms) {
-    if (!cold_start || uptime_ms >= settle_until_ms) {
-        return 0;
-    }
-    return settle_until_ms - uptime_ms;
 }
 
 bool shouldRecoverI2cBeforeInit(bool recovery_boot,

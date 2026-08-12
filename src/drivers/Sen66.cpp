@@ -17,11 +17,11 @@
 namespace {
 
 bool sen66AscDefaultsKnownAfterReset() {
-    return boot_reset_reason == ESP_RST_POWERON;
+    return boot_peripherals_cold_start;
 }
 
 bool sen66StateUnknownAfterBoot() {
-    return boot_reset_reason != ESP_RST_POWERON;
+    return !boot_peripherals_cold_start;
 }
 
 bool deadlineReached(uint32_t now_ms, uint32_t deadline_ms) {

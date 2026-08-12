@@ -871,7 +871,7 @@ bool SensorManager::detectPressureSensor() {
 
 bool SensorManager::detectHchoSensor() {
     hcho_sensor_type_ = HCHO_SENSOR_NONE;
-    const bool hcho_warm_restart = (boot_reset_reason != ESP_RST_POWERON);
+    const bool hcho_warm_restart = !boot_peripherals_cold_start;
     bool sfa30_identified = false;
 
     if (hcho_warm_restart) {
@@ -930,7 +930,7 @@ void SensorManager::startNextLateProbe(uint32_t now_ms, bool co2_asc_enabled) {
             pressure_late_stage_ = PressureLateStage::Bmp580;
             late_probe_kind_ = LateProbeKind::Pressure;
         } else if (candidate == 1U) {
-            hcho_late_stage_ = (boot_reset_reason != ESP_RST_POWERON)
+            hcho_late_stage_ = !boot_peripherals_cold_start
                 ? HchoLateStage::Sfa30Warm
                 : HchoLateStage::Sfa40;
             late_probe_kind_ = LateProbeKind::Hcho;

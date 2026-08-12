@@ -34,6 +34,8 @@ void setUp() {
     Logger::setSerialOutputEnabled(false);
     Logger::setSensorsSerialOutputEnabled(false);
     boot_reset_reason = ESP_RST_POWERON;
+    boot_board_cold_start = true;
+    boot_peripherals_cold_start = true;
 }
 
 void tearDown() {}
@@ -160,6 +162,8 @@ void test_real_sen66_cooperative_late_start_honors_config_and_start_delays() {
 
 void test_real_sen66_cooperative_warm_resync_waits_after_third_stop_failure() {
     boot_reset_reason = ESP_RST_SW;
+    boot_board_cold_start = false;
+    boot_peripherals_cold_start = false;
     I2cMock::setDevicePresent(Config::SEN66_ADDR, true);
     I2cMock::setCommandFailure(Config::SEN66_ADDR,
                                Config::SEN66_CMD_STOP,

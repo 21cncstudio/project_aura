@@ -9,6 +9,8 @@ namespace TouchWakePolicy {
 
 constexpr uint32_t FALLBACK_PROBE_INTERVAL_MS = 2500;
 constexpr uint32_t ERROR_STREAK_WINDOW_MS = FALLBACK_PROBE_INTERVAL_MS + 1000U;
+constexpr uint32_t BOOT_QUIET_COLD_MS = 5000;
+constexpr uint32_t BOOT_QUIET_WARM_MS = 10000;
 constexpr uint32_t RECOVERY_SUCCESS_COOLDOWN_MS = 5000;
 constexpr uint32_t RECOVERY_COOLDOWN_MS = 90UL * 1000UL;
 constexpr uint8_t RECOVERY_MAX_BACKOFF_SHIFT = 4;
@@ -19,6 +21,10 @@ enum class Sample : uint8_t {
     Released,
     Pressed,
 };
+
+constexpr uint32_t bootQuietWindowMs(bool cold_start) {
+    return cold_start ? BOOT_QUIET_COLD_MS : BOOT_QUIET_WARM_MS;
+}
 
 class StateMachine {
 public:

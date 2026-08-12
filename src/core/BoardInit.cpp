@@ -26,12 +26,7 @@ using esp_panel::drivers::BusRGB;
 
 constexpr uint32_t kBeginTimeoutMs = 10000;
 
-enum class BeginResult : uint8_t {
-    Success = 0,
-    Failed,
-    TaskCreateFailed,
-    Timeout,
-};
+using BeginResult = BoardInitPolicy::BeginOutcome;
 
 struct BeginContext {
     Board *board = nullptr;
@@ -239,7 +234,9 @@ Result initBoard(const I2cBusRecovery::LineState &early_state,
     ++result.begin_attempts;
     const BeginResult begin_result = runBoardBeginOnce(board);
     result.last_stage = static_cast<Stage>(g_stage.load(std::memory_order_acquire));
-    if (begin_result == BeginResult::Success) {
+    const BoardInitPolicy::CompletionAction completion_action =
+        BoardInitPolicy::completionAction(begin_result);
+    if (completion_action == BoardInitPolicy::CompletionAction::UseBoard) {
         noteStage(Stage::Complete);
         result.board = board;
         result.failure = Failure::None;
@@ -249,7 +246,7 @@ Result initBoard(const I2cBusRecovery::LineState &early_state,
         return result;
     }
 
-    if (begin_result == BeginResult::Timeout) {
+    if (completion_action == BoardInitPolicy::CompletionAction::RetainUntilRestart) {
         // The task was deleted inside vendor code. Destructing the partially
         // active object could touch inconsistent locks or device handles.
         result.failure = Failure::Timeout;

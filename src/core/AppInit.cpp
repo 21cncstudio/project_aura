@@ -17,6 +17,7 @@
 #include "core/BootState.h"
 #include "core/InitConfig.h"
 #include "core/Logger.h"
+#include "core/PowerStartPolicy.h"
 #include "lvgl_v8_port.h"
 #include "ui/UiStrings.h"
 
@@ -69,10 +70,15 @@ StorageManager::BootAction AppInit::handleBootState() {
     boot_reset_reason = reset_reason;
     // Some cold starts on the 7-inch board reach the application as ESP_RST_SW,
     // so the retained power-settle marker is the primary source of truth.
-    boot_board_cold_start =
-        !boot_board_power_settle_completed() ||
-        reset_reason == ESP_RST_POWERON ||
-        reset_reason == ESP_RST_BROWNOUT;
+    // Brownout remains a cold board recovery, but does not prove that external
+    // sensors lost power and returned to their reset-default state.
+    const PowerStartPolicy::Classification power_start =
+        PowerStartPolicy::classify(
+            boot_board_power_settle_completed(),
+            reset_reason == ESP_RST_POWERON,
+            reset_reason == ESP_RST_BROWNOUT);
+    boot_board_cold_start = power_start.board_cold_start;
+    boot_peripherals_cold_start = power_start.peripherals_cold_start;
     boot_ui_auto_recovery_reboot = boot_consume_ui_auto_recovery_reboot();
     boot_board_auto_recovery_reboot = boot_consume_board_auto_recovery_reboot();
     bool crash_reset = BootHelpers::isCrashReset(reset_reason);
@@ -86,6 +92,9 @@ StorageManager::BootAction AppInit::handleBootState() {
          BootHelpers::resetReasonText(reset_reason),
          boot_count);
     LOGI("Main", "Board power start: %s", boot_board_cold_start ? "cold" : "warm");
+    LOGI("Main",
+         "Peripheral power state: %s",
+         boot_peripherals_cold_start ? "cold" : "unknown/retained");
     if (boot_ui_auto_recovery_reboot) {
         LOGW("Main", "Previous boot ended with UI auto-recovery reboot");
     }

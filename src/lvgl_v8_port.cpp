@@ -62,8 +62,6 @@ static volatile uint32_t lvgl_diag_lock_fail_count = 0;
 static volatile uint32_t lvgl_diag_touch_read_error_count = 0;
 static constexpr uint32_t LVGL_TOUCH_POLL_INTERVAL_MS = 12;
 static constexpr uint32_t LVGL_TOUCH_READ_RETRY_DELAY_MS = 2;
-static constexpr uint32_t LVGL_TOUCH_BOOT_QUIET_MS = 5000;
-static constexpr uint32_t LVGL_TOUCH_BOOT_QUIET_WARM_MS = 10000;
 static constexpr uint32_t LVGL_TOUCH_ERROR_BLOCK_MS_BASE = 400;
 static constexpr uint32_t LVGL_TOUCH_ERROR_BLOCK_MS_STREAK = 1800;
 static constexpr uint8_t LVGL_TOUCH_RECOVER_ERROR_STREAK = 3;
@@ -364,9 +362,7 @@ static bool lvgl_port_apply_screen_flip_180(bool enabled)
 
 static inline uint32_t lvgl_touch_boot_quiet_window_ms()
 {
-    return (boot_reset_reason == ESP_RST_POWERON)
-               ? LVGL_TOUCH_BOOT_QUIET_MS
-               : LVGL_TOUCH_BOOT_QUIET_WARM_MS;
+    return TouchWakePolicy::bootQuietWindowMs(boot_peripherals_cold_start);
 }
 
 static inline void lvgl_touch_fill_from_cache(lv_indev_data_t *data)

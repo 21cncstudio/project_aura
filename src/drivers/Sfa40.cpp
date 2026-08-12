@@ -19,7 +19,7 @@ constexpr uint8_t SFA40_STATUS_NOT_READY = 0x01U;
 constexpr uint8_t SFA40_STATUS_NOT_WITHIN_SPEC = 0x02U;
 
 bool sfa40StateUnknownAfterBoot() {
-    return boot_reset_reason != ESP_RST_POWERON;
+    return !boot_peripherals_cold_start;
 }
 
 bool deadlineReached(uint32_t now_ms, uint32_t deadline_ms) {

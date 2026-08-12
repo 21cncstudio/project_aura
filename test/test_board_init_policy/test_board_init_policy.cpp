@@ -1,56 +1,66 @@
 #include <unity.h>
 
 #include "core/BoardInitPolicy.h"
+#include "core/PowerStartPolicy.h"
 
-using BoardInitPolicy::Action;
-using BoardInitPolicy::AttemptOutcome;
+using BoardInitPolicy::BeginOutcome;
+using BoardInitPolicy::CompletionAction;
 
 void setUp() {}
 void tearDown() {}
 
-void test_success_returns_without_cleanup() {
-    TEST_ASSERT_EQUAL_INT(static_cast<int>(Action::ReturnSuccess),
-                          static_cast<int>(BoardInitPolicy::decide(AttemptOutcome::Success, 1, 3)));
+void test_power_start_classifies_cold_sw_from_missing_retained_marker() {
+    const auto classification = PowerStartPolicy::classify(false, false, false);
+    TEST_ASSERT_TRUE(classification.board_cold_start);
+    TEST_ASSERT_TRUE(classification.peripherals_cold_start);
 }
 
-void test_normal_failure_retries_with_fresh_generation() {
-    TEST_ASSERT_EQUAL_INT(static_cast<int>(Action::RetryFresh),
-                          static_cast<int>(BoardInitPolicy::decide(AttemptOutcome::Failed, 1, 3)));
-    TEST_ASSERT_EQUAL_INT(static_cast<int>(Action::RetryFresh),
-                          static_cast<int>(BoardInitPolicy::decide(AttemptOutcome::Failed, 2, 3)));
+void test_power_start_keeps_brownout_peripherals_in_unknown_retained_state() {
+    const auto classification = PowerStartPolicy::classify(true, false, true);
+    TEST_ASSERT_TRUE(classification.board_cold_start);
+    TEST_ASSERT_FALSE(classification.peripherals_cold_start);
 }
 
-void test_task_creation_failure_is_retryable() {
-    TEST_ASSERT_EQUAL_INT(static_cast<int>(Action::RetryFresh),
-                          static_cast<int>(BoardInitPolicy::decide(AttemptOutcome::TaskCreateFailed, 1, 3)));
+void test_brownout_remains_conservative_when_retained_marker_is_missing() {
+    const auto classification = PowerStartPolicy::classify(false, false, true);
+    TEST_ASSERT_TRUE(classification.board_cold_start);
+    TEST_ASSERT_FALSE(classification.peripherals_cold_start);
 }
 
-void test_last_round_failure_aborts() {
-    TEST_ASSERT_EQUAL_INT(static_cast<int>(Action::Abort),
-                          static_cast<int>(BoardInitPolicy::decide(AttemptOutcome::Failed, 3, 3)));
-    TEST_ASSERT_EQUAL_INT(static_cast<int>(Action::Abort),
-                          static_cast<int>(BoardInitPolicy::decide(AttemptOutcome::TaskCreateFailed, 3, 3)));
+void test_power_start_classifies_normal_software_restart_as_warm() {
+    const auto classification = PowerStartPolicy::classify(true, false, false);
+    TEST_ASSERT_FALSE(classification.board_cold_start);
+    TEST_ASSERT_FALSE(classification.peripherals_cold_start);
 }
 
-void test_timeout_always_aborts_without_destructor_or_retry() {
-    TEST_ASSERT_EQUAL_INT(static_cast<int>(Action::Abort),
-                          static_cast<int>(BoardInitPolicy::decide(AttemptOutcome::Timeout, 1, 3)));
+void test_power_on_is_cold_for_board_and_peripherals() {
+    const auto classification = PowerStartPolicy::classify(true, true, false);
+    TEST_ASSERT_TRUE(classification.board_cold_start);
+    TEST_ASSERT_TRUE(classification.peripherals_cold_start);
 }
 
-void test_cold_power_settle_waits_only_for_remaining_cold_start_window() {
-    TEST_ASSERT_EQUAL_UINT32(7000,
-                             BoardInitPolicy::coldPowerSettleDelayMs(true, 3000, 10000));
-    TEST_ASSERT_EQUAL_UINT32(1,
-                             BoardInitPolicy::coldPowerSettleDelayMs(true, 9999, 10000));
+void test_success_uses_initialized_board() {
+    TEST_ASSERT_EQUAL_INT(
+        static_cast<int>(CompletionAction::UseBoard),
+        static_cast<int>(BoardInitPolicy::completionAction(BeginOutcome::Success)));
 }
 
-void test_cold_power_settle_skips_warm_start_or_completed_window() {
-    TEST_ASSERT_EQUAL_UINT32(0,
-                             BoardInitPolicy::coldPowerSettleDelayMs(false, 3000, 10000));
-    TEST_ASSERT_EQUAL_UINT32(0,
-                             BoardInitPolicy::coldPowerSettleDelayMs(true, 10000, 10000));
-    TEST_ASSERT_EQUAL_UINT32(0,
-                             BoardInitPolicy::coldPowerSettleDelayMs(true, 15000, 10000));
+void test_normal_failure_deletes_failed_board_without_retry_policy() {
+    TEST_ASSERT_EQUAL_INT(
+        static_cast<int>(CompletionAction::DeleteBoard),
+        static_cast<int>(BoardInitPolicy::completionAction(BeginOutcome::Failed)));
+}
+
+void test_task_creation_failure_deletes_unstarted_board() {
+    TEST_ASSERT_EQUAL_INT(
+        static_cast<int>(CompletionAction::DeleteBoard),
+        static_cast<int>(BoardInitPolicy::completionAction(BeginOutcome::TaskCreateFailed)));
+}
+
+void test_timeout_retains_unsafe_board_until_restart() {
+    TEST_ASSERT_EQUAL_INT(
+        static_cast<int>(CompletionAction::RetainUntilRestart),
+        static_cast<int>(BoardInitPolicy::completionAction(BeginOutcome::Timeout)));
 }
 
 void test_i2c_gpio_recovery_is_only_used_on_marked_recovery_boot() {
@@ -89,13 +99,15 @@ void test_i2c_recovery_decision_uses_fresh_pre_init_sample_not_early_diagnostic(
 
 int main(int, char **) {
     UNITY_BEGIN();
-    RUN_TEST(test_success_returns_without_cleanup);
-    RUN_TEST(test_normal_failure_retries_with_fresh_generation);
-    RUN_TEST(test_task_creation_failure_is_retryable);
-    RUN_TEST(test_last_round_failure_aborts);
-    RUN_TEST(test_timeout_always_aborts_without_destructor_or_retry);
-    RUN_TEST(test_cold_power_settle_waits_only_for_remaining_cold_start_window);
-    RUN_TEST(test_cold_power_settle_skips_warm_start_or_completed_window);
+    RUN_TEST(test_power_start_classifies_cold_sw_from_missing_retained_marker);
+    RUN_TEST(test_power_start_keeps_brownout_peripherals_in_unknown_retained_state);
+    RUN_TEST(test_brownout_remains_conservative_when_retained_marker_is_missing);
+    RUN_TEST(test_power_start_classifies_normal_software_restart_as_warm);
+    RUN_TEST(test_power_on_is_cold_for_board_and_peripherals);
+    RUN_TEST(test_success_uses_initialized_board);
+    RUN_TEST(test_normal_failure_deletes_failed_board_without_retry_policy);
+    RUN_TEST(test_task_creation_failure_deletes_unstarted_board);
+    RUN_TEST(test_timeout_retains_unsafe_board_until_restart);
     RUN_TEST(test_i2c_gpio_recovery_is_only_used_on_marked_recovery_boot);
     RUN_TEST(test_i2c_recovery_decision_uses_fresh_pre_init_sample_not_early_diagnostic);
     return UNITY_END();

@@ -66,6 +66,8 @@ void setUp() {
     Logger::setSerialOutputEnabled(false);
     Logger::setSensorsSerialOutputEnabled(false);
     boot_reset_reason = ESP_RST_POWERON;
+    boot_board_cold_start = true;
+    boot_peripherals_cold_start = true;
 }
 
 void tearDown() {}
@@ -107,6 +109,8 @@ void test_real_sfa30_warm_restart_stop_failure_marks_fault_when_device_acks() {
     setValidDeviceMarkingResponse();
     I2cMock::setCommandFailure(Config::SFA3X_ADDR, Config::SFA3X_CMD_STOP, true);
     boot_reset_reason = ESP_RST_SW;
+    boot_board_cold_start = false;
+    boot_peripherals_cold_start = false;
 
     Sfa30 sfa;
 
@@ -243,6 +247,8 @@ void test_real_sfa30_warm_restart_does_not_report_powerup_warmup() {
     I2cMock::setDevicePresent(Config::SFA3X_ADDR, true);
     setValidDeviceMarkingResponse();
     boot_reset_reason = ESP_RST_SW;
+    boot_board_cold_start = false;
+    boot_peripherals_cold_start = false;
 
     Sfa30 sfa;
 
@@ -331,6 +337,8 @@ void test_real_sfa30_cooperative_late_start_honors_command_delays() {
 
 void test_real_sfa30_cooperative_warm_stop_failure_preserves_identification() {
     boot_reset_reason = ESP_RST_SW;
+    boot_board_cold_start = false;
+    boot_peripherals_cold_start = false;
     I2cMock::setDevicePresent(Config::SFA3X_ADDR, true);
     setValidDeviceMarkingResponse();
     I2cMock::setCommandFailure(Config::SFA3X_ADDR,

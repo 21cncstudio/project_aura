@@ -40,6 +40,8 @@ void setUp() {
     Logger::setSensorsSerialOutputEnabled(false);
     Logger::resetRecentForTest();
     boot_reset_reason = ESP_RST_POWERON;
+    boot_board_cold_start = true;
+    boot_peripherals_cold_start = true;
     resetDriverStates();
 }
 
@@ -608,6 +610,8 @@ void test_sensor_manager_warm_restart_prefers_confirmed_sfa30_before_sfa40() {
     SensorManager manager;
 
     boot_reset_reason = ESP_RST_SW;
+    boot_board_cold_start = false;
+    boot_peripherals_cold_start = false;
 
     auto &sfa30 = Sfa30::state();
     sfa30.probe_ok = true;
@@ -631,6 +635,8 @@ void test_sensor_manager_warm_restart_tries_sfa40_when_sfa30_probe_does_not_conf
     SensorManager manager;
 
     boot_reset_reason = ESP_RST_SW;
+    boot_board_cold_start = false;
+    boot_peripherals_cold_start = false;
 
     auto &sfa30 = Sfa30::state();
     sfa30.probe_ok = false;
@@ -665,6 +671,32 @@ void test_sensor_manager_hcho_sensor_label_reports_sfa30_when_active() {
     TEST_ASSERT_EQUAL_STRING("SFA30", manager.hchoSensorLabel());
 }
 
+void test_sensor_manager_cold_start_reported_as_sw_still_tries_sfa40_first() {
+    StorageManager storage;
+    storage.begin();
+    SensorManager manager;
+
+    // The 7-inch board can report ESP_RST_SW after a real power removal.
+    boot_reset_reason = ESP_RST_SW;
+    boot_board_cold_start = true;
+    boot_peripherals_cold_start = true;
+
+    auto &sfa30 = Sfa30::state();
+    sfa30.probe_ok = true;
+    sfa30.status = Sfa30::Status::Ok;
+
+    auto &sfa40 = Sfa40::state();
+    sfa40.status = Sfa40::Status::Ok;
+
+    manager.begin(storage, 0.0f, 0.0f);
+
+    TEST_ASSERT_FALSE(sfa30.probe_called);
+    TEST_ASSERT_FALSE(sfa30.start_called);
+    TEST_ASSERT_TRUE(sfa40.start_called);
+    TEST_ASSERT_EQUAL_UINT8(SensorManager::HCHO_SENSOR_SFA40,
+                            manager.hchoSensorType());
+}
+
 void test_sensor_manager_hcho_sensor_label_reports_sfa40_when_active() {
     StorageManager storage;
     storage.begin();
@@ -689,6 +721,8 @@ void test_sensor_manager_sfa30_warmup_keeps_new_hcho_data_invalid() {
     SensorData data;
 
     boot_reset_reason = ESP_RST_SW;
+    boot_board_cold_start = false;
+    boot_peripherals_cold_start = false;
 
     auto &sfa30 = Sfa30::state();
     sfa30.probe_ok = true;
@@ -1199,6 +1233,7 @@ int main(int, char **) {
     RUN_TEST(test_sensor_manager_warm_restart_prefers_confirmed_sfa30_before_sfa40);
     RUN_TEST(test_sensor_manager_warm_restart_tries_sfa40_when_sfa30_probe_does_not_confirm);
     RUN_TEST(test_sensor_manager_hcho_sensor_label_reports_sfa30_when_active);
+    RUN_TEST(test_sensor_manager_cold_start_reported_as_sw_still_tries_sfa40_first);
     RUN_TEST(test_sensor_manager_hcho_sensor_label_reports_sfa40_when_active);
     RUN_TEST(test_sensor_manager_sfa30_warmup_keeps_new_hcho_data_invalid);
     RUN_TEST(test_sensor_manager_sfa_fault_is_reported);
