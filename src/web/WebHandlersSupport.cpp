@@ -10,6 +10,8 @@
 #include <Update.h>
 #include <WiFi.h>
 #include <esp_wifi.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/portmacro.h>
 
 #include "core/Logger.h"
 #include "core/SafeRestart.h"
@@ -17,6 +19,7 @@
 #include "lvgl_v8_port.h"
 #include "web/OtaRestartGate.h"
 #include "web/OtaPhysicalConfirm.h"
+#include "web/OtaUiLineagePolicy.h"
 #include "web/WebOtaState.h"
 #include "web/WebUiBridge.h"
 
@@ -37,7 +40,9 @@ WebStreamState g_web_stream_state;
 OtaRestartGate g_ota_restart_gate;
 bool g_ota_wifi_ps_saved = false;
 wifi_ps_type_t g_ota_wifi_ps_prev = WIFI_PS_NONE;
-std::atomic<uint32_t> g_ota_preflight_ui_due_ms{0};
+std::atomic<uint32_t> g_ota_upload_confirm_id{0};
+portMUX_TYPE g_ota_preflight_ui_lock = portMUX_INITIALIZER_UNLOCKED;
+OtaUiLineagePolicy::PreflightLease g_ota_preflight_ui_lease;
 
 uint32_t web_stream_now_ms(void *) {
     return millis();
@@ -97,20 +102,44 @@ void ota_reset_state() {
     g_ota_state.reset();
 }
 
-void ota_set_ui_screen(WebUiBridge::FirmwareUpdateScreenMode mode) {
-    if (!g_ctx || !g_ctx->web_ui_bridge) {
+void ota_set_ui_screen(WebUiBridge::FirmwareUpdateScreenMode mode,
+                       uint32_t confirm_id) {
+    if (confirm_id == 0 || !g_ctx || !g_ctx->web_ui_bridge) {
         return;
     }
-    g_ctx->web_ui_bridge->requestFirmwareUpdateScreen(mode);
+    g_ctx->web_ui_bridge->requestFirmwareUpdateScreen(mode, confirm_id);
 }
 
-void ota_arm_preflight_ui() {
-    ota_set_ui_screen(WebUiBridge::FirmwareUpdateScreenMode::Installing);
-    g_ota_preflight_ui_due_ms.store(millis() + kOtaPreflightUiLeaseMs, std::memory_order_release);
+void ota_arm_preflight_ui(uint32_t confirm_id) {
+    if (confirm_id == 0) {
+        return;
+    }
+    const uint32_t due_ms = millis() + kOtaPreflightUiLeaseMs;
+    portENTER_CRITICAL(&g_ota_preflight_ui_lock);
+    const bool armed = g_ota_preflight_ui_lease.arm(confirm_id, due_ms);
+    portEXIT_CRITICAL(&g_ota_preflight_ui_lock);
+    if (armed) {
+        ota_set_ui_screen(WebUiBridge::FirmwareUpdateScreenMode::Installing, confirm_id);
+    }
 }
 
-void ota_cancel_preflight_ui() {
-    g_ota_preflight_ui_due_ms.store(0, std::memory_order_release);
+void ota_cancel_preflight_ui(uint32_t confirm_id) {
+    portENTER_CRITICAL(&g_ota_preflight_ui_lock);
+    g_ota_preflight_ui_lease.cancel(confirm_id);
+    portEXIT_CRITICAL(&g_ota_preflight_ui_lock);
+}
+
+void ota_reset_preflight_ui() {
+    portENTER_CRITICAL(&g_ota_preflight_ui_lock);
+    g_ota_preflight_ui_lease.reset();
+    portEXIT_CRITICAL(&g_ota_preflight_ui_lock);
+}
+
+uint32_t ota_take_due_preflight_ui(uint32_t now_ms) {
+    portENTER_CRITICAL(&g_ota_preflight_ui_lock);
+    const uint32_t expired_confirm_id = g_ota_preflight_ui_lease.takeIfDue(now_ms);
+    portEXIT_CRITICAL(&g_ota_preflight_ui_lock);
+    return expired_confirm_id;
 }
 
 void ota_restore_wifi_power_save();
@@ -205,7 +234,8 @@ void init(WebHandlerContext *context) {
     g_web_stream_state.reset();
     g_restart_controller.reset();
     g_ota_restart_gate.reset();
-    ota_cancel_preflight_ui();
+    ota_reset_preflight_ui();
+    g_ota_upload_confirm_id.store(0, std::memory_order_release);
     ota_reset_state();
     OtaPhysicalConfirm::reset();
 }
@@ -257,17 +287,18 @@ void pollDeferred() {
     }
 
     const uint32_t now_ms = millis();
-    const uint32_t ota_preflight_ui_due_ms =
-        g_ota_preflight_ui_due_ms.load(std::memory_order_acquire);
-    if (ota_preflight_ui_due_ms != 0 &&
-        static_cast<int32_t>(now_ms - ota_preflight_ui_due_ms) >= 0 &&
-        !isOtaBusy()) {
-        ota_set_ui_screen(WebUiBridge::FirmwareUpdateScreenMode::Hidden);
-        ota_cancel_preflight_ui();
+    if (!isOtaBusy()) {
+        const uint32_t expired_preflight_confirm_id = ota_take_due_preflight_ui(now_ms);
+        if (expired_preflight_confirm_id != 0) {
+            ota_set_ui_screen(WebUiBridge::FirmwareUpdateScreenMode::Hidden,
+                              expired_preflight_confirm_id);
+        }
     }
 
-    if (OtaPhysicalConfirm::poll() && !isOtaBusy()) {
-        ota_set_ui_screen(WebUiBridge::FirmwareUpdateScreenMode::Hidden);
+    const uint32_t expired_confirm_id = OtaPhysicalConfirm::pollExpired();
+    if (expired_confirm_id != 0) {
+        ota_set_ui_screen(WebUiBridge::FirmwareUpdateScreenMode::Hidden,
+                          expired_confirm_id);
     }
 
     const WebDeferredActionsDue due = g_deferred_actions.pollDue(now_ms);
@@ -283,35 +314,41 @@ void pollDeferred() {
     g_restart_controller.poll(now_ms);
 }
 
-bool allowOtaPhysicalConfirm() {
-    const bool allowed = OtaPhysicalConfirm::allowCurrent();
+bool allowOtaPhysicalConfirm(uint32_t expected_confirm_id) {
+    const bool allowed = OtaPhysicalConfirm::allowCurrent(expected_confirm_id);
     if (allowed) {
-        ota_set_ui_screen(WebUiBridge::FirmwareUpdateScreenMode::ConfirmAllowed);
+        ota_set_ui_screen(WebUiBridge::FirmwareUpdateScreenMode::ConfirmAllowed,
+                          expected_confirm_id);
         const OtaPhysicalConfirm::Snapshot snapshot = OtaPhysicalConfirm::snapshot();
         LOGI("OTA", "physical confirm allowed (confirm_id=%u, expected=%u)",
              static_cast<unsigned>(snapshot.confirm_id),
              static_cast<unsigned>(snapshot.expected_size));
     } else {
         const OtaPhysicalConfirm::Snapshot snapshot = OtaPhysicalConfirm::snapshot();
-        LOGW("OTA", "physical confirm allow ignored (state=%s, confirm_id=%u)",
+        LOGW("OTA",
+             "physical confirm allow ignored (state=%s, expected_id=%u, current_id=%u)",
              OtaPhysicalConfirm::stateText(snapshot.state),
+             static_cast<unsigned>(expected_confirm_id),
              static_cast<unsigned>(snapshot.confirm_id));
     }
     return allowed;
 }
 
-bool denyOtaPhysicalConfirm() {
-    const bool denied = OtaPhysicalConfirm::denyCurrent();
+bool denyOtaPhysicalConfirm(uint32_t expected_confirm_id) {
+    const bool denied = OtaPhysicalConfirm::denyCurrent(expected_confirm_id);
     if (denied) {
-        ota_set_ui_screen(WebUiBridge::FirmwareUpdateScreenMode::ConfirmDenied);
+        ota_set_ui_screen(WebUiBridge::FirmwareUpdateScreenMode::ConfirmDenied,
+                          expected_confirm_id);
         const OtaPhysicalConfirm::Snapshot snapshot = OtaPhysicalConfirm::snapshot();
         LOGI("OTA", "physical confirm denied (confirm_id=%u, expected=%u)",
              static_cast<unsigned>(snapshot.confirm_id),
              static_cast<unsigned>(snapshot.expected_size));
     } else {
         const OtaPhysicalConfirm::Snapshot snapshot = OtaPhysicalConfirm::snapshot();
-        LOGW("OTA", "physical confirm deny ignored (state=%s, confirm_id=%u)",
+        LOGW("OTA",
+             "physical confirm deny ignored (state=%s, expected_id=%u, current_id=%u)",
              OtaPhysicalConfirm::stateText(snapshot.state),
+             static_cast<unsigned>(expected_confirm_id),
              static_cast<unsigned>(snapshot.confirm_id));
     }
     return denied;
@@ -352,6 +389,7 @@ WebOtaHandlers::Runtime otaRuntime(WebHandlerContext &context) {
         context,
         g_ota_state,
         g_restart_controller,
+        g_ota_upload_confirm_id,
         kDeferredRestartDelayMs,
         ota_upload_timeout_ms,
         ota_disable_wifi_power_save_for_upload,

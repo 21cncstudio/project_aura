@@ -1,5 +1,7 @@
 #include <unity.h>
 
+#include <cstring>
+
 #include "ArduinoMock.h"
 #include "I2cMock.h"
 #include "SntpMock.h"
@@ -159,6 +161,34 @@ void seedPcf8523ThatLooksLikeWeakDs3231() {
                           timer_regs, sizeof(timer_regs));
 }
 
+TimeManager::PollResult pollDeferredChecked(TimeManager &manager,
+                                            uint32_t advance_ms = 1000U,
+                                            bool rtc_i2c_available = true) {
+    advanceMillis(advance_ms);
+    const uint32_t before = I2cMock::transactionCount();
+    const TimeManager::PollResult result =
+        manager.poll(getMillis(), rtc_i2c_available);
+    const uint32_t transactions = I2cMock::transactionCount() - before;
+    TEST_ASSERT_LESS_OR_EQUAL_UINT32(1U, transactions);
+    return result;
+}
+
+template <typename Predicate>
+TimeManager::PollResult pollDeferredUntil(TimeManager &manager,
+                                          Predicate done,
+                                          uint16_t max_steps = 80U,
+                                          uint32_t advance_ms = 1000U) {
+    TimeManager::PollResult combined;
+    for (uint16_t step = 0; step < max_steps && !done(); ++step) {
+        const TimeManager::PollResult current =
+            pollDeferredChecked(manager, advance_ms);
+        combined.state_changed = combined.state_changed || current.state_changed;
+        combined.time_updated = combined.time_updated || current.time_updated;
+    }
+    TEST_ASSERT_TRUE_MESSAGE(done(), "deferred RTC operation did not settle");
+    return combined;
+}
+
 } // namespace
 
 void setUp() {
@@ -186,6 +216,8 @@ void test_time_manager_init_rtc_handles_absent_rtc() {
 
     TEST_ASSERT_FALSE(manager.initRtc());
     TEST_ASSERT_FALSE(manager.isRtcPresent());
+    TEST_ASSERT_FALSE(manager.isRtcInitialized());
+    TEST_ASSERT_TRUE(manager.isRtcDetecting());
     TEST_ASSERT_FALSE(manager.isRtcValid());
     TEST_ASSERT_FALSE(manager.isRtcLostPower());
     TEST_ASSERT_EQUAL_STRING("RTC", manager.rtcLabel());
@@ -218,6 +250,8 @@ void test_time_manager_init_rtc_marks_unset_pcf8523_as_time_unset_not_fault() {
 
     TEST_ASSERT_FALSE(manager.initRtc());
     TEST_ASSERT_TRUE(manager.isRtcPresent());
+    TEST_ASSERT_TRUE(manager.isRtcInitialized());
+    TEST_ASSERT_FALSE(manager.isRtcDetecting());
     TEST_ASSERT_FALSE(manager.isRtcValid());
     TEST_ASSERT_TRUE(manager.isRtcLostPower());
     TEST_ASSERT_TRUE(manager.isRtcTimeUnset());
@@ -448,6 +482,8 @@ void test_time_manager_init_rtc_keeps_detected_pcf8523_when_begin_fails() {
 
     TEST_ASSERT_FALSE(manager.initRtc());
     TEST_ASSERT_TRUE(manager.isRtcPresent());
+    TEST_ASSERT_FALSE(manager.isRtcInitialized());
+    TEST_ASSERT_TRUE(manager.isRtcDetecting());
     TEST_ASSERT_FALSE(manager.isRtcValid());
     TEST_ASSERT_FALSE(manager.isRtcLostPower());
     TEST_ASSERT_EQUAL_STRING("PCF8523", manager.rtcLabel());
@@ -465,6 +501,8 @@ void test_time_manager_init_rtc_keeps_detected_pcf8523_when_initial_read_fails()
 
     TEST_ASSERT_FALSE(manager.initRtc());
     TEST_ASSERT_TRUE(manager.isRtcPresent());
+    TEST_ASSERT_TRUE(manager.isRtcInitialized());
+    TEST_ASSERT_FALSE(manager.isRtcDetecting());
     TEST_ASSERT_FALSE(manager.isRtcValid());
     TEST_ASSERT_FALSE(manager.isRtcLostPower());
     TEST_ASSERT_EQUAL_STRING("PCF8523", manager.rtcLabel());
@@ -528,6 +566,567 @@ void test_time_manager_poll_recovers_rtc_after_runtime_read_failures() {
     TEST_ASSERT_TRUE(manager.isRtcValid());
 }
 
+void test_time_manager_poll_detects_rtc_that_appears_during_startup_window() {
+    StorageManager storage;
+    storage.begin();
+
+    TimeManager manager;
+    manager.begin(storage);
+    TEST_ASSERT_FALSE(manager.initRtc());
+    TEST_ASSERT_TRUE(manager.isRtcDetecting());
+
+    seedPcf8523WithUnsetTime();
+    setMillis(999);
+    auto before_due = manager.poll(getMillis());
+    TEST_ASSERT_FALSE(before_due.state_changed);
+    TEST_ASSERT_FALSE(manager.isRtcPresent());
+
+    const auto initialized = pollDeferredUntil(
+        manager,
+        [&manager]() { return manager.isRtcInitialized(); });
+    TEST_ASSERT_TRUE(initialized.state_changed);
+    TEST_ASSERT_TRUE(manager.isRtcInitialized());
+    TEST_ASSERT_TRUE(manager.isRtcTimeUnset());
+    TEST_ASSERT_FALSE(manager.isRtcDetecting());
+
+    I2cMock::setDevicePresent(Config::PCF8523_ADDR, false);
+    advanceMillis(Config::RTC_STATUS_POLL_MS);
+    manager.poll(getMillis());
+    TEST_ASSERT_TRUE(manager.isRtcPresent());
+    TEST_ASSERT_TRUE(manager.isRtcInitialized());
+    TEST_ASSERT_FALSE(manager.isRtcDetecting());
+}
+
+void test_time_manager_retries_begin_failure_then_initializes_without_blocking_poll() {
+    seedPcf8523WithFreshValidTime();
+    I2cMock::setWriteFailure(Config::PCF8523_ADDR,
+                             Config::PCF8523_REG_CONTROL_3,
+                             true);
+
+    StorageManager storage;
+    storage.begin();
+    TimeManager manager;
+    manager.begin(storage);
+
+    TEST_ASSERT_FALSE(manager.initRtc());
+    TEST_ASSERT_TRUE(manager.isRtcPresent());
+    TEST_ASSERT_FALSE(manager.isRtcInitialized());
+    TEST_ASSERT_TRUE(manager.isRtcDetecting());
+
+    I2cMock::setWriteFailure(Config::PCF8523_ADDR,
+                             Config::PCF8523_REG_CONTROL_3,
+                             false);
+    const auto completed = pollDeferredUntil(
+        manager,
+        [&manager]() { return manager.isRtcInitialized(); });
+    TEST_ASSERT_TRUE(completed.state_changed);
+    TEST_ASSERT_TRUE(completed.time_updated);
+    TEST_ASSERT_TRUE(manager.isRtcValid());
+    TEST_ASSERT_FALSE(manager.isRtcDetecting());
+}
+
+void test_time_manager_sync_unresolved_weak_ds_keeps_bounded_probe_active() {
+    seedPcf8523ThatLooksLikeWeakDs3231();
+    I2cMock::setReadFailureOnCall(Config::PCF8523_ADDR,
+                                  Config::PCF8523_REG_CONTROL_1,
+                                  6U);
+
+    StorageManager storage;
+    storage.begin();
+    TimeManager manager;
+    manager.begin(storage);
+
+    TEST_ASSERT_FALSE(manager.initRtc());
+    TEST_ASSERT_TRUE(manager.isRtcPresent());
+    TEST_ASSERT_FALSE(manager.isRtcInitialized());
+    TEST_ASSERT_TRUE(manager.isRtcDetecting());
+
+    setMillis(1000);
+    manager.poll(getMillis());
+    TEST_ASSERT_TRUE(manager.isRtcDetecting());
+}
+
+void test_time_manager_deferred_weak_ds_switches_to_pcf_before_success() {
+    StorageManager storage;
+    storage.begin();
+    TimeManager manager;
+    manager.begin(storage);
+    TEST_ASSERT_FALSE(manager.initRtc());
+
+    seedPcf8523ThatLooksLikeWeakDs3231();
+    pollDeferredUntil(
+        manager,
+        [&manager]() { return strcmp(manager.rtcLabel(), "DS3231") == 0; });
+    TEST_ASSERT_EQUAL_STRING("DS3231", manager.rtcLabel());
+
+    pollDeferredUntil(
+        manager,
+        [&manager]() { return strcmp(manager.rtcLabel(), "PCF8523") == 0; });
+    TEST_ASSERT_EQUAL_STRING("PCF8523", manager.rtcLabel());
+    TEST_ASSERT_FALSE(manager.isRtcInitialized());
+    TEST_ASSERT_TRUE(manager.isRtcDetecting());
+
+    const auto completed = pollDeferredUntil(
+        manager,
+        [&manager]() { return manager.isRtcInitialized(); });
+    TEST_ASSERT_TRUE(completed.state_changed);
+    TEST_ASSERT_TRUE(completed.time_updated);
+    TEST_ASSERT_TRUE(manager.isRtcInitialized());
+    TEST_ASSERT_TRUE(manager.isRtcValid());
+    TEST_ASSERT_FALSE(manager.isRtcDetecting());
+}
+
+void test_time_manager_deferred_unresolved_weak_ds_records_failure_and_retries() {
+    StorageManager storage;
+    storage.begin();
+    TimeManager manager;
+    manager.begin(storage);
+    TEST_ASSERT_FALSE(manager.initRtc());
+
+    seedPcf8523ThatLooksLikeWeakDs3231();
+    pollDeferredUntil(
+        manager,
+        [&manager]() { return strcmp(manager.rtcLabel(), "DS3231") == 0; });
+    I2cMock::setReadFailure(Config::PCF8523_ADDR,
+                            Config::PCF8523_REG_CONTROL_1,
+                            true);
+
+    TimeManager::PollResult unresolved;
+    for (uint8_t step = 0; step < 30U && !unresolved.state_changed; ++step) {
+        unresolved = pollDeferredChecked(manager);
+    }
+
+    TEST_ASSERT_TRUE(unresolved.state_changed);
+    TEST_ASSERT_FALSE(manager.isRtcInitialized());
+    TEST_ASSERT_TRUE(manager.isRtcDetecting());
+
+    I2cMock::setReadFailure(Config::PCF8523_ADDR,
+                            Config::PCF8523_REG_CONTROL_1,
+                            false);
+    pollDeferredChecked(manager);
+    TEST_ASSERT_TRUE(manager.isRtcDetecting());
+}
+
+void test_time_manager_deferred_all_read_failures_recover_in_runtime_poll() {
+    StorageManager storage;
+    storage.begin();
+    TimeManager manager;
+    manager.begin(storage);
+    TEST_ASSERT_FALSE(manager.initRtc());
+
+    seedPcf8523WithFreshValidTime();
+    I2cMock::setReadFailure(Config::PCF8523_ADDR,
+                            Config::PCF8523_REG_SECONDS,
+                            true);
+    const auto initialized_without_read = pollDeferredUntil(
+        manager,
+        [&manager]() { return manager.isRtcInitialized(); });
+
+    TEST_ASSERT_TRUE(initialized_without_read.state_changed);
+    TEST_ASSERT_TRUE(manager.isRtcPresent());
+    TEST_ASSERT_TRUE(manager.isRtcInitialized());
+    TEST_ASSERT_FALSE(manager.isRtcValid());
+    TEST_ASSERT_FALSE(manager.isRtcDetecting());
+
+    I2cMock::setReadFailure(Config::PCF8523_ADDR,
+                            Config::PCF8523_REG_SECONDS,
+                            false);
+    advanceMillis(Config::RTC_STATUS_POLL_MS);
+    const auto recovered = manager.poll(getMillis());
+    TEST_ASSERT_TRUE(recovered.state_changed);
+    TEST_ASSERT_TRUE(manager.isRtcValid());
+}
+
+void test_time_manager_deferred_rtc_deadline_handles_millis_wraparound() {
+    constexpr uint32_t start_ms = UINT32_MAX - 1200U;
+    setMillis(start_ms);
+
+    StorageManager storage;
+    storage.begin();
+    TimeManager manager;
+    manager.begin(storage);
+    TEST_ASSERT_FALSE(manager.initRtc());
+
+    seedPcf8523WithFreshValidTime();
+    const auto completed = pollDeferredUntil(
+        manager,
+        [&manager]() { return manager.isRtcInitialized(); });
+    TEST_ASSERT_TRUE(completed.state_changed);
+    TEST_ASSERT_TRUE(manager.isRtcInitialized());
+    TEST_ASSERT_FALSE(manager.isRtcDetecting());
+}
+
+void test_time_manager_deferred_rtc_does_not_overwrite_newer_system_time() {
+    StorageManager storage;
+    storage.begin();
+    TimeManager manager;
+    manager.begin(storage);
+    TEST_ASSERT_FALSE(manager.initRtc());
+
+    seedPcf8523WithOldValidTime();
+    pollDeferredUntil(
+        manager,
+        [&manager]() { return strcmp(manager.rtcLabel(), "PCF8523") == 0; });
+    TEST_ASSERT_TRUE(manager.isRtcDetecting());
+
+    constexpr time_t trusted_epoch = 1776256496;
+    setNowEpoch(trusted_epoch);
+    const auto completed = pollDeferredUntil(
+        manager,
+        [&manager]() { return manager.isRtcInitialized(); });
+
+    TEST_ASSERT_TRUE(completed.state_changed);
+    TEST_ASSERT_EQUAL_INT64(static_cast<long long>(trusted_epoch),
+                            static_cast<long long>(mockNow()));
+    TEST_ASSERT_TRUE(manager.isRtcInitialized());
+    TEST_ASSERT_TRUE(manager.isRtcValid());
+    TEST_ASSERT_FALSE(manager.isRtcDetecting());
+}
+
+void test_time_manager_stops_missing_rtc_detection_after_five_attempts() {
+    StorageManager storage;
+    storage.begin();
+
+    TimeManager manager;
+    manager.begin(storage);
+    TEST_ASSERT_FALSE(manager.initRtc());
+
+    pollDeferredUntil(
+        manager,
+        [&manager]() { return !manager.isRtcDetecting(); },
+        40U);
+
+    TEST_ASSERT_FALSE(manager.isRtcPresent());
+    TEST_ASSERT_FALSE(manager.isRtcInitialized());
+    TEST_ASSERT_FALSE(manager.isRtcDetecting());
+
+    seedPcf8523WithFreshValidTime();
+    setMillis(60000);
+    const auto after_exhaustion = manager.poll(getMillis());
+    TEST_ASSERT_FALSE(after_exhaustion.state_changed);
+    TEST_ASSERT_FALSE(manager.isRtcPresent());
+    TEST_ASSERT_FALSE(manager.isRtcInitialized());
+}
+
+void test_time_manager_deferred_poll_performs_at_most_one_i2c_transaction() {
+    StorageManager storage;
+    storage.begin();
+    TimeManager manager;
+    manager.begin(storage);
+    TEST_ASSERT_FALSE(manager.initRtc());
+
+    seedPcf8523ThatLooksLikeWeakDs3231();
+    pollDeferredUntil(
+        manager,
+        [&manager]() { return manager.isRtcInitialized(); });
+
+    TEST_ASSERT_TRUE(manager.isRtcValid());
+    TEST_ASSERT_EQUAL_STRING("PCF8523", manager.rtcLabel());
+}
+
+void test_time_manager_ambiguous_pcf_fallback_requires_successful_read() {
+    StorageManager storage;
+    storage.begin();
+    TimeManager manager;
+    manager.begin(storage);
+    TEST_ASSERT_FALSE(manager.initRtc());
+
+    seedPcf8523ThatLooksLikeWeakDs3231();
+    pollDeferredUntil(
+        manager,
+        [&manager]() { return strcmp(manager.rtcLabel(), "DS3231") == 0; });
+    pollDeferredUntil(
+        manager,
+        [&manager]() { return strcmp(manager.rtcLabel(), "PCF8523") == 0; });
+
+    I2cMock::setReadFailure(Config::PCF8523_ADDR,
+                            Config::PCF8523_REG_SECONDS,
+                            true);
+    TimeManager::PollResult failed_attempt;
+    for (uint8_t step = 0; step < 12U && !failed_attempt.state_changed; ++step) {
+        failed_attempt = pollDeferredChecked(manager);
+    }
+
+    TEST_ASSERT_TRUE(failed_attempt.state_changed);
+    TEST_ASSERT_FALSE(manager.isRtcInitialized());
+    TEST_ASSERT_TRUE(manager.isRtcDetecting());
+    TEST_ASSERT_EQUAL_STRING("PCF8523", manager.rtcLabel());
+}
+
+void test_time_manager_pauses_all_rtc_i2c_when_bus_is_unavailable() {
+    StorageManager storage;
+    storage.begin();
+    TimeManager manager;
+    manager.begin(storage);
+    TEST_ASSERT_FALSE(manager.initRtc());
+    seedPcf8523WithFreshValidTime();
+
+    setMillis(1000U);
+    const uint32_t before = I2cMock::transactionCount();
+    for (uint8_t step = 0; step < 5U; ++step) {
+        advanceMillis(1000U);
+        manager.poll(getMillis(), false);
+    }
+    TEST_ASSERT_EQUAL_UINT32(before, I2cMock::transactionCount());
+    TEST_ASSERT_FALSE(manager.isRtcPresent());
+    TEST_ASSERT_TRUE(manager.isRtcDetecting());
+
+    pollDeferredUntil(
+        manager,
+        [&manager]() { return manager.isRtcInitialized(); });
+    TEST_ASSERT_TRUE(manager.isRtcValid());
+}
+
+void test_time_manager_keeps_ntp_polling_when_rtc_i2c_is_unavailable() {
+    seedPcf8523WithOldValidTime();
+    StorageManager storage;
+    storage.begin();
+    TimeManager manager;
+    manager.begin(storage);
+    TEST_ASSERT_FALSE(manager.initRtc());
+    TEST_ASSERT_TRUE(manager.isRtcInitialized());
+
+    TEST_ASSERT_TRUE(manager.updateWifiState(true, true));
+    constexpr time_t trusted_epoch = 1776256496;
+    setNowEpoch(trusted_epoch);
+    SntpMock::setSyncStatus(SNTP_SYNC_STATUS_COMPLETED);
+
+    const uint32_t before = I2cMock::transactionCount();
+    const auto result = manager.poll(getMillis(), false);
+    TEST_ASSERT_EQUAL_UINT32(before, I2cMock::transactionCount());
+    TEST_ASSERT_TRUE(result.state_changed);
+    TEST_ASSERT_TRUE(result.time_updated);
+    TEST_ASSERT_FALSE(manager.isNtpSyncing());
+    TEST_ASSERT_EQUAL_INT64(static_cast<long long>(trusted_epoch),
+                            static_cast<long long>(mockNow()));
+
+    const uint32_t before_retry = I2cMock::transactionCount();
+    manager.poll(getMillis(), true);
+    TEST_ASSERT_EQUAL_UINT32(before_retry + 1U, I2cMock::transactionCount());
+    TEST_ASSERT_EQUAL_UINT8(
+        toBcd(26),
+        I2cMock::getRegister(
+            Config::PCF8523_ADDR,
+            static_cast<uint8_t>(Config::PCF8523_REG_SECONDS + 6U)));
+}
+
+void test_time_manager_permanent_runtime_gate_blocks_every_public_rtc_path() {
+    seedPcf8523WithFreshValidTime();
+    StorageManager storage;
+    storage.begin();
+    TimeManager manager;
+    manager.begin(storage);
+    TEST_ASSERT_TRUE(manager.initRtc());
+    TEST_ASSERT_TRUE(manager.isRtcInitialized());
+
+    manager.disableSharedI2cRuntime();
+    TEST_ASSERT_FALSE(manager.isSharedI2cRuntimeAvailable());
+    TEST_ASSERT_FALSE(manager.isRtcDetecting());
+    TEST_ASSERT_TRUE(manager.finalizeSharedI2cRuntimeDisable(0U));
+
+    const uint32_t before = I2cMock::transactionCount();
+    TEST_ASSERT_FALSE(manager.initRtc());
+
+    setNowEpoch(0);
+    setMillis(Config::RTC_RESTORE_INTERVAL_MS + 1U);
+    tm local_tm = {};
+    TEST_ASSERT_FALSE(manager.getLocalTime(local_tm));
+
+    TEST_ASSERT_TRUE(manager.setLocalTime(2026, 8, 12, 10, 30));
+    TEST_ASSERT_TRUE(manager.isSystemTimeValid());
+
+    (void)manager.isRtcPresent();
+    (void)manager.isRtcInitialized();
+    (void)manager.isRtcValid();
+    (void)manager.isRtcLostPower();
+    (void)manager.isRtcTimeUnset();
+    (void)manager.isRtcReadFault();
+    (void)manager.isRtcBatteryLow();
+    (void)manager.rtcLabel();
+    manager.poll(getMillis() + Config::RTC_STATUS_POLL_MS, true);
+
+    TEST_ASSERT_EQUAL_UINT32(before, I2cMock::transactionCount());
+}
+
+void test_time_manager_permanent_runtime_gate_stops_deferred_detection() {
+    StorageManager storage;
+    storage.begin();
+    TimeManager manager;
+    manager.begin(storage);
+    TEST_ASSERT_FALSE(manager.initRtc());
+    TEST_ASSERT_TRUE(manager.isRtcDetecting());
+
+    seedPcf8523WithFreshValidTime();
+    manager.disableSharedI2cRuntime();
+    TEST_ASSERT_TRUE(manager.finalizeSharedI2cRuntimeDisable(0U));
+    const uint32_t before = I2cMock::transactionCount();
+    for (uint8_t step = 0; step < 8U; ++step) {
+        advanceMillis(1000U);
+        manager.poll(getMillis(), true);
+    }
+
+    TEST_ASSERT_FALSE(manager.isRtcDetecting());
+    TEST_ASSERT_FALSE(manager.isRtcPresent());
+    TEST_ASSERT_EQUAL_UINT32(before, I2cMock::transactionCount());
+}
+
+void test_time_manager_permanent_runtime_gate_keeps_ntp_without_rtc_write() {
+    seedPcf8523WithOldValidTime();
+    StorageManager storage;
+    storage.begin();
+    TimeManager manager;
+    manager.begin(storage);
+    TEST_ASSERT_FALSE(manager.initRtc());
+    TEST_ASSERT_TRUE(manager.isRtcInitialized());
+    TEST_ASSERT_TRUE(manager.updateWifiState(true, true));
+
+    manager.disableSharedI2cRuntime();
+    constexpr time_t trusted_epoch = 1776256496;
+    setNowEpoch(trusted_epoch);
+    SntpMock::setSyncStatus(SNTP_SYNC_STATUS_COMPLETED);
+
+    const uint32_t before = I2cMock::transactionCount();
+    const TimeManager::PollResult result = manager.poll(getMillis(), true);
+
+    TEST_ASSERT_EQUAL_UINT32(before, I2cMock::transactionCount());
+    TEST_ASSERT_TRUE(result.state_changed);
+    TEST_ASSERT_TRUE(result.time_updated);
+    TEST_ASSERT_FALSE(manager.isNtpSyncing());
+    TEST_ASSERT_EQUAL_INT64(static_cast<long long>(trusted_epoch),
+                            static_cast<long long>(mockNow()));
+}
+
+void test_time_manager_begin_resets_runtime_gate_for_new_boot_lifecycle() {
+    StorageManager storage;
+    storage.begin();
+    TimeManager manager;
+    manager.begin(storage);
+    manager.disableSharedI2cRuntime();
+    TEST_ASSERT_FALSE(manager.isSharedI2cRuntimeAvailable());
+
+    manager.begin(storage);
+
+    TEST_ASSERT_TRUE(manager.isSharedI2cRuntimeAvailable());
+}
+
+void test_time_manager_finalize_closes_gate_without_prior_disable() {
+    StorageManager storage;
+    storage.begin();
+    TimeManager manager;
+    manager.begin(storage);
+
+    TEST_ASSERT_TRUE(manager.finalizeSharedI2cRuntimeDisable(0U));
+    TEST_ASSERT_FALSE(manager.isSharedI2cRuntimeAvailable());
+
+    seedPcf8523WithFreshValidTime();
+    const uint32_t before = I2cMock::transactionCount();
+    TEST_ASSERT_FALSE(manager.initRtc());
+    manager.poll(getMillis(), true);
+    TEST_ASSERT_EQUAL_UINT32(before, I2cMock::transactionCount());
+}
+
+void test_time_manager_ntp_completion_defers_rtc_write_during_detection() {
+    StorageManager storage;
+    storage.begin();
+    TimeManager manager;
+    manager.begin(storage);
+    TEST_ASSERT_FALSE(manager.initRtc());
+    seedPcf8523WithOldValidTime();
+
+    pollDeferredUntil(
+        manager,
+        [&manager]() { return strcmp(manager.rtcLabel(), "PCF8523") == 0; });
+    TEST_ASSERT_FALSE(manager.isRtcInitialized());
+    TEST_ASSERT_TRUE(manager.isRtcDetecting());
+
+    TEST_ASSERT_TRUE(manager.updateWifiState(true, true));
+    constexpr time_t trusted_epoch = 1776256496;
+    setNowEpoch(trusted_epoch);
+    SntpMock::setSyncStatus(SNTP_SYNC_STATUS_COMPLETED);
+
+    const uint32_t before = I2cMock::transactionCount();
+    const auto ntp_completed = manager.poll(getMillis());
+    TEST_ASSERT_LESS_OR_EQUAL_UINT32(
+        1U,
+        I2cMock::transactionCount() - before);
+    TEST_ASSERT_TRUE(ntp_completed.time_updated);
+    TEST_ASSERT_FALSE(manager.isNtpSyncing());
+    TEST_ASSERT_FALSE(manager.isRtcInitialized());
+
+    pollDeferredUntil(
+        manager,
+        [&manager]() { return manager.isRtcInitialized(); });
+    TEST_ASSERT_TRUE(manager.isRtcValid());
+    TEST_ASSERT_EQUAL_INT64(static_cast<long long>(trusted_epoch),
+                            static_cast<long long>(mockNow()));
+}
+
+void test_time_manager_ds_status_failure_does_not_commit_partial_calendar() {
+    StorageManager storage;
+    storage.begin();
+    TimeManager manager;
+    manager.begin(storage);
+    TEST_ASSERT_FALSE(manager.initRtc());
+    seedPcf8523ThatLooksLikeWeakDs3231();
+
+    pollDeferredUntil(
+        manager,
+        [&manager]() { return strcmp(manager.rtcLabel(), "DS3231") == 0; });
+    pollDeferredChecked(manager);  // DS3231 begin (no I2C).
+    pollDeferredChecked(manager);  // First, invalid calendar read.
+    pollDeferredChecked(manager);  // First status read succeeds.
+
+    seedDs3231WithFreshValidTime();
+    I2cMock::setReadFailure(Config::DS3231_ADDR,
+                            Config::DS3231_REG_STATUS,
+                            true);
+    pollDeferredChecked(manager);  // Second calendar read succeeds.
+    pollDeferredChecked(manager);  // Second status read fails.
+    pollDeferredChecked(manager);  // Third calendar read succeeds.
+    pollDeferredChecked(manager);  // Third status read fails.
+
+    seedPcf8523ThatLooksLikeWeakDs3231();
+    pollDeferredUntil(
+        manager,
+        [&manager]() { return strcmp(manager.rtcLabel(), "PCF8523") == 0; },
+        20U);
+    TEST_ASSERT_FALSE(manager.isRtcInitialized());
+    TEST_ASSERT_TRUE(manager.isRtcDetecting());
+}
+
+void test_time_manager_deferred_retry_deadline_uses_post_i2c_millis() {
+    StorageManager storage;
+    storage.begin();
+    TimeManager manager;
+    manager.begin(storage);
+    TEST_ASSERT_FALSE(manager.initRtc());
+    seedPcf8523WithFreshValidTime();
+
+    setMillis(1000U);
+    pollDeferredChecked(manager, 0U);  // Start the deferred attempt.
+    pollDeferredChecked(manager, 1U);  // Explicit PCF8523 signature.
+    pollDeferredChecked(manager, 1U);  // PCF8523 begin write.
+
+    I2cMock::setReadFailure(Config::PCF8523_ADDR,
+                            Config::PCF8523_REG_SECONDS,
+                            true);
+    I2cMock::setCommandAdvanceMs(100U);
+    advanceMillis(500U);
+    const uint32_t before_read = I2cMock::transactionCount();
+    manager.poll(getMillis());
+    TEST_ASSERT_EQUAL_UINT32(before_read + 1U, I2cMock::transactionCount());
+
+    const uint32_t after_read_ms = getMillis();
+    setMillis(after_read_ms + Config::RTC_INIT_RETRY_MS - 1U);
+    const uint32_t before_early_poll = I2cMock::transactionCount();
+    manager.poll(getMillis());
+    TEST_ASSERT_EQUAL_UINT32(before_early_poll, I2cMock::transactionCount());
+
+    advanceMillis(1U);
+    manager.poll(getMillis());
+    TEST_ASSERT_EQUAL_UINT32(before_early_poll + 1U, I2cMock::transactionCount());
+}
+
 int main(int, char **) {
     UNITY_BEGIN();
     RUN_TEST(test_time_manager_init_rtc_handles_absent_rtc);
@@ -549,5 +1148,26 @@ int main(int, char **) {
     RUN_TEST(test_time_manager_init_rtc_keeps_detected_pcf8523_when_initial_read_fails);
     RUN_TEST(test_time_manager_poll_marks_detected_rtc_invalid_after_repeated_read_failures);
     RUN_TEST(test_time_manager_poll_recovers_rtc_after_runtime_read_failures);
+    RUN_TEST(test_time_manager_poll_detects_rtc_that_appears_during_startup_window);
+    RUN_TEST(test_time_manager_retries_begin_failure_then_initializes_without_blocking_poll);
+    RUN_TEST(test_time_manager_sync_unresolved_weak_ds_keeps_bounded_probe_active);
+    RUN_TEST(test_time_manager_deferred_weak_ds_switches_to_pcf_before_success);
+    RUN_TEST(test_time_manager_deferred_unresolved_weak_ds_records_failure_and_retries);
+    RUN_TEST(test_time_manager_deferred_all_read_failures_recover_in_runtime_poll);
+    RUN_TEST(test_time_manager_deferred_rtc_deadline_handles_millis_wraparound);
+    RUN_TEST(test_time_manager_deferred_rtc_does_not_overwrite_newer_system_time);
+    RUN_TEST(test_time_manager_stops_missing_rtc_detection_after_five_attempts);
+    RUN_TEST(test_time_manager_deferred_poll_performs_at_most_one_i2c_transaction);
+    RUN_TEST(test_time_manager_ambiguous_pcf_fallback_requires_successful_read);
+    RUN_TEST(test_time_manager_pauses_all_rtc_i2c_when_bus_is_unavailable);
+    RUN_TEST(test_time_manager_keeps_ntp_polling_when_rtc_i2c_is_unavailable);
+    RUN_TEST(test_time_manager_permanent_runtime_gate_blocks_every_public_rtc_path);
+    RUN_TEST(test_time_manager_permanent_runtime_gate_stops_deferred_detection);
+    RUN_TEST(test_time_manager_permanent_runtime_gate_keeps_ntp_without_rtc_write);
+    RUN_TEST(test_time_manager_begin_resets_runtime_gate_for_new_boot_lifecycle);
+    RUN_TEST(test_time_manager_finalize_closes_gate_without_prior_disable);
+    RUN_TEST(test_time_manager_ntp_completion_defers_rtc_write_during_detection);
+    RUN_TEST(test_time_manager_ds_status_failure_does_not_commit_partial_calendar);
+    RUN_TEST(test_time_manager_deferred_retry_deadline_uses_post_i2c_millis);
     return UNITY_END();
 }

@@ -23,5 +23,7 @@ bool boot_consume_ui_auto_recovery_reboot();
 bool boot_ui_auto_recovery_restart_pending();
 void boot_mark_board_auto_recovery_reboot();
 bool boot_consume_board_auto_recovery_reboot();
+bool boot_board_auto_recovery_restart_pending();
+bool boot_any_auto_recovery_boot();
 bool boot_board_power_settle_completed();
 void boot_mark_board_power_settle_complete();

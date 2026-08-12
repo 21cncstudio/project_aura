@@ -7,7 +7,9 @@
 #pragma once
 
 #include <Arduino.h>
+#include <atomic>
 #include "config/AppData.h"
+#include "core/StartupProbePolicy.h"
 #include "drivers/Bmp3xx.h"
 #include "drivers/Bmp580.h"
 #include "drivers/DfrOptionalGasSensor.h"
@@ -44,6 +46,21 @@ public:
     PollResult poll(SensorData &data, StorageManager &storage, PressureHistory &pressure_history,
                     bool co2_asc_enabled);
 
+    // Permanently stop runtime access to the shared I2C bus. The gate is
+    // restored only by begin(), which represents a fresh sensor startup.
+    void disableSharedI2c();
+    // Wait for operations admitted before disableSharedI2c() to drain. This
+    // wait is bounded and returns false when timeout_ms expires.
+    bool waitForSharedI2cIdle(uint32_t timeout_ms);
+    bool isSharedI2cAvailable() const {
+        return shared_i2c_available_.load(std::memory_order_acquire);
+    }
+#ifdef UNIT_TEST
+    void setSharedI2cActiveUsersForTest(uint32_t count) {
+        shared_i2c_active_users_.store(count, std::memory_order_release);
+    }
+#endif
+
     void setOffsets(float temp_offset, float hum_offset);
     bool isInitialized() const { return initialized_; }
     bool isOk() const { return initialized_ && sen66_.isOk(); }
@@ -53,6 +70,9 @@ public:
     bool isSfaPresent() const { return currentHchoStatus() != SfaStatus::Absent; }
     bool hasSfaFault() const { return currentHchoStatus() == SfaStatus::Fault; }
     bool isSfaWarmupActive() const { return currentHchoWarmupActive(); }
+    bool isSfaDetecting() const {
+        return initialized_ && hcho_sensor_type_ == HCHO_SENSOR_NONE && hcho_probe_.pending();
+    }
     SfaStatus sfaStatus() const { return currentHchoStatus(); }
     bool isCoPresent() const { return sen0466_.isPresent(); }
     bool isCoValid() const { return sen0466_.isDataValid(); }
@@ -74,31 +94,72 @@ public:
                optional_gas_.optionalGasType() == DfrOptionalGasSensor::OptionalGasType::NH3;
     }
     bool isPressureOk() const;
+    bool isPressureDetecting() const {
+        return initialized_ && pressure_sensor_ == PRESSURE_NONE && pressure_probe_.pending();
+    }
     PressureSensorType pressureSensorType() const { return pressure_sensor_; }
     const char *pressureSensorLabel() const;
     const char *hchoSensorLabel() const;
     HchoSensorType hchoSensorType() const { return hcho_sensor_type_; }
     Sfa40::Diagnostics sfa40Diagnostics() const { return sfa40_.diagnostics(); }
-    bool deviceReset() { return initialized_ && sen66_.deviceReset(); }
-    void scheduleRetry(uint32_t delay_ms) {
-        if (!initialized_) return;
-        sen66_start_attempts_ = 0;
-        sen66_retry_exhausted_logged_ = false;
-        sen66_.scheduleRetry(delay_ms);
-    }
-    uint32_t retryAtMs() const { return initialized_ ? sen66_.retryAtMs() : 0; }
-    bool start(bool asc_enabled) { return initialized_ && sen66_.start(asc_enabled); }
+    bool deviceReset();
+    void scheduleRetry(uint32_t delay_ms);
+    bool start(bool asc_enabled);
     bool isWarmupActive() const { return initialized_ && sen66_.isWarmupActive(); }
-    uint32_t lastDataMs() const { return initialized_ ? sen66_.lastDataMs() : 0; }
-    bool setAscEnabled(bool enabled) { return initialized_ && sen66_.setAscEnabled(enabled); }
-    bool calibrateFrc(uint16_t ref_ppm, bool has_pressure, float pressure_hpa,
-                      uint16_t &correction) {
-        return initialized_ && sen66_.calibrateFRC(ref_ppm, has_pressure, pressure_hpa, correction);
+    bool isSen66Detecting() const {
+        return initialized_ && !sen66_.isOk() &&
+               (sen66_probe_.pending() || late_probe_kind_ == LateProbeKind::Sen66);
     }
+    bool isSen66StartupProbePending() const {
+        return initialized_ && !sen66_.isOk() && sen66_probe_.pending();
+    }
+    uint32_t lastDataMs() const { return initialized_ ? sen66_.lastDataMs() : 0; }
+    bool setAscEnabled(bool enabled);
+    bool calibrateFrc(uint16_t ref_ppm, bool has_pressure, float pressure_hpa,
+                      uint16_t &correction);
 
     void clearVocState(StorageManager &storage);
 
 private:
+    class SharedI2cLease {
+    public:
+        explicit SharedI2cLease(SensorManager &owner);
+        ~SharedI2cLease();
+
+        SharedI2cLease(const SharedI2cLease &) = delete;
+        SharedI2cLease &operator=(const SharedI2cLease &) = delete;
+
+        explicit operator bool() const { return acquired_; }
+
+    private:
+        SensorManager &owner_;
+        bool acquired_ = false;
+    };
+
+    enum class LateProbeKind : uint8_t {
+        None = 0,
+        Pressure,
+        Hcho,
+        Sen66,
+    };
+    enum class PressureLateStage : uint8_t {
+        Bmp580 = 0,
+        Bmp3xx,
+        Dps310,
+    };
+    enum class HchoLateStage : uint8_t {
+        Sfa30Warm = 0,
+        Sfa40,
+        Sfa30Fallback,
+    };
+
+    bool detectPressureSensor();
+    bool detectHchoSensor();
+    void startNextLateProbe(uint32_t now_ms, bool co2_asc_enabled);
+    void pollActiveLateProbe(uint32_t now_ms, PollResult &result);
+    void finishPressureLateProbe(bool success, PollResult &result);
+    void finishHchoLateProbe(bool success, PollResult &result);
+    void finishSen66LateProbe(bool success, PollResult &result);
     SfaStatus currentHchoStatus() const;
     bool currentHchoWarmupActive() const;
     bool currentHchoTakeNewData(float &hcho_ppb);
@@ -106,6 +167,8 @@ private:
     uint32_t currentHchoLastDataMs() const;
     float currentHchoMinPpb() const;
     float currentHchoMaxPpb() const;
+    bool tryAcquireSharedI2c();
+    void releaseSharedI2c();
 
     Bmp3xx bmp3xx_;
     Bmp580 bmp580_;
@@ -119,8 +182,17 @@ private:
     bool warmup_active_last_ = false;
     bool sfa_warmup_active_last_ = false;
     SfaStatus sfa_status_last_ = SfaStatus::Absent;
-    uint8_t sen66_start_attempts_ = 0;
-    bool sen66_retry_exhausted_logged_ = false;
+    StartupProbePolicy::State pressure_probe_;
+    StartupProbePolicy::State hcho_probe_;
+    StartupProbePolicy::State sen66_probe_;
     PressureSensorType pressure_sensor_ = PRESSURE_NONE;
+    LateProbeKind late_probe_kind_ = LateProbeKind::None;
+    PressureLateStage pressure_late_stage_ = PressureLateStage::Bmp580;
+    HchoLateStage hcho_late_stage_ = HchoLateStage::Sfa40;
+    bool late_driver_started_ = false;
+    bool late_sen66_asc_enabled_ = true;
+    uint8_t late_probe_cursor_ = 0;
     bool initialized_ = false;
+    std::atomic<bool> shared_i2c_available_{true};
+    std::atomic<uint32_t> shared_i2c_active_users_{0};
 };

@@ -24,4 +24,10 @@ uint32_t coldPowerSettleDelayMs(bool cold_start,
     return settle_until_ms - uptime_ms;
 }
 
+bool shouldRecoverI2cBeforeInit(bool recovery_boot,
+                                const PreInitI2cSamples &samples) {
+    return recovery_boot &&
+           (!samples.pre_init_sda_high || !samples.pre_init_scl_high);
+}
+
 } // namespace BoardInitPolicy

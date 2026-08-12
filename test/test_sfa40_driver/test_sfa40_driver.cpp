@@ -626,6 +626,64 @@ void test_real_sfa40_selftest_is_rejected_when_driver_is_in_fault_state() {
     TEST_ASSERT_FALSE(sfa.isOk());
 }
 
+void test_real_sfa40_cooperative_late_start_uses_start_command_timestamp() {
+    uint8_t serial_data[9];
+    encodeWordWithCrc(0x1234, &serial_data[0]);
+    encodeWordWithCrc(0x5678, &serial_data[3]);
+    encodeWordWithCrc(0x9ABC, &serial_data[6]);
+    I2cMock::setDevicePresent(Config::SFA3X_ADDR, true);
+    I2cMock::setCommandRead(Config::SFA3X_ADDR,
+                            Config::SFA40_CMD_ID,
+                            serial_data,
+                            sizeof(serial_data));
+    constexpr uint32_t command_duration_ms = 60U;
+    I2cMock::setCommandAdvanceMs(command_duration_ms);
+
+    Sfa40 sfa;
+    TEST_ASSERT_TRUE(sfa.begin());
+    sfa.beginLateStart();
+    TEST_ASSERT_EQUAL(static_cast<int>(CooperativeStart::Result::InProgress),
+                      static_cast<int>(sfa.pollLateStart(getMillis()))); // Ping.
+    TEST_ASSERT_EQUAL(static_cast<int>(CooperativeStart::Result::InProgress),
+                      static_cast<int>(sfa.pollLateStart(getMillis()))); // ID command.
+    TEST_ASSERT_EQUAL(static_cast<int>(CooperativeStart::Result::InProgress),
+                      static_cast<int>(sfa.pollLateStart(getMillis()))); // ID read.
+
+    constexpr uint32_t command_begin_ms = 1234U;
+    constexpr uint32_t command_complete_ms = command_begin_ms + command_duration_ms;
+    setMillis(command_begin_ms);
+    TEST_ASSERT_EQUAL(static_cast<int>(CooperativeStart::Result::InProgress),
+                      static_cast<int>(sfa.pollLateStart(getMillis()))); // Start command.
+    setMillis(command_begin_ms + Config::SFA3X_START_DELAY_MS);
+    TEST_ASSERT_EQUAL(static_cast<int>(CooperativeStart::Result::InProgress),
+                      static_cast<int>(sfa.pollLateStart(getMillis())));
+    setMillis(command_complete_ms + Config::SFA3X_START_DELAY_MS);
+    TEST_ASSERT_EQUAL(static_cast<int>(CooperativeStart::Result::Success),
+                      static_cast<int>(sfa.pollLateStart(getMillis())));
+
+    const Sfa40::Diagnostics diagnostics = sfa.diagnostics();
+    TEST_ASSERT_EQUAL_UINT32(command_complete_ms, diagnostics.start_ms);
+    TEST_ASSERT_TRUE(sfa.isOk());
+}
+
+void test_real_sfa40_cooperative_warm_stop_failure_requests_sfa30_fallback() {
+    boot_reset_reason = ESP_RST_SW;
+    I2cMock::setDevicePresent(Config::SFA3X_ADDR, true);
+    I2cMock::setCommandFailure(Config::SFA3X_ADDR,
+                               Config::SFA40_CMD_STOP,
+                               true);
+
+    Sfa40 sfa;
+    TEST_ASSERT_TRUE(sfa.begin());
+    sfa.beginLateStart();
+    TEST_ASSERT_EQUAL(static_cast<int>(CooperativeStart::Result::InProgress),
+                      static_cast<int>(sfa.pollLateStart(getMillis()))); // Ping.
+    TEST_ASSERT_EQUAL(static_cast<int>(CooperativeStart::Result::Failed),
+                      static_cast<int>(sfa.pollLateStart(getMillis()))); // Stop.
+    TEST_ASSERT_TRUE(sfa.hasFault());
+    TEST_ASSERT_TRUE(sfa.shouldFallbackToSfa30());
+}
+
 int main(int, char **) {
     UNITY_BEGIN();
     RUN_TEST(test_real_sfa40_start_keeps_absent_when_device_does_not_ack);
@@ -647,5 +705,7 @@ int main(int, char **) {
     RUN_TEST(test_real_sfa40_selftest_reports_failed_status_and_marks_fault);
     RUN_TEST(test_real_sfa40_selftest_read_error_marks_fault_and_clears_active_state);
     RUN_TEST(test_real_sfa40_selftest_is_rejected_when_driver_is_in_fault_state);
+    RUN_TEST(test_real_sfa40_cooperative_late_start_uses_start_command_timestamp);
+    RUN_TEST(test_real_sfa40_cooperative_warm_stop_failure_requests_sfa30_fallback);
     return UNITY_END();
 }

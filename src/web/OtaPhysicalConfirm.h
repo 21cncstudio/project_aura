@@ -76,9 +76,9 @@ public:
                                      bool has_confirm_id,
                                      uint32_t confirm_id,
                                      uint32_t now_ms);
-    bool allowCurrent(uint32_t now_ms);
-    bool denyCurrent(uint32_t now_ms);
-    bool poll(uint32_t now_ms);
+    bool allowCurrent(uint32_t expected_confirm_id, uint32_t now_ms);
+    bool denyCurrent(uint32_t expected_confirm_id, uint32_t now_ms);
+    uint32_t pollExpired(uint32_t now_ms);
 
 private:
     bool deadlineReached(uint32_t now_ms, uint32_t deadline_ms) const;
@@ -100,6 +100,7 @@ private:
     uint32_t allowed_until_ms_ = 0;
     uint32_t terminal_until_ms_ = 0;
     bool terminal_observed_ = false;
+    uint32_t expired_event_confirm_id_ = 0;
     State terminal_state_ = State::Idle;
     uint32_t terminal_confirm_id_ = 0;
     size_t terminal_expected_size_ = 0;
@@ -110,9 +111,9 @@ void reset();
 Snapshot snapshot();
 PrepareDecision prepare(size_t expected_size, bool has_confirm_id, uint32_t confirm_id);
 ConsumeDecision consumeForUpload(size_t expected_size, bool has_confirm_id, uint32_t confirm_id);
-bool allowCurrent();
-bool denyCurrent();
-bool poll();
+bool allowCurrent(uint32_t expected_confirm_id);
+bool denyCurrent(uint32_t expected_confirm_id);
+uint32_t pollExpired();
 
 const char *stateText(State state);
 const char *prepareStatusText(PrepareStatus status);

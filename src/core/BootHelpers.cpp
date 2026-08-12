@@ -14,11 +14,18 @@
 
 #include "config/AppConfig.h"
 #include "core/BootState.h"
+#include "core/Gt911ProbePolicy.h"
 #include "core/Logger.h"
+#include "esp_panel_board_custom_conf.h"
 
 namespace {
 
 using namespace Config;
+
+constexpr auto GT911_PROBE_PLAN = Gt911ProbePolicy::configuredAddressOnly(
+    static_cast<uint8_t>(ESP_PANEL_BOARD_TOUCH_I2C_ADDRESS));
+static_assert(GT911_PROBE_PLAN.address != SFA3X_ADDR,
+              "Configured GT911 address must not collide with SFA3X");
 
 bool gt911_read_product_id(uint8_t addr, uint8_t *out, size_t len) {
     uint8_t reg[2] = {
@@ -78,18 +85,21 @@ const char *BootHelpers::resetReasonText(esp_reset_reason_t reason) {
 
 void BootHelpers::logGt911Address() {
     uint8_t id[3] = {};
-    bool ok_primary = gt911_read_product_id(GT911_ADDR_PRIMARY, id, sizeof(id));
-    if (ok_primary) {
-        Logger::log(Logger::Info, "GT911", "probe 0x5D: %02X,%02X,%02X", id[0], id[1], id[2]);
+    const bool ok =
+        gt911_read_product_id(GT911_PROBE_PLAN.address, id, sizeof(id));
+    if (ok) {
+        Logger::log(Logger::Info,
+                    "GT911",
+                    "probe 0x%02X: %02X,%02X,%02X",
+                    GT911_PROBE_PLAN.address,
+                    id[0],
+                    id[1],
+                    id[2]);
     } else {
-        Logger::log(Logger::Info, "GT911", "probe 0x5D: no response");
+        Logger::log(Logger::Info,
+                    "GT911",
+                    "probe 0x%02X: no response",
+                    GT911_PROBE_PLAN.address);
     }
-
-    bool ok_alt = gt911_read_product_id(GT911_ADDR_ALT, id, sizeof(id));
-    if (ok_alt) {
-        Logger::log(Logger::Info, "GT911", "probe 0x14: %02X,%02X,%02X", id[0], id[1], id[2]);
-    } else {
-        Logger::log(Logger::Info, "GT911", "probe 0x14: no response");
-    }
-    boot_touch_detected = ok_primary || ok_alt;
+    boot_touch_detected = ok;
 }

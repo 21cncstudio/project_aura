@@ -173,17 +173,20 @@ bool UiBootFlow::bootDiagHasErrors(UiController &owner, uint32_t now_ms) {
     if (!owner.sensorManager.isOk() &&
         !BootDiagPolicy::sen66Pending(owner.sensorManager.isOk(),
                                       owner.sensorManager.isBusy(),
-                                      owner.sensorManager.retryAtMs(),
-                                      now_ms)) {
+                                      owner.sensorManager.isSen66StartupProbePending())) {
         has_error = true;
     }
-    if (!owner.sensorManager.isDpsOk()) {
+    if (!owner.sensorManager.isDpsOk() &&
+        !owner.sensorManager.isPressureDetecting()) {
         has_error = true;
     }
-    if (owner.sensorManager.hasSfaFault() && !owner.sensorManager.isSfaWarmupActive()) {
+    if (owner.sensorManager.hasSfaFault() &&
+        !owner.sensorManager.isSfaWarmupActive() &&
+        !owner.sensorManager.isSfaDetecting()) {
         has_error = true;
     }
-    if (owner.timeManager.isRtcPresent()) {
+    if (owner.timeManager.isRtcPresent() &&
+        !owner.timeManager.isRtcDetecting()) {
         if (owner.timeManager.isRtcReadFault() ||
             (!owner.timeManager.isRtcValid() && !owner.timeManager.isRtcTimeUnset())) {
             has_error = true;
@@ -199,8 +202,7 @@ void UiBootFlow::updateBootDiag(UiController &owner, uint32_t now_ms) {
     size_t error_len = 0;
     const bool sen66_pending = BootDiagPolicy::sen66Pending(owner.sensorManager.isOk(),
                                                             owner.sensorManager.isBusy(),
-                                                            owner.sensorManager.retryAtMs(),
-                                                            now_ms);
+                                                            owner.sensorManager.isSen66StartupProbePending());
 
     if (objects.lbl_diag_app_ver) {
         snprintf(buf, sizeof(buf), "v%s", AppVersion::fullVersion());
@@ -290,15 +292,26 @@ void UiBootFlow::updateBootDiag(UiController &owner, uint32_t now_ms) {
         owner.safe_label_set_text(objects.lbl_diag_dps_label, owner.sensorManager.pressureSensorLabel());
     }
     if (objects.lbl_diag_dps) {
-        owner.safe_label_set_text(objects.lbl_diag_dps,
-                                  owner.sensorManager.isDpsOk() ? UiText::StatusOk() : UiText::StatusErr());
+        const char *status = UiText::StatusErr();
+        if (owner.sensorManager.isDpsOk()) {
+            status = UiText::StatusOk();
+        } else if (owner.sensorManager.isPressureDetecting()) {
+            status = UiText::BootDiagStarting();
+        }
+        owner.safe_label_set_text(objects.lbl_diag_dps, status);
     }
     if (!owner.sensorManager.isDpsOk()) {
-        append_error_line(error_lines, sizeof(error_lines), error_len, "Pressure sensor read failed");
+        append_error_line(error_lines,
+                          sizeof(error_lines),
+                          error_len,
+                          owner.sensorManager.isPressureDetecting()
+                              ? "Pressure sensor starting..."
+                              : "Pressure sensor read failed");
     }
     if (objects.lbl_diag_sfa) {
         const char *status = UiText::BootDiagNotFound();
-        if (owner.sensorManager.isSfaWarmupActive()) {
+        if (owner.sensorManager.isSfaDetecting() ||
+            owner.sensorManager.isSfaWarmupActive()) {
             status = UiText::BootDiagStarting();
         } else {
             switch (owner.sensorManager.sfaStatus()) {
@@ -314,7 +327,9 @@ void UiBootFlow::updateBootDiag(UiController &owner, uint32_t now_ms) {
         }
         owner.safe_label_set_text(objects.lbl_diag_sfa, status);
     }
-    if (owner.sensorManager.hasSfaFault() && !owner.sensorManager.isSfaWarmupActive()) {
+    if (owner.sensorManager.hasSfaFault() &&
+        !owner.sensorManager.isSfaWarmupActive() &&
+        !owner.sensorManager.isSfaDetecting()) {
         const char *hcho_label = owner.sensorManager.hchoSensorLabel();
         if (strcmp(hcho_label, "SFA30/40") == 0) {
             append_error_line(error_lines,
@@ -396,7 +411,9 @@ void UiBootFlow::updateBootDiag(UiController &owner, uint32_t now_ms) {
     }
     if (objects.lbl_diag_rtc) {
         const char *status = UiText::BootDiagNotFound();
-        if (owner.timeManager.isRtcPresent()) {
+        if (owner.timeManager.isRtcDetecting()) {
+            status = UiText::BootDiagStarting();
+        } else if (owner.timeManager.isRtcPresent()) {
             if (owner.timeManager.isRtcTimeUnset()) {
                 status = UiText::BootDiagTimeNotSet();
             } else if (owner.timeManager.isRtcLostPower()) {
@@ -409,7 +426,8 @@ void UiBootFlow::updateBootDiag(UiController &owner, uint32_t now_ms) {
         }
         owner.safe_label_set_text(objects.lbl_diag_rtc, status);
     }
-    if (owner.timeManager.isRtcPresent()) {
+    if (owner.timeManager.isRtcPresent() &&
+        !owner.timeManager.isRtcDetecting()) {
         if (owner.timeManager.isRtcTimeUnset()) {
             // New RTC modules can ship without a valid clock. NTP or manual set will initialize them.
         } else if (owner.timeManager.isRtcLostPower()) {

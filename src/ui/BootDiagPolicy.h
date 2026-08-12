@@ -10,8 +10,8 @@
 
 namespace BootDiagPolicy {
 
-inline bool sen66Pending(bool sensor_ok, bool sensor_busy, uint32_t retry_at_ms, uint32_t now_ms) {
-    return !sensor_ok && (sensor_busy || (retry_at_ms != 0 && now_ms < retry_at_ms));
+inline bool sen66Pending(bool sensor_ok, bool sensor_busy, bool startup_probe_pending) {
+    return !sensor_ok && (sensor_busy || startup_probe_pending);
 }
 
 inline bool shouldAutoAdvance(bool has_errors,

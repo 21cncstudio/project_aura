@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Arduino.h"
+#include "core/CooperativeStart.h"
 
 struct Sfa30TestState {
     enum class Status : uint8_t {
@@ -16,6 +17,13 @@ struct Sfa30TestState {
     bool probe_ok = false;
     bool probe_called = false;
     bool start_called = false;
+    uint8_t probe_call_count = 0;
+    uint8_t start_call_count = 0;
+    uint8_t late_start_begin_count = 0;
+    uint8_t late_start_poll_count = 0;
+    uint8_t late_start_polls_to_complete = 1;
+    bool late_start_active = false;
+    uint32_t poll_call_count = 0;
     bool warmup_active = false;
     float hcho_ppb = 0.0f;
     uint32_t last_data_ms = 0;
@@ -33,12 +41,32 @@ public:
     bool begin() { return true; }
     bool probe() {
         state().probe_called = true;
+        ++state().probe_call_count;
         return state().probe_ok;
     }
-    void start() { state().start_called = true; }
+    void start() {
+        state().start_called = true;
+        ++state().start_call_count;
+    }
+    void beginLateStart() {
+        ++state().late_start_begin_count;
+        state().late_start_poll_count = 0;
+        state().late_start_active = true;
+    }
+    CooperativeStart::Result pollLateStart(uint32_t) {
+        if (!state().late_start_active) return CooperativeStart::Result::Idle;
+        if (++state().late_start_poll_count < state().late_start_polls_to_complete) {
+            return CooperativeStart::Result::InProgress;
+        }
+        state().late_start_active = false;
+        return state().status == Status::Ok ? CooperativeStart::Result::Success
+                                            : CooperativeStart::Result::Failed;
+    }
+    bool isLateStartActive() const { return state().late_start_active; }
+    bool lateStartIdentified() const { return state().probe_ok; }
     void stop() {}
     bool readData(float &) { return false; }
-    void poll() {}
+    void poll() { ++state().poll_call_count; }
     bool isDataValid() const { return state().data_valid; }
     bool isOk() const { return state().status == Status::Ok; }
     bool isPresent() const { return state().status != Status::Absent; }

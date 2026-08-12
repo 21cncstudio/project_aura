@@ -23,6 +23,7 @@
 #include "core/NetworkCommandQueue.h"
 #include "core/NetworkPlane.h"
 #include "core/OtaRollback.h"
+#include "core/RuntimeI2cRecoveryPolicy.h"
 #include "core/RuntimeReadinessPolicy.h"
 #include "core/SafeRestart.h"
 #include "core/WebRuntimeState.h"
@@ -82,6 +83,9 @@ constexpr uint32_t TASK_WDT_TIMEOUT_MS = 180000;
 constexpr uint32_t OTA_UI_QUIESCE_DELAY_MS = 120;
 constexpr uint32_t OTA_UI_QUIESCE_WARN_MS = 2000;
 constexpr uint32_t OTA_TOUCH_BLOCK_MS = 15UL * 60UL * 1000UL;
+constexpr uint32_t RUNTIME_I2C_MONITOR_START_MS = 10UL * 1000UL;
+constexpr uint32_t SHARED_I2C_LVGL_QUIESCE_TIMEOUT_MS = 250U;
+constexpr uint32_t SHARED_I2C_OWNER_DRAIN_TIMEOUT_MS = 250U;
 
 bool night_mode = false;
 bool temp_units_c = true;
@@ -139,6 +143,8 @@ bool board_ready = false;
 bool i2c_runtime_ready = false;
 bool lvgl_ready = false;
 bool operational_ready = false;
+bool restart_task_ready = false;
+RuntimeI2cRecoveryPolicy::State runtime_i2c_recovery_policy;
 
 void quiesce_network_for_restart() {
     const wifi_mode_t wifi_mode = WiFi.getMode();
@@ -149,6 +155,127 @@ void quiesce_network_for_restart() {
     LOGI("OTA", "quiescing WiFi before restart");
     WiFi.disconnect(true, false);
     delay(250);
+}
+
+bool quiesce_lvgl_for_shared_i2c(const char *operation) {
+    const bool lvgl_task_active = lvgl_port_request_quiesce();
+    if (!lvgl_task_active || lvgl_port_is_paused()) {
+        return true;
+    }
+
+    const uint32_t pause_started_ms = millis();
+    while (!lvgl_port_is_paused() &&
+           static_cast<uint32_t>(millis() - pause_started_ms) <
+               SHARED_I2C_LVGL_QUIESCE_TIMEOUT_MS) {
+        delay(5);
+    }
+    if (!lvgl_port_is_paused()) {
+        Logger::log(Logger::Warn,
+                    "I2C",
+                    "LVGL cooperative pause timed out before %s",
+                    operation != nullptr ? operation : "shared-I2C write");
+        return false;
+    }
+    return true;
+}
+
+void disable_runtime_shared_i2c_owners() {
+    // Close every independent runtime entry point before waiting for LVGL.
+    // The touch gate is first so no new input callback can be generated while
+    // the remaining owners drain an already admitted bounded transaction.
+    i2c_runtime_ready = false;
+    lvgl_port_disable_touch_i2c();
+    timeManager.disableSharedI2cRuntime();
+    backlightManager.disableSharedBus();
+    sensorManager.disableSharedI2c();
+}
+
+bool drain_runtime_shared_i2c_owners() {
+    const bool touch_idle =
+        lvgl_port_finalize_touch_i2c_disable(SHARED_I2C_OWNER_DRAIN_TIMEOUT_MS);
+    const bool rtc_idle =
+        timeManager.finalizeSharedI2cRuntimeDisable(SHARED_I2C_OWNER_DRAIN_TIMEOUT_MS);
+    const bool backlight_idle =
+        backlightManager.waitForSharedBusIdle(SHARED_I2C_OWNER_DRAIN_TIMEOUT_MS);
+    const bool sensors_idle =
+        sensorManager.waitForSharedI2cIdle(SHARED_I2C_OWNER_DRAIN_TIMEOUT_MS);
+    if (!touch_idle || !rtc_idle || !backlight_idle || !sensors_idle) {
+        LOGE("I2C",
+             "shared-bus owner drain timed out (touch=%s rtc=%s backlight=%s sensors=%s)",
+             touch_idle ? "idle" : "busy",
+             rtc_idle ? "idle" : "busy",
+             backlight_idle ? "idle" : "busy",
+             sensors_idle ? "idle" : "busy");
+        return false;
+    }
+    return true;
+}
+
+void poll_runtime_i2c_recovery(uint32_t now_ms) {
+    if (!i2c_runtime_ready ||
+        static_cast<uint32_t>(now_ms - boot_start_ms) < RUNTIME_I2C_MONITOR_START_MS) {
+        return;
+    }
+
+    lvgl_port_diagnostics_t diagnostics = {};
+    const bool diagnostics_available =
+        lvgl_ready && uiController.isLvglReady() &&
+        lvgl_port_get_diagnostics(&diagnostics);
+    const bool touch_offline =
+        diagnostics_available && diagnostics.touch_offline;
+    const I2cBusRecovery::LineState lines = I2cBusRecovery::sample(
+        static_cast<gpio_num_t>(I2C_SDA_PIN),
+        static_cast<gpio_num_t>(I2C_SCL_PIN));
+    const RuntimeI2cRecoveryPolicy::Decision decision =
+        runtime_i2c_recovery_policy.poll(now_ms,
+                                         lines.idle(),
+                                         touch_offline,
+                                         boot_any_auto_recovery_boot(),
+                                         restart_task_ready);
+    if (runtime_i2c_recovery_policy.sharedBusFaultConfirmed() &&
+        i2c_runtime_ready) {
+        disable_runtime_shared_i2c_owners();
+
+        // Quiesce both restart and suppressed paths immediately. A controlled
+        // restart can be deferred by an active OTA upload, so leaving LVGL
+        // running here would otherwise reopen touch and direct UI I2C paths.
+        const bool lvgl_quiesced =
+            quiesce_lvgl_for_shared_i2c("runtime shared-I2C shutdown");
+        const bool owners_drained = drain_runtime_shared_i2c_owners();
+
+        // A suppressed recovery has no later restart shutdown path. Make one
+        // bounded best-effort attempt to clear retained DAC output, but only
+        // after LVGL confirmed it no longer owns the legacy I2C driver.
+        if (decision != RuntimeI2cRecoveryPolicy::Decision::Restart) {
+            if (!lvgl_quiesced || !owners_drained) {
+                LOGE("I2C", "DAC safe-output write skipped: shared-I2C owners still active");
+            } else if (!fanControl.prepareForI2cOffline()) {
+                LOGW("I2C", "DAC safe-output write failed before disabling shared-bus polling");
+            }
+        }
+        LOGE("I2C",
+             "shared bus lines remain stuck (SDA=%u, SCL=%u); disabling runtime I2C access",
+             lines.sda_high ? 1u : 0u,
+             lines.scl_high ? 1u : 0u);
+    }
+    if (decision == RuntimeI2cRecoveryPolicy::Decision::None) {
+        return;
+    }
+    if (decision != RuntimeI2cRecoveryPolicy::Decision::Restart) {
+        LOGE("I2C",
+             "runtime recovery suppressed: %s",
+             RuntimeI2cRecoveryPolicy::decisionText(decision));
+        return;
+    }
+
+    LOGE("I2C",
+         "runtime I2C fault detected (touch_offline=%s, shared_bus_stuck=%s, SDA=%u, SCL=%u); scheduling one controlled restart",
+         touch_offline ? "yes" : "no",
+         runtime_i2c_recovery_policy.sharedBusFaultConfirmed() ? "yes" : "no",
+         lines.sda_high ? 1u : 0u,
+         lines.scl_high ? 1u : 0u);
+    boot_mark_board_auto_recovery_reboot();
+    WebHandlersRequestRestart();
 }
 } // namespace
 
@@ -177,16 +304,21 @@ void setup()
     Watchdog::setup(TASK_WDT_TIMEOUT_MS);
 
     StorageManager::BootAction boot_action = AppInit::handleBootState();
+    const bool auto_recovery_boot = boot_any_auto_recovery_boot();
     BootDiagnostics::state = BootDiagnostics::Snapshot{};
     BootDiagnostics::state.reset_reason = boot_reset_reason;
-    BootDiagnostics::state.auto_recovery_boot =
-        boot_board_auto_recovery_reboot || boot_ui_auto_recovery_reboot;
-    const bool restart_task_ready = safe_restart_init();
+    BootDiagnostics::state.auto_recovery_boot = auto_recovery_boot;
+    restart_task_ready = safe_restart_init();
     if (!restart_task_ready) {
         LOGW("Restart", "Core0 restart task init failed; automatic recovery will be suppressed");
     }
 
-    BoardInit::Result board_result = BoardInit::initBoard(early_i2c_state);
+    const I2cBusRecovery::LineState pre_init_i2c_state = I2cBusRecovery::sample(
+        static_cast<gpio_num_t>(I2C_SDA_PIN),
+        static_cast<gpio_num_t>(I2C_SCL_PIN));
+    BoardInit::Result board_result = BoardInit::initBoard(early_i2c_state,
+                                                          pre_init_i2c_state,
+                                                          auto_recovery_boot);
     auto *board = board_result.board;
     board_ready = board_result.ready();
     i2c_runtime_ready = board_ready;
@@ -260,6 +392,13 @@ void setup()
 
     AppInit::initManagersAndConfig(init_ctx, boot_action);
     AppInit::initBoardAndPeripherals(init_ctx, board);
+    if (!i2c_runtime_ready) {
+        // Board initialization is the only path that opens these managers.
+        // Keep headless management services available without allowing a web
+        // or UI callback to probe a bus which never became operational.
+        disable_runtime_shared_i2c_owners();
+        (void)drain_runtime_shared_i2c_owners();
+    }
     sdCardManager.begin(board);
     dailyExtremaHistory.begin(sdCardManager, temp_units_c);
     networkManager.attachDailyHistory(sdCardManager, dailyExtremaHistory);
@@ -268,8 +407,6 @@ void setup()
     operational_ready = RuntimeReadinessPolicy::operational(board_ready, lvgl_ready);
     BootDiagnostics::state.lvgl_ready = lvgl_ready;
 
-    const bool auto_recovery_boot =
-        boot_board_auto_recovery_reboot || boot_ui_auto_recovery_reboot;
     const BoardRecoveryPolicy::Decision recovery_decision = BoardRecoveryPolicy::decide(
         board_ready,
         lvgl_ready,
@@ -293,9 +430,9 @@ void setup()
     }
     if (!lvgl_ready) {
         // lvgl_port_init() may have completed before UI startup failed. Make
-        // every headless path quiescent even when recovery is unavailable or
-        // has already been attempted.
-        lvgl_port_prepare_restart();
+        // every headless path request a cooperative pause. Do not force-stop a
+        // task before the controlled shutdown has made the shared-I2C DAC safe.
+        (void)lvgl_port_request_quiesce();
     }
     memoryMonitor.logNow("boot");
 
@@ -325,20 +462,33 @@ void loop()
             // A controlled restart confirms OTA only after display and UI reached
             // the operational state. Headless management access is intentionally
             // insufficient to validate a display firmware image.
-            const bool ui_auto_recovery_restart =
-                boot_ui_auto_recovery_restart_pending();
+            const bool auto_recovery_restart =
+                boot_ui_auto_recovery_restart_pending() ||
+                boot_board_auto_recovery_restart_pending();
             const bool ui_runtime_healthy = uiController.isLvglRuntimeHealthy();
-            if (ui_auto_recovery_restart) {
-                LOGW("OTA", "rollback validation withheld: automatic UI recovery restart");
+            if (auto_recovery_restart) {
+                LOGW("OTA", "rollback validation withheld: automatic recovery restart");
             } else if (RuntimeReadinessPolicy::canConfirmOta(
                            board_ready, lvgl_ready, ui_runtime_healthy)) {
                 OtaRollback::markValidIfPending("controlled_restart");
             } else {
                 LOGW("OTA", "rollback validation withheld: display runtime not operational");
             }
+            // Stop LVGL between handler iterations so touch cannot overlap
+            // the bounded DAC write on the shared I2C driver.
+            disable_runtime_shared_i2c_owners();
+            const bool lvgl_quiesced =
+                quiesce_lvgl_for_shared_i2c("DAC safe write for restart");
+            const bool owners_drained = drain_runtime_shared_i2c_owners();
+            if (!lvgl_quiesced || !owners_drained) {
+                LOGE("Restart", "DAC safe output skipped: shared-I2C owners still active");
+            } else if (!fanControl.prepareForRestart()) {
+                LOGW("Restart", "DAC safe output could not be confirmed before restart");
+            }
             dailyExtremaHistory.flush();
-            // This function is intentionally safe after a failed or only
-            // partially completed lvgl_port_init().
+            // This remains safe after a failed or only partially completed
+            // lvgl_port_init(). Forced suspension is last, after the bounded
+            // DAC transaction, so it cannot strand the I2C driver mutex.
             lvgl_port_prepare_restart();
             quiesce_network_for_restart();
             delay(50);
@@ -350,8 +500,12 @@ void loop()
     }
 
     const bool ota_busy = WebHandlersIsOtaBusy();
+    // Health may be false precisely because the port is paused, but a
+    // permanently disabled shared I2C bus must never be followed by an OTA
+    // resume that restarts touch traffic.
     const bool lvgl_runtime_available =
-        lvgl_ready && uiController.isLvglRuntimeHealthy();
+        RuntimeReadinessPolicy::canManageLvglRuntime(
+            i2c_runtime_ready, lvgl_ready, uiController.isLvglReady());
     const uint32_t loop_now = millis();
     if (ota_busy && !ota_window_active) {
         ota_window_active = true;
@@ -431,6 +585,8 @@ void loop()
         return;
     }
 
+    poll_runtime_i2c_recovery(millis());
+
     SensorManager::PollResult sensor_poll{};
     if (i2c_runtime_ready) {
         sensor_poll = sensorManager.poll(currentData, storage, pressureHistory, co2_asc_enabled);
@@ -459,7 +615,7 @@ void loop()
             LOGW("OTA", "rollback validation withheld: stable timer reached without healthy display runtime");
         }
     }
-    TimeManager::PollResult time_poll = timeManager.poll(now);
+    TimeManager::PollResult time_poll = timeManager.poll(now, i2c_runtime_ready);
     mqttManager.setSystemTimeValid(timeManager.isSystemTimeValid());
     uiController.onTimePoll(time_poll);
     if (sensor_poll.data_changed) {

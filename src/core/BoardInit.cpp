@@ -12,6 +12,8 @@
 #include <freertos/task.h>
 
 #include "BoardInitCallbacks.h"
+#include "config/AppConfig.h"
+#include "core/BoardInitPolicy.h"
 #include "core/BootState.h"
 #include "core/Logger.h"
 #include "lvgl_v8_port.h"
@@ -167,15 +169,47 @@ const char *stageText(Stage stage) {
     }
 }
 
-Result initBoard(const I2cBusRecovery::LineState &early_state) {
+Result initBoard(const I2cBusRecovery::LineState &early_state,
+                 const I2cBusRecovery::LineState &pre_init_state,
+                 bool auto_recovery_boot) {
     Result result{};
     result.rounds = 1;
     result.cold_power_start = boot_board_cold_start;
-    result.last_recovery = observeBus(early_state);
+    result.last_recovery = observeBus(pre_init_state);
     LOGI("Main",
          "Early I2C sample: SDA=%u SCL=%u",
          early_state.sda_high ? 1u : 0u,
          early_state.scl_high ? 1u : 0u);
+    LOGI("Main",
+         "Pre-init I2C sample: SDA=%u SCL=%u",
+         pre_init_state.sda_high ? 1u : 0u,
+         pre_init_state.scl_high ? 1u : 0u);
+    const BoardInitPolicy::PreInitI2cSamples recovery_samples{
+        early_state.sda_high,
+        early_state.scl_high,
+        pre_init_state.sda_high,
+        pre_init_state.scl_high,
+    };
+    if (BoardInitPolicy::shouldRecoverI2cBeforeInit(
+            auto_recovery_boot,
+            recovery_samples)) {
+        LOGW("Main", "Marked recovery boot found stuck I2C lines; applying one pre-init recovery");
+        result.last_recovery = I2cBusRecovery::recover(
+            static_cast<gpio_num_t>(Config::I2C_SDA_PIN),
+            static_cast<gpio_num_t>(Config::I2C_SCL_PIN));
+        LOGW("Main",
+             "Pre-init I2C recovery: status=%s pulses=%u SDA=%u SCL=%u",
+             I2cBusRecovery::statusText(result.last_recovery.status),
+             static_cast<unsigned>(result.last_recovery.pulses),
+             result.last_recovery.after.sda_high ? 1u : 0u,
+             result.last_recovery.after.scl_high ? 1u : 0u);
+        if (!result.last_recovery.busReady()) {
+            result.failure = Failure::BusStuck;
+            LOGE("Main", "I2C lines remain stuck after bounded recovery");
+            return result;
+        }
+        delay(5);
+    }
     if (result.cold_power_start) {
         boot_mark_board_power_settle_complete();
         LOGI("Main", "Cold power start: using vendor board init without an I2C pre-probe");

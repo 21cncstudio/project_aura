@@ -15,6 +15,15 @@
 
 namespace {
 
+constexpr uint8_t kBmp3xxErrReservedMask = 0xF8;
+constexpr uint8_t kBmp3xxPwrCtrlReservedMask = 0xCC;
+constexpr uint8_t kBmp3xxOsrReservedMask = 0xC0;
+constexpr uint8_t kBmp3xxOdrReservedMask = 0xE0;
+
+bool deadlineReached(uint32_t now_ms, uint32_t deadline_ms) {
+    return static_cast<int32_t>(now_ms - deadline_ms) >= 0;
+}
+
 uint16_t readU16Le(const uint8_t *buf) {
     return static_cast<uint16_t>(buf[0]) |
            (static_cast<uint16_t>(buf[1]) << 8);
@@ -53,6 +62,9 @@ bool Bmp3xx::begin() {
     pressure_valid_ = false;
     has_new_data_ = false;
     variant_ = Variant::Unknown;
+    late_start_phase_ = LateStartPhase::Idle;
+    late_start_due_ms_ = 0;
+    late_start_deadline_ms_ = 0;
     return true;
 }
 
@@ -305,6 +317,234 @@ bool Bmp3xx::start() {
     no_data_since_ms_ = 0;
     last_data_ms_ = 0;
     return true;
+}
+
+void Bmp3xx::beginLateStart() {
+    addr_ = 0;
+    variant_ = Variant::Unknown;
+    ok_ = false;
+    late_start_due_ms_ = 0;
+    late_start_deadline_ms_ = 0;
+    late_start_phase_ = LateStartPhase::DetectPrimaryChip;
+}
+
+bool Bmp3xx::lateDetectRead(uint8_t addr,
+                            uint8_t reg,
+                            uint8_t reserved_mask,
+                            LateStartPhase next_phase,
+                            LateStartPhase fallback_phase) {
+    addr_ = addr;
+    uint8_t value = 0;
+    if (!readU8(reg, value) || (value & reserved_mask) != 0U) {
+        variant_ = Variant::Unknown;
+        late_start_phase_ = fallback_phase;
+        return false;
+    }
+    late_start_phase_ = next_phase;
+    return true;
+}
+
+CooperativeStart::Result Bmp3xx::finishLateStart(bool success) {
+    late_start_phase_ = LateStartPhase::Idle;
+    if (!success) {
+        ok_ = false;
+        return CooperativeStart::Result::Failed;
+    }
+    ok_ = true;
+    pressure_valid_ = false;
+    pressure_has_ = false;
+    has_new_data_ = false;
+    no_data_since_ms_ = 0;
+    last_data_ms_ = 0;
+    return CooperativeStart::Result::Success;
+}
+
+CooperativeStart::Result Bmp3xx::pollLateStart(uint32_t now_ms) {
+    auto detect_chip = [this](uint8_t addr,
+                              LateStartPhase next_phase,
+                              LateStartPhase fallback_phase) {
+        addr_ = addr;
+        uint8_t chip_id = 0;
+        if (!readU8(Config::BMP3XX_REG_CHIP_ID, chip_id)) {
+            variant_ = Variant::Unknown;
+            late_start_phase_ = fallback_phase;
+            return;
+        }
+        if (chip_id == Config::BMP3XX_CHIP_ID_BMP388) {
+            variant_ = Variant::BMP388;
+        } else if (chip_id == Config::BMP3XX_CHIP_ID_BMP390) {
+            variant_ = Variant::BMP390;
+        } else {
+            variant_ = Variant::Unknown;
+            late_start_phase_ = fallback_phase;
+            return;
+        }
+        late_start_phase_ = next_phase;
+    };
+
+    switch (late_start_phase_) {
+        case LateStartPhase::Idle:
+            return CooperativeStart::Result::Idle;
+        case LateStartPhase::DetectPrimaryChip:
+            detect_chip(Config::BMP3XX_ADDR_PRIMARY,
+                        LateStartPhase::DetectPrimaryErr,
+                        LateStartPhase::DetectAltChip);
+            return CooperativeStart::Result::InProgress;
+        case LateStartPhase::DetectPrimaryErr:
+            lateDetectRead(Config::BMP3XX_ADDR_PRIMARY, Config::BMP3XX_REG_ERR,
+                           kBmp3xxErrReservedMask, LateStartPhase::DetectPrimaryPower,
+                           LateStartPhase::DetectAltChip);
+            return CooperativeStart::Result::InProgress;
+        case LateStartPhase::DetectPrimaryPower:
+            lateDetectRead(Config::BMP3XX_ADDR_PRIMARY, Config::BMP3XX_REG_PWR_CTRL,
+                           kBmp3xxPwrCtrlReservedMask, LateStartPhase::DetectPrimaryOsr,
+                           LateStartPhase::DetectAltChip);
+            return CooperativeStart::Result::InProgress;
+        case LateStartPhase::DetectPrimaryOsr:
+            lateDetectRead(Config::BMP3XX_ADDR_PRIMARY, Config::BMP3XX_REG_OSR,
+                           kBmp3xxOsrReservedMask, LateStartPhase::DetectPrimaryOdr,
+                           LateStartPhase::DetectAltChip);
+            return CooperativeStart::Result::InProgress;
+        case LateStartPhase::DetectPrimaryOdr:
+            lateDetectRead(Config::BMP3XX_ADDR_PRIMARY, Config::BMP3XX_REG_ODR,
+                           kBmp3xxOdrReservedMask, LateStartPhase::SoftReset,
+                           LateStartPhase::DetectAltChip);
+            if (late_start_phase_ == LateStartPhase::SoftReset) {
+                Logger::log(Logger::Info, "BMP3xx", "%s found at 0x%02X",
+                            variantLabel(), static_cast<unsigned>(Config::BMP3XX_ADDR_PRIMARY));
+            }
+            return CooperativeStart::Result::InProgress;
+        case LateStartPhase::DetectAltChip:
+            detect_chip(Config::BMP3XX_ADDR_ALT,
+                        LateStartPhase::DetectAltErr,
+                        LateStartPhase::Idle);
+            if (late_start_phase_ == LateStartPhase::Idle) {
+                return finishLateStart(false);
+            }
+            return CooperativeStart::Result::InProgress;
+        case LateStartPhase::DetectAltErr:
+            lateDetectRead(Config::BMP3XX_ADDR_ALT, Config::BMP3XX_REG_ERR,
+                           kBmp3xxErrReservedMask, LateStartPhase::DetectAltPower,
+                           LateStartPhase::Idle);
+            return late_start_phase_ == LateStartPhase::Idle
+                       ? finishLateStart(false)
+                       : CooperativeStart::Result::InProgress;
+        case LateStartPhase::DetectAltPower:
+            lateDetectRead(Config::BMP3XX_ADDR_ALT, Config::BMP3XX_REG_PWR_CTRL,
+                           kBmp3xxPwrCtrlReservedMask, LateStartPhase::DetectAltOsr,
+                           LateStartPhase::Idle);
+            return late_start_phase_ == LateStartPhase::Idle
+                       ? finishLateStart(false)
+                       : CooperativeStart::Result::InProgress;
+        case LateStartPhase::DetectAltOsr:
+            lateDetectRead(Config::BMP3XX_ADDR_ALT, Config::BMP3XX_REG_OSR,
+                           kBmp3xxOsrReservedMask, LateStartPhase::DetectAltOdr,
+                           LateStartPhase::Idle);
+            return late_start_phase_ == LateStartPhase::Idle
+                       ? finishLateStart(false)
+                       : CooperativeStart::Result::InProgress;
+        case LateStartPhase::DetectAltOdr:
+            lateDetectRead(Config::BMP3XX_ADDR_ALT, Config::BMP3XX_REG_ODR,
+                           kBmp3xxOdrReservedMask, LateStartPhase::SoftReset,
+                           LateStartPhase::Idle);
+            if (late_start_phase_ == LateStartPhase::Idle) {
+                return finishLateStart(false);
+            }
+            Logger::log(Logger::Info, "BMP3xx", "%s found at 0x%02X",
+                        variantLabel(), static_cast<unsigned>(Config::BMP3XX_ADDR_ALT));
+            return CooperativeStart::Result::InProgress;
+        case LateStartPhase::SoftReset:
+            if (!writeU8(Config::BMP3XX_REG_CMD, Config::BMP3XX_CMD_SOFT_RESET)) {
+                return finishLateStart(false);
+            }
+            late_start_due_ms_ = millis() + 5U;
+            late_start_phase_ = LateStartPhase::WaitReset;
+            return CooperativeStart::Result::InProgress;
+        case LateStartPhase::WaitReset:
+            if (!deadlineReached(now_ms, late_start_due_ms_)) {
+                return CooperativeStart::Result::InProgress;
+            }
+            late_start_deadline_ms_ = now_ms + 20U;
+            late_start_phase_ = LateStartPhase::WaitCmdReady;
+            return CooperativeStart::Result::InProgress;
+        case LateStartPhase::WaitCmdReady: {
+            uint8_t status = 0;
+            if (readU8(Config::BMP3XX_REG_STATUS, status) &&
+                (status & Config::BMP3XX_STATUS_CMD_RDY) != 0U) {
+                late_start_phase_ = LateStartPhase::ReadCalibration;
+                return CooperativeStart::Result::InProgress;
+            }
+            if (deadlineReached(now_ms, late_start_deadline_ms_)) {
+                return finishLateStart(false);
+            }
+            return CooperativeStart::Result::InProgress;
+        }
+        case LateStartPhase::ReadCalibration:
+            if (!readCalibration()) {
+                return finishLateStart(false);
+            }
+            late_start_phase_ = LateStartPhase::WriteOsr;
+            return CooperativeStart::Result::InProgress;
+        case LateStartPhase::WriteOsr: {
+            const uint8_t osr =
+                static_cast<uint8_t>(Config::BMP3XX_PRESS_OS_4X & 0x07) |
+                static_cast<uint8_t>((Config::BMP3XX_TEMP_OS_2X & 0x07) << 3);
+            if (!writeU8(Config::BMP3XX_REG_OSR, osr)) {
+                return finishLateStart(false);
+            }
+            late_start_phase_ = LateStartPhase::WriteOdr;
+            return CooperativeStart::Result::InProgress;
+        }
+        case LateStartPhase::WriteOdr:
+            if (!writeU8(Config::BMP3XX_REG_ODR, Config::BMP3XX_ODR_0P78_HZ & 0x1F)) {
+                return finishLateStart(false);
+            }
+            late_start_phase_ = LateStartPhase::WriteConfig;
+            return CooperativeStart::Result::InProgress;
+        case LateStartPhase::WriteConfig: {
+            const uint8_t config =
+                static_cast<uint8_t>((Config::BMP3XX_IIR_BYPASS & 0x07) << 1);
+            if (!writeU8(Config::BMP3XX_REG_CONFIG, config)) {
+                return finishLateStart(false);
+            }
+            late_start_phase_ = LateStartPhase::WritePower;
+            return CooperativeStart::Result::InProgress;
+        }
+        case LateStartPhase::WritePower: {
+            const uint8_t power =
+                static_cast<uint8_t>(Config::BMP3XX_PRESS_EN |
+                                     Config::BMP3XX_TEMP_EN |
+                                     ((Config::BMP3XX_MODE_NORMAL & 0x03) << 4));
+            if (!writeU8(Config::BMP3XX_REG_PWR_CTRL, power)) {
+                return finishLateStart(false);
+            }
+            late_start_due_ms_ = millis() + 2U;
+            late_start_phase_ = LateStartPhase::WaitConfig;
+            return CooperativeStart::Result::InProgress;
+        }
+        case LateStartPhase::WaitConfig:
+            if (!deadlineReached(now_ms, late_start_due_ms_)) {
+                return CooperativeStart::Result::InProgress;
+            }
+            late_start_phase_ = LateStartPhase::ReadError;
+            return CooperativeStart::Result::InProgress;
+        case LateStartPhase::ReadError: {
+            uint8_t err = 0;
+            if (!readU8(Config::BMP3XX_REG_ERR, err)) {
+                return finishLateStart(false);
+            }
+            if ((err & (Config::BMP3XX_ERR_FATAL |
+                        Config::BMP3XX_ERR_CMD |
+                        Config::BMP3XX_ERR_CONF)) != 0U) {
+                Logger::log(Logger::Warn, "BMP3xx", "%s config error 0x%02X",
+                            variantLabel(), static_cast<unsigned>(err));
+                return finishLateStart(false);
+            }
+            return finishLateStart(true);
+        }
+        default:
+            return finishLateStart(false);
+    }
 }
 
 void Bmp3xx::tryRecover(uint32_t now, const char *reason) {

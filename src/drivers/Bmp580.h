@@ -6,6 +6,7 @@
 
 #pragma once
 #include <Arduino.h>
+#include "core/CooperativeStart.h"
 
 class Bmp580 {
 public:
@@ -17,6 +18,9 @@ public:
 
     bool begin();
     bool start();
+    void beginLateStart();
+    CooperativeStart::Result pollLateStart(uint32_t now_ms);
+    bool isLateStartActive() const { return late_start_phase_ != LateStartPhase::Idle; }
     void poll();
     bool takeNewData(float &pressure_hpa, float &temperature_c);
     bool isOk() const { return ok_; }
@@ -27,6 +31,21 @@ public:
     void invalidate();
 
 private:
+    enum class LateStartPhase : uint8_t {
+        Idle = 0,
+        DetectPrimary,
+        DetectAlt,
+        SoftReset,
+        WaitReset,
+        WaitNvm,
+        WriteOsr,
+        ReadIir,
+        WriteIir,
+        ReadOdr,
+        WriteOdr,
+    };
+
+    CooperativeStart::Result finishLateStart(bool success);
     bool detect(uint8_t addr);
     bool writeU8(uint8_t reg, uint8_t value);
     bool readBytes(uint8_t reg, uint8_t *buf, size_t len);
@@ -53,4 +72,8 @@ private:
     bool pressure_valid_ = false;
     bool has_new_data_ = false;
     Variant variant_ = Variant::Unknown;
+    LateStartPhase late_start_phase_ = LateStartPhase::Idle;
+    uint32_t late_start_due_ms_ = 0;
+    uint32_t late_start_deadline_ms_ = 0;
+    uint8_t late_start_reg_value_ = 0;
 };

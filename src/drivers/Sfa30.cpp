@@ -19,6 +19,10 @@ bool sfa30StateUnknownAfterBoot() {
     return boot_reset_reason != ESP_RST_POWERON;
 }
 
+bool deadlineReached(uint32_t now_ms, uint32_t deadline_ms) {
+    return static_cast<int32_t>(now_ms - deadline_ms) >= 0;
+}
+
 } // namespace
 
 bool Sfa30::begin() {
@@ -35,6 +39,9 @@ bool Sfa30::begin() {
     fail_count_ = 0;
     status_ = Status::Absent;
     last_error_cause_ = ErrorCause::None;
+    late_start_phase_ = LateStartPhase::Idle;
+    late_start_due_ms_ = 0;
+    late_start_identified_ = false;
     return true;
 }
 
@@ -85,6 +92,108 @@ void Sfa30::start() {
     ok_ = true;
     status_ = Status::Ok;
     last_error_cause_ = ErrorCause::None;
+}
+
+void Sfa30::beginLateStart() {
+    ok_ = false;
+    status_ = Status::Absent;
+    data_valid_ = false;
+    has_new_data_ = false;
+    late_start_identified_ = false;
+    late_start_due_ms_ = 0;
+    late_start_phase_ = LateStartPhase::Ping;
+}
+
+CooperativeStart::Result Sfa30::finishLateStart(bool success) {
+    late_start_phase_ = LateStartPhase::Idle;
+    if (!success) {
+        ok_ = false;
+        return CooperativeStart::Result::Failed;
+    }
+    measuring_ = true;
+    measurement_state_unknown_ = false;
+    ok_ = true;
+    status_ = Status::Ok;
+    last_error_cause_ = ErrorCause::None;
+    return CooperativeStart::Result::Success;
+}
+
+CooperativeStart::Result Sfa30::pollLateStart(uint32_t now_ms) {
+    switch (late_start_phase_) {
+        case LateStartPhase::Idle:
+            return CooperativeStart::Result::Idle;
+        case LateStartPhase::Ping:
+            if (!pingAddress()) {
+                status_ = Status::Absent;
+                last_error_cause_ = ErrorCause::None;
+                return finishLateStart(false);
+            }
+            late_start_phase_ = LateStartPhase::WriteDetect;
+            return CooperativeStart::Result::InProgress;
+        case LateStartPhase::WriteDetect:
+            if (!writeCmd(Config::SFA30_CMD_GET_DEVICE_MARKING)) {
+                status_ = Status::Fault;
+                last_error_cause_ = ErrorCause::ReadCommand;
+                return finishLateStart(false);
+            }
+            late_start_due_ms_ = millis() + Config::SFA3X_READ_DELAY_MS;
+            late_start_phase_ = LateStartPhase::WaitDetect;
+            return CooperativeStart::Result::InProgress;
+        case LateStartPhase::WaitDetect:
+            if (deadlineReached(now_ms, late_start_due_ms_)) {
+                late_start_phase_ = LateStartPhase::ReadDetect;
+            }
+            return CooperativeStart::Result::InProgress;
+        case LateStartPhase::ReadDetect: {
+            uint8_t buf[48] = {};
+            if (!readBytes(buf, sizeof(buf))) {
+                status_ = Status::Fault;
+                last_error_cause_ = ErrorCause::ReadBytes;
+                return finishLateStart(false);
+            }
+            if (!parseDeviceMarking(buf, sizeof(buf))) {
+                status_ = Status::Fault;
+                return finishLateStart(false);
+            }
+            late_start_identified_ = true;
+            status_ = Status::Fault;
+            late_start_phase_ = measurement_state_unknown_
+                ? LateStartPhase::StopUnknown
+                : LateStartPhase::WriteStart;
+            return CooperativeStart::Result::InProgress;
+        }
+        case LateStartPhase::StopUnknown:
+            LOGI(label(), "forcing idle after warm restart");
+            if (!writeCmd(Config::SFA3X_CMD_STOP)) {
+                last_error_cause_ = ErrorCause::WarmRestartStop;
+                return finishLateStart(false);
+            }
+            late_start_due_ms_ = millis() + Config::SFA3X_STOP_DELAY_MS;
+            late_start_phase_ = LateStartPhase::WaitStop;
+            return CooperativeStart::Result::InProgress;
+        case LateStartPhase::WaitStop:
+            if (deadlineReached(now_ms, late_start_due_ms_)) {
+                measuring_ = false;
+                measurement_state_unknown_ = false;
+                late_start_phase_ = LateStartPhase::WriteStart;
+            }
+            return CooperativeStart::Result::InProgress;
+        case LateStartPhase::WriteStart:
+            if (!writeCmd(Config::SFA3X_CMD_START)) {
+                last_error_cause_ = ErrorCause::StartCommand;
+                return finishLateStart(false);
+            }
+            late_start_due_ms_ = millis() + Config::SFA3X_START_DELAY_MS;
+            late_start_phase_ = LateStartPhase::WaitStart;
+            return CooperativeStart::Result::InProgress;
+        case LateStartPhase::WaitStart:
+            if (!deadlineReached(now_ms, late_start_due_ms_)) {
+                return CooperativeStart::Result::InProgress;
+            }
+            return finishLateStart(true);
+        default:
+            return finishLateStart(false);
+    }
 }
 
 bool Sfa30::isWarmupActive() const {
@@ -207,6 +316,44 @@ bool Sfa30::detectSensor() {
         return false;
     }
 
+    last_error_cause_ = ErrorCause::None;
+    return true;
+}
+
+bool Sfa30::parseDeviceMarking(const uint8_t *buf, size_t len) {
+    if (!buf || len != 48U) {
+        last_error_cause_ = ErrorCause::DetectSensor;
+        return false;
+    }
+
+    bool seen_terminator = false;
+    bool seen_printable = false;
+    for (size_t offset = 0; offset < len; offset += 3U) {
+        if (I2C::crc8(&buf[offset], 2) != buf[offset + 2]) {
+            last_error_cause_ = ErrorCause::ReadCrc;
+            return false;
+        }
+        for (size_t byte_index = 0; byte_index < 2U; ++byte_index) {
+            const uint8_t byte = buf[offset + byte_index];
+            if (seen_terminator) {
+                if (byte != 0U) {
+                    last_error_cause_ = ErrorCause::DetectSensor;
+                    return false;
+                }
+            } else if (byte == 0U) {
+                seen_terminator = true;
+            } else if (byte < 0x20U || byte > 0x7EU) {
+                last_error_cause_ = ErrorCause::DetectSensor;
+                return false;
+            } else {
+                seen_printable = true;
+            }
+        }
+    }
+    if (!seen_printable) {
+        last_error_cause_ = ErrorCause::DetectSensor;
+        return false;
+    }
     last_error_cause_ = ErrorCause::None;
     return true;
 }

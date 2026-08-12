@@ -6,6 +6,7 @@
 
 #pragma once
 #include <Arduino.h>
+#include "core/CooperativeStart.h"
 
 class Bmp3xx {
 public:
@@ -17,6 +18,9 @@ public:
 
     bool begin();
     bool start();
+    void beginLateStart();
+    CooperativeStart::Result pollLateStart(uint32_t now_ms);
+    bool isLateStartActive() const { return late_start_phase_ != LateStartPhase::Idle; }
     void poll();
     bool takeNewData(float &pressure_hpa, float &temperature_c);
     bool isOk() const { return ok_; }
@@ -27,6 +31,33 @@ public:
     void invalidate();
 
 private:
+    enum class LateStartPhase : uint8_t {
+        Idle = 0,
+        DetectPrimaryChip,
+        DetectPrimaryErr,
+        DetectPrimaryPower,
+        DetectPrimaryOsr,
+        DetectPrimaryOdr,
+        DetectAltChip,
+        DetectAltErr,
+        DetectAltPower,
+        DetectAltOsr,
+        DetectAltOdr,
+        SoftReset,
+        WaitReset,
+        WaitCmdReady,
+        ReadCalibration,
+        WriteOsr,
+        WriteOdr,
+        WriteConfig,
+        WritePower,
+        WaitConfig,
+        ReadError,
+    };
+
+    bool lateDetectRead(uint8_t addr, uint8_t reg, uint8_t reserved_mask,
+                        LateStartPhase next_phase, LateStartPhase fallback_phase);
+    CooperativeStart::Result finishLateStart(bool success);
     struct Calibration {
         double par_t1 = 0.0;
         double par_t2 = 0.0;
@@ -74,4 +105,7 @@ private:
     bool pressure_valid_ = false;
     bool has_new_data_ = false;
     Variant variant_ = Variant::Unknown;
+    LateStartPhase late_start_phase_ = LateStartPhase::Idle;
+    uint32_t late_start_due_ms_ = 0;
+    uint32_t late_start_deadline_ms_ = 0;
 };

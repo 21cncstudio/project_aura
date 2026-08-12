@@ -26,6 +26,8 @@ public:
     void savePrefs(StorageManager &storage);
 
     bool setOn(bool on);
+    void disableSharedBus();
+    bool waitForSharedBusIdle(uint32_t timeout_ms);
     bool isOn() const { return backlight_on_; }
     uint32_t commandFailureCount() const { return command_failure_count_; }
 
@@ -49,14 +51,17 @@ public:
 
 private:
     uint32_t normalizeTimeoutMs(uint32_t timeout_ms) const;
+    bool setOnWithGateHeld(bool on);
     void storeSchedulePrefs();
     void refreshSchedule();
+    void refreshScheduleWithGateHeld();
     void consumeInput();
 
     esp_panel::drivers::Backlight *panel_backlight_ = nullptr;
     bool backlight_on_ = true;
     uint32_t command_failure_count_ = 0;
     BacklightStatePolicy::PendingCommand pending_command_;
+    BacklightStatePolicy::RuntimeGate runtime_gate_;
     uint32_t backlight_timeout_ms_ = 0;
     bool schedule_enabled_ = false;
     bool alarm_wake_enabled_ = false;

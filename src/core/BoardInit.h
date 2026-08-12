@@ -53,7 +53,9 @@ struct Result {
     bool ready() const { return board != nullptr && failure == Failure::None; }
 };
 
-Result initBoard(const I2cBusRecovery::LineState &early_state);
+Result initBoard(const I2cBusRecovery::LineState &early_state,
+                 const I2cBusRecovery::LineState &pre_init_state,
+                 bool auto_recovery_boot);
 void noteStage(Stage stage);
 const char *failureText(Failure failure);
 const char *stageText(Stage stage);

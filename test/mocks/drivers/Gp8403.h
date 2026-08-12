@@ -11,6 +11,8 @@ struct Gp8403TestState {
     uint32_t probe_calls = 0;
     uint32_t range_calls = 0;
     uint32_t write_calls = 0;
+    uint8_t last_write_channel = 0;
+    uint16_t last_write_mv = 0;
 };
 
 class Gp8403 {
@@ -36,8 +38,10 @@ public:
         ++state().write_calls;
         return state().write_ok;
     }
-    bool writeChannelMillivolts(uint8_t, uint16_t) {
+    bool writeChannelMillivolts(uint8_t channel, uint16_t millivolts) {
         ++state().write_calls;
+        state().last_write_channel = channel;
+        state().last_write_mv = millivolts;
         return state().write_ok;
     }
 };

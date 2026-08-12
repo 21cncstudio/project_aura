@@ -140,6 +140,9 @@ extern "C" {
  * @param lcd The pointer to the LCD panel device, mustn't be nullptr
  * @param tp  The pointer to the touch panel device, set to nullptr if is not used
  *
+ * If initialization fails, all timers, callbacks and partially registered
+ * LVGL resources created by this call are released before returning.
+ *
  * @return true if success, otherwise false
  */
 bool lvgl_port_init(esp_panel::drivers::LCD *lcd, esp_panel::drivers::Touch *tp);
@@ -188,6 +191,17 @@ bool lvgl_port_resume(void);
  * @return true if the request was accepted
  */
 bool lvgl_port_request_resume(void);
+
+/**
+ * @brief Begin a non-forcing LVGL shutdown.
+ *
+ * Requests a cooperative pause but keeps the task handle, callbacks and timers
+ * intact. This must be used before shared-I2C shutdown work so a task is never
+ * force-suspended while it may own the bus.
+ *
+ * @return true when an LVGL task exists and was asked to pause
+ */
+bool lvgl_port_request_quiesce(void);
 
 /**
  * @brief Prepare LVGL port for immediate system restart.
@@ -250,6 +264,23 @@ bool lvgl_port_get_screen_flip_180(void);
 bool lvgl_port_block_touch_read(uint32_t duration_ms);
 
 /**
+ * @brief Permanently disable touch-controller I2C traffic for this boot.
+ *
+ * The gate is reset only by a new lvgl_port_init() lifecycle. Once disabled,
+ * the input callback returns RELEASED before normal reads, wake probing, or
+ * soft recovery can access the shared bus.
+ */
+void lvgl_port_disable_touch_i2c(void);
+
+/**
+ * @brief Bounded drain and state cleanup after touch I2C is disabled.
+ *
+ * @param timeout_ms Maximum time to wait for an already admitted callback.
+ * @return true when the gate became idle and touch state was finalized.
+ */
+bool lvgl_port_finalize_touch_i2c_disable(uint32_t timeout_ms);
+
+/**
  * @brief Enable/disable wake-touch probe mode.
  *
  * In probe mode touch reads do not generate LVGL pressed events.
@@ -281,6 +312,7 @@ typedef struct {
     bool display_sync_fault;
     uint32_t lock_fail_count;
     uint32_t touch_read_error_count;
+    bool touch_offline;
     bool paused;
 } lvgl_port_diagnostics_t;
 

@@ -53,6 +53,40 @@ void test_cold_power_settle_skips_warm_start_or_completed_window() {
                              BoardInitPolicy::coldPowerSettleDelayMs(true, 15000, 10000));
 }
 
+void test_i2c_gpio_recovery_is_only_used_on_marked_recovery_boot() {
+    BoardInitPolicy::PreInitI2cSamples samples{};
+    samples.pre_init_sda_high = false;
+    samples.pre_init_scl_high = true;
+    TEST_ASSERT_TRUE(BoardInitPolicy::shouldRecoverI2cBeforeInit(true, samples));
+
+    samples.pre_init_sda_high = true;
+    samples.pre_init_scl_high = false;
+    TEST_ASSERT_TRUE(BoardInitPolicy::shouldRecoverI2cBeforeInit(true, samples));
+
+    samples.pre_init_sda_high = true;
+    samples.pre_init_scl_high = true;
+    TEST_ASSERT_FALSE(BoardInitPolicy::shouldRecoverI2cBeforeInit(true, samples));
+
+    samples.pre_init_sda_high = false;
+    samples.pre_init_scl_high = false;
+    TEST_ASSERT_FALSE(BoardInitPolicy::shouldRecoverI2cBeforeInit(false, samples));
+}
+
+void test_i2c_recovery_decision_uses_fresh_pre_init_sample_not_early_diagnostic() {
+    BoardInitPolicy::PreInitI2cSamples samples{};
+    samples.early_diagnostic_sda_high = false;
+    samples.early_diagnostic_scl_high = false;
+    samples.pre_init_sda_high = true;
+    samples.pre_init_scl_high = true;
+    TEST_ASSERT_FALSE(BoardInitPolicy::shouldRecoverI2cBeforeInit(true, samples));
+
+    samples.early_diagnostic_sda_high = true;
+    samples.early_diagnostic_scl_high = true;
+    samples.pre_init_sda_high = false;
+    samples.pre_init_scl_high = true;
+    TEST_ASSERT_TRUE(BoardInitPolicy::shouldRecoverI2cBeforeInit(true, samples));
+}
+
 int main(int, char **) {
     UNITY_BEGIN();
     RUN_TEST(test_success_returns_without_cleanup);
@@ -62,5 +96,7 @@ int main(int, char **) {
     RUN_TEST(test_timeout_always_aborts_without_destructor_or_retry);
     RUN_TEST(test_cold_power_settle_waits_only_for_remaining_cold_start_window);
     RUN_TEST(test_cold_power_settle_skips_warm_start_or_completed_window);
+    RUN_TEST(test_i2c_gpio_recovery_is_only_used_on_marked_recovery_boot);
+    RUN_TEST(test_i2c_recovery_decision_uses_fresh_pre_init_sample_not_early_diagnostic);
     return UNITY_END();
 }

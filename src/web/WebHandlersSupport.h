@@ -43,8 +43,8 @@ bool shouldPauseMqttForTransfer();
 void noteMqttConnectDeferred();
 void noteMqttPublishDeferred();
 void pollDeferred();
-bool allowOtaPhysicalConfirm();
-bool denyOtaPhysicalConfirm();
+bool allowOtaPhysicalConfirm(uint32_t expected_confirm_id);
+bool denyOtaPhysicalConfirm(uint32_t expected_confirm_id);
 
 WebOtaSnapshot otaSnapshotForHttpRequest();
 WebTransferSnapshot streamSnapshot(uint32_t now_ms);

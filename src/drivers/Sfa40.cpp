@@ -22,6 +22,10 @@ bool sfa40StateUnknownAfterBoot() {
     return boot_reset_reason != ESP_RST_POWERON;
 }
 
+bool deadlineReached(uint32_t now_ms, uint32_t deadline_ms) {
+    return static_cast<int32_t>(now_ms - deadline_ms) >= 0;
+}
+
 float decodeHumidityPercent(uint16_t raw) {
     float humidity = 125.0f * (static_cast<float>(raw) / 65535.0f) - 6.0f;
     if (humidity < 0.0f) {
@@ -79,6 +83,9 @@ bool Sfa40::begin() {
     last_status_reserved_ = 0;
     last_humidity_percent_ = 0.0f;
     last_temperature_c_ = 0.0f;
+    late_start_phase_ = LateStartPhase::Idle;
+    late_start_due_ms_ = 0;
+    late_start_command_ms_ = 0;
     return true;
 }
 
@@ -147,6 +154,150 @@ void Sfa40::start() {
     start_ms_ = start_command_ms;
     first_ready_ms_ = 0;
     first_within_spec_ms_ = 0;
+}
+
+void Sfa40::beginLateStart() {
+    ok_ = false;
+    status_ = Status::Absent;
+    data_valid_ = false;
+    has_new_data_ = false;
+    warmup_active_ = false;
+    serial_valid_ = false;
+    late_start_due_ms_ = 0;
+    late_start_command_ms_ = 0;
+    late_start_phase_ = LateStartPhase::Ping;
+}
+
+CooperativeStart::Result Sfa40::finishLateStart(bool success, uint32_t now_ms) {
+    (void)now_ms;
+    late_start_phase_ = LateStartPhase::Idle;
+    if (!success) {
+        ok_ = false;
+        return CooperativeStart::Result::Failed;
+    }
+    measuring_ = true;
+    measurement_state_unknown_ = false;
+    warmup_active_ = true;
+    selftest_active_ = false;
+    ok_ = true;
+    status_ = Status::Ok;
+    last_error_cause_ = ErrorCause::None;
+    last_poll_ms_ = late_start_command_ms_;
+    next_measurement_read_ms_ =
+        late_start_command_ms_ + Config::SFA40_FIRST_READ_DELAY_MS;
+    start_ms_ = late_start_command_ms_;
+    first_ready_ms_ = 0;
+    first_within_spec_ms_ = 0;
+    return CooperativeStart::Result::Success;
+}
+
+CooperativeStart::Result Sfa40::pollLateStart(uint32_t now_ms) {
+    switch (late_start_phase_) {
+        case LateStartPhase::Idle:
+            return CooperativeStart::Result::Idle;
+        case LateStartPhase::Ping:
+            if (!pingAddress()) {
+                status_ = Status::Absent;
+                last_error_cause_ = ErrorCause::None;
+                return finishLateStart(false, now_ms);
+            }
+            late_start_phase_ = measurement_state_unknown_
+                ? LateStartPhase::StopBeforeDetect
+                : LateStartPhase::WriteId;
+            return CooperativeStart::Result::InProgress;
+        case LateStartPhase::StopBeforeDetect:
+            LOGI(label(), "forcing idle before detect after warm restart");
+            if (!writeCmd(Config::SFA40_CMD_STOP)) {
+                status_ = Status::Fault;
+                last_error_cause_ = ErrorCause::WarmRestartStop;
+                return finishLateStart(false, now_ms);
+            }
+            late_start_due_ms_ = millis() + Config::SFA3X_STOP_DELAY_MS;
+            late_start_phase_ = LateStartPhase::WaitStopBeforeDetect;
+            return CooperativeStart::Result::InProgress;
+        case LateStartPhase::WaitStopBeforeDetect:
+            if (deadlineReached(now_ms, late_start_due_ms_)) {
+                measuring_ = false;
+                measurement_state_unknown_ = false;
+                late_start_phase_ = LateStartPhase::WriteId;
+            }
+            return CooperativeStart::Result::InProgress;
+        case LateStartPhase::WriteId:
+            if (!writeCmd(Config::SFA40_CMD_ID)) {
+                ++read_command_errors_;
+                status_ = Status::Fault;
+                last_error_cause_ = ErrorCause::ReadCommand;
+                return finishLateStart(false, now_ms);
+            }
+            late_start_phase_ = LateStartPhase::ReadId;
+            return CooperativeStart::Result::InProgress;
+        case LateStartPhase::ReadId: {
+            uint8_t buf[9] = {};
+            if (!readBytes(buf, sizeof(buf))) {
+                ++read_bytes_errors_;
+                status_ = Status::Fault;
+                last_error_cause_ = ErrorCause::ReadBytes;
+                return finishLateStart(false, now_ms);
+            }
+            bool nonzero = false;
+            for (size_t i = 0; i < 3U; ++i) {
+                const uint8_t *word = &buf[i * 3U];
+                if (I2C::crc8(word, 2) != word[2]) {
+                    ++read_crc_errors_;
+                    status_ = Status::Fault;
+                    last_error_cause_ = ErrorCause::ReadCrc;
+                    return finishLateStart(false, now_ms);
+                }
+                serial_words_[i] =
+                    (static_cast<uint16_t>(word[0]) << 8) | word[1];
+                nonzero = nonzero || serial_words_[i] != 0U;
+            }
+            if (!nonzero) {
+                status_ = Status::Fault;
+                serial_valid_ = false;
+                last_error_cause_ = ErrorCause::DetectSensor;
+                return finishLateStart(false, now_ms);
+            }
+            serial_valid_ = true;
+            last_error_cause_ = ErrorCause::None;
+            status_ = Status::Fault;
+            late_start_phase_ = measurement_state_unknown_
+                ? LateStartPhase::StopBeforeStart
+                : LateStartPhase::WriteStart;
+            return CooperativeStart::Result::InProgress;
+        }
+        case LateStartPhase::StopBeforeStart:
+            if (!writeCmd(Config::SFA40_CMD_STOP)) {
+                last_error_cause_ = ErrorCause::WarmRestartStop;
+                return finishLateStart(false, now_ms);
+            }
+            late_start_due_ms_ = millis() + Config::SFA3X_STOP_DELAY_MS;
+            late_start_phase_ = LateStartPhase::WaitStopBeforeStart;
+            return CooperativeStart::Result::InProgress;
+        case LateStartPhase::WaitStopBeforeStart:
+            if (deadlineReached(now_ms, late_start_due_ms_)) {
+                measuring_ = false;
+                measurement_state_unknown_ = false;
+                late_start_phase_ = LateStartPhase::WriteStart;
+            }
+            return CooperativeStart::Result::InProgress;
+        case LateStartPhase::WriteStart:
+            if (!writeCmd(Config::SFA40_CMD_START)) {
+                last_error_cause_ = ErrorCause::StartCommand;
+                return finishLateStart(false, now_ms);
+            }
+            late_start_command_ms_ = millis();
+            late_start_due_ms_ = late_start_command_ms_ + Config::SFA3X_START_DELAY_MS;
+            late_start_phase_ = LateStartPhase::WaitStart;
+            return CooperativeStart::Result::InProgress;
+        case LateStartPhase::WaitStart:
+            if (!deadlineReached(now_ms, late_start_due_ms_)) {
+                return CooperativeStart::Result::InProgress;
+            }
+            return finishLateStart(true, now_ms);
+        default:
+            return finishLateStart(false, now_ms);
+    }
 }
 
 void Sfa40::stop() {

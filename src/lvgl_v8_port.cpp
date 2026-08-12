@@ -14,6 +14,7 @@
 #include "esp_lib_utils.h"
 #include "core/BootState.h"
 #include "core/LvglWaitPolicy.h"
+#include "core/SharedI2cRuntimeGate.h"
 #include "core/TouchWakePolicy.h"
 #include "lvgl_v8_port.h"
 
@@ -34,23 +35,22 @@ static Touch *lvgl_port_touch = nullptr;
 static bool lvgl_port_screen_flip_180 = false;
 static void *lvgl_port_rotated_fb = nullptr;
 static void *lvgl_buf[LVGL_PORT_BUFFER_NUM_MAX] = {};
-static uint32_t lvgl_touch_read_block_until_ms = 0;
-static bool lvgl_touch_wait_release_after_block = false;
+static std::atomic<uint32_t> lvgl_touch_read_block_until_ms{0};
+static std::atomic<bool> lvgl_touch_wait_release_after_block{false};
+static SharedI2cRuntimeGate::Gate lvgl_touch_i2c_runtime_gate;
 static TouchWakePolicy::StateMachine lvgl_touch_wake_policy;
+static portMUX_TYPE lvgl_touch_wake_policy_mux = portMUX_INITIALIZER_UNLOCKED;
 static SemaphoreHandle_t lvgl_touch_interrupt_sem = nullptr;
 static StaticSemaphore_t lvgl_touch_interrupt_sem_buffer;
 static bool lvgl_touch_interrupt_gated = false;
 static uint32_t lvgl_touch_last_sample_ms = 0;
 static lv_indev_state_t lvgl_touch_cached_state = LV_INDEV_STATE_RELEASED;
+static std::atomic<bool> lvgl_touch_pressed{false};
 static TouchPoint lvgl_touch_cached_point = {};
-static uint8_t lvgl_touch_error_streak = 0;
-static uint32_t lvgl_touch_last_error_ms = 0;
+static TouchWakePolicy::ErrorStreak lvgl_touch_error_streak;
 static uint32_t lvgl_touch_boot_quiet_until_ms = 0;
-static uint32_t lvgl_touch_last_recover_ms = 0;
-static uint32_t lvgl_touch_recover_attempts = 0;
-static uint32_t lvgl_touch_recover_successes = 0;
-static uint8_t lvgl_touch_recover_fail_streak = 0;
-static bool lvgl_touch_offline = false;
+static TouchWakePolicy::RecoveryStateMachine lvgl_touch_recovery;
+static std::atomic<bool> lvgl_touch_offline{false};
 static volatile uint32_t lvgl_diag_timer_handler_count = 0;
 static volatile uint32_t lvgl_diag_timer_handler_last_ms = 0;
 static volatile uint32_t lvgl_diag_flush_count = 0;
@@ -62,17 +62,13 @@ static volatile uint32_t lvgl_diag_lock_fail_count = 0;
 static volatile uint32_t lvgl_diag_touch_read_error_count = 0;
 static constexpr uint32_t LVGL_TOUCH_POLL_INTERVAL_MS = 12;
 static constexpr uint32_t LVGL_TOUCH_READ_RETRY_DELAY_MS = 2;
-static constexpr uint32_t LVGL_TOUCH_ERROR_STREAK_WINDOW_MS = 1200;
 static constexpr uint32_t LVGL_TOUCH_BOOT_QUIET_MS = 5000;
 static constexpr uint32_t LVGL_TOUCH_BOOT_QUIET_WARM_MS = 10000;
 static constexpr uint32_t LVGL_TOUCH_ERROR_BLOCK_MS_BASE = 400;
 static constexpr uint32_t LVGL_TOUCH_ERROR_BLOCK_MS_STREAK = 1800;
 static constexpr uint8_t LVGL_TOUCH_RECOVER_ERROR_STREAK = 3;
-static constexpr uint32_t LVGL_TOUCH_RECOVER_COOLDOWN_MS = 90000;
 static constexpr uint32_t LVGL_TOUCH_RECOVER_BLOCK_MS = 300;
 static constexpr uint32_t LVGL_TOUCH_RECOVER_PAUSE_MS = 120;
-static constexpr uint8_t LVGL_TOUCH_RECOVER_MAX_BACKOFF_SHIFT = 4;
-static constexpr uint32_t LVGL_TOUCH_RECOVER_MAX_COOLDOWN_MS = 8UL * 60UL * 1000UL;
 static constexpr uint32_t LVGL_DIAG_MAX_REASONABLE_AGE_MS = 24UL * 60UL * 60UL * 1000UL;
 
 static inline uint32_t get_rtos_ms()
@@ -83,6 +79,72 @@ static inline uint32_t get_rtos_ms()
 static inline uint32_t get_rtos_ms_isr()
 {
     return static_cast<uint32_t>(xTaskGetTickCountFromISR()) * portTICK_PERIOD_MS;
+}
+
+static inline void lvgl_touch_set_cached_state(lv_indev_state_t state)
+{
+    lvgl_touch_cached_state = state;
+    lvgl_touch_pressed.store(state == LV_INDEV_STATE_PRESSED,
+                             std::memory_order_release);
+}
+
+static bool lvgl_touch_wake_policy_enabled()
+{
+    portENTER_CRITICAL(&lvgl_touch_wake_policy_mux);
+    const bool enabled = lvgl_touch_wake_policy.isEnabled();
+    portEXIT_CRITICAL(&lvgl_touch_wake_policy_mux);
+    return enabled;
+}
+
+static bool lvgl_touch_wake_policy_has_pending()
+{
+    portENTER_CRITICAL(&lvgl_touch_wake_policy_mux);
+    const bool pending = lvgl_touch_wake_policy.hasPendingWake();
+    portEXIT_CRITICAL(&lvgl_touch_wake_policy_mux);
+    return pending;
+}
+
+static bool lvgl_touch_wake_policy_should_probe(bool interrupt_gated,
+                                                bool interrupt_pending,
+                                                uint32_t now_ms)
+{
+    portENTER_CRITICAL(&lvgl_touch_wake_policy_mux);
+    const bool should_probe = lvgl_touch_wake_policy.shouldProbe(
+        interrupt_gated, interrupt_pending, now_ms);
+    portEXIT_CRITICAL(&lvgl_touch_wake_policy_mux);
+    return should_probe;
+}
+
+static void lvgl_touch_wake_policy_record(TouchWakePolicy::Sample sample,
+                                          uint32_t now_ms)
+{
+    portENTER_CRITICAL(&lvgl_touch_wake_policy_mux);
+    lvgl_touch_wake_policy.recordProbe(sample, now_ms);
+    portEXIT_CRITICAL(&lvgl_touch_wake_policy_mux);
+}
+
+static void lvgl_touch_wake_policy_set(bool enabled,
+                                       bool touch_released,
+                                       uint32_t now_ms)
+{
+    portENTER_CRITICAL(&lvgl_touch_wake_policy_mux);
+    lvgl_touch_wake_policy.setEnabled(enabled, touch_released, now_ms);
+    portEXIT_CRITICAL(&lvgl_touch_wake_policy_mux);
+}
+
+static void lvgl_touch_wake_policy_reset()
+{
+    portENTER_CRITICAL(&lvgl_touch_wake_policy_mux);
+    lvgl_touch_wake_policy = TouchWakePolicy::StateMachine{};
+    portEXIT_CRITICAL(&lvgl_touch_wake_policy_mux);
+}
+
+static bool lvgl_touch_wake_policy_take_pending()
+{
+    portENTER_CRITICAL(&lvgl_touch_wake_policy_mux);
+    const bool pending = lvgl_touch_wake_policy.takePendingWake();
+    portEXIT_CRITICAL(&lvgl_touch_wake_policy_mux);
+    return pending;
 }
 
 static inline void lvgl_diag_mark_timer_handler()
@@ -137,7 +199,33 @@ static bool lvgl_port_wait_for_vsync_after(uint32_t baseline_vsync_count)
     if (timeout_ticks == 0) {
         timeout_ticks = 1;
     }
-    (void)xTaskNotifyWait(0, 0, nullptr, timeout_ticks);
+
+    // A pause/resume/quiesce request uses xTaskAbortDelay() to wake the LVGL
+    // task from its normal delay. That same call can also abort this VSYNC
+    // notification wait. Treat such an early return as a control wake, not as
+    // a display timeout, and keep waiting against the original deadline.
+    const uint32_t start_tick = static_cast<uint32_t>(xTaskGetTickCount());
+    const uint32_t timeout_tick_count = static_cast<uint32_t>(timeout_ticks);
+    for (;;) {
+        if (LvglWaitPolicy::hasNewVsync(
+                baseline_vsync_count, lvgl_diag_vsync_count)) {
+            return true;
+        }
+
+        const uint32_t remaining_ticks = LvglWaitPolicy::remainingWaitTicks(
+            start_tick,
+            static_cast<uint32_t>(xTaskGetTickCount()),
+            timeout_tick_count);
+        if (remaining_ticks == 0) {
+            break;
+        }
+
+        (void)xTaskNotifyWait(
+            0, 0, nullptr, static_cast<TickType_t>(remaining_ticks));
+    }
+
+    // Prefer a VSYNC that raced with the final deadline check over latching a
+    // permanent display fault.
     if (LvglWaitPolicy::hasNewVsync(
             baseline_vsync_count, lvgl_diag_vsync_count)) {
         return true;
@@ -265,9 +353,10 @@ static bool lvgl_port_apply_screen_flip_180(bool enabled)
 #endif
 
     lvgl_port_screen_flip_180 = enabled;
-    lvgl_touch_cached_state = LV_INDEV_STATE_RELEASED;
-    lvgl_touch_wait_release_after_block = true;
-    lvgl_touch_read_block_until_ms = get_monotonic_ms() + 250;
+    lvgl_touch_set_cached_state(LV_INDEV_STATE_RELEASED);
+    lvgl_touch_wait_release_after_block.store(true, std::memory_order_release);
+    lvgl_touch_read_block_until_ms.store(get_monotonic_ms() + 250,
+                                         std::memory_order_release);
     lv_obj_invalidate(lv_scr_act());
     ESP_LOGI("LVGL", "screen 180 flip %s", enabled ? "enabled" : "disabled");
     return true;
@@ -289,9 +378,12 @@ static inline void lvgl_touch_fill_from_cache(lv_indev_data_t *data)
     data->state = lvgl_touch_cached_state;
 }
 
-static int lvgl_touch_read_points_with_retry(Touch *tp, TouchPoint *point)
+static int lvgl_touch_read_points_with_retry(
+    Touch *tp,
+    TouchPoint *point,
+    const SharedI2cRuntimeGate::Gate::Access &access)
 {
-    if (tp == nullptr) {
+    if (!access || tp == nullptr) {
         return -1;
     }
 
@@ -306,77 +398,89 @@ static int lvgl_touch_read_points_with_retry(Touch *tp, TouchPoint *point)
 
 static inline void lvgl_touch_note_success()
 {
-    lvgl_touch_error_streak = 0;
+    lvgl_touch_error_streak.reset();
 }
 
-static inline uint32_t lvgl_touch_recover_cooldown_ms()
+static bool lvgl_touch_try_soft_recover(
+    Touch *tp,
+    uint32_t now_ms,
+    const SharedI2cRuntimeGate::Gate::Access &access)
 {
-    const uint8_t shift = (lvgl_touch_recover_fail_streak > LVGL_TOUCH_RECOVER_MAX_BACKOFF_SHIFT)
-                          ? LVGL_TOUCH_RECOVER_MAX_BACKOFF_SHIFT
-                          : lvgl_touch_recover_fail_streak;
-    uint32_t cooldown_ms = LVGL_TOUCH_RECOVER_COOLDOWN_MS << shift;
-    if (cooldown_ms > LVGL_TOUCH_RECOVER_MAX_COOLDOWN_MS) {
-        cooldown_ms = LVGL_TOUCH_RECOVER_MAX_COOLDOWN_MS;
-    }
-    return cooldown_ms;
-}
-
-static bool lvgl_touch_try_soft_recover(Touch *tp, uint32_t now_ms)
-{
-    if (tp == nullptr) {
+    if (!access || tp == nullptr) {
         return false;
     }
-
-    lvgl_touch_last_recover_ms = now_ms;
-    ++lvgl_touch_recover_attempts;
 
     // Conservative recovery: avoid full touch re-init in read loop
     // (it can race GPIO ISR install and destabilize shared I2C devices).
     vTaskDelay(pdMS_TO_TICKS(LVGL_TOUCH_RECOVER_PAUSE_MS));
 
     tp->resetPoints();
-    ++lvgl_touch_recover_successes;
-    lvgl_touch_recover_fail_streak = 0;
-    lvgl_touch_offline = false;
-    lvgl_touch_cached_state = LV_INDEV_STATE_RELEASED;
-    lvgl_touch_wait_release_after_block = true;
-    lvgl_touch_read_block_until_ms = now_ms + LVGL_TOUCH_RECOVER_BLOCK_MS;
+    TouchPoint validation_point;
+    const int validation_result =
+        lvgl_touch_read_points_with_retry(tp, &validation_point, access);
+    const bool recovered = validation_result >= 0;
+    lvgl_touch_recovery.recordAttempt(recovered, now_ms);
+    lvgl_touch_offline.store(lvgl_touch_recovery.isOffline(),
+                             std::memory_order_release);
+
+    lvgl_touch_set_cached_state(LV_INDEV_STATE_RELEASED);
+    if (!recovered) {
+        ++lvgl_diag_touch_read_error_count;
+        lvgl_touch_wait_release_after_block.store(false, std::memory_order_release);
+        ESP_LOGW("LVGL",
+                 "touch soft recovery validation failed "
+                 "(attempt=%lu, failures=%u, retry=%lu ms)",
+                 static_cast<unsigned long>(lvgl_touch_recovery.attempts()),
+                 static_cast<unsigned>(lvgl_touch_recovery.failStreak()),
+                 static_cast<unsigned long>(lvgl_touch_recovery.cooldownMs()));
+        return false;
+    }
+
+    lvgl_touch_error_streak.reset();
+    lvgl_touch_wait_release_after_block.store(true, std::memory_order_release);
+    lvgl_touch_read_block_until_ms.store(now_ms + LVGL_TOUCH_RECOVER_BLOCK_MS,
+                                         std::memory_order_release);
     ESP_LOGI("LVGL",
-             "touch soft recovery applied (attempt=%lu, success=%lu, pause=%lu ms)",
-             static_cast<unsigned long>(lvgl_touch_recover_attempts),
-             static_cast<unsigned long>(lvgl_touch_recover_successes),
+             "touch soft recovery verified (attempt=%lu, success=%lu, pause=%lu ms)",
+             static_cast<unsigned long>(lvgl_touch_recovery.attempts()),
+             static_cast<unsigned long>(lvgl_touch_recovery.successes()),
              static_cast<unsigned long>(LVGL_TOUCH_RECOVER_PAUSE_MS));
     return true;
 }
 
-static inline void lvgl_touch_note_error(Touch *tp, uint32_t now_ms, const char *stage)
+static inline void lvgl_touch_note_error(
+    Touch *tp,
+    uint32_t now_ms,
+    const char *stage,
+    const SharedI2cRuntimeGate::Gate::Access &access)
 {
     ++lvgl_diag_touch_read_error_count;
-    lvgl_touch_cached_state = LV_INDEV_STATE_RELEASED;
-    lvgl_touch_wait_release_after_block = false;
+    lvgl_touch_set_cached_state(LV_INDEV_STATE_RELEASED);
+    lvgl_touch_wait_release_after_block.store(false, std::memory_order_release);
 
-    if ((lvgl_touch_last_error_ms == 0) ||
-        !is_before_deadline(now_ms, lvgl_touch_last_error_ms + LVGL_TOUCH_ERROR_STREAK_WINDOW_MS)) {
-        lvgl_touch_error_streak = 1;
-    } else if (lvgl_touch_error_streak < 0xFF) {
-        ++lvgl_touch_error_streak;
-    }
-    lvgl_touch_last_error_ms = now_ms;
+    const uint8_t error_streak = lvgl_touch_error_streak.recordError(now_ms);
     const uint32_t block_ms =
-        (lvgl_touch_error_streak >= 2) ? LVGL_TOUCH_ERROR_BLOCK_MS_STREAK
-                                       : LVGL_TOUCH_ERROR_BLOCK_MS_BASE;
-    lvgl_touch_read_block_until_ms = now_ms + block_ms;
+        (error_streak >= 2) ? LVGL_TOUCH_ERROR_BLOCK_MS_STREAK
+                            : LVGL_TOUCH_ERROR_BLOCK_MS_BASE;
+    lvgl_touch_read_block_until_ms.store(now_ms + block_ms,
+                                         std::memory_order_release);
 
-    const bool cooldown_active =
-        (lvgl_touch_last_recover_ms != 0) &&
-        is_before_deadline(now_ms, lvgl_touch_last_recover_ms + lvgl_touch_recover_cooldown_ms());
-    if ((lvgl_touch_error_streak >= LVGL_TOUCH_RECOVER_ERROR_STREAK) && !cooldown_active) {
-        ESP_LOGW("LVGL",
-                 "touch read errors streak=%u at %s, trying soft recovery",
-                 static_cast<unsigned>(lvgl_touch_error_streak),
-                 stage ? stage : "?");
-        if (lvgl_touch_try_soft_recover(tp, now_ms)) {
-            lvgl_touch_error_streak = 0;
+    if (error_streak >= LVGL_TOUCH_RECOVER_ERROR_STREAK) {
+        if (lvgl_touch_recovery.canAttempt(now_ms)) {
+            ESP_LOGW("LVGL",
+                     "touch read errors streak=%u at %s, trying soft recovery",
+                     static_cast<unsigned>(error_streak),
+                     stage ? stage : "?");
+            if (lvgl_touch_try_soft_recover(tp, now_ms, access)) {
+                lvgl_touch_error_streak.reset();
+            }
+        } else if (!lvgl_touch_recovery.isOffline()) {
+            // A recently successful recovery has a cooldown. If errors return
+            // during it, stop polling instead of hammering the shared bus.
+            lvgl_touch_recovery.suspendUntilRetry();
+            lvgl_touch_offline.store(true, std::memory_order_release);
+            ESP_LOGW("LVGL",
+                     "touch failed again during recovery cooldown; polling suspended");
         }
     }
 }
@@ -988,7 +1092,13 @@ static lv_disp_t *display_init(LCD *lcd)
     buffer_size = lcd_width * LVGL_PORT_BUFFER_SIZE_HEIGHT;
     for (int i = 0; (i < LVGL_PORT_BUFFER_NUM) && (i < LVGL_PORT_BUFFER_NUM_MAX); i++) {
         lvgl_buf[i] = heap_caps_malloc(buffer_size * sizeof(lv_color_t), LVGL_PORT_BUFFER_MALLOC_CAPS);
-        assert(lvgl_buf[i]);
+        if (lvgl_buf[i] == nullptr) {
+            ESP_UTILS_LOGE(
+                "Allocate LVGL buffer[%d] failed (size=%d)",
+                i,
+                buffer_size * static_cast<int>(sizeof(lv_color_t)));
+            return nullptr;
+        }
         ESP_UTILS_LOGD("Buffer[%d] address: %p, size: %d", i, lvgl_buf[i], buffer_size * sizeof(lv_color_t));
     }
 #else
@@ -1019,6 +1129,24 @@ static lv_disp_t *display_init(LCD *lcd)
 
 #endif
 #endif /* LVGL_PORT_AVOID_TEAR */
+
+    if (lvgl_buf[0] == nullptr) {
+        ESP_UTILS_LOGE("Primary LVGL draw buffer is unavailable");
+        return nullptr;
+    }
+#if !LVGL_PORT_AVOID_TEAR
+#if LVGL_PORT_BUFFER_NUM > 1
+    if (lvgl_buf[1] == nullptr) {
+        ESP_UTILS_LOGE("Secondary LVGL draw buffer is unavailable");
+        return nullptr;
+    }
+#endif
+#elif !((LVGL_PORT_DISP_BUFFER_NUM >= 3) && (LVGL_PORT_ROTATION_DEGREE != 0))
+    if (lvgl_buf[1] == nullptr) {
+        ESP_UTILS_LOGE("Secondary LVGL draw buffer is unavailable");
+        return nullptr;
+    }
+#endif
 
     // initialize LVGL draw buffers
     lv_disp_draw_buf_init(&disp_buf, lvgl_buf[0], lvgl_buf[1], buffer_size);
@@ -1061,49 +1189,57 @@ static lv_disp_t *display_init(LCD *lcd)
 
 static void touchpad_read(lv_indev_drv_t *indev_drv, lv_indev_data_t *data)
 {
+    SharedI2cRuntimeGate::Gate::Access access =
+        lvgl_touch_i2c_runtime_gate.acquire();
+    if (!access) {
+        lvgl_touch_set_cached_state(LV_INDEV_STATE_RELEASED);
+        data->state = LV_INDEV_STATE_RELEASED;
+        data->continue_reading = false;
+        return;
+    }
+
     Touch *tp = (Touch *)indev_drv->user_data;
     TouchPoint point;
     const uint32_t now_ms = get_monotonic_ms();
     if (tp == nullptr) {
-        lvgl_touch_cached_state = LV_INDEV_STATE_RELEASED;
+        lvgl_touch_set_cached_state(LV_INDEV_STATE_RELEASED);
         data->state = lvgl_touch_cached_state;
         return;
     }
 
     if ((lvgl_touch_boot_quiet_until_ms != 0) &&
         is_before_deadline(now_ms, lvgl_touch_boot_quiet_until_ms)) {
-        lvgl_touch_cached_state = LV_INDEV_STATE_RELEASED;
+        lvgl_touch_set_cached_state(LV_INDEV_STATE_RELEASED);
         data->state = lvgl_touch_cached_state;
         return;
     }
 
-    if (lvgl_touch_offline) {
-        const bool cooldown_active =
-            (lvgl_touch_last_recover_ms != 0) &&
-            is_before_deadline(now_ms, lvgl_touch_last_recover_ms + lvgl_touch_recover_cooldown_ms());
-        if (!cooldown_active) {
+    if (lvgl_touch_recovery.isOffline()) {
+        if (lvgl_touch_recovery.canAttempt(now_ms)) {
             ESP_LOGW("LVGL", "touch offline, retrying soft recovery");
-            if (lvgl_touch_try_soft_recover(tp, now_ms)) {
-                lvgl_touch_error_streak = 0;
+            if (lvgl_touch_try_soft_recover(tp, now_ms, access)) {
+                lvgl_touch_error_streak.reset();
             }
         }
-        lvgl_touch_cached_state = LV_INDEV_STATE_RELEASED;
+        lvgl_touch_set_cached_state(LV_INDEV_STATE_RELEASED);
         data->state = lvgl_touch_cached_state;
         return;
     }
 
-    if (lvgl_touch_wake_policy.isEnabled()) {
-        if (lvgl_touch_read_block_until_ms != 0) {
-            if (is_before_deadline(now_ms, lvgl_touch_read_block_until_ms)) {
-                lvgl_touch_cached_state = LV_INDEV_STATE_RELEASED;
+    if (lvgl_touch_wake_policy_enabled()) {
+        const uint32_t block_until_ms =
+            lvgl_touch_read_block_until_ms.load(std::memory_order_acquire);
+        if (block_until_ms != 0) {
+            if (is_before_deadline(now_ms, block_until_ms)) {
+                lvgl_touch_set_cached_state(LV_INDEV_STATE_RELEASED);
                 data->state = lvgl_touch_cached_state;
                 return;
             }
-            lvgl_touch_read_block_until_ms = 0;
+            lvgl_touch_read_block_until_ms.store(0, std::memory_order_release);
         }
 
-        if (lvgl_touch_wake_policy.hasPendingWake()) {
-            lvgl_touch_cached_state = LV_INDEV_STATE_RELEASED;
+        if (lvgl_touch_wake_policy_has_pending()) {
+            lvgl_touch_set_cached_state(LV_INDEV_STATE_RELEASED);
             data->state = lvgl_touch_cached_state;
             return;
         }
@@ -1112,51 +1248,56 @@ static void touchpad_read(lv_indev_drv_t *indev_drv, lv_indev_data_t *data)
         // Prefer a fresh GT911 interrupt. A sparse fallback probe prevents a
         // lost interrupt from making the dark screen impossible to wake while
         // avoiding the continuous I2C traffic which caused the original fault.
-        if (!lvgl_touch_wake_policy.shouldProbe(
+        if (!lvgl_touch_wake_policy_should_probe(
                 lvgl_touch_interrupt_gated, interrupt_pending, now_ms)) {
-            lvgl_touch_cached_state = LV_INDEV_STATE_RELEASED;
+            lvgl_touch_set_cached_state(LV_INDEV_STATE_RELEASED);
             data->state = lvgl_touch_cached_state;
             return;
         }
 
-        int wake_probe = lvgl_touch_read_points_with_retry(tp, &point);
+        int wake_probe =
+            lvgl_touch_read_points_with_retry(tp, &point, access);
         if (wake_probe > 0) {
-            lvgl_touch_wake_policy.recordProbe(TouchWakePolicy::Sample::Pressed, now_ms);
+            lvgl_touch_wake_policy_record(TouchWakePolicy::Sample::Pressed, now_ms);
             lvgl_touch_note_success();
         } else if (wake_probe < 0) {
-            lvgl_touch_wake_policy.recordProbe(TouchWakePolicy::Sample::Error, now_ms);
-            lvgl_touch_note_error(tp, now_ms, "wake_probe");
+            lvgl_touch_wake_policy_record(TouchWakePolicy::Sample::Error, now_ms);
+            lvgl_touch_note_error(tp, now_ms, "wake_probe", access);
         } else {
-            lvgl_touch_wake_policy.recordProbe(TouchWakePolicy::Sample::Released, now_ms);
+            lvgl_touch_wake_policy_record(TouchWakePolicy::Sample::Released, now_ms);
             lvgl_touch_note_success();
         }
-        lvgl_touch_cached_state = LV_INDEV_STATE_RELEASED;
+        lvgl_touch_set_cached_state(LV_INDEV_STATE_RELEASED);
         data->state = lvgl_touch_cached_state;
         return;
     }
 
-    if (lvgl_touch_read_block_until_ms != 0) {
-        if (is_before_deadline(now_ms, lvgl_touch_read_block_until_ms)) {
-            lvgl_touch_cached_state = LV_INDEV_STATE_RELEASED;
+    const uint32_t block_until_ms =
+        lvgl_touch_read_block_until_ms.load(std::memory_order_acquire);
+    if (block_until_ms != 0) {
+        if (is_before_deadline(now_ms, block_until_ms)) {
+            lvgl_touch_set_cached_state(LV_INDEV_STATE_RELEASED);
             data->state = lvgl_touch_cached_state;
             return;
         }
-        lvgl_touch_read_block_until_ms = 0;
+        lvgl_touch_read_block_until_ms.store(0, std::memory_order_release);
     }
 
     // After wake block ends, require a clean release first. This avoids
     // turning a wake touch into an accidental click on a UI control.
-    if (lvgl_touch_wait_release_after_block) {
-        int release_probe = lvgl_touch_read_points_with_retry(tp, &point);
+    if (lvgl_touch_wait_release_after_block.load(std::memory_order_acquire)) {
+        int release_probe =
+            lvgl_touch_read_points_with_retry(tp, &point, access);
         if (release_probe <= 0) {
-            lvgl_touch_wait_release_after_block = false;
+            lvgl_touch_wait_release_after_block.store(false,
+                                                       std::memory_order_release);
             if (release_probe < 0) {
-                lvgl_touch_note_error(tp, now_ms, "release_probe");
+                lvgl_touch_note_error(tp, now_ms, "release_probe", access);
             } else {
                 lvgl_touch_note_success();
             }
         }
-        lvgl_touch_cached_state = LV_INDEV_STATE_RELEASED;
+        lvgl_touch_set_cached_state(LV_INDEV_STATE_RELEASED);
         data->state = lvgl_touch_cached_state;
         return;
     }
@@ -1169,19 +1310,20 @@ static void touchpad_read(lv_indev_drv_t *indev_drv, lv_indev_data_t *data)
 
     /* Read data from touch controller */
     lvgl_touch_last_sample_ms = now_ms;
-    int read_touch_result = lvgl_touch_read_points_with_retry(tp, &point);
+    int read_touch_result =
+        lvgl_touch_read_points_with_retry(tp, &point, access);
     if (read_touch_result > 0) {
         lvgl_touch_note_success();
         lvgl_port_apply_screen_flip_to_touch_point(point);
         lvgl_touch_cached_point = point;
-        lvgl_touch_cached_state = LV_INDEV_STATE_PRESSED;
+        lvgl_touch_set_cached_state(LV_INDEV_STATE_PRESSED);
     } else {
         if (read_touch_result < 0) {
-            lvgl_touch_note_error(tp, now_ms, "read");
+            lvgl_touch_note_error(tp, now_ms, "read", access);
         } else {
             lvgl_touch_note_success();
         }
-        lvgl_touch_cached_state = LV_INDEV_STATE_RELEASED;
+        lvgl_touch_set_cached_state(LV_INDEV_STATE_RELEASED);
     }
     lvgl_touch_fill_from_cache(data);
 }
@@ -1224,33 +1366,150 @@ static void tick_increment(void *arg)
 
 static bool tick_init(void)
 {
+    if (lvgl_tick_timer != nullptr) {
+        ESP_UTILS_LOGE("LVGL tick timer is already initialized");
+        return false;
+    }
+
     // Tick interface for LVGL (using esp_timer to generate 2ms periodic event)
     const esp_timer_create_args_t lvgl_tick_timer_args = {
         .callback = &tick_increment,
         .name = "LVGL tick"
     };
-    ESP_UTILS_CHECK_ERROR_RETURN(
-        esp_timer_create(&lvgl_tick_timer_args, &lvgl_tick_timer), false, "Create LVGL tick timer failed"
-    );
-    ESP_UTILS_CHECK_ERROR_RETURN(
-        esp_timer_start_periodic(lvgl_tick_timer, LVGL_PORT_TICK_PERIOD_MS * 1000), false,
-        "Start LVGL tick timer failed"
-    );
+    const esp_err_t create_result =
+        esp_timer_create(&lvgl_tick_timer_args, &lvgl_tick_timer);
+    if (create_result != ESP_OK) {
+        lvgl_tick_timer = nullptr;
+        ESP_UTILS_LOGE(
+            "Create LVGL tick timer failed: %s", esp_err_to_name(create_result));
+        return false;
+    }
+
+    const esp_err_t start_result = esp_timer_start_periodic(
+        lvgl_tick_timer, LVGL_PORT_TICK_PERIOD_MS * 1000);
+    if (start_result != ESP_OK) {
+        ESP_UTILS_LOGE(
+            "Start LVGL tick timer failed: %s", esp_err_to_name(start_result));
+        const esp_err_t delete_result = esp_timer_delete(lvgl_tick_timer);
+        if (delete_result == ESP_OK) {
+            lvgl_tick_timer = nullptr;
+        } else {
+            ESP_UTILS_LOGE(
+                "Delete unstarted LVGL tick timer failed: %s",
+                esp_err_to_name(delete_result));
+        }
+        return false;
+    }
 
     return true;
 }
 
 static bool tick_deinit(void)
 {
-    ESP_UTILS_CHECK_ERROR_RETURN(
-        esp_timer_stop(lvgl_tick_timer), false, "Stop LVGL tick timer failed"
-    );
-    ESP_UTILS_CHECK_ERROR_RETURN(
-        esp_timer_delete(lvgl_tick_timer), false, "Delete LVGL tick timer failed"
-    );
-    return true;
+    if (lvgl_tick_timer == nullptr) {
+        return true;
+    }
+
+    bool success = true;
+    const esp_err_t stop_result = esp_timer_stop(lvgl_tick_timer);
+    if ((stop_result != ESP_OK) &&
+        (stop_result != ESP_ERR_INVALID_STATE)) {
+        ESP_UTILS_LOGE(
+            "Stop LVGL tick timer failed: %s", esp_err_to_name(stop_result));
+        success = false;
+    }
+
+    const esp_err_t delete_result = esp_timer_delete(lvgl_tick_timer);
+    if (delete_result == ESP_OK) {
+        lvgl_tick_timer = nullptr;
+    } else {
+        ESP_UTILS_LOGE(
+            "Delete LVGL tick timer failed: %s", esp_err_to_name(delete_result));
+        success = false;
+    }
+    return success;
 }
 #endif
+
+static bool lvgl_port_cleanup_partial_init(lv_disp_t *disp, lv_indev_t *indev)
+{
+    // This helper is only used before an LVGL task has been created, so all
+    // resources can be released without suspending another task or taking the
+    // LVGL mutex.
+    bool success = true;
+    lvgl_vsync_notify_enabled = false;
+
+    if (lvgl_port_lcd != nullptr) {
+        lvgl_port_lcd->attachDrawBitmapFinishCallback(nullptr, nullptr);
+    }
+    if (lvgl_port_touch != nullptr &&
+        lvgl_port_touch->isInterruptEnabled()) {
+        lvgl_port_touch->attachInterruptCallback(nullptr, nullptr);
+    }
+    lvgl_touch_interrupt_gated = false;
+    lvgl_touch_interrupt_sem = nullptr;
+
+#if !LV_TICK_CUSTOM
+    if (!tick_deinit()) {
+        success = false;
+    }
+#endif
+
+    if (indev != nullptr) {
+        lv_indev_delete(indev);
+    }
+    if (disp != nullptr) {
+        lv_disp_remove(disp);
+    }
+
+#if LV_USE_LOG
+    lv_log_register_print_cb(nullptr);
+#endif
+
+    if (lvgl_mux != nullptr) {
+        vSemaphoreDelete(lvgl_mux);
+        lvgl_mux = nullptr;
+    }
+
+#if !LVGL_PORT_AVOID_TEAR
+    for (int i = 0; i < LVGL_PORT_BUFFER_NUM_MAX; ++i) {
+        if (lvgl_buf[i] != nullptr) {
+            free(lvgl_buf[i]);
+            lvgl_buf[i] = nullptr;
+        }
+    }
+#else
+    for (int i = 0; i < LVGL_PORT_BUFFER_NUM_MAX; ++i) {
+        lvgl_buf[i] = nullptr;
+    }
+#endif
+#if LVGL_PORT_AVOID_TEAR && LVGL_PORT_FULL_REFRESH && \
+    (LVGL_PORT_DISP_BUFFER_NUM == 3) && (LVGL_PORT_ROTATION_DEGREE == 0)
+    lvgl_port_lcd_last_buf = nullptr;
+    lvgl_port_lcd_next_buf = nullptr;
+    lvgl_port_flush_next_buf = nullptr;
+#endif
+
+    lvgl_task_handle = nullptr;
+    lvgl_pause_requested.store(false, std::memory_order_release);
+    lvgl_port_paused.store(true, std::memory_order_release);
+    lvgl_port_lcd = nullptr;
+    lvgl_port_touch = nullptr;
+    lvgl_port_rotated_fb = nullptr;
+    lvgl_port_screen_flip_180 = false;
+    lvgl_touch_read_block_until_ms.store(0, std::memory_order_release);
+    lvgl_touch_wait_release_after_block.store(false, std::memory_order_release);
+    lvgl_touch_wake_policy_reset();
+    lvgl_touch_set_cached_state(LV_INDEV_STATE_RELEASED);
+    lvgl_touch_cached_point = {};
+    lvgl_touch_last_sample_ms = 0;
+    lvgl_touch_error_streak.reset();
+    lvgl_touch_recovery.reset();
+    lvgl_touch_boot_quiet_until_ms = 0;
+    lvgl_touch_offline.store(false, std::memory_order_release);
+
+    return success;
+}
 
 static void lvgl_port_task(void *arg)
 {
@@ -1315,30 +1574,42 @@ IRAM_ATTR bool onDrawBitmapFinishCallback(void *user_data)
 bool lvgl_port_init(LCD *lcd, Touch *tp)
 {
     ESP_UTILS_CHECK_FALSE_RETURN(lcd != nullptr, false, "Invalid LCD device");
+    ESP_UTILS_CHECK_FALSE_RETURN(
+        (lvgl_task_handle == nullptr) && (lvgl_mux == nullptr),
+        false,
+        "LVGL port is already initialized");
 
+    ESP_UTILS_CHECK_FALSE_RETURN(
+        lvgl_touch_i2c_runtime_gate.resetForBoot(),
+        false,
+        "Touch I2C gate still has active users");
     lvgl_display_sync_fault.store(false, std::memory_order_release);
     lvgl_diag_vsync_wait_timeout_count = 0;
     lvgl_vsync_notify_enabled = false;
+    lvgl_task_handle = nullptr;
+    lvgl_mux = nullptr;
+    lvgl_pause_requested.store(false, std::memory_order_release);
+    lvgl_port_paused.store(false, std::memory_order_release);
     lvgl_port_lcd = nullptr;
     lvgl_port_touch = nullptr;
-    lvgl_touch_read_block_until_ms = 0;
-    lvgl_touch_wait_release_after_block = false;
-    lvgl_touch_wake_policy = TouchWakePolicy::StateMachine{};
+    lvgl_touch_read_block_until_ms.store(0, std::memory_order_release);
+    lvgl_touch_wait_release_after_block.store(false, std::memory_order_release);
+    lvgl_touch_wake_policy_reset();
     lvgl_touch_interrupt_sem = nullptr;
     lvgl_touch_interrupt_gated = false;
     lvgl_touch_last_sample_ms = 0;
-    lvgl_touch_cached_state = LV_INDEV_STATE_RELEASED;
+    lvgl_touch_set_cached_state(LV_INDEV_STATE_RELEASED);
     lvgl_touch_cached_point = {};
-    lvgl_touch_error_streak = 0;
-    lvgl_touch_last_error_ms = 0;
-    lvgl_touch_last_recover_ms = 0;
-    lvgl_touch_recover_attempts = 0;
-    lvgl_touch_recover_successes = 0;
-    lvgl_touch_recover_fail_streak = 0;
-    lvgl_touch_offline = false;
+    lvgl_touch_error_streak.reset();
+    lvgl_touch_recovery.reset();
+    lvgl_touch_offline.store(false, std::memory_order_release);
     lvgl_port_rotated_fb = nullptr;
+    for (int i = 0; i < LVGL_PORT_BUFFER_NUM_MAX; ++i) {
+        lvgl_buf[i] = nullptr;
+    }
     lvgl_touch_boot_quiet_until_ms = get_monotonic_ms() + lvgl_touch_boot_quiet_window_ms();
-    lvgl_touch_read_block_until_ms = lvgl_touch_boot_quiet_until_ms;
+    lvgl_touch_read_block_until_ms.store(lvgl_touch_boot_quiet_until_ms,
+                                         std::memory_order_release);
 
     auto bus_type = lcd->getBus()->getBasicAttributes().type;
 #if LVGL_PORT_AVOID_TEAR
@@ -1359,12 +1630,20 @@ bool lvgl_port_init(LCD *lcd, Touch *tp)
     lv_log_register_print_cb(lvgl_log_print_cb);
 #endif
 #if !LV_TICK_CUSTOM
-    ESP_UTILS_CHECK_FALSE_RETURN(tick_init(), false, "Initialize LVGL tick failed");
+    if (!tick_init()) {
+        (void)lvgl_port_cleanup_partial_init(disp, indev);
+        ESP_UTILS_LOGE("Initialize LVGL tick failed");
+        return false;
+    }
 #endif
 
     ESP_UTILS_LOGI("Initializing LVGL display driver");
     disp = display_init(lcd);
-    ESP_UTILS_CHECK_NULL_RETURN(disp, false, "Initialize LVGL display driver failed");
+    if (disp == nullptr) {
+        (void)lvgl_port_cleanup_partial_init(disp, indev);
+        ESP_UTILS_LOGE("Initialize LVGL display driver failed");
+        return false;
+    }
     // Record the initial rotation of the display
     lv_disp_set_rotation(disp, LV_DISP_ROT_NONE);
     lvgl_port_lcd = lcd;
@@ -1379,7 +1658,11 @@ bool lvgl_port_init(LCD *lcd, Touch *tp)
         ESP_UTILS_LOGD("Initialize LVGL input driver");
         lvgl_port_touch = tp;
         indev = indev_init(tp);
-        ESP_UTILS_CHECK_NULL_RETURN(indev, false, "Initialize LVGL input driver failed");
+        if (indev == nullptr) {
+            (void)lvgl_port_cleanup_partial_init(disp, indev);
+            ESP_UTILS_LOGE("Initialize LVGL input driver failed");
+            return false;
+        }
 
 #if LVGL_PORT_ROTATION_DEGREE != 0
         auto &transformation = tp->getTransformation();
@@ -1400,13 +1683,22 @@ bool lvgl_port_init(LCD *lcd, Touch *tp)
 
     ESP_UTILS_LOGD("Create mutex for LVGL");
     lvgl_mux = xSemaphoreCreateRecursiveMutex();
-    ESP_UTILS_CHECK_NULL_RETURN(lvgl_mux, false, "Create LVGL mutex failed");
+    if (lvgl_mux == nullptr) {
+        (void)lvgl_port_cleanup_partial_init(disp, indev);
+        ESP_UTILS_LOGE("Create LVGL mutex failed");
+        return false;
+    }
 
     ESP_UTILS_LOGD("Create LVGL task");
     BaseType_t core_id = (LVGL_PORT_TASK_CORE < 0) ? tskNO_AFFINITY : LVGL_PORT_TASK_CORE;
     BaseType_t ret = xTaskCreatePinnedToCore(lvgl_port_task, "lvgl", LVGL_PORT_TASK_STACK_SIZE, NULL,
                      LVGL_PORT_TASK_PRIORITY, &lvgl_task_handle, core_id);
-    ESP_UTILS_CHECK_FALSE_RETURN(ret == pdPASS, false, "Create LVGL task failed");
+    if (ret != pdPASS) {
+        lvgl_task_handle = nullptr;
+        (void)lvgl_port_cleanup_partial_init(disp, indev);
+        ESP_UTILS_LOGE("Create LVGL task failed");
+        return false;
+    }
 
 #if LVGL_PORT_AVOID_TEAR
     lvgl_vsync_notify_enabled = true;
@@ -1441,6 +1733,10 @@ bool lvgl_port_unlock(void)
 
 bool lvgl_port_set_screen_flip_180(bool enabled)
 {
+    SharedI2cRuntimeGate::Gate::Access access =
+        lvgl_touch_i2c_runtime_gate.acquire();
+    ESP_UTILS_CHECK_FALSE_RETURN(
+        static_cast<bool>(access), false, "Touch I2C runtime is disabled");
     ESP_UTILS_CHECK_FALSE_RETURN(
         lvgl_port_lock(LvglWaitPolicy::SCREEN_FLIP_LOCK_TIMEOUT_MS), false, "Lock LVGL failed"
     );
@@ -1456,34 +1752,82 @@ bool lvgl_port_get_screen_flip_180(void)
 
 bool lvgl_port_block_touch_read(uint32_t duration_ms)
 {
+    SharedI2cRuntimeGate::Gate::Access access =
+        lvgl_touch_i2c_runtime_gate.acquire();
+    if (!access) {
+        return false;
+    }
     const uint32_t now_ms = get_monotonic_ms();
     if (duration_ms == 0) {
-        lvgl_touch_read_block_until_ms = 0;
-        lvgl_touch_wait_release_after_block = false;
+        lvgl_touch_read_block_until_ms.store(0, std::memory_order_release);
+        lvgl_touch_wait_release_after_block.store(false,
+                                                   std::memory_order_release);
     } else {
-        lvgl_touch_read_block_until_ms = now_ms + duration_ms;
-        lvgl_touch_wait_release_after_block = true;
+        lvgl_touch_read_block_until_ms.store(now_ms + duration_ms,
+                                             std::memory_order_release);
+        lvgl_touch_wait_release_after_block.store(true,
+                                                  std::memory_order_release);
     }
+    return true;
+}
+
+void lvgl_port_disable_touch_i2c(void)
+{
+    if (!lvgl_touch_i2c_runtime_gate.disable()) {
+        return;
+    }
+
+    ESP_LOGW("LVGL", "shared I2C bus offline; new touch transactions disabled");
+}
+
+bool lvgl_port_finalize_touch_i2c_disable(uint32_t timeout_ms)
+{
+    (void)lvgl_touch_i2c_runtime_gate.disable();
+    const uint32_t started_ms = get_monotonic_ms();
+    while (!lvgl_touch_i2c_runtime_gate.idle()) {
+        if (static_cast<uint32_t>(get_monotonic_ms() - started_ms) >= timeout_ms) {
+            return false;
+        }
+        vTaskDelay(1);
+    }
+
+    const uint32_t now_ms = get_monotonic_ms();
+    lvgl_touch_wake_policy_set(false, true, now_ms);
+    lvgl_touch_clear_interrupt();
+    lvgl_touch_read_block_until_ms.store(0, std::memory_order_release);
+    lvgl_touch_wait_release_after_block.store(false, std::memory_order_release);
+    lvgl_touch_set_cached_state(LV_INDEV_STATE_RELEASED);
+    lvgl_touch_offline.store(true, std::memory_order_release);
     return true;
 }
 
 bool lvgl_port_set_wake_touch_probe(bool enabled)
 {
-    if (enabled == lvgl_touch_wake_policy.isEnabled()) {
+    SharedI2cRuntimeGate::Gate::Access access =
+        lvgl_touch_i2c_runtime_gate.acquire();
+    if (!access) {
+        return !enabled;
+    }
+    if (enabled == lvgl_touch_wake_policy_enabled()) {
         return true;
     }
 
     const uint32_t now_ms = get_monotonic_ms();
-    const bool touch_released = lvgl_touch_cached_state != LV_INDEV_STATE_PRESSED;
-    lvgl_touch_wake_policy.setEnabled(enabled, touch_released, now_ms);
-    lvgl_touch_cached_state = LV_INDEV_STATE_RELEASED;
+    const bool touch_released =
+        !lvgl_touch_pressed.load(std::memory_order_acquire);
+    lvgl_touch_wake_policy_set(enabled, touch_released, now_ms);
     lvgl_touch_clear_interrupt();
     return true;
 }
 
 bool lvgl_port_take_wake_touch_pending(void)
 {
-    return lvgl_touch_wake_policy.takePendingWake();
+    SharedI2cRuntimeGate::Gate::Access access =
+        lvgl_touch_i2c_runtime_gate.acquire();
+    if (!access) {
+        return false;
+    }
+    return lvgl_touch_wake_policy_take_pending();
 }
 
 bool lvgl_port_get_diagnostics(lvgl_port_diagnostics_t *out)
@@ -1507,6 +1851,7 @@ bool lvgl_port_get_diagnostics(lvgl_port_diagnostics_t *out)
         lvgl_display_sync_fault.load(std::memory_order_acquire);
     out->lock_fail_count = lvgl_diag_lock_fail_count;
     out->touch_read_error_count = lvgl_diag_touch_read_error_count;
+    out->touch_offline = lvgl_touch_offline.load(std::memory_order_acquire);
     out->paused = lvgl_port_paused.load(std::memory_order_acquire);
 
     return true;
@@ -1541,16 +1886,47 @@ bool lvgl_port_request_resume(void)
     return true;
 }
 
+bool lvgl_port_request_quiesce(void)
+{
+    TaskHandle_t task = lvgl_task_handle;
+    if (task == nullptr) {
+        return false;
+    }
+
+    // Leave VSYNC callbacks and the tick timer alive until the task has
+    // cooperatively stopped between handler iterations. Disabling them here
+    // could strand an in-flight framebuffer hand-off and turn a clean pause
+    // request into a display-sync fail-stop.
+    lvgl_pause_requested.store(true, std::memory_order_release);
+    lvgl_port_wake_task();
+    return true;
+}
+
 bool lvgl_port_deinit(void)
 {
-    lvgl_vsync_notify_enabled = false;
+    TaskHandle_t task = lvgl_task_handle;
+    ESP_UTILS_CHECK_FALSE_RETURN(
+        (task == nullptr) || (task != xTaskGetCurrentTaskHandle()),
+        false,
+        "LVGL task cannot deinitialize itself");
+    ESP_UTILS_CHECK_FALSE_RETURN(
+        lvgl_port_lock(LvglWaitPolicy::DEINIT_LOCK_TIMEOUT_MS),
+        false,
+        "Lock LVGL for deinit failed");
+
 #if !LV_TICK_CUSTOM
-    ESP_UTILS_CHECK_FALSE_RETURN(tick_deinit(), false, "Deinitialize LVGL tick failed");
+    if (!tick_deinit()) {
+        (void)lvgl_port_unlock();
+        ESP_UTILS_LOGE("Deinitialize LVGL tick failed");
+        return false;
+    }
 #endif
 
-    ESP_UTILS_CHECK_FALSE_RETURN(lvgl_port_lock(-1), false, "Lock LVGL failed");
-    if (lvgl_task_handle != nullptr) {
-        vTaskDelete(lvgl_task_handle);
+    // Keep VSYNC notifications alive until the finite mutex acquisition above
+    // proves that no flush is still waiting for the current frame hand-off.
+    lvgl_vsync_notify_enabled = false;
+    if (task != nullptr) {
+        vTaskDelete(task);
         lvgl_task_handle = nullptr;
     }
     ESP_UTILS_CHECK_FALSE_RETURN(lvgl_port_unlock(), false, "Unlock LVGL failed");
@@ -1578,6 +1954,11 @@ bool lvgl_port_deinit(void)
 
 bool lvgl_port_prepare_restart(void)
 {
+    // Request the safe path first. Callers that need to protect shared-I2C
+    // shutdown work must wait for this cooperative pause before entering this
+    // final, force-capable teardown.
+    (void)lvgl_port_request_quiesce();
+
     // Prevent VSYNC ISR from notifying a task handle during reboot teardown.
     lvgl_vsync_notify_enabled = false;
     if (lvgl_port_lcd != nullptr) {

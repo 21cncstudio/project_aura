@@ -588,82 +588,71 @@ void log_soft_warnings(const SensorData &data, bool gas_warmup) {
 
 } // namespace
 
+SensorManager::SharedI2cLease::SharedI2cLease(SensorManager &owner)
+    : owner_(owner), acquired_(owner_.tryAcquireSharedI2c()) {}
+
+SensorManager::SharedI2cLease::~SharedI2cLease() {
+    if (acquired_) {
+        owner_.releaseSharedI2c();
+    }
+}
+
+bool SensorManager::tryAcquireSharedI2c() {
+    if (!shared_i2c_available_.load(std::memory_order_acquire)) {
+        return false;
+    }
+
+    shared_i2c_active_users_.fetch_add(1U, std::memory_order_acq_rel);
+    if (!shared_i2c_available_.load(std::memory_order_acquire)) {
+        shared_i2c_active_users_.fetch_sub(1U, std::memory_order_acq_rel);
+        return false;
+    }
+    return true;
+}
+
+void SensorManager::releaseSharedI2c() {
+    shared_i2c_active_users_.fetch_sub(1U, std::memory_order_release);
+}
+
+void SensorManager::disableSharedI2c() {
+    shared_i2c_available_.store(false, std::memory_order_release);
+}
+
+bool SensorManager::waitForSharedI2cIdle(uint32_t timeout_ms) {
+    const uint32_t wait_started_ms = millis();
+    while (shared_i2c_active_users_.load(std::memory_order_acquire) != 0U) {
+        if (static_cast<uint32_t>(millis() - wait_started_ms) >= timeout_ms) {
+            return false;
+        }
+        delay(1);
+    }
+    return true;
+}
+
 void SensorManager::begin(StorageManager &storage, float temp_offset, float hum_offset) {
+    // begin() is the only operation allowed to reopen the one-way runtime gate.
+    // A fresh startup cannot have callers left from the previous runtime.
+    shared_i2c_active_users_.store(0U, std::memory_order_release);
+    shared_i2c_available_.store(true, std::memory_order_release);
     initialized_ = true;
+    late_probe_kind_ = LateProbeKind::None;
+    late_driver_started_ = false;
+    late_probe_cursor_ = 0;
     sen66_.begin();
     sen66_.setOffsets(temp_offset, hum_offset);
     sen66_.loadVocState(storage);
-    sen66_start_attempts_ = 0;
-    sen66_retry_exhausted_logged_ = false;
 
     bmp580_.begin();
-    if (bmp580_.start()) {
-        pressure_sensor_ = PRESSURE_BMP58X;
-        Logger::log(Logger::Info, "Sensors", "%s OK", bmp580_.variantLabel());
-    } else {
-        bmp3xx_.begin();
-        if (bmp3xx_.start()) {
-            pressure_sensor_ = PRESSURE_BMP3XX;
-            Logger::log(Logger::Info, "Sensors", "%s OK", bmp3xx_.variantLabel());
-        } else {
-            dps310_.begin();
-            if (dps310_.start()) {
-                pressure_sensor_ = PRESSURE_DPS310;
-                LOGI("Sensors", "DPS310 OK");
-            } else {
-                pressure_sensor_ = PRESSURE_NONE;
-                LOGW("Sensors", "Pressure sensor not found");
-            }
-        }
-    }
+    bmp3xx_.begin();
+    dps310_.begin();
+    pressure_probe_.reset(millis());
+    pressure_probe_.recordAttempt(detectPressureSensor());
 
     hcho_sensor_type_ = HCHO_SENSOR_NONE;
-    const bool hcho_warm_restart = (boot_reset_reason != ESP_RST_POWERON);
-    bool sfa30_identified = false;
     sfa30_.begin();
     sfa40_.begin();
-
-    if (hcho_warm_restart) {
-        sfa30_identified = sfa30_.probe();
-        if (sfa30_identified) {
-            sfa30_.start();
-            if (sfa30_.status() == Sfa30::Status::Ok) {
-                hcho_sensor_type_ = HCHO_SENSOR_SFA30;
-                Logger::log(Logger::Info, "Sensors", "%s OK", sfa30_.label());
-            }
-        }
-    }
-
-    if (hcho_sensor_type_ == HCHO_SENSOR_NONE && !sfa30_identified) {
-        sfa40_.start();
-        if (sfa40_.status() == Sfa40::Status::Ok) {
-            hcho_sensor_type_ = HCHO_SENSOR_SFA40;
-            if (sfa40_.isWarmupActive()) {
-                Logger::log(Logger::Info, "Sensors", "%s starting", sfa40_.label());
-            } else {
-                Logger::log(Logger::Info, "Sensors", "%s OK", sfa40_.label());
-            }
-        }
-    }
-
-    if (hcho_sensor_type_ == HCHO_SENSOR_NONE && !sfa30_identified) {
-        if (sfa40_.status() == Sfa40::Status::Absent || sfa40_.shouldFallbackToSfa30()) {
-            sfa30_.start();
-            if (sfa30_.status() == Sfa30::Status::Ok) {
-                hcho_sensor_type_ = HCHO_SENSOR_SFA30;
-                Logger::log(Logger::Info, "Sensors", "%s OK", sfa30_.label());
-            }
-        }
-    }
-
-    if (hcho_sensor_type_ == HCHO_SENSOR_NONE) {
-        const bool any_fault =
-            (sfa40_.status() == Sfa40::Status::Fault) ||
-            (sfa30_.status() == Sfa30::Status::Fault);
-        Logger::log(any_fault ? Logger::Warn : Logger::Info,
-                    "Sensors",
-                    any_fault ? "HCHO sensor init failed" : "HCHO sensor not installed");
-    }
+    hcho_probe_.reset(millis());
+    hcho_probe_.recordAttempt(detectHchoSensor());
     sfa_warmup_active_last_ = currentHchoWarmupActive();
     sfa_status_last_ = currentHchoStatus();
 
@@ -685,7 +674,8 @@ void SensorManager::begin(StorageManager &storage, float temp_offset, float hum_
         Logger::log(Logger::Info, "Sensors", "%s slot not installed", optional_gas_.label());
     }
 
-    sen66_.scheduleRetry(Config::SEN66_STARTUP_GRACE_MS);
+    const uint32_t sen66_probe_start_ms = millis() + Config::SEN66_STARTUP_GRACE_MS;
+    sen66_probe_.reset(sen66_probe_start_ms);
     Logger::log(Logger::Info, "Sensors",
                 "SEN66 startup delay %u ms",
                 static_cast<unsigned>(Config::SEN66_STARTUP_GRACE_MS));
@@ -699,16 +689,42 @@ SensorManager::PollResult SensorManager::poll(SensorData &data,
     if (!initialized_) {
         return result;
     }
+    SharedI2cLease shared_i2c(*this);
+    if (!shared_i2c) {
+        return result;
+    }
+    const uint32_t now = millis();
+
+    const LateProbeKind late_probe_at_entry = late_probe_kind_;
+    if (late_probe_kind_ != LateProbeKind::None) {
+        pollActiveLateProbe(now, result);
+    } else {
+        startNextLateProbe(now, co2_asc_enabled);
+    }
+    const bool pressure_late_this_poll =
+        late_probe_at_entry == LateProbeKind::Pressure ||
+        late_probe_kind_ == LateProbeKind::Pressure;
+    const bool hcho_late_this_poll =
+        late_probe_at_entry == LateProbeKind::Hcho ||
+        late_probe_kind_ == LateProbeKind::Hcho;
+    const bool sen66_late_this_poll =
+        late_probe_at_entry == LateProbeKind::Sen66 ||
+        late_probe_kind_ == LateProbeKind::Sen66;
+
     bool sen66_changed = false;
-    sen66_.poll(data, sen66_changed);
+    if (!sen66_late_this_poll) {
+        sen66_.poll(data, sen66_changed);
+    }
     if (sen66_changed) {
         result.data_changed = true;
     }
-    sen66_.saveVocState(storage);
+    if (!sen66_late_this_poll) {
+        sen66_.saveVocState(storage);
+    }
 
-    if (hcho_sensor_type_ == HCHO_SENSOR_SFA40) {
+    if (!hcho_late_this_poll && hcho_sensor_type_ == HCHO_SENSOR_SFA40) {
         sfa40_.poll();
-    } else if (hcho_sensor_type_ == HCHO_SENSOR_SFA30) {
+    } else if (!hcho_late_this_poll && hcho_sensor_type_ == HCHO_SENSOR_SFA30) {
         sfa30_.poll();
     }
     const bool sfa_warmup_now = currentHchoWarmupActive();
@@ -753,13 +769,13 @@ SensorManager::PollResult SensorManager::poll(SensorData &data,
     bool pressure_new = false;
     float pressure_min_hpa = Config::DPS310_PRESSURE_MIN_HPA;
     float pressure_max_hpa = Config::DPS310_PRESSURE_MAX_HPA;
-    if (pressure_sensor_ == PRESSURE_BMP58X) {
+    if (!pressure_late_this_poll && pressure_sensor_ == PRESSURE_BMP58X) {
         bmp580_.poll();
         if (bmp580_.takeNewData(pressure_hpa, temperature_c)) {
             pressure_new = true;
         }
         pressure_valid = bmp580_.isPressureValid();
-    } else if (pressure_sensor_ == PRESSURE_BMP3XX) {
+    } else if (!pressure_late_this_poll && pressure_sensor_ == PRESSURE_BMP3XX) {
         bmp3xx_.poll();
         if (bmp3xx_.takeNewData(pressure_hpa, temperature_c)) {
             pressure_new = true;
@@ -767,7 +783,7 @@ SensorManager::PollResult SensorManager::poll(SensorData &data,
         pressure_valid = bmp3xx_.isPressureValid();
         pressure_min_hpa = Config::BMP3XX_PRESSURE_MIN_HPA;
         pressure_max_hpa = Config::BMP3XX_PRESSURE_MAX_HPA;
-    } else if (pressure_sensor_ == PRESSURE_DPS310) {
+    } else if (!pressure_late_this_poll && pressure_sensor_ == PRESSURE_DPS310) {
         dps310_.poll();
         if (dps310_.takeNewData(pressure_hpa, temperature_c)) {
             pressure_new = true;
@@ -796,31 +812,6 @@ SensorManager::PollResult SensorManager::poll(SensorData &data,
         data.pressure_delta_3h_valid = false;
         data.pressure_delta_24h_valid = false;
         result.data_changed = true;
-    }
-
-    uint32_t now = millis();
-    if (!sen66_.isOk() &&
-        !sen66_.isBusy() &&
-        sen66_start_attempts_ < Config::SEN66_MAX_START_ATTEMPTS &&
-        now >= sen66_.retryAtMs()) {
-        if (sen66_.start(co2_asc_enabled)) {
-            LOGI("Sensors", "SEN66 OK");
-            sen66_start_attempts_ = 0;
-            sen66_retry_exhausted_logged_ = false;
-        } else {
-            if (sen66_start_attempts_ < UINT8_MAX) {
-                ++sen66_start_attempts_;
-            }
-            LOGW("Sensors", "SEN66 not found (%u/%u)",
-                 static_cast<unsigned>(sen66_start_attempts_),
-                 static_cast<unsigned>(Config::SEN66_MAX_START_ATTEMPTS));
-            if (sen66_start_attempts_ < Config::SEN66_MAX_START_ATTEMPTS) {
-                sen66_.scheduleRetry(Config::SEN66_START_RETRY_MS);
-            } else if (!sen66_retry_exhausted_logged_) {
-                LOGW("Sensors", "SEN66 start attempts exhausted, stop probing until reboot");
-                sen66_retry_exhausted_logged_ = true;
-            }
-        }
     }
 
     bool warmup_now = sen66_.isWarmupActive();
@@ -856,6 +847,274 @@ SensorManager::PollResult SensorManager::poll(SensorData &data,
     log_soft_warnings(data, warmup_now);
 
     return result;
+}
+
+bool SensorManager::detectPressureSensor() {
+    pressure_sensor_ = PRESSURE_NONE;
+    if (bmp580_.start()) {
+        pressure_sensor_ = PRESSURE_BMP58X;
+        Logger::log(Logger::Info, "Sensors", "%s OK", bmp580_.variantLabel());
+        return true;
+    }
+    if (bmp3xx_.start()) {
+        pressure_sensor_ = PRESSURE_BMP3XX;
+        Logger::log(Logger::Info, "Sensors", "%s OK", bmp3xx_.variantLabel());
+        return true;
+    }
+    if (dps310_.start()) {
+        pressure_sensor_ = PRESSURE_DPS310;
+        LOGI("Sensors", "DPS310 OK");
+        return true;
+    }
+    return false;
+}
+
+bool SensorManager::detectHchoSensor() {
+    hcho_sensor_type_ = HCHO_SENSOR_NONE;
+    const bool hcho_warm_restart = (boot_reset_reason != ESP_RST_POWERON);
+    bool sfa30_identified = false;
+
+    if (hcho_warm_restart) {
+        sfa30_identified = sfa30_.probe();
+        if (sfa30_identified) {
+            sfa30_.start();
+            if (sfa30_.status() == Sfa30::Status::Ok) {
+                hcho_sensor_type_ = HCHO_SENSOR_SFA30;
+                Logger::log(Logger::Info, "Sensors", "%s OK", sfa30_.label());
+                return true;
+            }
+        }
+    }
+
+    if (!sfa30_identified) {
+        sfa40_.start();
+        if (sfa40_.status() == Sfa40::Status::Ok) {
+            hcho_sensor_type_ = HCHO_SENSOR_SFA40;
+            if (sfa40_.isWarmupActive()) {
+                Logger::log(Logger::Info, "Sensors", "%s starting", sfa40_.label());
+            } else {
+                Logger::log(Logger::Info, "Sensors", "%s OK", sfa40_.label());
+            }
+            return true;
+        }
+    }
+
+    if (!sfa30_identified &&
+        (sfa40_.status() == Sfa40::Status::Absent || sfa40_.shouldFallbackToSfa30())) {
+        sfa30_.start();
+        if (sfa30_.status() == Sfa30::Status::Ok) {
+            hcho_sensor_type_ = HCHO_SENSOR_SFA30;
+            Logger::log(Logger::Info, "Sensors", "%s OK", sfa30_.label());
+            return true;
+        }
+    }
+
+    return false;
+}
+
+void SensorManager::startNextLateProbe(uint32_t now_ms, bool co2_asc_enabled) {
+    const bool due[3] = {
+        pressure_sensor_ == PRESSURE_NONE && pressure_probe_.shouldAttempt(now_ms),
+        hcho_sensor_type_ == HCHO_SENSOR_NONE && hcho_probe_.shouldAttempt(now_ms),
+        !sen66_.isOk() && !sen66_.isBusy() && sen66_probe_.shouldAttempt(now_ms),
+    };
+
+    for (uint8_t offset = 0; offset < 3U; ++offset) {
+        const uint8_t candidate = static_cast<uint8_t>((late_probe_cursor_ + offset) % 3U);
+        if (!due[candidate]) {
+            continue;
+        }
+        late_probe_cursor_ = static_cast<uint8_t>((candidate + 1U) % 3U);
+        late_driver_started_ = false;
+        if (candidate == 0U) {
+            pressure_late_stage_ = PressureLateStage::Bmp580;
+            late_probe_kind_ = LateProbeKind::Pressure;
+        } else if (candidate == 1U) {
+            hcho_late_stage_ = (boot_reset_reason != ESP_RST_POWERON)
+                ? HchoLateStage::Sfa30Warm
+                : HchoLateStage::Sfa40;
+            late_probe_kind_ = LateProbeKind::Hcho;
+        } else {
+            late_sen66_asc_enabled_ = co2_asc_enabled;
+            late_probe_kind_ = LateProbeKind::Sen66;
+        }
+        return;
+    }
+}
+
+void SensorManager::pollActiveLateProbe(uint32_t now_ms, PollResult &result) {
+    if (!late_driver_started_) {
+        switch (late_probe_kind_) {
+            case LateProbeKind::Pressure:
+                if (pressure_late_stage_ == PressureLateStage::Bmp580) {
+                    bmp580_.beginLateStart();
+                } else if (pressure_late_stage_ == PressureLateStage::Bmp3xx) {
+                    bmp3xx_.beginLateStart();
+                } else {
+                    dps310_.beginLateStart();
+                }
+                break;
+            case LateProbeKind::Hcho:
+                if (hcho_late_stage_ == HchoLateStage::Sfa40) {
+                    sfa40_.beginLateStart();
+                } else {
+                    sfa30_.beginLateStart();
+                }
+                break;
+            case LateProbeKind::Sen66:
+                sen66_.beginLateStart(late_sen66_asc_enabled_);
+                break;
+            case LateProbeKind::None:
+            default:
+                return;
+        }
+        late_driver_started_ = true;
+        return;
+    }
+
+    CooperativeStart::Result start_result = CooperativeStart::Result::Failed;
+    if (late_probe_kind_ == LateProbeKind::Pressure) {
+        if (pressure_late_stage_ == PressureLateStage::Bmp580) {
+            start_result = bmp580_.pollLateStart(now_ms);
+        } else if (pressure_late_stage_ == PressureLateStage::Bmp3xx) {
+            start_result = bmp3xx_.pollLateStart(now_ms);
+        } else {
+            start_result = dps310_.pollLateStart(now_ms);
+        }
+        if (start_result == CooperativeStart::Result::InProgress) {
+            return;
+        }
+        if (start_result == CooperativeStart::Result::Success) {
+            pressure_sensor_ = pressure_late_stage_ == PressureLateStage::Bmp580
+                ? PRESSURE_BMP58X
+                : (pressure_late_stage_ == PressureLateStage::Bmp3xx
+                       ? PRESSURE_BMP3XX
+                       : PRESSURE_DPS310);
+            if (pressure_sensor_ == PRESSURE_BMP58X) {
+                Logger::log(Logger::Info, "Sensors", "%s OK", bmp580_.variantLabel());
+            } else if (pressure_sensor_ == PRESSURE_BMP3XX) {
+                Logger::log(Logger::Info, "Sensors", "%s OK", bmp3xx_.variantLabel());
+            } else {
+                LOGI("Sensors", "DPS310 OK");
+            }
+            finishPressureLateProbe(true, result);
+            return;
+        }
+        if (pressure_late_stage_ == PressureLateStage::Bmp580) {
+            pressure_late_stage_ = PressureLateStage::Bmp3xx;
+            late_driver_started_ = false;
+            return;
+        }
+        if (pressure_late_stage_ == PressureLateStage::Bmp3xx) {
+            pressure_late_stage_ = PressureLateStage::Dps310;
+            late_driver_started_ = false;
+            return;
+        }
+        finishPressureLateProbe(false, result);
+        return;
+    }
+
+    if (late_probe_kind_ == LateProbeKind::Hcho) {
+        if (hcho_late_stage_ == HchoLateStage::Sfa40) {
+            start_result = sfa40_.pollLateStart(now_ms);
+        } else {
+            start_result = sfa30_.pollLateStart(now_ms);
+        }
+        if (start_result == CooperativeStart::Result::InProgress) {
+            return;
+        }
+        if (start_result == CooperativeStart::Result::Success) {
+            hcho_sensor_type_ = hcho_late_stage_ == HchoLateStage::Sfa40
+                ? HCHO_SENSOR_SFA40
+                : HCHO_SENSOR_SFA30;
+            if (hcho_sensor_type_ == HCHO_SENSOR_SFA40 && sfa40_.isWarmupActive()) {
+                Logger::log(Logger::Info, "Sensors", "%s starting", sfa40_.label());
+            } else {
+                Logger::log(Logger::Info, "Sensors", "%s OK",
+                            hcho_sensor_type_ == HCHO_SENSOR_SFA40
+                                ? sfa40_.label()
+                                : sfa30_.label());
+            }
+            finishHchoLateProbe(true, result);
+            return;
+        }
+        if (hcho_late_stage_ == HchoLateStage::Sfa30Warm) {
+            if (sfa30_.lateStartIdentified()) {
+                finishHchoLateProbe(false, result);
+            } else {
+                hcho_late_stage_ = HchoLateStage::Sfa40;
+                late_driver_started_ = false;
+            }
+            return;
+        }
+        if (hcho_late_stage_ == HchoLateStage::Sfa40 &&
+            (sfa40_.status() == Sfa40::Status::Absent ||
+             sfa40_.shouldFallbackToSfa30())) {
+            hcho_late_stage_ = HchoLateStage::Sfa30Fallback;
+            late_driver_started_ = false;
+            return;
+        }
+        finishHchoLateProbe(false, result);
+        return;
+    }
+
+    if (late_probe_kind_ == LateProbeKind::Sen66) {
+        start_result = sen66_.pollLateStart(now_ms);
+        if (start_result == CooperativeStart::Result::InProgress) {
+            return;
+        }
+        finishSen66LateProbe(start_result == CooperativeStart::Result::Success, result);
+    }
+}
+
+void SensorManager::finishPressureLateProbe(bool success, PollResult &result) {
+    pressure_probe_.recordAttempt(success);
+    late_probe_kind_ = LateProbeKind::None;
+    late_driver_started_ = false;
+    if (success) {
+        result.data_changed = true;
+    } else if (pressure_probe_.exhausted()) {
+        result.data_changed = true;
+        LOGI("Sensors", "Pressure sensor not found after startup probes");
+    }
+}
+
+void SensorManager::finishHchoLateProbe(bool success, PollResult &result) {
+    hcho_probe_.recordAttempt(success);
+    late_probe_kind_ = LateProbeKind::None;
+    late_driver_started_ = false;
+    if (success) {
+        result.data_changed = true;
+    }
+    if (!success && hcho_probe_.exhausted()) {
+        result.data_changed = true;
+        const bool any_fault =
+            (sfa40_.status() == Sfa40::Status::Fault) ||
+            (sfa30_.status() == Sfa30::Status::Fault);
+        Logger::log(any_fault ? Logger::Warn : Logger::Info,
+                    "Sensors",
+                    any_fault ? "HCHO sensor init failed after startup probes"
+                              : "HCHO sensor not installed after startup probes");
+    }
+}
+
+void SensorManager::finishSen66LateProbe(bool success, PollResult &result) {
+    sen66_probe_.recordAttempt(success);
+    late_probe_kind_ = LateProbeKind::None;
+    late_driver_started_ = false;
+    if (success) {
+        result.data_changed = true;
+        LOGI("Sensors", "SEN66 OK");
+        return;
+    }
+
+    LOGW("Sensors", "SEN66 not found (%u/%u)",
+         static_cast<unsigned>(sen66_probe_.attempts()),
+         static_cast<unsigned>(StartupProbePolicy::kMaxAttempts));
+    if (!sen66_probe_.pending()) {
+        result.data_changed = true;
+        LOGW("Sensors", "SEN66 start attempts exhausted, stop probing until reboot");
+    }
 }
 
 bool SensorManager::isPressureOk() const {
@@ -985,13 +1244,66 @@ const char *SensorManager::hchoSensorLabel() const {
 }
 
 void SensorManager::setOffsets(float temp_offset, float hum_offset) {
-    if (initialized_) {
-        sen66_.setOffsets(temp_offset, hum_offset);
+    if (!initialized_) {
+        return;
     }
+    SharedI2cLease shared_i2c(*this);
+    if (!shared_i2c) {
+        return;
+    }
+    sen66_.setOffsets(temp_offset, hum_offset);
+}
+
+bool SensorManager::deviceReset() {
+    if (!initialized_) {
+        return false;
+    }
+    SharedI2cLease shared_i2c(*this);
+    return shared_i2c && sen66_.deviceReset();
+}
+
+void SensorManager::scheduleRetry(uint32_t delay_ms) {
+    if (!initialized_ || !isSharedI2cAvailable()) {
+        return;
+    }
+    sen66_probe_.reset(millis() + delay_ms);
+}
+
+bool SensorManager::start(bool asc_enabled) {
+    if (!initialized_) {
+        return false;
+    }
+    SharedI2cLease shared_i2c(*this);
+    return shared_i2c && sen66_.start(asc_enabled);
+}
+
+bool SensorManager::setAscEnabled(bool enabled) {
+    if (!initialized_) {
+        return false;
+    }
+    SharedI2cLease shared_i2c(*this);
+    return shared_i2c && sen66_.setAscEnabled(enabled);
+}
+
+bool SensorManager::calibrateFrc(uint16_t ref_ppm,
+                                 bool has_pressure,
+                                 float pressure_hpa,
+                                 uint16_t &correction) {
+    if (!initialized_) {
+        return false;
+    }
+    SharedI2cLease shared_i2c(*this);
+    return shared_i2c &&
+           sen66_.calibrateFRC(ref_ppm, has_pressure, pressure_hpa, correction);
 }
 
 void SensorManager::clearVocState(StorageManager &storage) {
-    if (initialized_) {
-        sen66_.clearVocState(storage);
+    if (!initialized_) {
+        return;
     }
+    SharedI2cLease shared_i2c(*this);
+    if (!shared_i2c) {
+        return;
+    }
+    sen66_.clearVocState(storage);
 }

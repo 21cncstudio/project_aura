@@ -52,5 +52,5 @@ void settings_handle_update();
 void ota_handle_prepare();
 void ota_handle_update();
 void ota_handle_upload();
-bool WebHandlersAllowOtaPhysicalConfirm();
-bool WebHandlersDenyOtaPhysicalConfirm();
+bool WebHandlersAllowOtaPhysicalConfirm(uint32_t expected_confirm_id);
+bool WebHandlersDenyOtaPhysicalConfirm(uint32_t expected_confirm_id);

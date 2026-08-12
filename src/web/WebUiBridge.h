@@ -13,6 +13,7 @@
 #include "config/AppData.h"
 #include "config/AppConfig.h"
 #include "modules/DacAutoConfig.h"
+#include "web/OtaUiLineagePolicy.h"
 
 class WebUiBridge {
 public:
@@ -27,6 +28,11 @@ public:
         ConfirmAllowed,
         ConfirmDenied,
         Installing,
+    };
+
+    struct FirmwareUpdateScreenRequest {
+        FirmwareUpdateScreenMode mode = FirmwareUpdateScreenMode::Hidden;
+        uint32_t confirm_id = 0;
     };
 
     struct Snapshot {
@@ -161,8 +167,8 @@ public:
     bool consumePendingMqttSaveRequest(MqttSaveUpdate &update, uint32_t &request_id);
     void completePendingMqttSaveRequest(uint32_t request_id, const ApplyResult &result);
 
-    void requestFirmwareUpdateScreen(FirmwareUpdateScreenMode mode);
-    bool consumePendingFirmwareUpdateScreen(FirmwareUpdateScreenMode &mode);
+    void requestFirmwareUpdateScreen(FirmwareUpdateScreenMode mode, uint32_t confirm_id);
+    bool consumePendingFirmwareUpdateScreen(FirmwareUpdateScreenRequest &request);
     void setMqttScreenOpen(bool open);
     void setThemeScreenOpen(bool open, bool custom_open);
 
@@ -229,5 +235,6 @@ private:
     ApplyResult pending_mqtt_save_result_{};
     uint32_t pending_mqtt_save_result_id_ = 0;
     bool firmware_update_screen_pending_ = false;
-    FirmwareUpdateScreenMode firmware_update_screen_mode_ = FirmwareUpdateScreenMode::Hidden;
+    FirmwareUpdateScreenRequest firmware_update_screen_request_{};
+    OtaUiLineagePolicy::ScreenLineage firmware_update_screen_lineage_{};
 };

@@ -846,10 +846,13 @@ void UiController::on_factory_reset_event(lv_event_t *e) {
 }
 
 void UiController::on_fw_update_allow_event(lv_event_t *e) {
-    if (lv_event_get_code(e) != LV_EVENT_CLICKED) {
+    if (!e || lv_event_get_code(e) != LV_EVENT_CLICKED ||
+        firmware_update_screen_mode_ != WebUiBridge::FirmwareUpdateScreenMode::ConfirmPending ||
+        firmware_update_confirm_id_ == 0) {
         return;
     }
-    if (WebHandlersAllowOtaPhysicalConfirm()) {
+    const uint32_t confirm_id = firmware_update_confirm_id_;
+    if (WebHandlersAllowOtaPhysicalConfirm(confirm_id)) {
         firmware_update_screen_mode_ = WebUiBridge::FirmwareUpdateScreenMode::ConfirmAllowed;
         firmware_update_autoclose_due_ms_ = 0;
         update_fw_update_ui();
@@ -858,10 +861,13 @@ void UiController::on_fw_update_allow_event(lv_event_t *e) {
 }
 
 void UiController::on_fw_update_deny_event(lv_event_t *e) {
-    if (lv_event_get_code(e) != LV_EVENT_CLICKED) {
+    if (!e || lv_event_get_code(e) != LV_EVENT_CLICKED ||
+        firmware_update_screen_mode_ != WebUiBridge::FirmwareUpdateScreenMode::ConfirmPending ||
+        firmware_update_confirm_id_ == 0) {
         return;
     }
-    if (WebHandlersDenyOtaPhysicalConfirm()) {
+    const uint32_t confirm_id = firmware_update_confirm_id_;
+    if (WebHandlersDenyOtaPhysicalConfirm(confirm_id)) {
         firmware_update_screen_mode_ = WebUiBridge::FirmwareUpdateScreenMode::ConfirmDenied;
         firmware_update_autoclose_due_ms_ = millis() + 1500UL;
         update_fw_update_ui();

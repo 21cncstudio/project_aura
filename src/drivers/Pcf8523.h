@@ -12,6 +12,13 @@ class Pcf8523 {
 public:
     bool probe();
     bool probeFallback();
+    bool readProbeSignature(bool &matched);
+    bool readProbeFallbackControl(uint8_t out[3]);
+    bool readProbeFallbackTime(uint8_t out[7]);
+    bool readProbeFallbackTimers(uint8_t out[5]);
+    static bool probeFallbackMatches(const uint8_t control[3],
+                                     const uint8_t time_regs[7],
+                                     const uint8_t timer_regs[5]);
     bool begin();
     bool readTime(tm &out, bool &osc_stop, bool &valid);
     bool writeTime(const tm &utc_tm);

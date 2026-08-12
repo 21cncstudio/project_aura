@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "driver/i2c.h"
+#include "ArduinoMock.h"
 
 struct MockI2cCmd {
     bool has_address = false;
@@ -19,6 +20,8 @@ struct DeviceState {
     bool present = false;
     std::array<uint8_t, 256> regs{};
     std::array<bool, 256> read_fail{};
+    std::array<uint32_t, 256> read_call_count{};
+    std::array<uint32_t, 256> read_fail_on_call{};
     std::array<bool, 256> write_fail{};
     std::unordered_set<uint16_t> failing_cmds;
     std::unordered_map<uint16_t, std::vector<uint8_t>> cmd_reads;
@@ -28,9 +31,16 @@ struct DeviceState {
 };
 
 std::array<DeviceState, 256> g_devices{};
+uint32_t g_command_advance_ms = 0;
+uint32_t g_transaction_count = 0;
 
 DeviceState &device(uint8_t addr) {
     return g_devices[addr];
+}
+
+void noteTransaction() {
+    ++g_transaction_count;
+    advanceMillis(g_command_advance_ms);
 }
 
 } // namespace
@@ -39,6 +49,8 @@ namespace I2cMock {
 
 void reset() {
     g_devices = {};
+    g_command_advance_ms = 0;
+    g_transaction_count = 0;
 }
 
 void setDevicePresent(uint8_t addr, bool present) {
@@ -82,12 +94,25 @@ void setReadFailure(uint8_t addr, uint8_t reg, bool fail) {
     device(addr).read_fail[reg] = fail;
 }
 
+void setCommandAdvanceMs(uint32_t advance_ms) {
+    g_command_advance_ms = advance_ms;
+}
+
+void setReadFailureOnCall(uint8_t addr, uint8_t reg, uint32_t call_number) {
+    device(addr).read_call_count[reg] = 0;
+    device(addr).read_fail_on_call[reg] = call_number;
+}
+
 void setWriteFailure(uint8_t addr, uint8_t reg, bool fail) {
     device(addr).write_fail[reg] = fail;
 }
 
 uint8_t getRegister(uint8_t addr, uint8_t reg) {
     return device(addr).regs[reg];
+}
+
+uint32_t transactionCount() {
+    return g_transaction_count;
 }
 
 } // namespace I2cMock
@@ -132,6 +157,7 @@ esp_err_t i2c_master_write(i2c_cmd_handle_t cmd, const uint8_t *data, size_t dat
 }
 
 esp_err_t i2c_master_cmd_begin(i2c_port_t, i2c_cmd_handle_t cmd, TickType_t) {
+    noteTransaction();
     if (!cmd || !cmd->has_address) {
         return ESP_ERR_INVALID_ARG;
     }
@@ -157,17 +183,22 @@ esp_err_t i2c_master_write_read_device(i2c_port_t,
                                        uint8_t *read_buffer,
                                        size_t read_size,
                                        TickType_t) {
+    noteTransaction();
     if (!device(addr).present || !write_buffer || write_size == 0 ||
         !read_buffer || read_size == 0) {
         return ESP_FAIL;
     }
     const uint8_t reg = write_buffer[0];
-    if (device(addr).read_fail[reg]) {
+    DeviceState &state = device(addr);
+    ++state.read_call_count[reg];
+    if (state.read_fail[reg] ||
+        (state.read_fail_on_call[reg] != 0U &&
+         state.read_call_count[reg] == state.read_fail_on_call[reg])) {
         return ESP_FAIL;
     }
-    if (device(addr).has_last_sensor_cmd) {
-        auto it = device(addr).cmd_reads.find(device(addr).last_sensor_cmd);
-        if (it != device(addr).cmd_reads.end()) {
+    if (state.has_last_sensor_cmd) {
+        auto it = state.cmd_reads.find(state.last_sensor_cmd);
+        if (it != state.cmd_reads.end()) {
             if (it->second.size() < read_size) {
                 return ESP_FAIL;
             }
@@ -195,6 +226,7 @@ esp_err_t i2c_master_write_to_device(i2c_port_t,
                                      const uint8_t *write_buffer,
                                      size_t write_size,
                                      TickType_t) {
+    noteTransaction();
     if (!device(addr).present || !write_buffer || write_size == 0) {
         return ESP_FAIL;
     }
@@ -221,6 +253,7 @@ esp_err_t i2c_master_read_from_device(i2c_port_t,
                                       uint8_t *read_buffer,
                                       size_t read_size,
                                       TickType_t) {
+    noteTransaction();
     if (!device(addr).present || !read_buffer || read_size == 0) {
         return ESP_FAIL;
     }

@@ -29,6 +29,7 @@ bool boot_ui_auto_recovery_reboot = false;
 bool boot_board_auto_recovery_reboot = false;
 bool boot_board_cold_start = false;
 bool boot_ui_auto_recovery_restart_requested = false;
+bool boot_board_auto_recovery_restart_requested = false;
 
 void boot_mark_ui_auto_recovery_reboot() {
     boot_ui_auto_recovery_magic = BOOT_UI_AUTO_RECOVERY_MAGIC;
@@ -47,12 +48,21 @@ bool boot_ui_auto_recovery_restart_pending() {
 
 void boot_mark_board_auto_recovery_reboot() {
     boot_board_auto_recovery_magic = BOOT_BOARD_AUTO_RECOVERY_MAGIC;
+    boot_board_auto_recovery_restart_requested = true;
 }
 
 bool boot_consume_board_auto_recovery_reboot() {
     const bool flagged = (boot_board_auto_recovery_magic == BOOT_BOARD_AUTO_RECOVERY_MAGIC);
     boot_board_auto_recovery_magic = 0;
     return flagged;
+}
+
+bool boot_board_auto_recovery_restart_pending() {
+    return boot_board_auto_recovery_restart_requested;
+}
+
+bool boot_any_auto_recovery_boot() {
+    return boot_ui_auto_recovery_reboot || boot_board_auto_recovery_reboot;
 }
 
 bool boot_board_power_settle_completed() {

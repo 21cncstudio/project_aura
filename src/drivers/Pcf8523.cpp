@@ -36,29 +36,57 @@ bool isBcdWithin(uint8_t raw, uint8_t mask, uint8_t max_value, bool allow_zero) 
 } // namespace
 
 bool Pcf8523::probe() {
+    bool matched = false;
+    return readProbeSignature(matched) && matched;
+}
+
+bool Pcf8523::readProbeSignature(bool &matched) {
     uint8_t signature[5] = { 0 };
+    matched = false;
     if (!read(Config::PCF8523_REG_OFFSET, signature, sizeof(signature))) {
         return false;
     }
-
-    return signature[0] == 0x00 &&
-           signature[1] == 0x00 &&
-           signature[2] == Config::PCF8523_TMR_FREQ_RESET &&
-           signature[4] == Config::PCF8523_TMR_FREQ_RESET;
+    matched = signature[0] == 0x00 &&
+              signature[1] == 0x00 &&
+              signature[2] == Config::PCF8523_TMR_FREQ_RESET &&
+              signature[4] == Config::PCF8523_TMR_FREQ_RESET;
+    return true;
 }
 
 bool Pcf8523::probeFallback() {
     uint8_t ctrl[3] = { 0 };
     uint8_t time_regs[7] = { 0 };
     uint8_t timer_regs[5] = { 0 };
-    if (!read(Config::PCF8523_REG_CONTROL_1, ctrl, sizeof(ctrl)) ||
-        !read(Config::PCF8523_REG_SECONDS, time_regs, sizeof(time_regs)) ||
-        !read(Config::PCF8523_REG_OFFSET, timer_regs, sizeof(timer_regs))) {
+    if (!readProbeFallbackControl(ctrl) ||
+        !readProbeFallbackTime(time_regs) ||
+        !readProbeFallbackTimers(timer_regs)) {
         return false;
     }
 
-    const bool ctrl1_layout_valid = (ctrl[0] & 0x40) == 0;
-    const bool ctrl3_reserved_clear = (ctrl[2] & 0x10) == 0;
+    return probeFallbackMatches(ctrl, time_regs, timer_regs);
+}
+
+bool Pcf8523::readProbeFallbackControl(uint8_t out[3]) {
+    return read(Config::PCF8523_REG_CONTROL_1, out, 3);
+}
+
+bool Pcf8523::readProbeFallbackTime(uint8_t out[7]) {
+    return read(Config::PCF8523_REG_SECONDS, out, 7);
+}
+
+bool Pcf8523::readProbeFallbackTimers(uint8_t out[5]) {
+    return read(Config::PCF8523_REG_OFFSET, out, 5);
+}
+
+bool Pcf8523::probeFallbackMatches(const uint8_t control[3],
+                                   const uint8_t time_regs[7],
+                                   const uint8_t timer_regs[5]) {
+    if (!control || !time_regs || !timer_regs) {
+        return false;
+    }
+
+    const bool ctrl1_layout_valid = (control[0] & 0x40) == 0;
+    const bool ctrl3_reserved_clear = (control[2] & 0x10) == 0;
     const uint8_t weekday_raw = time_regs[4];
     const bool weekday_layout_valid = (weekday_raw & 0xF8) == 0;
     const bool month_layout_valid = (time_regs[5] & 0xE0) == 0;

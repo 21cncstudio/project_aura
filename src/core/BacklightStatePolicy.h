@@ -6,6 +6,7 @@
 
 #pragma once
 
+#include <atomic>
 #include <stdint.h>
 
 namespace BacklightStatePolicy {
@@ -36,6 +37,11 @@ inline uint32_t retryDelayMs(uint8_t consecutive_failures) {
 inline bool retryReady(uint32_t now_ms, uint32_t retry_not_before_ms, bool retry_pending) {
     return !retry_pending ||
            static_cast<int32_t>(now_ms - retry_not_before_ms) >= 0;
+}
+
+inline bool beforeDeadline(uint32_t now_ms, uint32_t deadline_ms) {
+    return deadline_ms != 0 &&
+           static_cast<int32_t>(now_ms - deadline_ms) < 0;
 }
 
 class PendingCommand {
@@ -73,6 +79,110 @@ private:
     uint8_t consecutive_failures_ = 0;
     uint32_t retry_not_before_ms_ = 0;
 };
+
+class RuntimeGate {
+public:
+    class Access {
+    public:
+        Access() = default;
+        Access(const Access &) = delete;
+        Access &operator=(const Access &) = delete;
+
+        Access(Access &&other) noexcept : gate_(other.gate_) {
+            other.gate_ = nullptr;
+        }
+
+        Access &operator=(Access &&other) noexcept {
+            if (this == &other) {
+                return *this;
+            }
+            release();
+            gate_ = other.gate_;
+            other.gate_ = nullptr;
+            return *this;
+        }
+
+        ~Access() { release(); }
+
+        explicit operator bool() const { return gate_ != nullptr; }
+
+    private:
+        friend class RuntimeGate;
+
+        explicit Access(RuntimeGate *gate) : gate_(gate) {}
+
+        void release() {
+            if (!gate_) {
+                return;
+            }
+            gate_->releaseAccess();
+            gate_ = nullptr;
+        }
+
+        RuntimeGate *gate_ = nullptr;
+    };
+
+    RuntimeGate() = default;
+    RuntimeGate(const RuntimeGate &) = delete;
+    RuntimeGate &operator=(const RuntimeGate &) = delete;
+
+    bool available() const {
+        return available_.load(std::memory_order_acquire);
+    }
+
+    Access acquire() {
+        if (!available_.load(std::memory_order_acquire)) {
+            return Access{};
+        }
+
+        active_users_.fetch_add(1U, std::memory_order_acq_rel);
+        if (!available_.load(std::memory_order_acquire)) {
+            active_users_.fetch_sub(1U, std::memory_order_acq_rel);
+            return Access{};
+        }
+        return Access{this};
+    }
+
+    bool disable() {
+        // Close admission immediately. A caller which raced between its first
+        // availability check and incrementing the counter will fail the second
+        // check and release its provisional count without running an operation.
+        return available_.exchange(false, std::memory_order_acq_rel);
+    }
+
+    bool idle() const {
+        return active_users_.load(std::memory_order_acquire) == 0U;
+    }
+
+    uint32_t activeUsers() const {
+        return active_users_.load(std::memory_order_acquire);
+    }
+
+private:
+    void releaseAccess() {
+        active_users_.fetch_sub(1U, std::memory_order_release);
+    }
+
+    std::atomic<bool> available_{true};
+    std::atomic<uint32_t> active_users_{0};
+};
+
+inline bool drainWaitExpired(uint32_t start_ms,
+                             uint32_t now_ms,
+                             uint32_t timeout_ms) {
+    return static_cast<uint32_t>(now_ms - start_ms) >= timeout_ms;
+}
+
+inline bool clearPendingAfterDrain(const RuntimeGate &gate,
+                                   PendingCommand &pending_command) {
+    // Finalization is safe only after admission was permanently closed and
+    // every operation admitted before that close has released its lease.
+    if (gate.available() || !gate.idle()) {
+        return false;
+    }
+    pending_command.clear();
+    return true;
+}
 
 inline bool inputActivitySince(uint32_t previous_inactive_ms, uint32_t inactive_ms) {
     return previous_inactive_ms != 0 && inactive_ms < previous_inactive_ms;

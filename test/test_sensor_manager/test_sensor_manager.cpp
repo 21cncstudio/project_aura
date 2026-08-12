@@ -205,9 +205,122 @@ void test_sensor_manager_before_begin_suppresses_poll_and_public_operations() {
     TEST_ASSERT_FALSE(manager.setAscEnabled(true));
     TEST_ASSERT_FALSE(manager.calibrateFrc(400, false, 0.0f, correction));
     manager.scheduleRetry(1000);
-    TEST_ASSERT_EQUAL_UINT32(0, Sen66::state().retry_at_ms);
     TEST_ASSERT_FALSE(Sen66::state().device_reset_called);
     TEST_ASSERT_FALSE(Sen66::state().start_called);
+}
+
+void test_sensor_manager_shared_i2c_gate_blocks_runtime_driver_paths() {
+    StorageManager storage;
+    storage.begin();
+    PressureHistory history;
+    SensorManager manager;
+    SensorData data{};
+    uint16_t correction = 123;
+
+    Sen0466::state().start_ok = true;
+    DfrOptionalGasSensor::state().start_ok = true;
+    DfrOptionalGasSensor::state().gas_type =
+        DfrOptionalGasSensor::OptionalGasType::NH3;
+    manager.begin(storage, 0.0f, 0.0f);
+
+    const uint32_t offsets_before = Sen66::state().set_offsets_call_count;
+    const uint8_t start_before = Sen66::state().start_call_count;
+    Sen66::state().save_voc_called = false;
+    Sen66::state().clear_voc_called = false;
+    Sen66::state().device_reset_called = false;
+    Sfa40::state().has_new_data = true;
+    Bmp580::state().has_new_data = true;
+
+    manager.disableSharedI2c();
+    manager.disableSharedI2c();
+    TEST_ASSERT_FALSE(manager.isSharedI2cAvailable());
+
+    const SensorManager::PollResult result = manager.poll(data, storage, history, true);
+    manager.setOffsets(1.0f, 2.0f);
+    TEST_ASSERT_FALSE(manager.deviceReset());
+    manager.scheduleRetry(1000U);
+    TEST_ASSERT_FALSE(manager.start(true));
+    TEST_ASSERT_FALSE(manager.setAscEnabled(false));
+    TEST_ASSERT_FALSE(manager.calibrateFrc(420U, false, 0.0f, correction));
+    manager.clearVocState(storage);
+
+    TEST_ASSERT_FALSE(result.data_changed);
+    TEST_ASSERT_FALSE(result.warmup_changed);
+    TEST_ASSERT_EQUAL_UINT32(offsets_before, Sen66::state().set_offsets_call_count);
+    TEST_ASSERT_EQUAL_UINT8(start_before, Sen66::state().start_call_count);
+    TEST_ASSERT_EQUAL_UINT32(0U, Sen66::state().poll_call_count);
+    TEST_ASSERT_EQUAL_UINT32(0U, Sen66::state().frc_call_count);
+    TEST_ASSERT_EQUAL_UINT32(0U, Sen66::state().asc_call_count);
+    TEST_ASSERT_FALSE(Sen66::state().save_voc_called);
+    TEST_ASSERT_FALSE(Sen66::state().clear_voc_called);
+    TEST_ASSERT_FALSE(Sen66::state().device_reset_called);
+    TEST_ASSERT_EQUAL_UINT32(0U, Bmp580::state().poll_call_count);
+    TEST_ASSERT_EQUAL_UINT32(0U, Sfa40::state().poll_call_count);
+    TEST_ASSERT_EQUAL_UINT32(0U, Sen0466::state().poll_call_count);
+    TEST_ASSERT_EQUAL_UINT32(0U, DfrOptionalGasSensor::state().poll_call_count);
+    TEST_ASSERT_TRUE(Bmp580::state().has_new_data);
+    TEST_ASSERT_TRUE(Sfa40::state().has_new_data);
+}
+
+void test_sensor_manager_begin_is_only_path_that_reopens_shared_i2c_gate() {
+    StorageManager storage;
+    storage.begin();
+    PressureHistory history;
+    SensorManager manager;
+    SensorData data{};
+
+    Bmp580::state().start_ok = false;
+    Bmp3xx::state().start_ok = false;
+    Dps310::state().start_ok = false;
+    Sfa40::state().status = Sfa40::Status::Absent;
+    Sfa30::state().status = Sfa30::Status::Absent;
+    manager.begin(storage, 0.0f, 0.0f);
+    manager.disableSharedI2c();
+
+    setMillis(1000U);
+    manager.poll(data, storage, history, true);
+    TEST_ASSERT_EQUAL_UINT8(0U, Bmp580::state().late_start_begin_count);
+    TEST_ASSERT_EQUAL_UINT8(0U, Sfa40::state().late_start_begin_count);
+
+    manager.begin(storage, 0.0f, 0.0f);
+    TEST_ASSERT_TRUE(manager.isSharedI2cAvailable());
+    setMillis(2000U);
+    manager.poll(data, storage, history, true); // Select pressure retry.
+    manager.poll(data, storage, history, true); // Begin BMP58x retry.
+    TEST_ASSERT_EQUAL_UINT8(1U, Bmp580::state().late_start_begin_count);
+}
+
+void test_sensor_manager_disable_closes_gate_without_waiting_for_active_user() {
+    SensorManager manager;
+    manager.setSharedI2cActiveUsersForTest(1U);
+    setMillis(1234U);
+
+    manager.disableSharedI2c();
+
+    TEST_ASSERT_FALSE(manager.isSharedI2cAvailable());
+    TEST_ASSERT_EQUAL_UINT32(1234U, getMillis());
+    manager.setSharedI2cActiveUsersForTest(0U);
+}
+
+void test_sensor_manager_wait_for_shared_i2c_idle_handles_idle_and_zero_timeout() {
+    SensorManager manager;
+
+    TEST_ASSERT_TRUE(manager.waitForSharedI2cIdle(0U));
+
+    manager.setSharedI2cActiveUsersForTest(1U);
+    TEST_ASSERT_FALSE(manager.waitForSharedI2cIdle(0U));
+    TEST_ASSERT_EQUAL_UINT32(0U, getMillis());
+    manager.setSharedI2cActiveUsersForTest(0U);
+}
+
+void test_sensor_manager_wait_for_shared_i2c_idle_is_bounded_across_rollover() {
+    SensorManager manager;
+    manager.setSharedI2cActiveUsersForTest(1U);
+    setMillis(UINT32_MAX - 2U);
+
+    TEST_ASSERT_FALSE(manager.waitForSharedI2cIdle(5U));
+    TEST_ASSERT_EQUAL_UINT32(2U, getMillis());
+    manager.setSharedI2cActiveUsersForTest(0U);
 }
 
 void test_sensor_manager_pm05_clamps_to_sensor_limit() {
@@ -865,12 +978,214 @@ void test_sensor_manager_stale_resets_temp_warning_state() {
     TEST_ASSERT_TRUE(recentContainsMessagePrefix("Temperature outside recommended range:"));
 }
 
+static SensorManager::PollResult driveStartupSequences(
+    SensorManager &manager,
+    SensorData &data,
+    StorageManager &storage,
+    PressureHistory &history,
+    uint32_t now_ms,
+    size_t polls = 64U) {
+    SensorManager::PollResult aggregate;
+    setMillis(now_ms);
+    for (size_t i = 0; i < polls; ++i) {
+        const SensorManager::PollResult current =
+            manager.poll(data, storage, history, true);
+        aggregate.data_changed = aggregate.data_changed || current.data_changed;
+        aggregate.warmup_changed = aggregate.warmup_changed || current.warmup_changed;
+    }
+    return aggregate;
+}
+
+void test_sensor_manager_pressure_probe_follows_bounded_startup_schedule() {
+    StorageManager storage;
+    storage.begin();
+    PressureHistory history;
+    SensorManager manager;
+    SensorData data;
+
+    Bmp580::state().start_ok = false;
+    Bmp3xx::state().start_ok = false;
+    Dps310::state().start_ok = false;
+    manager.begin(storage, 0.0f, 0.0f);
+
+    TEST_ASSERT_TRUE(manager.isPressureDetecting());
+    TEST_ASSERT_EQUAL_UINT8(1, Bmp580::state().start_call_count);
+    TEST_ASSERT_EQUAL_UINT8(1, Bmp3xx::state().start_call_count);
+    TEST_ASSERT_EQUAL_UINT8(1, Dps310::state().start_call_count);
+
+    setMillis(999);
+    manager.poll(data, storage, history, true);
+    TEST_ASSERT_EQUAL_UINT8(1, Bmp580::state().start_call_count);
+
+    const uint32_t retry_times[] = {1000U, 3000U, 10000U, 30000U};
+    SensorManager::PollResult final_attempt;
+    for (uint32_t retry_time : retry_times) {
+        final_attempt = driveStartupSequences(manager, data, storage, history, retry_time);
+    }
+
+    TEST_ASSERT_TRUE(final_attempt.data_changed);
+    TEST_ASSERT_FALSE(manager.isPressureDetecting());
+    TEST_ASSERT_EQUAL(SensorManager::PRESSURE_NONE, manager.pressureSensorType());
+    TEST_ASSERT_EQUAL_UINT8(1, Bmp580::state().start_call_count);
+    TEST_ASSERT_EQUAL_UINT8(1, Bmp3xx::state().start_call_count);
+    TEST_ASSERT_EQUAL_UINT8(1, Dps310::state().start_call_count);
+    TEST_ASSERT_EQUAL_UINT8(4, Bmp580::state().late_start_begin_count);
+    TEST_ASSERT_EQUAL_UINT8(4, Bmp3xx::state().late_start_begin_count);
+    TEST_ASSERT_EQUAL_UINT8(4, Dps310::state().late_start_begin_count);
+
+    setMillis(60000);
+    manager.poll(data, storage, history, true);
+    TEST_ASSERT_EQUAL_UINT8(4, Bmp580::state().late_start_begin_count);
+}
+
+void test_sensor_manager_late_pressure_and_sfa_detection_stop_remaining_probes() {
+    StorageManager storage;
+    storage.begin();
+    PressureHistory history;
+    SensorManager manager;
+    SensorData data;
+
+    Bmp580::state().start_ok = false;
+    Bmp3xx::state().start_ok = false;
+    Dps310::state().start_ok = false;
+    Sfa40::state().status = Sfa40::Status::Absent;
+    Sfa30::state().status = Sfa30::Status::Absent;
+    manager.begin(storage, 0.0f, 0.0f);
+
+    TEST_ASSERT_TRUE(manager.isPressureDetecting());
+    TEST_ASSERT_TRUE(manager.isSfaDetecting());
+
+    Bmp580::state().start_ok = true;
+    Sfa40::state().status = Sfa40::Status::Ok;
+    const SensorManager::PollResult detected =
+        driveStartupSequences(manager, data, storage, history, 1000U);
+
+    TEST_ASSERT_TRUE(detected.data_changed);
+    TEST_ASSERT_FALSE(manager.isPressureDetecting());
+    TEST_ASSERT_EQUAL(SensorManager::PRESSURE_BMP58X, manager.pressureSensorType());
+    TEST_ASSERT_FALSE(manager.isSfaDetecting());
+    TEST_ASSERT_EQUAL(SensorManager::HCHO_SENSOR_SFA40, manager.hchoSensorType());
+
+    const uint8_t pressure_attempts = Bmp580::state().late_start_begin_count;
+    const uint8_t sfa_attempts = Sfa40::state().late_start_begin_count;
+    setMillis(30000);
+    manager.poll(data, storage, history, true);
+    TEST_ASSERT_EQUAL_UINT8(pressure_attempts, Bmp580::state().late_start_begin_count);
+    TEST_ASSERT_EQUAL_UINT8(sfa_attempts, Sfa40::state().late_start_begin_count);
+}
+
+void test_sensor_manager_hcho_probe_stops_after_five_attempts() {
+    StorageManager storage;
+    storage.begin();
+    PressureHistory history;
+    SensorManager manager;
+    SensorData data;
+
+    Sfa40::state().status = Sfa40::Status::Absent;
+    Sfa30::state().status = Sfa30::Status::Absent;
+    manager.begin(storage, 0.0f, 0.0f);
+
+    TEST_ASSERT_TRUE(manager.isSfaDetecting());
+    const uint32_t retry_times[] = {1000U, 3000U, 10000U, 30000U};
+    SensorManager::PollResult final_attempt;
+    for (uint32_t retry_time : retry_times) {
+        final_attempt = driveStartupSequences(manager, data, storage, history, retry_time);
+    }
+
+    TEST_ASSERT_TRUE(final_attempt.data_changed);
+    TEST_ASSERT_FALSE(manager.isSfaDetecting());
+    TEST_ASSERT_EQUAL_UINT8(1, Sfa40::state().start_call_count);
+    TEST_ASSERT_EQUAL_UINT8(1, Sfa30::state().start_call_count);
+    TEST_ASSERT_EQUAL_UINT8(4, Sfa40::state().late_start_begin_count);
+    TEST_ASSERT_EQUAL_UINT8(4, Sfa30::state().late_start_begin_count);
+
+    setMillis(60000);
+    manager.poll(data, storage, history, true);
+    TEST_ASSERT_EQUAL_UINT8(4, Sfa40::state().late_start_begin_count);
+    TEST_ASSERT_EQUAL_UINT8(4, Sfa30::state().late_start_begin_count);
+}
+
+void test_sensor_manager_sen66_uses_grace_then_bounded_startup_schedule() {
+    StorageManager storage;
+    storage.begin();
+    PressureHistory history;
+    SensorManager manager;
+    SensorData data;
+
+    Sen66::state().ok = false;
+    Sen66::state().start_ok = false;
+    manager.begin(storage, 0.0f, 0.0f);
+
+    TEST_ASSERT_TRUE(manager.isSen66Detecting());
+    setMillis(Config::SEN66_STARTUP_GRACE_MS - 1U);
+    manager.poll(data, storage, history, true);
+    TEST_ASSERT_EQUAL_UINT8(0, Sen66::state().start_call_count);
+
+    const uint32_t start_ms = Config::SEN66_STARTUP_GRACE_MS;
+    const uint32_t attempts[] = {
+        start_ms,
+        start_ms + 1000U,
+        start_ms + 3000U,
+        start_ms + 10000U,
+        start_ms + 30000U,
+    };
+    SensorManager::PollResult final_attempt;
+    for (uint32_t attempt_ms : attempts) {
+        final_attempt = driveStartupSequences(manager, data, storage, history, attempt_ms, 8U);
+    }
+
+    TEST_ASSERT_TRUE(final_attempt.data_changed);
+    TEST_ASSERT_FALSE(manager.isSen66Detecting());
+    TEST_ASSERT_EQUAL_UINT8(0, Sen66::state().start_call_count);
+    TEST_ASSERT_EQUAL_UINT8(5, Sen66::state().late_start_begin_count);
+    setMillis(start_ms + 60000U);
+    manager.poll(data, storage, history, true);
+    TEST_ASSERT_EQUAL_UINT8(5, Sen66::state().late_start_begin_count);
+}
+
+void test_sensor_manager_late_probes_are_serialized_round_robin() {
+    StorageManager storage;
+    storage.begin();
+    PressureHistory history;
+    SensorManager manager;
+    SensorData data;
+
+    Bmp580::state().start_ok = false;
+    Bmp3xx::state().start_ok = false;
+    Dps310::state().start_ok = false;
+    Sfa40::state().status = Sfa40::Status::Absent;
+    Sfa30::state().status = Sfa30::Status::Absent;
+    manager.begin(storage, 0.0f, 0.0f);
+
+    setMillis(1000U);
+    manager.poll(data, storage, history, true); // Select pressure.
+    manager.poll(data, storage, history, true); // Begin BMP58x.
+    TEST_ASSERT_EQUAL_UINT8(1, Bmp580::state().late_start_begin_count);
+    TEST_ASSERT_EQUAL_UINT8(0, Sfa40::state().late_start_begin_count);
+
+    for (size_t i = 0; i < 5U; ++i) {
+        manager.poll(data, storage, history, true);
+    }
+    TEST_ASSERT_EQUAL_UINT8(1, Bmp3xx::state().late_start_begin_count);
+    TEST_ASSERT_EQUAL_UINT8(1, Dps310::state().late_start_begin_count);
+    TEST_ASSERT_EQUAL_UINT8(0, Sfa40::state().late_start_begin_count);
+
+    manager.poll(data, storage, history, true); // Select HCHO next.
+    manager.poll(data, storage, history, true); // Begin SFA40.
+    TEST_ASSERT_EQUAL_UINT8(1, Sfa40::state().late_start_begin_count);
+}
+
 int main(int, char **) {
     UNITY_BEGIN();
     RUN_TEST(test_sensor_manager_poll_updates_data);
     RUN_TEST(test_sensor_manager_warmup_change);
     RUN_TEST(test_sensor_manager_stale_preserves_other_sensor_data);
     RUN_TEST(test_sensor_manager_before_begin_suppresses_poll_and_public_operations);
+    RUN_TEST(test_sensor_manager_shared_i2c_gate_blocks_runtime_driver_paths);
+    RUN_TEST(test_sensor_manager_begin_is_only_path_that_reopens_shared_i2c_gate);
+    RUN_TEST(test_sensor_manager_disable_closes_gate_without_waiting_for_active_user);
+    RUN_TEST(test_sensor_manager_wait_for_shared_i2c_idle_handles_idle_and_zero_timeout);
+    RUN_TEST(test_sensor_manager_wait_for_shared_i2c_idle_is_bounded_across_rollover);
     RUN_TEST(test_sensor_manager_pm05_clamps_to_sensor_limit);
     RUN_TEST(test_sensor_manager_pm1_invalid_resets_stale_value);
     RUN_TEST(test_sensor_manager_without_co_sensor_keeps_pm1_and_clears_co);
@@ -898,5 +1213,10 @@ int main(int, char **) {
     RUN_TEST(test_sensor_manager_bmp3xx_label_reports_bmp390);
     RUN_TEST(test_sensor_manager_falls_back_to_dps310_after_bmp_families_fail);
     RUN_TEST(test_sensor_manager_stale_resets_temp_warning_state);
+    RUN_TEST(test_sensor_manager_pressure_probe_follows_bounded_startup_schedule);
+    RUN_TEST(test_sensor_manager_late_pressure_and_sfa_detection_stop_remaining_probes);
+    RUN_TEST(test_sensor_manager_hcho_probe_stops_after_five_attempts);
+    RUN_TEST(test_sensor_manager_sen66_uses_grace_then_bounded_startup_schedule);
+    RUN_TEST(test_sensor_manager_late_probes_are_serialized_round_robin);
     return UNITY_END();
 }

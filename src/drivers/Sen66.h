@@ -6,6 +6,7 @@
 
 #pragma once
 #include <Arduino.h>
+#include "core/CooperativeStart.h"
 
 class StorageManager;
 #include "config/AppConfig.h"
@@ -18,10 +19,10 @@ public:
     void loadVocState(StorageManager &storage);
     void saveVocState(StorageManager &storage);
     void clearVocState(StorageManager &storage);
-    void scheduleRetry(uint32_t delay_ms);
-    uint32_t retryAtMs() const { return retry_at_ms_; }
-
     bool start(bool asc_enabled);
+    void beginLateStart(bool asc_enabled);
+    CooperativeStart::Result pollLateStart(uint32_t now_ms);
+    bool isLateStartActive() const { return late_start_phase_ != LateStartPhase::Idle; }
     bool stop();
     void poll(SensorData &data, bool &changed);
     bool readValues(SensorData &out);
@@ -37,6 +38,37 @@ public:
     uint32_t lastDataMs() const { return last_data_ms_; }
 
 private:
+    enum class LateStartPhase : uint8_t {
+        Idle = 0,
+        StopWrite,
+        StopWait,
+        StopRetryWait,
+        DeviceResetRetryWait,
+        DeviceResetWrite,
+        DeviceResetWait,
+        TempWrite,
+        TempWait,
+        VocWrite,
+        VocWait,
+        AscReadWrite,
+        AscReadWait,
+        AscReadResponse,
+        AscApplyWrite,
+        AscApplySettle,
+        AscVerifyWrite,
+        AscVerifyWait,
+        AscVerifyResponse,
+        AscRetryWait,
+        AscFinalDelay,
+        AscFinalStatusWrite,
+        AscFinalStatusWait,
+        AscFinalStatusResponse,
+        StartWrite,
+        StartWait,
+    };
+
+    CooperativeStart::Result finishLateStart(bool success, uint32_t now_ms);
+    bool readLateWord(uint16_t &value);
     bool writeCmdWithWord(uint16_t cmd, uint16_t word);
     bool writeCmdWithWords(uint16_t cmd, const uint16_t *words, size_t count);
     bool setAmbientPressure(uint16_t hpa);
@@ -66,7 +98,6 @@ private:
     uint32_t last_status_ms_ = 0;
     uint8_t fail_count_ = 0;
     uint32_t status_last_ = 0;
-    uint32_t retry_at_ms_ = 0;
     uint32_t measure_start_ms_ = 0;
     uint32_t last_pressure_ms_ = 0;
     uint16_t last_pressure_hpa_ = 0;
@@ -86,4 +117,10 @@ private:
     int co2_idx_ = 0;
     bool asc_default_known_ = false;
     bool measurement_state_unknown_ = false;
+    LateStartPhase late_start_phase_ = LateStartPhase::Idle;
+    uint32_t late_start_due_ms_ = 0;
+    bool late_start_asc_enabled_ = true;
+    uint8_t late_start_stop_attempt_ = 0;
+    uint8_t late_start_asc_write_attempt_ = 0;
+    uint8_t late_start_asc_verify_attempt_ = 0;
 };

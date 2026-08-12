@@ -73,12 +73,12 @@ bool WebHandlersTryBeginRestartShutdown() {
     return WebHandlersSupport::tryBeginRestartShutdown();
 }
 
-bool WebHandlersAllowOtaPhysicalConfirm() {
-    return WebHandlersSupport::allowOtaPhysicalConfirm();
+bool WebHandlersAllowOtaPhysicalConfirm(uint32_t expected_confirm_id) {
+    return WebHandlersSupport::allowOtaPhysicalConfirm(expected_confirm_id);
 }
 
-bool WebHandlersDenyOtaPhysicalConfirm() {
-    return WebHandlersSupport::denyOtaPhysicalConfirm();
+bool WebHandlersDenyOtaPhysicalConfirm(uint32_t expected_confirm_id) {
+    return WebHandlersSupport::denyOtaPhysicalConfirm(expected_confirm_id);
 }
 
 bool WebHandlersShouldPauseMqttConnect() {

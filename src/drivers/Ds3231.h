@@ -19,8 +19,18 @@ public:
 
     bool probe();
     ProbeStrength probeStrength();
+    bool readProbeMeta(uint8_t out[4]);
+    bool readProbeWrap(uint8_t out[4]);
+    bool readProbeHead(uint8_t out[2]);
+    static ProbeStrength classifyProbe(const uint8_t meta[4],
+                                       const uint8_t wrap[4],
+                                       const uint8_t head[2]);
     bool begin();
+    bool readCalendar(tm &out, bool &valid);
+    bool readStatus(uint8_t &status);
     bool readTime(tm &out, bool &osc_stop, bool &valid);
+    bool writeCalendar(const tm &utc_tm);
+    bool writeStatus(uint8_t status);
     bool writeTime(const tm &utc_tm);
     bool clearOscillatorStop();
     bool isBatteryLow(bool &low);

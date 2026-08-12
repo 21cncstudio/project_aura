@@ -229,7 +229,7 @@ void FanControl::begin(bool auto_mode_preference, bool auto_armed_preference) {
     last_recover_attempt_ms_ = 0;
     last_health_check_ms_ = 0;
     health_probe_fail_count_ = 0;
-    boot_missing_lockout_ = false;
+    dac_ever_ready_ = false;
     boot_auto_resume_pending_ = false;
     boot_auto_resume_due_ms_ = 0;
     auto_resume_blocked_ = false;
@@ -252,14 +252,17 @@ void FanControl::begin(bool auto_mode_preference, bool auto_armed_preference) {
     }
 
     const uint32_t now_ms = millis();
+    startup_probe_.reset(now_ms);
     const char *init_failure_reason = nullptr;
-    switch (tryInitialize(now_ms, init_failure_reason)) {
+    const InitStatus init_status = tryInitialize(now_ms, init_failure_reason);
+    startup_probe_.recordAttempt(init_status == InitStatus::Ok);
+    switch (init_status) {
         case InitStatus::Ok:
+            dac_ever_ready_ = true;
             LOGI("FanControl", "DAC ready at 0x%02X", Config::DAC_I2C_ADDR_DEFAULT);
             break;
         case InitStatus::Absent:
-            LOGI("FanControl", "DAC not installed");
-            boot_missing_lockout_ = true;
+            LOGI("FanControl", "DAC not detected; bounded startup retries scheduled");
             applyStopState(false);
             break;
         case InitStatus::Fault:
@@ -268,6 +271,37 @@ void FanControl::begin(bool auto_mode_preference, bool auto_armed_preference) {
             break;
     }
     publishSnapshot();
+}
+
+bool FanControl::prepareForRestart() {
+    return prepareSafeShutdown("safe restart write failed");
+}
+
+bool FanControl::prepareForI2cOffline() {
+    return prepareSafeShutdown("safe I2C-offline write failed");
+}
+
+bool FanControl::prepareSafeShutdown(const char *failure_reason) {
+    if (!initialized_ || !Config::DAC_FEATURE_ENABLED) {
+        return true;
+    }
+
+    // Keep shutdown bounded: one best-effort I2C write, with no retry delay.
+    // This is attempted even when startup detection failed because a GP8403
+    // can retain an earlier non-zero output across an ESP-only restart. The
+    // transaction itself is limited by I2C_TIMEOUT_MS.
+    if (!dac_.writeChannelMillivolts(Config::DAC_CHANNEL_VOUT0,
+                                     Config::DAC_SAFE_ERROR_MV)) {
+        if (present_ || dac_ever_ready_) {
+            handleDacFault(failure_reason);
+            publishSnapshot();
+        }
+        return false;
+    }
+
+    applyStopState(true);
+    publishSnapshot();
+    return true;
 }
 
 void FanControl::poll(uint32_t now_ms,
@@ -319,8 +353,28 @@ void FanControl::poll(uint32_t now_ms,
     }
 
     if (!available_) {
-        if (!boot_missing_lockout_ &&
-            now_ms - last_recover_attempt_ms_ >= Config::DAC_RECOVER_COOLDOWN_MS) {
+        if (!dac_ever_ready_ && startup_probe_.shouldAttempt(now_ms)) {
+            const char *init_failure_reason = nullptr;
+            const InitStatus init_status = tryInitialize(now_ms, init_failure_reason);
+            const bool ready = init_status == InitStatus::Ok;
+            startup_probe_.recordAttempt(ready);
+            if (ready) {
+                dac_ever_ready_ = true;
+                LOGI("FanControl", "DAC detected during startup retry %u/%u",
+                     static_cast<unsigned>(startup_probe_.attempts()),
+                     static_cast<unsigned>(StartupProbePolicy::kMaxAttempts));
+            } else if (startup_probe_.exhausted()) {
+                LOGW("FanControl",
+                     "DAC not detected after %u startup attempts; retries stopped until reboot",
+                     static_cast<unsigned>(StartupProbePolicy::kMaxAttempts));
+            } else if (init_status == InitStatus::Fault) {
+                LOGD("FanControl", "DAC startup retry %u/%u failed: %s",
+                     static_cast<unsigned>(startup_probe_.attempts()),
+                     static_cast<unsigned>(StartupProbePolicy::kMaxAttempts),
+                     init_failure_reason ? init_failure_reason : "unknown");
+            }
+        } else if (dac_ever_ready_ &&
+                   now_ms - last_recover_attempt_ms_ >= Config::DAC_RECOVER_COOLDOWN_MS) {
             last_recover_attempt_ms_ = now_ms;
             const char *init_failure_reason = nullptr;
             if (tryInitialize(now_ms, init_failure_reason) == InitStatus::Ok) {

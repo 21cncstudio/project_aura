@@ -51,31 +51,52 @@ bool Ds3231::probe() {
 
 Ds3231::ProbeStrength Ds3231::probeStrength() {
     uint8_t meta_regs[4] = { 0 };
-    if (!read(Config::DS3231_REG_STATUS, meta_regs, sizeof(meta_regs))) {
+    if (!readProbeMeta(meta_regs)) {
         return ProbeStrength::None;
     }
 
     uint8_t wrap_regs[4] = { 0 };
     uint8_t head_regs[2] = { 0 };
-    if (!read(Config::DS3231_REG_TEMP_MSB, wrap_regs, sizeof(wrap_regs)) ||
-        !read(Config::DS3231_REG_SECONDS, head_regs, sizeof(head_regs))) {
+    if (!readProbeWrap(wrap_regs) || !readProbeHead(head_regs)) {
+        return ProbeStrength::None;
+    }
+
+    return classifyProbe(meta_regs, wrap_regs, head_regs);
+}
+
+bool Ds3231::readProbeMeta(uint8_t out[4]) {
+    return read(Config::DS3231_REG_STATUS, out, 4);
+}
+
+bool Ds3231::readProbeWrap(uint8_t out[4]) {
+    return read(Config::DS3231_REG_TEMP_MSB, out, 4);
+}
+
+bool Ds3231::readProbeHead(uint8_t out[2]) {
+    return read(Config::DS3231_REG_SECONDS, out, 2);
+}
+
+Ds3231::ProbeStrength Ds3231::classifyProbe(const uint8_t meta[4],
+                                             const uint8_t wrap[4],
+                                             const uint8_t head[2]) {
+    if (!meta || !wrap || !head) {
         return ProbeStrength::None;
     }
 
     // Keep probe read-only and identify the chip only by immutable register shape.
     // Calendar contents can be dirty after power loss and must not affect detect.
     const bool meta_valid =
-        (meta_regs[0] & Config::DS3231_STATUS_RESERVED_MASK) == 0 &&
-        (meta_regs[3] & Config::DS3231_TEMP_LSB_UNUSED_MASK) == 0;
+        (meta[0] & Config::DS3231_STATUS_RESERVED_MASK) == 0 &&
+        (meta[3] & Config::DS3231_TEMP_LSB_UNUSED_MASK) == 0;
     const bool wrap_valid =
-        wrap_regs[2] == head_regs[0] &&
-        wrap_regs[3] == head_regs[1];
+        wrap[2] == head[0] &&
+        wrap[3] == head[1];
 
     if (!meta_valid || !wrap_valid) {
         return ProbeStrength::None;
     }
 
-    if ((meta_regs[3] & 0xC0) != 0) {
+    if ((meta[3] & 0xC0) != 0) {
         return ProbeStrength::Strong;
     }
     return ProbeStrength::Weak;
@@ -126,15 +147,11 @@ bool Ds3231::write(uint8_t reg, const uint8_t *buf, size_t len) {
     return err == ESP_OK;
 }
 
-bool Ds3231::readTime(tm &out, bool &osc_stop, bool &valid) {
+bool Ds3231::readCalendar(tm &out, bool &valid) {
     uint8_t buf[7] = { 0 };
-    uint8_t status = 0;
-    if (!read(Config::DS3231_REG_SECONDS, buf, sizeof(buf)) ||
-        !read(Config::DS3231_REG_STATUS, &status, 1)) {
+    if (!read(Config::DS3231_REG_SECONDS, buf, sizeof(buf))) {
         return false;
     }
-
-    osc_stop = (status & Config::DS3231_STATUS_OSF) != 0;
 
     const bool layout_valid =
         isBcdWithin(buf[0], 0x7F, 59, true) &&
@@ -190,7 +207,20 @@ bool Ds3231::readTime(tm &out, bool &osc_stop, bool &valid) {
     return true;
 }
 
-bool Ds3231::writeTime(const tm &utc_tm) {
+bool Ds3231::readStatus(uint8_t &status) {
+    return read(Config::DS3231_REG_STATUS, &status, 1);
+}
+
+bool Ds3231::readTime(tm &out, bool &osc_stop, bool &valid) {
+    uint8_t status = 0;
+    if (!readCalendar(out, valid) || !readStatus(status)) {
+        return false;
+    }
+    osc_stop = (status & Config::DS3231_STATUS_OSF) != 0;
+    return true;
+}
+
+bool Ds3231::writeCalendar(const tm &utc_tm) {
     const uint8_t weekday = (utc_tm.tm_wday == 0) ? 7 : utc_tm.tm_wday;
     uint8_t buf[7] = { 0 };
     buf[0] = bin2bcd(static_cast<uint8_t>(utc_tm.tm_sec)) & 0x7F;
@@ -200,7 +230,15 @@ bool Ds3231::writeTime(const tm &utc_tm) {
     buf[4] = bin2bcd(static_cast<uint8_t>(utc_tm.tm_mday)) & 0x3F;
     buf[5] = bin2bcd(static_cast<uint8_t>(utc_tm.tm_mon + 1)) & 0x1F;
     buf[6] = bin2bcd(static_cast<uint8_t>(utc_tm.tm_year + 1900 - 2000));
-    if (!write(Config::DS3231_REG_SECONDS, buf, sizeof(buf))) {
+    return write(Config::DS3231_REG_SECONDS, buf, sizeof(buf));
+}
+
+bool Ds3231::writeStatus(uint8_t status) {
+    return write(Config::DS3231_REG_STATUS, &status, 1);
+}
+
+bool Ds3231::writeTime(const tm &utc_tm) {
+    if (!writeCalendar(utc_tm)) {
         return false;
     }
     return clearOscillatorStop();
@@ -208,11 +246,11 @@ bool Ds3231::writeTime(const tm &utc_tm) {
 
 bool Ds3231::clearOscillatorStop() {
     uint8_t status = 0;
-    if (!read(Config::DS3231_REG_STATUS, &status, 1)) {
+    if (!readStatus(status)) {
         return false;
     }
     status &= static_cast<uint8_t>(~Config::DS3231_STATUS_OSF);
-    return write(Config::DS3231_REG_STATUS, &status, 1);
+    return writeStatus(status);
 }
 
 bool Ds3231::isBatteryLow(bool &low) {

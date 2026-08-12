@@ -47,6 +47,7 @@ void StateMachine::reset() {
     allowed_until_ms_ = 0;
     terminal_until_ms_ = 0;
     terminal_observed_ = false;
+    expired_event_confirm_id_ = 0;
     terminal_state_ = State::Idle;
     terminal_confirm_id_ = 0;
     terminal_expected_size_ = 0;
@@ -83,6 +84,13 @@ void StateMachine::enterTerminal(State state, uint32_t now_ms) {
     allowed_until_ms_ = 0;
     terminal_until_ms_ = now_ms + kTerminalRetentionMs;
     terminal_observed_ = false;
+    if (state == State::Expired) {
+        // Expiry may first be observed by prepare(), consumeForUpload(),
+        // allowCurrent(), or denyCurrent(). Keep the UI event pending until
+        // pollExpired() consumes it so the confirmation screen cannot remain
+        // visible indefinitely.
+        expired_event_confirm_id_ = confirm_id_;
+    }
     recordTerminal(state, now_ms);
 }
 
@@ -266,9 +274,11 @@ ConsumeDecision StateMachine::consumeForUpload(size_t expected_size,
     }
 }
 
-bool StateMachine::allowCurrent(uint32_t now_ms) {
+bool StateMachine::allowCurrent(uint32_t expected_confirm_id, uint32_t now_ms) {
     expireIfDue(now_ms);
-    if (state_ != State::Pending) {
+    if (state_ != State::Pending ||
+        expected_confirm_id == 0 ||
+        expected_confirm_id != confirm_id_) {
         return false;
     }
     state_ = State::Allowed;
@@ -278,19 +288,22 @@ bool StateMachine::allowCurrent(uint32_t now_ms) {
     return true;
 }
 
-bool StateMachine::denyCurrent(uint32_t now_ms) {
+bool StateMachine::denyCurrent(uint32_t expected_confirm_id, uint32_t now_ms) {
     expireIfDue(now_ms);
-    if (state_ != State::Pending) {
+    if (state_ != State::Pending ||
+        expected_confirm_id == 0 ||
+        expected_confirm_id != confirm_id_) {
         return false;
     }
     enterTerminal(State::Denied, now_ms);
     return true;
 }
 
-bool StateMachine::poll(uint32_t now_ms) {
-    const State before = state_;
+uint32_t StateMachine::pollExpired(uint32_t now_ms) {
     expireIfDue(now_ms);
-    return before != state_ && state_ == State::Expired;
+    const uint32_t expired_confirm_id = expired_event_confirm_id_;
+    expired_event_confirm_id_ = 0;
+    return expired_confirm_id;
 }
 
 void reset() {
@@ -315,22 +328,22 @@ ConsumeDecision consumeForUpload(size_t expected_size, bool has_confirm_id, uint
     return g_state.consumeForUpload(expected_size, has_confirm_id, confirm_id, now_ms);
 }
 
-bool allowCurrent() {
+bool allowCurrent(uint32_t expected_confirm_id) {
     const uint32_t now_ms = millis();
     CriticalGuard guard;
-    return g_state.allowCurrent(now_ms);
+    return g_state.allowCurrent(expected_confirm_id, now_ms);
 }
 
-bool denyCurrent() {
+bool denyCurrent(uint32_t expected_confirm_id) {
     const uint32_t now_ms = millis();
     CriticalGuard guard;
-    return g_state.denyCurrent(now_ms);
+    return g_state.denyCurrent(expected_confirm_id, now_ms);
 }
 
-bool poll() {
+uint32_t pollExpired() {
     const uint32_t now_ms = millis();
     CriticalGuard guard;
-    return g_state.poll(now_ms);
+    return g_state.pollExpired(now_ms);
 }
 
 const char *stateText(State state) {

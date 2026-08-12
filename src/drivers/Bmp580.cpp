@@ -33,6 +33,10 @@ int32_t signExtend24(int32_t value) {
     return (value << 8) >> 8;
 }
 
+bool deadlineReached(uint32_t now_ms, uint32_t deadline_ms) {
+    return static_cast<int32_t>(now_ms - deadline_ms) >= 0;
+}
+
 const char *bmp58x_variant_label(Bmp580::Variant variant) {
     switch (variant) {
         case Bmp580::Variant::BMP580_581:
@@ -61,6 +65,10 @@ bool Bmp580::begin() {
     pressure_valid_ = false;
     has_new_data_ = false;
     variant_ = Variant::Unknown;
+    late_start_phase_ = LateStartPhase::Idle;
+    late_start_due_ms_ = 0;
+    late_start_deadline_ms_ = 0;
+    late_start_reg_value_ = 0;
     return true;
 }
 
@@ -245,6 +253,127 @@ bool Bmp580::start() {
     no_data_since_ms_ = 0;
     last_data_ms_ = 0;
     return true;
+}
+
+void Bmp580::beginLateStart() {
+    addr_ = 0;
+    variant_ = Variant::Unknown;
+    ok_ = false;
+    late_start_due_ms_ = 0;
+    late_start_deadline_ms_ = 0;
+    late_start_reg_value_ = 0;
+    late_start_phase_ = LateStartPhase::DetectPrimary;
+}
+
+CooperativeStart::Result Bmp580::finishLateStart(bool success) {
+    late_start_phase_ = LateStartPhase::Idle;
+    if (!success) {
+        ok_ = false;
+        return CooperativeStart::Result::Failed;
+    }
+    ok_ = true;
+    pressure_valid_ = false;
+    pressure_has_ = false;
+    has_new_data_ = false;
+    no_data_since_ms_ = 0;
+    last_data_ms_ = 0;
+    return CooperativeStart::Result::Success;
+}
+
+CooperativeStart::Result Bmp580::pollLateStart(uint32_t now_ms) {
+    switch (late_start_phase_) {
+        case LateStartPhase::Idle:
+            return CooperativeStart::Result::Idle;
+        case LateStartPhase::DetectPrimary:
+            if (detect(Config::BMP580_ADDR_PRIMARY)) {
+                Logger::log(Logger::Info, "BMP58x", "%s found at 0x%02X",
+                            variantLabel(), static_cast<unsigned>(Config::BMP580_ADDR_PRIMARY));
+                late_start_phase_ = LateStartPhase::SoftReset;
+            } else {
+                late_start_phase_ = LateStartPhase::DetectAlt;
+            }
+            return CooperativeStart::Result::InProgress;
+        case LateStartPhase::DetectAlt:
+            if (!detect(Config::BMP580_ADDR_ALT)) {
+                return finishLateStart(false);
+            }
+            Logger::log(Logger::Info, "BMP58x", "%s found at 0x%02X",
+                        variantLabel(), static_cast<unsigned>(Config::BMP580_ADDR_ALT));
+            late_start_phase_ = LateStartPhase::SoftReset;
+            return CooperativeStart::Result::InProgress;
+        case LateStartPhase::SoftReset:
+            if (!writeU8(Config::BMP580_REG_CMD, Config::BMP580_SOFT_RESET_CMD)) {
+                return finishLateStart(false);
+            }
+            late_start_due_ms_ = millis() + 5U;
+            late_start_phase_ = LateStartPhase::WaitReset;
+            return CooperativeStart::Result::InProgress;
+        case LateStartPhase::WaitReset:
+            if (!deadlineReached(now_ms, late_start_due_ms_)) {
+                return CooperativeStart::Result::InProgress;
+            }
+            late_start_deadline_ms_ = now_ms + 20U;
+            late_start_phase_ = LateStartPhase::WaitNvm;
+            return CooperativeStart::Result::InProgress;
+        case LateStartPhase::WaitNvm: {
+            uint8_t status = 0;
+            if (readU8(Config::BMP580_REG_STATUS, status) &&
+                (status & Config::BMP580_STATUS_NVM_RDY) != 0U) {
+                late_start_phase_ = LateStartPhase::WriteOsr;
+                return CooperativeStart::Result::InProgress;
+            }
+            if (deadlineReached(now_ms, late_start_deadline_ms_)) {
+                LOGW("BMP58x", "%s NVM_RDY timeout", variantLabel());
+                return finishLateStart(false);
+            }
+            return CooperativeStart::Result::InProgress;
+        }
+        case LateStartPhase::WriteOsr: {
+            uint8_t osr = static_cast<uint8_t>(Config::BMP580_OSR_4X & kOsrTempMask);
+            osr |= static_cast<uint8_t>((Config::BMP580_OSR_4X & kOsrTempMask) << kOsrPressShift);
+            osr |= kPressEnableMask;
+            if (!writeU8(Config::BMP580_REG_OSR_CONFIG, osr)) {
+                return finishLateStart(false);
+            }
+            late_start_phase_ = LateStartPhase::ReadIir;
+            return CooperativeStart::Result::InProgress;
+        }
+        case LateStartPhase::ReadIir:
+            if (!readU8(Config::BMP580_REG_DSP_IIR, late_start_reg_value_)) {
+                return finishLateStart(false);
+            }
+            late_start_phase_ = LateStartPhase::WriteIir;
+            return CooperativeStart::Result::InProgress;
+        case LateStartPhase::WriteIir: {
+            uint8_t iir = static_cast<uint8_t>(late_start_reg_value_ & kIirReservedMask);
+            iir |= static_cast<uint8_t>(Config::BMP580_IIR_BYPASS & kIirTempMask);
+            iir |= static_cast<uint8_t>((Config::BMP580_IIR_BYPASS & kIirTempMask) << kIirPressShift);
+            if (!writeU8(Config::BMP580_REG_DSP_IIR, iir)) {
+                return finishLateStart(false);
+            }
+            late_start_phase_ = LateStartPhase::ReadOdr;
+            return CooperativeStart::Result::InProgress;
+        }
+        case LateStartPhase::ReadOdr:
+            if (!readU8(Config::BMP580_REG_ODR_CONFIG, late_start_reg_value_)) {
+                return finishLateStart(false);
+            }
+            late_start_phase_ = LateStartPhase::WriteOdr;
+            return CooperativeStart::Result::InProgress;
+        case LateStartPhase::WriteOdr: {
+            uint8_t odr = static_cast<uint8_t>(late_start_reg_value_ & ~kPowerModeMask);
+            odr |= Config::BMP580_POWERMODE_CONTINUOUS & kPowerModeMask;
+            odr &= ~kOdrMask;
+            odr |= static_cast<uint8_t>((Config::BMP580_ODR_1_HZ << kOdrShift) & kOdrMask);
+            odr |= kDeepDisableMask;
+            if (!writeU8(Config::BMP580_REG_ODR_CONFIG, odr)) {
+                return finishLateStart(false);
+            }
+            return finishLateStart(true);
+        }
+        default:
+            return finishLateStart(false);
+    }
 }
 
 void Bmp580::tryRecover(uint32_t now, const char *reason) {

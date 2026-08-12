@@ -8,6 +8,18 @@
 #include <driver/i2c.h>
 #include <math.h>
 #include "core/Logger.h"
+
+namespace {
+
+bool lateDeadlineReached(uint32_t now_ms, uint32_t deadline_ms) {
+    return static_cast<int32_t>(now_ms - deadline_ms) >= 0;
+}
+
+constexpr int32_t kDpsScale[] = {
+    524288, 1572864, 3670016, 7864320, 253952, 516096, 1040384, 2088960
+};
+
+} // namespace
 #include "config/AppConfig.h"
 
 bool Dps310::begin() {
@@ -35,6 +47,11 @@ bool Dps310::begin() {
     last_recover_ms_ = 0;
     pressure_valid_ = false;
     has_new_data_ = false;
+    late_start_phase_ = LateStartPhase::Idle;
+    late_start_due_ms_ = 0;
+    late_start_deadline_ms_ = 0;
+    late_start_reg_value_ = 0;
+    late_start_temp_source_ = false;
     return true;
 }
 
@@ -319,6 +336,176 @@ bool Dps310::start() {
     last_data_ms_ = 0;
     has_new_data_ = false;
     return true;
+}
+
+void Dps310::beginLateStart() {
+    addr_ = 0;
+    ok_ = false;
+    late_start_due_ms_ = 0;
+    late_start_deadline_ms_ = 0;
+    late_start_reg_value_ = 0;
+    late_start_temp_source_ = false;
+    late_start_phase_ = LateStartPhase::DetectPrimary;
+}
+
+CooperativeStart::Result Dps310::finishLateStart(bool success) {
+    late_start_phase_ = LateStartPhase::Idle;
+    if (!success) {
+        ok_ = false;
+        return CooperativeStart::Result::Failed;
+    }
+    ok_ = true;
+    pressure_valid_ = false;
+    pressure_has_ = false;
+    no_data_since_ms_ = 0;
+    last_data_ms_ = 0;
+    has_new_data_ = false;
+    return CooperativeStart::Result::Success;
+}
+
+CooperativeStart::Result Dps310::pollLateStart(uint32_t now_ms) {
+    switch (late_start_phase_) {
+        case LateStartPhase::Idle:
+            return CooperativeStart::Result::Idle;
+        case LateStartPhase::DetectPrimary:
+            if (detect(Config::DPS310_ADDR_PRIMARY)) {
+                LOGI("DPS310", "found at 0x77");
+                late_start_phase_ = LateStartPhase::Reset;
+            } else {
+                late_start_phase_ = LateStartPhase::DetectAlt;
+            }
+            return CooperativeStart::Result::InProgress;
+        case LateStartPhase::DetectAlt:
+            if (!detect(Config::DPS310_ADDR_ALT)) {
+                return finishLateStart(false);
+            }
+            LOGI("DPS310", "found at 0x76");
+            late_start_phase_ = LateStartPhase::Reset;
+            return CooperativeStart::Result::InProgress;
+        case LateStartPhase::Reset:
+            if (!writeU8(Config::DPS310_RESET, 0x89)) {
+                return finishLateStart(false);
+            }
+            late_start_due_ms_ = millis() + 20U;
+            late_start_phase_ = LateStartPhase::WaitReset;
+            return CooperativeStart::Result::InProgress;
+        case LateStartPhase::WaitReset:
+            if (!lateDeadlineReached(now_ms, late_start_due_ms_)) {
+                return CooperativeStart::Result::InProgress;
+            }
+            late_start_deadline_ms_ = now_ms + 500U;
+            late_start_phase_ = LateStartPhase::WaitCoefReady;
+            return CooperativeStart::Result::InProgress;
+        case LateStartPhase::WaitCoefReady:
+            if (!readU8(Config::DPS310_MEASCFG, late_start_reg_value_)) {
+                return finishLateStart(false);
+            }
+            if ((late_start_reg_value_ & (1U << 7)) != 0U) {
+                late_start_deadline_ms_ = millis() + 500U;
+                late_start_phase_ = LateStartPhase::WaitSensorReady;
+            } else if (lateDeadlineReached(now_ms, late_start_deadline_ms_)) {
+                LOGW("DPS310", "COEF_RDY timeout");
+                late_start_deadline_ms_ = millis() + 500U;
+                late_start_phase_ = LateStartPhase::WaitSensorReady;
+            }
+            return CooperativeStart::Result::InProgress;
+        case LateStartPhase::WaitSensorReady:
+            if (!readU8(Config::DPS310_MEASCFG, late_start_reg_value_)) {
+                return finishLateStart(false);
+            }
+            if ((late_start_reg_value_ & (1U << 6)) != 0U) {
+                late_start_phase_ = LateStartPhase::ReadCalibration;
+            } else if (lateDeadlineReached(now_ms, late_start_deadline_ms_)) {
+                LOGW("DPS310", "SENSOR_RDY timeout");
+                late_start_phase_ = LateStartPhase::ReadCalibration;
+            }
+            return CooperativeStart::Result::InProgress;
+        case LateStartPhase::ReadCalibration:
+            if (!readCalibration()) {
+                LOGW("DPS310", "calib read failed");
+                return finishLateStart(false);
+            }
+            late_start_phase_ = LateStartPhase::WritePressureConfig;
+            return CooperativeStart::Result::InProgress;
+        case LateStartPhase::WritePressureConfig:
+            if (!writeU8(Config::DPS310_PRSCFG, static_cast<uint8_t>((3U << 4) | 5U))) {
+                return finishLateStart(false);
+            }
+            pressure_scale_ = kDpsScale[5];
+            late_start_phase_ = LateStartPhase::ReadPressureShift;
+            return CooperativeStart::Result::InProgress;
+        case LateStartPhase::ReadPressureShift:
+            if (!readU8(Config::DPS310_CFGREG, late_start_reg_value_)) {
+                return finishLateStart(false);
+            }
+            late_start_phase_ = LateStartPhase::WritePressureShift;
+            return CooperativeStart::Result::InProgress;
+        case LateStartPhase::WritePressureShift:
+            if (!writeU8(Config::DPS310_CFGREG,
+                         static_cast<uint8_t>(late_start_reg_value_ | (1U << 2)))) {
+                return finishLateStart(false);
+            }
+            late_start_phase_ = LateStartPhase::WriteTemperatureConfig;
+            return CooperativeStart::Result::InProgress;
+        case LateStartPhase::WriteTemperatureConfig:
+            if (!writeU8(Config::DPS310_TMPCFG, static_cast<uint8_t>((3U << 4) | 5U))) {
+                return finishLateStart(false);
+            }
+            temp_scale_ = kDpsScale[5];
+            late_start_phase_ = LateStartPhase::ReadTemperatureShift;
+            return CooperativeStart::Result::InProgress;
+        case LateStartPhase::ReadTemperatureShift:
+            if (!readU8(Config::DPS310_CFGREG, late_start_reg_value_)) {
+                return finishLateStart(false);
+            }
+            late_start_phase_ = LateStartPhase::WriteTemperatureShift;
+            return CooperativeStart::Result::InProgress;
+        case LateStartPhase::WriteTemperatureShift:
+            if (!writeU8(Config::DPS310_CFGREG,
+                         static_cast<uint8_t>(late_start_reg_value_ | (1U << 3)))) {
+                return finishLateStart(false);
+            }
+            late_start_phase_ = LateStartPhase::ReadTemperatureSource;
+            return CooperativeStart::Result::InProgress;
+        case LateStartPhase::ReadTemperatureSource:
+            if (readU8(Config::DPS310_TMPCOEFSRCE, late_start_reg_value_)) {
+                late_start_temp_source_ = (late_start_reg_value_ & 0x80U) != 0U;
+                late_start_phase_ = LateStartPhase::ReadTemperatureConfig;
+            } else {
+                late_start_phase_ = LateStartPhase::ReadMode;
+            }
+            return CooperativeStart::Result::InProgress;
+        case LateStartPhase::ReadTemperatureConfig:
+            if (!readU8(Config::DPS310_TMPCFG, late_start_reg_value_)) {
+                late_start_phase_ = LateStartPhase::ReadMode;
+                return CooperativeStart::Result::InProgress;
+            }
+            late_start_phase_ = LateStartPhase::WriteTemperatureSource;
+            return CooperativeStart::Result::InProgress;
+        case LateStartPhase::WriteTemperatureSource: {
+            const uint8_t value = late_start_temp_source_
+                ? static_cast<uint8_t>(late_start_reg_value_ | 0x80U)
+                : static_cast<uint8_t>(late_start_reg_value_ & ~0x80U);
+            (void)writeU8(Config::DPS310_TMPCFG, value);
+            late_start_phase_ = LateStartPhase::ReadMode;
+            return CooperativeStart::Result::InProgress;
+        }
+        case LateStartPhase::ReadMode:
+            if (!readU8(Config::DPS310_MEASCFG, late_start_reg_value_)) {
+                return finishLateStart(false);
+            }
+            late_start_phase_ = LateStartPhase::WriteMode;
+            return CooperativeStart::Result::InProgress;
+        case LateStartPhase::WriteMode:
+            if (!writeU8(Config::DPS310_MEASCFG,
+                         static_cast<uint8_t>((late_start_reg_value_ & 0xF8U) |
+                                              (Config::DPS310_MODE_CONT_PRESTEMP & 0x07U)))) {
+                return finishLateStart(false);
+            }
+            return finishLateStart(true);
+        default:
+            return finishLateStart(false);
+    }
 }
 
 void Dps310::tryRecover(uint32_t now, const char *reason) {

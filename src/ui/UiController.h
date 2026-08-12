@@ -68,6 +68,7 @@ public:
 
     void setLvglReady(bool ready);
     bool begin();
+    bool isLvglReady() const { return lvgl_ready; }
     bool isLvglRuntimeHealthy() const;
     void onSensorPoll(const SensorManager::PollResult &poll);
     void onTimePoll(const TimeManager::PollResult &poll);
@@ -90,7 +91,7 @@ public:
     bool webSetNtpServer(const String &server);
     bool webSetUnitsC(bool units_c);
     bool webSetOffsets(float temp_offset_c, float hum_offset_pct);
-    void webSetFirmwareUpdateScreen(WebUiBridge::FirmwareUpdateScreenMode mode);
+    void webSetFirmwareUpdateScreen(const WebUiBridge::FirmwareUpdateScreenRequest &request);
     void webRequestRestart();
 
 private:
@@ -1047,6 +1048,8 @@ private:
     bool firmware_update_screen_active_ = false;
     WebUiBridge::FirmwareUpdateScreenMode firmware_update_screen_mode_ =
         WebUiBridge::FirmwareUpdateScreenMode::Hidden;
+    OtaUiLineagePolicy::ScreenLineage firmware_update_screen_lineage_{};
+    uint32_t firmware_update_confirm_id_ = 0;
     uint32_t firmware_update_autoclose_due_ms_ = 0;
     int firmware_update_return_screen_id_ = 0;
     UiDeferredUnload deferred_unload_;

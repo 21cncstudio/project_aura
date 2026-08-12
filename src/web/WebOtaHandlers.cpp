@@ -14,6 +14,7 @@
 #include "core/Logger.h"
 #include "core/OtaRollback.h"
 #include "web/WebOtaApiUtils.h"
+#include "web/OtaUiLineagePolicy.h"
 #include "web/WebResponseUtils.h"
 #include "web/WebTextUtils.h"
 
@@ -318,13 +319,19 @@ const char *upload_confirm_error_message(OtaPhysicalConfirm::ConsumeStatus statu
 }
 
 void cleanup_after_update_response(WebOtaHandlers::Runtime &runtime, bool success) {
-    if (!success && runtime.set_ui_screen) {
-        runtime.set_ui_screen(WebUiBridge::FirmwareUpdateScreenMode::Hidden);
+    const uint32_t confirm_id =
+        runtime.upload_confirm_id.load(std::memory_order_acquire);
+    if (confirm_id != 0 && runtime.cancel_preflight_ui) {
+        runtime.cancel_preflight_ui(confirm_id);
+    }
+    if (!success && confirm_id != 0 && runtime.set_ui_screen) {
+        runtime.set_ui_screen(WebUiBridge::FirmwareUpdateScreenMode::Hidden, confirm_id);
     }
     if (runtime.restore_wifi_power_save) {
         runtime.restore_wifi_power_save();
     }
     runtime.ota_state.clearBusy();
+    runtime.upload_confirm_id.store(0, std::memory_order_release);
     if (runtime.end_upload) {
         runtime.end_upload();
     }
@@ -391,7 +398,12 @@ void handlePrepare(Runtime &runtime, bool ota_busy) {
 
     const esp_partition_t *target_partition = esp_ota_get_next_update_partition(nullptr);
     const size_t slot_size = target_partition ? target_partition->size : 0;
-    const bool available = runtime.arm_preflight_ui && runtime.upload_timeout_ms && target_partition;
+    const bool available = runtime.arm_preflight_ui &&
+                           runtime.upload_timeout_ms &&
+                           runtime.set_ui_screen &&
+                           runtime.prepare_physical_confirm &&
+                           runtime.consume_physical_confirm &&
+                           target_partition;
     const uint32_t upload_timeout_ms =
         available && runtime.upload_timeout_ms
             ? runtime.upload_timeout_ms(size_known ? expected_size : 0)
@@ -419,7 +431,8 @@ void handlePrepare(Runtime &runtime, bool ota_busy) {
         if (confirm_decision.status != OtaPhysicalConfirm::PrepareStatus::Ready) {
             if (confirm_decision.status == OtaPhysicalConfirm::PrepareStatus::Required &&
                 runtime.set_ui_screen) {
-                runtime.set_ui_screen(WebUiBridge::FirmwareUpdateScreenMode::ConfirmPending);
+                runtime.set_ui_screen(WebUiBridge::FirmwareUpdateScreenMode::ConfirmPending,
+                                      confirm_decision.confirm_id);
             }
             if (!has_confirm_id ||
                 confirm_decision.status != OtaPhysicalConfirm::PrepareStatus::Required) {
@@ -443,8 +456,8 @@ void handlePrepare(Runtime &runtime, bool ota_busy) {
     String json;
     serializeJson(doc, json);
 
-    if (result.success) {
-        runtime.arm_preflight_ui();
+    if (result.success && confirm_id != 0) {
+        runtime.arm_preflight_ui(confirm_id);
     }
     WebResponseUtils::sendNoStoreHeaders(server);
     server.send(result.status_code, "application/json", json);
@@ -464,6 +477,13 @@ void handleUpload(Runtime &runtime, bool ota_busy) {
             server.rejectUpload();
             return;
         }
+
+        uint32_t confirm_id = 0;
+        const bool has_confirm_id = parse_confirm_id_arg(server, confirm_id);
+        // The client-supplied value is untrusted until the confirmation state
+        // machine consumes it. Cleanup must never publish a UI command with an
+        // unvalidated ID because that could advance the screen lineage.
+        runtime.upload_confirm_id.store(0, std::memory_order_release);
         if (OtaRollback::isPendingVerify()) {
             LOGW("OTA", "reject upload start while boot validation is pending");
             runtime.ota_state.beginUpload(millis());
@@ -486,29 +506,35 @@ void handleUpload(Runtime &runtime, bool ota_busy) {
             return;
         }
 
-        uint32_t confirm_id = 0;
-        const bool has_confirm_id = parse_confirm_id_arg(server, confirm_id);
+        OtaPhysicalConfirm::ConsumeDecision confirm_decision;
         if (runtime.consume_physical_confirm) {
-            const OtaPhysicalConfirm::ConsumeDecision confirm_decision =
+            confirm_decision =
                 runtime.consume_physical_confirm(expected_size, has_confirm_id, confirm_id);
-            if (confirm_decision.status != OtaPhysicalConfirm::ConsumeStatus::Consumed) {
-                const uint32_t now_ms = millis();
-                runtime.ota_state.beginUpload(now_ms);
-                fail_upload(runtime, upload_confirm_error_message(confirm_decision.status));
-                server.rejectUpload();
-                LOGW("OTA", "reject upload start physical_confirm=%s confirm_id=%u expected=%u",
-                     OtaPhysicalConfirm::consumeStatusText(confirm_decision.status),
-                     static_cast<unsigned>(confirm_decision.confirm_id),
-                     static_cast<unsigned>(expected_size));
-                return;
-            }
-            LOGI("OTA", "physical confirm consumed (confirm_id=%u, expected=%u)",
+        }
+        const uint32_t validated_confirm_id =
+            OtaUiLineagePolicy::validatedUploadConfirmId(
+                runtime.consume_physical_confirm &&
+                    confirm_decision.status == OtaPhysicalConfirm::ConsumeStatus::Consumed,
+                confirm_decision.confirm_id);
+        if (validated_confirm_id == 0) {
+            const uint32_t now_ms = millis();
+            runtime.ota_state.beginUpload(now_ms);
+            fail_upload(runtime, upload_confirm_error_message(confirm_decision.status));
+            server.rejectUpload();
+            LOGW("OTA", "reject upload start physical_confirm=%s confirm_id=%u expected=%u",
+                 OtaPhysicalConfirm::consumeStatusText(confirm_decision.status),
                  static_cast<unsigned>(confirm_decision.confirm_id),
                  static_cast<unsigned>(expected_size));
+            return;
         }
+        confirm_id = validated_confirm_id;
+        runtime.upload_confirm_id.store(confirm_id, std::memory_order_release);
+        LOGI("OTA", "physical confirm consumed (confirm_id=%u, expected=%u)",
+             static_cast<unsigned>(confirm_id),
+             static_cast<unsigned>(expected_size));
 
         if (runtime.cancel_preflight_ui) {
-            runtime.cancel_preflight_ui();
+            runtime.cancel_preflight_ui(confirm_id);
         }
         const uint32_t start_ms = millis();
         runtime.ota_state.beginUpload(start_ms);
@@ -526,8 +552,9 @@ void handleUpload(Runtime &runtime, bool ota_busy) {
         if (runtime.context.wifi_stop_scan) {
             runtime.context.wifi_stop_scan();
         }
-        if (runtime.set_ui_screen) {
-            runtime.set_ui_screen(WebUiBridge::FirmwareUpdateScreenMode::Installing);
+        if (runtime.set_ui_screen && confirm_id != 0) {
+            runtime.set_ui_screen(WebUiBridge::FirmwareUpdateScreenMode::Installing,
+                                  confirm_id);
         }
 
         const esp_partition_t *target_partition = esp_ota_get_next_update_partition(nullptr);
@@ -693,17 +720,11 @@ void handleUpdate(Runtime &runtime, bool ota_busy) {
         const WebOtaSnapshot rejected_ota = runtime.ota_state.snapshot();
         if (rejected_ota.hasError() && rejected_ota.error == kOtaBootPendingVerifyError) {
             send_ota_boot_pending_verify_upload_response(server);
-            if (runtime.cancel_preflight_ui) {
-                runtime.cancel_preflight_ui();
-            }
             cleanup_after_update_response(runtime, false);
             return;
         }
         if (rejected_ota.hasError() && is_upload_confirm_error(rejected_ota.error)) {
             send_ota_physical_confirm_upload_response(server, rejected_ota.error);
-            if (runtime.cancel_preflight_ui) {
-                runtime.cancel_preflight_ui();
-            }
             cleanup_after_update_response(runtime, false);
             return;
         }
@@ -777,9 +798,6 @@ void handleUpdate(Runtime &runtime, bool ota_busy) {
         LOGI("OTA", "response sent, deferred reboot in %u ms",
              static_cast<unsigned>(runtime.deferred_restart_delay_ms));
         runtime.restart_controller.schedule(millis(), runtime.deferred_restart_delay_ms);
-    }
-    if (runtime.cancel_preflight_ui) {
-        runtime.cancel_preflight_ui();
     }
     cleanup_after_update_response(runtime, result.success);
 }

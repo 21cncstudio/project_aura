@@ -13678,8 +13678,8 @@ void create_screen_page_fw_update() {
                     // card_fw_update
                     lv_obj_t *obj = lv_obj_create(parent_obj);
                     objects.card_fw_update = obj;
-                    lv_obj_set_pos(obj, 142, 154);
-                    lv_obj_set_size(obj, 516, 195);
+                    lv_obj_set_pos(obj, 142, 114);
+                    lv_obj_set_size(obj, 516, 253);
                     lv_obj_set_style_pad_left(obj, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
                     lv_obj_set_style_pad_top(obj, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
                     lv_obj_set_style_pad_right(obj, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
@@ -13720,7 +13720,7 @@ void create_screen_page_fw_update() {
                             // btn_fw_update_cancel
                             lv_obj_t *obj = lv_obj_create(parent_obj);
                             objects.btn_fw_update_cancel = obj;
-                            lv_obj_set_pos(obj, 281, 118);
+                            lv_obj_set_pos(obj, 281, 171);
                             lv_obj_set_size(obj, 150, 60);
                             lv_obj_set_style_pad_left(obj, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
                             lv_obj_set_style_pad_top(obj, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
@@ -13754,7 +13754,7 @@ void create_screen_page_fw_update() {
                             // btn_fw_update_allow
                             lv_obj_t *obj = lv_obj_create(parent_obj);
                             objects.btn_fw_update_allow = obj;
-                            lv_obj_set_pos(obj, 82, 118);
+                            lv_obj_set_pos(obj, 82, 171);
                             lv_obj_set_size(obj, 150, 60);
                             lv_obj_set_style_pad_left(obj, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
                             lv_obj_set_style_pad_top(obj, 0, LV_PART_MAIN | LV_STATE_DEFAULT);

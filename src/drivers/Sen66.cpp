@@ -24,6 +24,10 @@ bool sen66StateUnknownAfterBoot() {
     return boot_reset_reason != ESP_RST_POWERON;
 }
 
+bool deadlineReached(uint32_t now_ms, uint32_t deadline_ms) {
+    return static_cast<int32_t>(now_ms - deadline_ms) >= 0;
+}
+
 } // namespace
 
 bool Sen66::begin() {
@@ -34,7 +38,6 @@ bool Sen66::begin() {
     last_status_ms_ = 0;
     fail_count_ = 0;
     status_last_ = 0;
-    retry_at_ms_ = 0;
     measure_start_ms_ = 0;
     last_pressure_ms_ = 0;
     last_pressure_hpa_ = 0;
@@ -49,6 +52,12 @@ bool Sen66::begin() {
     resetCo2Smoother();
     asc_default_known_ = sen66AscDefaultsKnownAfterReset();
     measurement_state_unknown_ = sen66StateUnknownAfterBoot();
+    late_start_phase_ = LateStartPhase::Idle;
+    late_start_due_ms_ = 0;
+    late_start_asc_enabled_ = true;
+    late_start_stop_attempt_ = 0;
+    late_start_asc_write_attempt_ = 0;
+    late_start_asc_verify_attempt_ = 0;
     return true;
 }
 
@@ -95,10 +104,6 @@ void Sen66::clearVocState(StorageManager &storage) {
     storage.clearVocState();
     voc_state_valid_ = false;
     memset(voc_state_, 0, sizeof(voc_state_));
-}
-
-void Sen66::scheduleRetry(uint32_t delay_ms) {
-    retry_at_ms_ = millis() + delay_ms;
 }
 
 bool Sen66::writeCmdWithWord(uint16_t cmd, uint16_t word) {
@@ -448,6 +453,10 @@ bool Sen66::startMeasurement() {
         return true;
     }
     if (I2C::write_cmd(Config::SEN66_ADDR, Config::SEN66_CMD_START, nullptr, 0) != ESP_OK) {
+        // A failed I2C transaction cannot prove that the sensor did not
+        // accept START. Force the next attempt through STOP before sending
+        // configuration commands that require idle mode.
+        measurement_state_unknown_ = true;
         return false;
     }
     delay(Config::SEN66_START_DELAY_MS);
@@ -638,6 +647,336 @@ bool Sen66::start(bool asc_enabled) {
     ok_ = true;
     busy_ = false;
     return true;
+}
+
+void Sen66::beginLateStart(bool asc_enabled) {
+    busy_ = true;
+    ok_ = false;
+    late_start_asc_enabled_ = asc_enabled;
+    late_start_stop_attempt_ = 0;
+    late_start_asc_write_attempt_ = 0;
+    late_start_asc_verify_attempt_ = 0;
+    late_start_due_ms_ = 0;
+    late_start_phase_ = (!measuring_ && !measurement_state_unknown_)
+        ? LateStartPhase::TempWrite
+        : LateStartPhase::StopWrite;
+    if (measurement_state_unknown_) {
+        LOGI("SEN66", "forcing idle after warm restart");
+    }
+}
+
+CooperativeStart::Result Sen66::finishLateStart(bool success, uint32_t now_ms) {
+    late_start_phase_ = LateStartPhase::Idle;
+    busy_ = false;
+    if (!success) {
+        ok_ = false;
+        measuring_ = false;
+        return CooperativeStart::Result::Failed;
+    }
+    measuring_ = true;
+    measurement_state_unknown_ = false;
+    if (measure_start_ms_ == 0) {
+        measure_start_ms_ = now_ms;
+    }
+    last_voc_state_save_ms_ = now_ms;
+    asc_default_known_ = false;
+    ok_ = true;
+    return CooperativeStart::Result::Success;
+}
+
+bool Sen66::readLateWord(uint16_t &value) {
+    uint8_t buf[3] = {};
+    if (I2C::read_bytes(Config::SEN66_ADDR, buf, sizeof(buf)) != ESP_OK ||
+        I2C::crc8(buf, 2) != buf[2]) {
+        return false;
+    }
+    value = (static_cast<uint16_t>(buf[0]) << 8) | buf[1];
+    return true;
+}
+
+CooperativeStart::Result Sen66::pollLateStart(uint32_t now_ms) {
+    switch (late_start_phase_) {
+        case LateStartPhase::Idle:
+            return CooperativeStart::Result::Idle;
+        case LateStartPhase::StopWrite:
+            ++late_start_stop_attempt_;
+            if (I2C::write_cmd(Config::SEN66_ADDR, Config::SEN66_CMD_STOP, nullptr, 0) == ESP_OK) {
+                late_start_due_ms_ = millis() + Config::SEN66_STOP_DELAY_MS;
+                late_start_phase_ = LateStartPhase::StopWait;
+            } else if (late_start_stop_attempt_ < 3U) {
+                late_start_due_ms_ = millis() + Config::SEN66_CMD_DELAY_MS;
+                late_start_phase_ = LateStartPhase::StopRetryWait;
+            } else if (measurement_state_unknown_) {
+                LOGW("SEN66", "STOP failed while resyncing state, resetting sensor");
+                late_start_due_ms_ = millis() + Config::SEN66_CMD_DELAY_MS;
+                late_start_phase_ = LateStartPhase::DeviceResetRetryWait;
+            } else {
+                // The failed transaction cannot prove that the device stayed
+                // in measurement mode or accepted STOP. Keep that ambiguity
+                // across the bounded outer retry so the next attempt starts
+                // with STOP again instead of sending configuration commands.
+                measurement_state_unknown_ = true;
+                return finishLateStart(false, now_ms);
+            }
+            return CooperativeStart::Result::InProgress;
+        case LateStartPhase::StopWait:
+            if (deadlineReached(now_ms, late_start_due_ms_)) {
+                measuring_ = false;
+                measurement_state_unknown_ = false;
+                late_start_phase_ = LateStartPhase::TempWrite;
+            }
+            return CooperativeStart::Result::InProgress;
+        case LateStartPhase::StopRetryWait:
+            if (deadlineReached(now_ms, late_start_due_ms_)) {
+                late_start_phase_ = LateStartPhase::StopWrite;
+            }
+            return CooperativeStart::Result::InProgress;
+        case LateStartPhase::DeviceResetRetryWait:
+            if (deadlineReached(now_ms, late_start_due_ms_)) {
+                late_start_phase_ = LateStartPhase::DeviceResetWrite;
+            }
+            return CooperativeStart::Result::InProgress;
+        case LateStartPhase::DeviceResetWrite:
+            if (I2C::write_cmd(Config::SEN66_ADDR,
+                               Config::SEN66_CMD_DEVICE_RESET,
+                               nullptr,
+                               0) != ESP_OK) {
+                return finishLateStart(false, now_ms);
+            }
+            late_start_due_ms_ = millis() + Config::SEN66_DEVICE_RESET_DELAY_MS;
+            late_start_phase_ = LateStartPhase::DeviceResetWait;
+            return CooperativeStart::Result::InProgress;
+        case LateStartPhase::DeviceResetWait:
+            if (!deadlineReached(now_ms, late_start_due_ms_)) {
+                return CooperativeStart::Result::InProgress;
+            }
+            measuring_ = false;
+            measurement_state_unknown_ = false;
+            measure_start_ms_ = 0;
+            last_voc_state_save_ms_ = 0;
+            temp_offset_hw_active_ = false;
+            temp_offset_hw_value_ = 0.0f;
+            last_status_ms_ = 0;
+            status_last_ = 0;
+            fail_count_ = 0;
+            co2_invalid_logged_ = false;
+            co2_invalid_since_ms_ = 0;
+            resetCo2Smoother();
+            asc_default_known_ = true;
+            late_start_phase_ = LateStartPhase::TempWrite;
+            return CooperativeStart::Result::InProgress;
+        case LateStartPhase::TempWrite: {
+            const float desired_correction = desiredTempCorrectionC();
+            const int16_t offset_scaled =
+                static_cast<int16_t>(lroundf(desired_correction * 200.0f));
+            const int16_t slope_scaled =
+                static_cast<int16_t>(lroundf(Config::SEN66_TEMP_OFFSET_SLOPE * 10000.0f));
+            const uint16_t words[4] = {
+                static_cast<uint16_t>(offset_scaled),
+                static_cast<uint16_t>(slope_scaled),
+                Config::SEN66_TEMP_OFFSET_TIME_S,
+                Config::SEN66_TEMP_OFFSET_SLOT,
+            };
+            if (writeCmdWithWords(Config::SEN66_CMD_TEMP_OFFSET, words, 4)) {
+                temp_offset_hw_active_ = true;
+                temp_offset_hw_value_ = desired_correction;
+                LOGI("SEN66", "temp compensation via HW: base %.1f C, user %.1f C",
+                     Config::BASE_TEMP_OFFSET, temp_offset_);
+            } else {
+                LOGW("SEN66", "temp offset set failed");
+            }
+            late_start_due_ms_ = millis() + Config::SEN66_CMD_DELAY_MS;
+            late_start_phase_ = LateStartPhase::TempWait;
+            return CooperativeStart::Result::InProgress;
+        }
+        case LateStartPhase::TempWait:
+            if (deadlineReached(now_ms, late_start_due_ms_)) {
+                late_start_phase_ = voc_state_valid_
+                    ? LateStartPhase::VocWrite
+                    : LateStartPhase::AscReadWrite;
+            }
+            return CooperativeStart::Result::InProgress;
+        case LateStartPhase::VocWrite: {
+            uint16_t words[4] = {};
+            for (size_t i = 0; i < 4U; ++i) {
+                words[i] = (static_cast<uint16_t>(voc_state_[i * 2U]) << 8) |
+                           voc_state_[i * 2U + 1U];
+            }
+            if (writeCmdWithWords(Config::SEN66_CMD_VOC_STATE, words, 4)) {
+                LOGI("SEN66", "VOC state restored");
+            } else {
+                LOGW("SEN66", "VOC state restore failed");
+            }
+            late_start_due_ms_ = millis() + Config::SEN66_CMD_DELAY_MS;
+            late_start_phase_ = LateStartPhase::VocWait;
+            return CooperativeStart::Result::InProgress;
+        }
+        case LateStartPhase::VocWait:
+            if (deadlineReached(now_ms, late_start_due_ms_)) {
+                late_start_phase_ = LateStartPhase::AscReadWrite;
+            }
+            return CooperativeStart::Result::InProgress;
+        case LateStartPhase::AscReadWrite:
+            if (late_start_asc_enabled_ && asc_default_known_) {
+                LOGI("SEN66", "ASC enabled (default after reset)");
+                late_start_phase_ = LateStartPhase::StartWrite;
+                return CooperativeStart::Result::InProgress;
+            }
+            if (I2C::write_cmd(Config::SEN66_ADDR, Config::SEN66_CMD_ASC, nullptr, 0) != ESP_OK) {
+                late_start_phase_ = LateStartPhase::AscApplyWrite;
+                return CooperativeStart::Result::InProgress;
+            }
+            late_start_due_ms_ = millis() + Config::SEN66_CMD_DELAY_MS;
+            late_start_phase_ = LateStartPhase::AscReadWait;
+            return CooperativeStart::Result::InProgress;
+        case LateStartPhase::AscReadWait:
+            if (deadlineReached(now_ms, late_start_due_ms_)) {
+                late_start_phase_ = LateStartPhase::AscReadResponse;
+            }
+            return CooperativeStart::Result::InProgress;
+        case LateStartPhase::AscReadResponse: {
+            uint16_t value = 0;
+            if (readLateWord(value) && ((value == 1U) == late_start_asc_enabled_)) {
+                LOGI("SEN66", "ASC %s", late_start_asc_enabled_ ? "enabled" : "disabled");
+                late_start_phase_ = LateStartPhase::StartWrite;
+            } else {
+                late_start_phase_ = LateStartPhase::AscApplyWrite;
+            }
+            return CooperativeStart::Result::InProgress;
+        }
+        case LateStartPhase::AscApplyWrite:
+            if (writeCmdWithWord(Config::SEN66_CMD_ASC,
+                                 late_start_asc_enabled_ ? 1U : 0U)) {
+                late_start_asc_verify_attempt_ = 0;
+                late_start_due_ms_ = millis() + Config::SEN66_ASC_SETTLE_DELAY_MS;
+                late_start_phase_ = LateStartPhase::AscApplySettle;
+            } else {
+                ++late_start_asc_write_attempt_;
+                if (late_start_asc_write_attempt_ >= Config::SEN66_ASC_WRITE_ATTEMPTS) {
+                    late_start_due_ms_ = millis() + Config::SEN66_ASC_RETRY_DELAY_MS;
+                    late_start_phase_ = LateStartPhase::AscFinalDelay;
+                } else {
+                    late_start_due_ms_ = millis() + Config::SEN66_ASC_RETRY_DELAY_MS;
+                    late_start_phase_ = LateStartPhase::AscRetryWait;
+                }
+            }
+            return CooperativeStart::Result::InProgress;
+        case LateStartPhase::AscApplySettle:
+            if (deadlineReached(now_ms, late_start_due_ms_)) {
+                late_start_phase_ = LateStartPhase::AscVerifyWrite;
+            }
+            return CooperativeStart::Result::InProgress;
+        case LateStartPhase::AscVerifyWrite:
+            if (I2C::write_cmd(Config::SEN66_ADDR, Config::SEN66_CMD_ASC, nullptr, 0) != ESP_OK) {
+                ++late_start_asc_verify_attempt_;
+                late_start_due_ms_ = millis() + Config::SEN66_ASC_RETRY_DELAY_MS;
+                late_start_phase_ = LateStartPhase::AscRetryWait;
+                return CooperativeStart::Result::InProgress;
+            }
+            late_start_due_ms_ = millis() + Config::SEN66_CMD_DELAY_MS;
+            late_start_phase_ = LateStartPhase::AscVerifyWait;
+            return CooperativeStart::Result::InProgress;
+        case LateStartPhase::AscVerifyWait:
+            if (deadlineReached(now_ms, late_start_due_ms_)) {
+                late_start_phase_ = LateStartPhase::AscVerifyResponse;
+            }
+            return CooperativeStart::Result::InProgress;
+        case LateStartPhase::AscVerifyResponse: {
+            uint16_t value = 0;
+            if (readLateWord(value) && ((value == 1U) == late_start_asc_enabled_)) {
+                LOGI("SEN66", "ASC %s", late_start_asc_enabled_ ? "enabled" : "disabled");
+                late_start_phase_ = LateStartPhase::StartWrite;
+                return CooperativeStart::Result::InProgress;
+            }
+            ++late_start_asc_verify_attempt_;
+            late_start_due_ms_ = millis() + Config::SEN66_ASC_RETRY_DELAY_MS;
+            late_start_phase_ = LateStartPhase::AscRetryWait;
+            return CooperativeStart::Result::InProgress;
+        }
+        case LateStartPhase::AscRetryWait:
+            if (!deadlineReached(now_ms, late_start_due_ms_)) {
+                return CooperativeStart::Result::InProgress;
+            }
+            if (late_start_asc_verify_attempt_ < Config::SEN66_ASC_VERIFY_ATTEMPTS &&
+                late_start_asc_write_attempt_ < Config::SEN66_ASC_WRITE_ATTEMPTS) {
+                late_start_phase_ = late_start_asc_verify_attempt_ == 0U
+                    ? LateStartPhase::AscApplyWrite
+                    : LateStartPhase::AscVerifyWrite;
+            } else {
+                ++late_start_asc_write_attempt_;
+                if (late_start_asc_write_attempt_ < Config::SEN66_ASC_WRITE_ATTEMPTS) {
+                    late_start_asc_verify_attempt_ = 0;
+                    late_start_phase_ = LateStartPhase::AscApplyWrite;
+                } else {
+                    LOGW("SEN66", "ASC set failed (%s)",
+                         late_start_asc_enabled_ ? "enable" : "disable");
+                    late_start_phase_ = LateStartPhase::AscFinalStatusWrite;
+                }
+            }
+            return CooperativeStart::Result::InProgress;
+        case LateStartPhase::AscFinalDelay:
+            if (!deadlineReached(now_ms, late_start_due_ms_)) {
+                return CooperativeStart::Result::InProgress;
+            }
+            LOGW("SEN66", "ASC set failed (%s)",
+                 late_start_asc_enabled_ ? "enable" : "disable");
+            late_start_phase_ = LateStartPhase::AscFinalStatusWrite;
+            return CooperativeStart::Result::InProgress;
+        case LateStartPhase::AscFinalStatusWrite:
+            if (I2C::write_cmd(Config::SEN66_ADDR,
+                               Config::SEN66_CMD_READ_STATUS,
+                               nullptr,
+                               0) != ESP_OK) {
+                LOGW("SEN66", "ASC apply detail: status=read-failed");
+                late_start_phase_ = LateStartPhase::StartWrite;
+                return CooperativeStart::Result::InProgress;
+            }
+            late_start_due_ms_ = millis() + Config::SEN66_CMD_DELAY_MS;
+            late_start_phase_ = LateStartPhase::AscFinalStatusWait;
+            return CooperativeStart::Result::InProgress;
+        case LateStartPhase::AscFinalStatusWait:
+            if (deadlineReached(now_ms, late_start_due_ms_)) {
+                late_start_phase_ = LateStartPhase::AscFinalStatusResponse;
+            }
+            return CooperativeStart::Result::InProgress;
+        case LateStartPhase::AscFinalStatusResponse: {
+            uint8_t buf[6] = {};
+            if (I2C::read_bytes(Config::SEN66_ADDR, buf, sizeof(buf)) != ESP_OK ||
+                I2C::crc8(&buf[0], 2) != buf[2] ||
+                I2C::crc8(&buf[3], 2) != buf[5]) {
+                LOGW("SEN66", "ASC apply detail: status=read-failed");
+            } else {
+                const uint32_t status =
+                    (static_cast<uint32_t>(buf[0]) << 24) |
+                    (static_cast<uint32_t>(buf[1]) << 16) |
+                    (static_cast<uint32_t>(buf[3]) << 8) |
+                    static_cast<uint32_t>(buf[4]);
+                if (status != 0U) {
+                    LOGW("SEN66", "ASC apply device status: 0x%08lX",
+                         static_cast<unsigned long>(status));
+                }
+            }
+            late_start_phase_ = LateStartPhase::StartWrite;
+            return CooperativeStart::Result::InProgress;
+        }
+        case LateStartPhase::StartWrite:
+            if (I2C::write_cmd(Config::SEN66_ADDR, Config::SEN66_CMD_START, nullptr, 0) != ESP_OK) {
+                // Delivery is ambiguous after a failed transaction. Preserve
+                // that ambiguity so the bounded outer retry starts with STOP.
+                measurement_state_unknown_ = true;
+                return finishLateStart(false, now_ms);
+            }
+            late_start_due_ms_ = millis() + Config::SEN66_START_DELAY_MS;
+            late_start_phase_ = LateStartPhase::StartWait;
+            return CooperativeStart::Result::InProgress;
+        case LateStartPhase::StartWait:
+            if (!deadlineReached(now_ms, late_start_due_ms_)) {
+                return CooperativeStart::Result::InProgress;
+            }
+            return finishLateStart(true, now_ms);
+        default:
+            return finishLateStart(false, now_ms);
+    }
 }
 
 bool Sen66::setAscEnabled(bool enabled) {

@@ -7,6 +7,7 @@
 #pragma once
 
 #include <Arduino.h>
+#include "core/CooperativeStart.h"
 
 class Sfa30 {
 public:
@@ -19,6 +20,10 @@ public:
     bool begin();
     bool probe();
     void start();
+    void beginLateStart();
+    CooperativeStart::Result pollLateStart(uint32_t now_ms);
+    bool isLateStartActive() const { return late_start_phase_ != LateStartPhase::Idle; }
+    bool lateStartIdentified() const { return late_start_identified_; }
     void stop();
     bool readData(float &hcho_ppb);
     void poll();
@@ -34,6 +39,20 @@ public:
     void invalidate();
 
 private:
+    enum class LateStartPhase : uint8_t {
+        Idle = 0,
+        Ping,
+        WriteDetect,
+        WaitDetect,
+        ReadDetect,
+        StopUnknown,
+        WaitStop,
+        WriteStart,
+        WaitStart,
+    };
+
+    CooperativeStart::Result finishLateStart(bool success);
+    bool parseDeviceMarking(const uint8_t *buf, size_t len);
     enum class ErrorCause : uint8_t {
         None = 0,
         DetectSensor,
@@ -65,4 +84,7 @@ private:
     uint8_t fail_count_ = 0;
     Status status_ = Status::Absent;
     ErrorCause last_error_cause_ = ErrorCause::None;
+    LateStartPhase late_start_phase_ = LateStartPhase::Idle;
+    uint32_t late_start_due_ms_ = 0;
+    bool late_start_identified_ = false;
 };

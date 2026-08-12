@@ -42,6 +42,7 @@
 #include "ui/NightModeManager.h"
 #include "ui/UiEventBinder.h"
 #include "ui/UiAutoRecoveryPolicy.h"
+#include "ui/LvglRuntimeReadinessPolicy.h"
 #include "ui/UiOptionalGasProfile.h"
 
 using namespace Config;
@@ -54,13 +55,17 @@ constexpr int UI_LVGL_STARTUP_LOCK_TIMEOUT_MS = 2000;
 constexpr uint32_t UI_LVGL_LOCK_WARN_MS = 60000;
 constexpr uint16_t UI_LVGL_LOCK_WARN_FAIL_STREAK = 3;
 constexpr uint32_t UI_LVGL_DIAG_HEARTBEAT_MS = 60000;
-constexpr uint32_t UI_LVGL_DIAG_STALL_MS = 15000;
-constexpr uint32_t UI_LVGL_DIAG_VSYNC_STALL_MS = 5000;
-constexpr uint32_t UI_LVGL_DIAG_FLUSH_STALL_MS = 15000;
+constexpr uint32_t UI_LVGL_DIAG_STALL_MS =
+    LvglRuntimeReadinessPolicy::HANDLER_MAX_AGE_MS;
+constexpr uint32_t UI_LVGL_DIAG_VSYNC_STALL_MS =
+    LvglRuntimeReadinessPolicy::VSYNC_MAX_AGE_MS;
+constexpr uint32_t UI_LVGL_DIAG_FLUSH_STALL_MS =
+    LvglRuntimeReadinessPolicy::FLUSH_MAX_AGE_MS;
 constexpr uint32_t UI_LVGL_DIAG_STALL_LOG_COOLDOWN_MS = 30000;
 constexpr uint32_t UI_LVGL_DIAG_RECOVER_MS = 3000;
 constexpr uint32_t UI_LVGL_DIAG_REBOOT_STALL_MS = 45000;
-constexpr uint32_t UI_LVGL_DIAG_AGE_UNKNOWN_MS = 0xFFFFFFFFu;
+constexpr uint32_t UI_LVGL_DIAG_AGE_UNKNOWN_MS =
+    LvglRuntimeReadinessPolicy::AGE_UNKNOWN_MS;
 constexpr uint32_t UI_LVGL_DIAG_TOUCH_WARN_DELTA = 3;
 constexpr uint32_t UI_POOR_GAS_BG_HEX = 0xEB0000;
 constexpr uint32_t UI_HIGH_CO2_BG_HEX = 0xB36B00;
@@ -363,15 +368,27 @@ void UiController::setLvglReady(bool ready) {
 }
 
 bool UiController::isLvglRuntimeHealthy() const {
-    if (!lvgl_ready ||
-        lvgl_diag_stall_active ||
-        lvgl_diag_auto_recovery_restart_requested_ ||
-        lvgl_diag_auto_recovery_suppressed_) {
+    lvgl_port_diagnostics_t diagnostics = {};
+    if (!lvgl_port_get_diagnostics(&diagnostics)) {
         return false;
     }
-    lvgl_port_diagnostics_t diagnostics = {};
-    return lvgl_port_get_diagnostics(&diagnostics) &&
-           !diagnostics.display_sync_fault;
+
+    LvglRuntimeReadinessPolicy::Diagnostics readiness;
+    readiness.timer_handler_count = diagnostics.timer_handler_count;
+    readiness.timer_handler_age_ms = diagnostics.timer_handler_age_ms;
+    readiness.flush_count = diagnostics.flush_count;
+    readiness.flush_age_ms = diagnostics.flush_age_ms;
+    readiness.vsync_count = diagnostics.vsync_count;
+    readiness.vsync_age_ms = diagnostics.vsync_age_ms;
+    readiness.display_sync_fault = diagnostics.display_sync_fault;
+    readiness.touch_offline = diagnostics.touch_offline;
+    readiness.paused = diagnostics.paused;
+    return LvglRuntimeReadinessPolicy::isReady(
+        lvgl_ready,
+        lvgl_diag_stall_active,
+        lvgl_diag_auto_recovery_restart_requested_,
+        lvgl_diag_auto_recovery_suppressed_,
+        readiness);
 }
 
 void UiController::refreshConnectivitySnapshot() {
@@ -492,12 +509,11 @@ void UiController::processWebUiBridgeCommands() {
             applyMqttSaveBridge(mqtt_save_update, this));
     }
 
-    WebUiBridge::FirmwareUpdateScreenMode firmware_update_screen_mode =
-        WebUiBridge::FirmwareUpdateScreenMode::Hidden;
-    if (!webUiBridge.consumePendingFirmwareUpdateScreen(firmware_update_screen_mode)) {
+    WebUiBridge::FirmwareUpdateScreenRequest firmware_update_request;
+    if (!webUiBridge.consumePendingFirmwareUpdateScreen(firmware_update_request)) {
         return;
     }
-    webSetFirmwareUpdateScreen(firmware_update_screen_mode);
+    webSetFirmwareUpdateScreen(firmware_update_request);
     publishWebUiSnapshot();
 }
 
@@ -1144,13 +1160,24 @@ void UiController::apply_pending_screen_now_from_web() {
     lvgl_port_unlock();
 }
 
-void UiController::webSetFirmwareUpdateScreen(WebUiBridge::FirmwareUpdateScreenMode mode) {
+void UiController::webSetFirmwareUpdateScreen(
+    const WebUiBridge::FirmwareUpdateScreenRequest &request) {
+    const WebUiBridge::FirmwareUpdateScreenMode mode = request.mode;
+    if (!firmware_update_screen_lineage_.accept(request.confirm_id)) {
+        LOGW("UI",
+             "ignored stale firmware screen command (mode=%u, confirm_id=%u, latest=%u)",
+             static_cast<unsigned>(mode),
+             static_cast<unsigned>(request.confirm_id),
+             static_cast<unsigned>(firmware_update_screen_lineage_.latestConfirmId()));
+        return;
+    }
     if (!lvgl_ready) {
         // Firmware-screen commands may still arrive while OTA/network
         // management remains available in permanent headless mode. Consume
         // them without touching stale LVGL objects.
         firmware_update_screen_active_ = false;
         firmware_update_screen_mode_ = WebUiBridge::FirmwareUpdateScreenMode::Hidden;
+        firmware_update_confirm_id_ = 0;
         firmware_update_autoclose_due_ms_ = 0;
         return;
     }
@@ -1175,6 +1202,7 @@ void UiController::webSetFirmwareUpdateScreen(WebUiBridge::FirmwareUpdateScreenM
         }
         firmware_update_screen_active_ = true;
         firmware_update_screen_mode_ = mode;
+        firmware_update_confirm_id_ = request.confirm_id;
         firmware_update_autoclose_due_ms_ =
             mode == WebUiBridge::FirmwareUpdateScreenMode::ConfirmDenied
                 ? millis() + 1500UL
@@ -1192,6 +1220,7 @@ void UiController::webSetFirmwareUpdateScreen(WebUiBridge::FirmwareUpdateScreenM
     const bool fw_pending = pending_screen_id == SCREEN_ID_PAGE_FW_UPDATE;
     firmware_update_screen_active_ = false;
     firmware_update_screen_mode_ = WebUiBridge::FirmwareUpdateScreenMode::Hidden;
+    firmware_update_confirm_id_ = 0;
     firmware_update_autoclose_due_ms_ = 0;
 
     if (!fw_current && !fw_pending) {
@@ -1235,7 +1264,7 @@ void UiController::poll(uint32_t now) {
 
         const UiAutoRecoveryPolicy::Decision recovery_decision =
             UiAutoRecoveryPolicy::decide(
-                boot_ui_auto_recovery_reboot,
+                boot_any_auto_recovery_boot(),
                 lvgl_diag_auto_recovery_restart_requested_);
         if (recovery_decision == UiAutoRecoveryPolicy::Decision::RequestRestart) {
             LOGE("UI",
@@ -1251,10 +1280,11 @@ void UiController::poll(uint32_t now) {
                  "Display sync fault persisted after automatic UI recovery; restart loop suppressed");
         }
 
-        // The LVGL task intentionally fail-stops while owning the framebuffer.
-        // Detach its timers and callbacks, then continue as a web-managed
-        // headless runtime until restart or power cycle.
-        lvgl_port_prepare_restart();
+        // Never force-suspend the display task here: controlled shutdown must
+        // make the shared-I2C DAC safe first. A sync-faulted task may not
+        // acknowledge this request, but keeping its handle intact lets the
+        // main restart path perform the final teardown in the correct order.
+        (void)lvgl_port_request_quiesce();
         lvgl_ready = false;
         publishWebUiSnapshot();
         return;
@@ -1269,7 +1299,9 @@ void UiController::poll(uint32_t now) {
 
     if (firmware_update_autoclose_due_ms_ != 0 &&
         static_cast<int32_t>(now - firmware_update_autoclose_due_ms_) >= 0) {
-        webSetFirmwareUpdateScreen(WebUiBridge::FirmwareUpdateScreenMode::Hidden);
+        webSetFirmwareUpdateScreen(
+            {WebUiBridge::FirmwareUpdateScreenMode::Hidden,
+             firmware_update_confirm_id_});
     }
     sync_display_threshold_revision();
     const bool co2_overlay_progress_active =
@@ -1411,7 +1443,7 @@ void UiController::poll(uint32_t now) {
                 } else {
                     const UiAutoRecoveryPolicy::Decision recovery_decision =
                         UiAutoRecoveryPolicy::decide(
-                            boot_ui_auto_recovery_reboot,
+                            boot_any_auto_recovery_boot(),
                             lvgl_diag_auto_recovery_restart_requested_);
                     if (recovery_decision ==
                         UiAutoRecoveryPolicy::Decision::RequestRestart) {
@@ -1423,9 +1455,10 @@ void UiController::poll(uint32_t now) {
                         boot_mark_ui_auto_recovery_reboot();
                         WebHandlersRequestRestart();
                         // Restart may be deferred while OTA owns the restart
-                        // gate. Quiesce the stalled display runtime now so
-                        // touch, callbacks and I2C cannot continue meanwhile.
-                        lvgl_port_prepare_restart();
+                        // gate. Request a cooperative pause now, but leave the
+                        // final force-capable teardown to the main shutdown
+                        // path after the DAC safe write.
+                        (void)lvgl_port_request_quiesce();
                         lvgl_ready = false;
                         publishWebUiSnapshot();
                         return;
@@ -1436,9 +1469,10 @@ void UiController::poll(uint32_t now) {
                         LOGE("UI",
                              "LVGL stall persisted after an automatic UI recovery boot; restart loop suppressed");
                         // No restart will follow on the guarded recovery boot.
-                        // Quiesce the stalled LVGL task, display callbacks and
-                        // touch IRQ before entering permanent headless mode.
-                        lvgl_port_prepare_restart();
+                        // Keep the task handle alive and request only a
+                        // cooperative pause: force-suspending an unknown I2C
+                        // owner could strand the sensor and DAC bus forever.
+                        (void)lvgl_port_request_quiesce();
                         lvgl_ready = false;
                         publishWebUiSnapshot();
                         return;
@@ -1483,8 +1517,7 @@ void UiController::poll(uint32_t now) {
         BootDiagPolicy::shouldAutoAdvance(boot_diag_has_error,
                                           BootDiagPolicy::sen66Pending(sensorManager.isOk(),
                                                                        sensorManager.isBusy(),
-                                                                       sensorManager.retryAtMs(),
-                                                                       now),
+                                                                       sensorManager.isSen66StartupProbePending()),
                                           now - boot_diag_start_ms,
                                           Config::BOOT_DIAG_MS)) {
         pending_screen_id = SCREEN_ID_PAGE_MAIN_PRO;

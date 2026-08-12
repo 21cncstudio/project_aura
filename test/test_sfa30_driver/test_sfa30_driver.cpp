@@ -295,6 +295,62 @@ void test_real_sfa30_start_marks_fault_when_device_marking_is_empty() {
                       static_cast<int>(sfa.status()));
 }
 
+void test_real_sfa30_cooperative_late_start_honors_command_delays() {
+    I2cMock::setDevicePresent(Config::SFA3X_ADDR, true);
+    setValidDeviceMarkingResponse();
+
+    Sfa30 sfa;
+    TEST_ASSERT_TRUE(sfa.begin());
+    sfa.beginLateStart();
+
+    TEST_ASSERT_EQUAL(static_cast<int>(CooperativeStart::Result::InProgress),
+                      static_cast<int>(sfa.pollLateStart(getMillis()))); // Ping.
+    TEST_ASSERT_EQUAL(static_cast<int>(CooperativeStart::Result::InProgress),
+                      static_cast<int>(sfa.pollLateStart(getMillis()))); // Marking command.
+    TEST_ASSERT_EQUAL(static_cast<int>(CooperativeStart::Result::InProgress),
+                      static_cast<int>(sfa.pollLateStart(getMillis()))); // Wait.
+    TEST_ASSERT_FALSE(sfa.isOk());
+
+    setMillis(Config::SFA3X_READ_DELAY_MS);
+    TEST_ASSERT_EQUAL(static_cast<int>(CooperativeStart::Result::InProgress),
+                      static_cast<int>(sfa.pollLateStart(getMillis()))); // Arm read.
+    TEST_ASSERT_EQUAL(static_cast<int>(CooperativeStart::Result::InProgress),
+                      static_cast<int>(sfa.pollLateStart(getMillis()))); // Read marking.
+    TEST_ASSERT_TRUE(sfa.lateStartIdentified());
+    TEST_ASSERT_EQUAL(static_cast<int>(CooperativeStart::Result::InProgress),
+                      static_cast<int>(sfa.pollLateStart(getMillis()))); // Start command.
+
+    setMillis(Config::SFA3X_READ_DELAY_MS + Config::SFA3X_START_DELAY_MS - 1U);
+    TEST_ASSERT_EQUAL(static_cast<int>(CooperativeStart::Result::InProgress),
+                      static_cast<int>(sfa.pollLateStart(getMillis())));
+    setMillis(Config::SFA3X_READ_DELAY_MS + Config::SFA3X_START_DELAY_MS);
+    TEST_ASSERT_EQUAL(static_cast<int>(CooperativeStart::Result::Success),
+                      static_cast<int>(sfa.pollLateStart(getMillis())));
+    TEST_ASSERT_TRUE(sfa.isOk());
+}
+
+void test_real_sfa30_cooperative_warm_stop_failure_preserves_identification() {
+    boot_reset_reason = ESP_RST_SW;
+    I2cMock::setDevicePresent(Config::SFA3X_ADDR, true);
+    setValidDeviceMarkingResponse();
+    I2cMock::setCommandFailure(Config::SFA3X_ADDR,
+                               Config::SFA3X_CMD_STOP,
+                               true);
+
+    Sfa30 sfa;
+    TEST_ASSERT_TRUE(sfa.begin());
+    sfa.beginLateStart();
+    sfa.pollLateStart(getMillis()); // Ping.
+    sfa.pollLateStart(getMillis()); // Marking command.
+    setMillis(Config::SFA3X_READ_DELAY_MS);
+    sfa.pollLateStart(getMillis()); // Arm read.
+    sfa.pollLateStart(getMillis()); // Read marking.
+    TEST_ASSERT_TRUE(sfa.lateStartIdentified());
+    TEST_ASSERT_EQUAL(static_cast<int>(CooperativeStart::Result::Failed),
+                      static_cast<int>(sfa.pollLateStart(getMillis())));
+    TEST_ASSERT_TRUE(sfa.hasFault());
+}
+
 int main(int, char **) {
     UNITY_BEGIN();
     RUN_TEST(test_real_sfa30_start_keeps_absent_when_device_does_not_ack);
@@ -307,5 +363,7 @@ int main(int, char **) {
     RUN_TEST(test_real_sfa30_warm_restart_does_not_report_powerup_warmup);
     RUN_TEST(test_real_sfa30_start_marks_fault_when_device_marking_read_fails);
     RUN_TEST(test_real_sfa30_start_marks_fault_when_device_marking_is_empty);
+    RUN_TEST(test_real_sfa30_cooperative_late_start_honors_command_delays);
+    RUN_TEST(test_real_sfa30_cooperative_warm_stop_failure_preserves_identification);
     return UNITY_END();
 }

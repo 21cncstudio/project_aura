@@ -14,6 +14,7 @@
 #include "modules/DisplayThresholds.h"
 #include "modules/FanStateSnapshot.h"
 #include "drivers/Gp8403.h"
+#include "core/StartupProbePolicy.h"
 
 struct SensorData;
 
@@ -34,6 +35,8 @@ public:
               const SensorData *sensor_data,
               bool gas_warmup,
               const DisplayThresholds::Config &thresholds);
+    bool prepareForRestart();
+    bool prepareForI2cOffline();
 
     void setMode(Mode mode);
     void setManualStep(uint8_t step);
@@ -90,6 +93,7 @@ private:
     void applyRequestAutoStart();
     void applyAutoConfig(const DacAutoConfig &config);
     InitStatus tryInitialize(uint32_t now_ms, const char *&failure_reason);
+    bool prepareSafeShutdown(const char *failure_reason);
     bool applyOutputMillivolts(uint16_t millivolts);
     void handleDacFault(const char *reason);
     void applyStopState(bool output_known);
@@ -120,7 +124,8 @@ private:
     uint32_t last_recover_attempt_ms_ = 0;
     uint32_t last_health_check_ms_ = 0;
     uint8_t health_probe_fail_count_ = 0;
-    bool boot_missing_lockout_ = false;
+    StartupProbePolicy::State startup_probe_{};
+    bool dac_ever_ready_ = false;
     bool auto_resume_blocked_ = false;
     bool boot_auto_resume_pending_ = false;
     uint32_t boot_auto_resume_due_ms_ = 0;

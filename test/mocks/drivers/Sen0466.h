@@ -9,6 +9,7 @@ struct Sen0466TestState {
     bool data_valid = false;
     bool warmup = false;
     bool invalidate_called = false;
+    uint32_t poll_call_count = 0;
     float co_ppm = 0.0f;
     uint32_t last_data_ms = 0;
 };
@@ -31,7 +32,7 @@ public:
         }
         return state().start_ok;
     }
-    void poll() {}
+    void poll() { ++state().poll_call_count; }
     bool isPresent() const { return state().present; }
     bool isDataValid() const { return state().data_valid; }
     bool isWarmupActive() const { return state().warmup; }

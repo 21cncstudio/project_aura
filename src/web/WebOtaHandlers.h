@@ -6,6 +6,7 @@
 
 #pragma once
 
+#include <atomic>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -21,13 +22,15 @@ struct Runtime {
     WebHandlerContext &context;
     WebOtaState &ota_state;
     OtaDeferredRestart::Controller &restart_controller;
+    std::atomic<uint32_t> &upload_confirm_id;
     uint32_t deferred_restart_delay_ms = 0;
     uint32_t (*upload_timeout_ms)(size_t image_size_bytes) = nullptr;
     void (*disable_wifi_power_save_for_upload)() = nullptr;
     void (*restore_wifi_power_save)() = nullptr;
-    void (*arm_preflight_ui)() = nullptr;
-    void (*cancel_preflight_ui)() = nullptr;
-    void (*set_ui_screen)(WebUiBridge::FirmwareUpdateScreenMode mode) = nullptr;
+    void (*arm_preflight_ui)(uint32_t confirm_id) = nullptr;
+    void (*cancel_preflight_ui)(uint32_t confirm_id) = nullptr;
+    void (*set_ui_screen)(WebUiBridge::FirmwareUpdateScreenMode mode,
+                          uint32_t confirm_id) = nullptr;
     void (*set_error)(const String &error) = nullptr;
     bool (*try_begin_upload)() = nullptr;
     void (*end_upload)() = nullptr;

@@ -6,11 +6,15 @@
 
 #pragma once
 #include <Arduino.h>
+#include "core/CooperativeStart.h"
 
 class Dps310 {
 public:
     bool begin();
     bool start();
+    void beginLateStart();
+    CooperativeStart::Result pollLateStart(uint32_t now_ms);
+    bool isLateStartActive() const { return late_start_phase_ != LateStartPhase::Idle; }
     void poll();
     bool takeNewData(float &pressure_hpa, float &temperature_c);
     bool isOk() const { return ok_; }
@@ -19,6 +23,29 @@ public:
     void invalidate();
 
 private:
+    enum class LateStartPhase : uint8_t {
+        Idle = 0,
+        DetectPrimary,
+        DetectAlt,
+        Reset,
+        WaitReset,
+        WaitCoefReady,
+        WaitSensorReady,
+        ReadCalibration,
+        WritePressureConfig,
+        ReadPressureShift,
+        WritePressureShift,
+        WriteTemperatureConfig,
+        ReadTemperatureShift,
+        WriteTemperatureShift,
+        ReadTemperatureSource,
+        ReadTemperatureConfig,
+        WriteTemperatureSource,
+        ReadMode,
+        WriteMode,
+    };
+
+    CooperativeStart::Result finishLateStart(bool success);
     static int32_t twosComplement(int32_t val, uint8_t bits);
     bool detect(uint8_t addr);
     bool writeU8(uint8_t reg, uint8_t value);
@@ -61,4 +88,9 @@ private:
     uint32_t last_recover_ms_ = 0;
     bool pressure_valid_ = false;
     bool has_new_data_ = false;
+    LateStartPhase late_start_phase_ = LateStartPhase::Idle;
+    uint32_t late_start_due_ms_ = 0;
+    uint32_t late_start_deadline_ms_ = 0;
+    uint8_t late_start_reg_value_ = 0;
+    bool late_start_temp_source_ = false;
 };
