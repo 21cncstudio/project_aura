@@ -146,6 +146,8 @@ bool i2c_runtime_ready = false;
 bool lvgl_ready = false;
 bool operational_ready = false;
 bool restart_task_ready = false;
+bool restart_request_pending = false;
+bool restart_ota_deferral_logged = false;
 RuntimeI2cRecoveryPolicy::State runtime_i2c_recovery_policy;
 
 void quiesce_network_for_restart() {
@@ -466,12 +468,19 @@ void setup()
 void loop()
 {
     if (WebHandlersConsumeRestartRequest()) {
+        restart_request_pending = true;
+    }
+    if (restart_request_pending) {
         // Upload admission and restart shutdown use one atomic gate. Whichever
         // side wins first excludes the other without a cross-task check/use gap.
         if (!WebHandlersTryBeginRestartShutdown()) {
-            LOGW("Restart", "restart deferred until OTA upload completes");
-            WebHandlersRequestRestart();
+            if (!restart_ota_deferral_logged) {
+                LOGW("Restart", "restart deferred until OTA upload completes");
+                restart_ota_deferral_logged = true;
+            }
         } else {
+            restart_request_pending = false;
+            restart_ota_deferral_logged = false;
             LOGI("OTA", "restarting now (main loop)");
             // A controlled restart confirms OTA only after display and UI reached
             // the operational state. Headless management access is intentionally
