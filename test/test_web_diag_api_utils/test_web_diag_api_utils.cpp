@@ -72,6 +72,7 @@ void test_web_diag_api_utils_fill_json_populates_network_errors_and_stream() {
     payload.boot.cold_power_start = true;
     payload.boot.cold_power_wait_ms = 7000;
     payload.boot.expander_probe_status = "ready";
+    payload.boot.expander_probe_result_valid = true;
     payload.boot.expander_probe_attempts = 4;
     payload.boot.expander_probe_wait_ms = 750;
     payload.boot.expander_probe_error = 0;
@@ -130,9 +131,44 @@ void test_web_diag_api_utils_fill_json_populates_network_errors_and_stream() {
     TEST_ASSERT_EQUAL_FLOAT(0.9f, doc["web_stream"]["last_sent_ratio"].as<float>());
 }
 
+void test_web_diag_api_utils_marks_unrun_expander_probe_details_null() {
+    WebDiagApiUtils::Payload payload{};
+    payload.boot.expander_probe_status = "not_run";
+    payload.boot.expander_probe_result_valid = false;
+
+    ArduinoJson::JsonDocument doc;
+    WebDiagApiUtils::fillJson(doc.to<ArduinoJson::JsonObject>(), payload, nullptr, 0, 0);
+
+    const ArduinoJson::JsonObjectConst boot = doc["boot"].as<ArduinoJson::JsonObjectConst>();
+    TEST_ASSERT_EQUAL_STRING("not_run", boot["expander_probe_status"].as<const char *>());
+    String json;
+    ArduinoJson::serializeJson(doc, json);
+    const char *detail_fields[] = {
+        "expander_probe_attempts",
+        "expander_probe_wait_ms",
+        "expander_probe_error",
+        "expander_probe_phase",
+        "expander_probe_failed_address",
+        "expander_probe_failed_value",
+        "expander_probe_bus_recoveries",
+        "expander_probe_failure_lines_valid",
+        "expander_probe_failure_sda_high",
+        "expander_probe_failure_scl_high",
+        "expander_probe_recovery_sda_high",
+        "expander_probe_recovery_scl_high",
+        "expander_probe_recovery_pulses",
+    };
+    for (const char *field : detail_fields) {
+        const String serialized_null = String("\"") + field + "\":null";
+        TEST_ASSERT_NOT_NULL_MESSAGE(strstr(json.c_str(), serialized_null.c_str()), field);
+        TEST_ASSERT_TRUE_MESSAGE(boot[field].isNull(), field);
+    }
+}
+
 int main(int, char **) {
     UNITY_BEGIN();
     RUN_TEST(test_web_diag_api_utils_access_allowed_accepts_ap_or_sta_connectivity);
     RUN_TEST(test_web_diag_api_utils_fill_json_populates_network_errors_and_stream);
+    RUN_TEST(test_web_diag_api_utils_marks_unrun_expander_probe_details_null);
     return UNITY_END();
 }

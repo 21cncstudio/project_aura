@@ -99,6 +99,8 @@ void handleDiagData(WebHandlerContext &context,
     payload.boot.cold_power_start = boot.cold_power_start;
     payload.boot.cold_power_wait_ms = boot.cold_power_wait_ms;
     payload.boot.expander_probe_status = Ch422gReadyProbe::statusText(boot.expander_probe_status);
+    payload.boot.expander_probe_result_valid =
+        boot.expander_probe_status != Ch422gReadyProbe::Status::NotRun;
     payload.boot.expander_probe_attempts = boot.expander_probe_attempts;
     payload.boot.expander_probe_wait_ms = boot.expander_probe_wait_ms;
     payload.boot.expander_probe_error = boot.expander_probe_error;

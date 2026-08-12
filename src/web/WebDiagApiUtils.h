@@ -28,6 +28,7 @@ struct BootPayload {
     bool cold_power_start = false;
     uint32_t cold_power_wait_ms = 0;
     const char *expander_probe_status = "not_run";
+    bool expander_probe_result_valid = false;
     uint16_t expander_probe_attempts = 0;
     uint32_t expander_probe_wait_ms = 0;
     int32_t expander_probe_error = 0;

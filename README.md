@@ -392,6 +392,8 @@ MQTT stays idle until configured and enabled.
 Quick diagnostics for support:
 - `GET /api/state` should return live JSON with `network.mode`, `network.ip`, and sensor payload.
 - `GET /api/diag` (available in AP setup mode) shows Wi-Fi state, IP/hostname, heap, OTA busy state, and recent warnings/errors.
+  When `boot.expander_probe_status` is `not_run`, its detailed probe fields are present as `null`
+  because no CH422G probe result exists for that boot.
 
 ## An Honest Note About Cost
 The electronic component cost is not money received by the project. It is the approximate market
