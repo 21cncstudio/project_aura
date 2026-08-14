@@ -59,6 +59,9 @@ private:
     void storeSchedulePrefs();
     void refreshSchedule();
     void refreshScheduleWithGateHeld(bool trace_clock_transition = false);
+    void requestGuardedWake(BacklightWakeBreadcrumbs::Event event, uint32_t now_ms);
+    bool processGuardedWake(uint32_t now_ms);
+    void cancelGuardedWake();
     void consumeInput();
 
     esp_panel::drivers::Backlight *panel_backlight_ = nullptr;
@@ -73,6 +76,9 @@ private:
     bool schedule_active_ = false;
     BacklightWakeBreadcrumbs::Event pending_wake_event_ =
         BacklightWakeBreadcrumbs::Event::None;
+    BacklightWakeBreadcrumbs::Event guarded_wake_event_ =
+        BacklightWakeBreadcrumbs::Event::None;
+    bool guarded_wake_pending_ = false;
     int sleep_hour_ = 23;
     int sleep_minute_ = 0;
     int wake_hour_ = 6;

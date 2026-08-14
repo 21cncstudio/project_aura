@@ -13,6 +13,7 @@
 #include "core/NetworkCommandQueue.h"
 #include "core/ConnectivityRuntime.h"
 #include "core/MqttRuntimeState.h"
+#include "core/WakePowerGuard.h"
 #include "core/Watchdog.h"
 #include "modules/MqttManager.h"
 #include "modules/NetworkManager.h"
@@ -36,16 +37,21 @@ void network_plane_task(void *arg) {
     LOGI("Main", "Network task running on core: %d", xPortGetCoreID());
     for (;;) {
         Watchdog::kick();
-        ctx->networkCommandQueue.processAll(ctx->networkManager,
-                                            ctx->mqttManager,
-                                            ctx->connectivityRuntime);
-        Watchdog::kick();
-        ctx->networkManager.poll();
-        Watchdog::kick();
-        ctx->connectivityRuntime.update(ctx->networkManager, ctx->mqttManager);
-        ctx->mqttManager.poll(ctx->mqttRuntimeState);
-        Watchdog::kick();
-        ctx->connectivityRuntime.update(ctx->networkManager, ctx->mqttManager);
+        const uint32_t now_ms = millis();
+        WakePowerGuard::Activity activity =
+            WakePowerGuard::tryAcquireActivity(now_ms);
+        if (activity) {
+            ctx->networkCommandQueue.processAll(ctx->networkManager,
+                                                ctx->mqttManager,
+                                                ctx->connectivityRuntime);
+            Watchdog::kick();
+            ctx->networkManager.poll();
+            Watchdog::kick();
+            ctx->connectivityRuntime.update(ctx->networkManager, ctx->mqttManager);
+            ctx->mqttManager.poll(ctx->mqttRuntimeState);
+            Watchdog::kick();
+            ctx->connectivityRuntime.update(ctx->networkManager, ctx->mqttManager);
+        }
         const TickType_t delay_ticks = WebHandlersIsOtaBusy()
                                            ? 1
                                            : pdMS_TO_TICKS(kNetworkTaskDelayNormalMs);

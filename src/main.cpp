@@ -29,6 +29,7 @@
 #include "core/SafeRestart.h"
 #include "core/SharedI2cShutdownPolicy.h"
 #include "core/WebRuntimeState.h"
+#include "core/WakePowerGuard.h"
 #include "core/Watchdog.h"
 
 #include "modules/StorageManager.h"
@@ -664,22 +665,29 @@ void loop()
         return;
     }
 
-    poll_runtime_i2c_recovery(millis());
+    const uint32_t background_now = millis();
+    const bool wake_background_paused =
+        WakePowerGuard::backgroundPaused(background_now);
+    if (!wake_background_paused) {
+        poll_runtime_i2c_recovery(background_now);
+    }
 
     SensorManager::PollResult sensor_poll{};
-    if (i2c_runtime_ready) {
+    if (!wake_background_paused && i2c_runtime_ready) {
         sensor_poll = sensorManager.poll(currentData, storage, pressureHistory, co2_asc_enabled);
         uiController.onSensorPoll(sensor_poll);
         chartsHistory.update(currentData, storage, sensorManager.isWarmupActive());
     }
     chartsRuntimeState.update(chartsHistory);
     webRuntimeState.update(currentData, sensorManager.isWarmupActive(), fanControl);
-    if (!network_plane_running) {
+    if (!wake_background_paused && !network_plane_running) {
         networkCommandQueue.processAll(networkManager, mqttManager, connectivityRuntime);
         networkManager.poll();
         connectivityRuntime.update(networkManager, mqttManager);
     }
-    AppInit::pollDeferredRuntime();
+    if (!wake_background_paused) {
+        AppInit::pollDeferredRuntime();
+    }
     const uint32_t now = millis();
     if (BootPolicy::markStable(now,
                                boot_start_ms,
@@ -694,14 +702,18 @@ void loop()
             LOGW("OTA", "rollback validation withheld: stable timer reached without healthy display runtime");
         }
     }
-    TimeManager::PollResult time_poll = timeManager.poll(now, i2c_runtime_ready);
-    mqttManager.setSystemTimeValid(timeManager.isSystemTimeValid());
-    uiController.onTimePoll(time_poll);
+    if (!wake_background_paused) {
+        TimeManager::PollResult time_poll = timeManager.poll(now, i2c_runtime_ready);
+        mqttManager.setSystemTimeValid(timeManager.isSystemTimeValid());
+        uiController.onTimePoll(time_poll);
+    }
     if (sensor_poll.data_changed) {
         dailyExtremaHistory.update(currentData, now);
     }
-    dailyExtremaHistory.poll(now);
-    if (i2c_runtime_ready) {
+    if (!wake_background_paused) {
+        dailyExtremaHistory.poll(now);
+    }
+    if (!wake_background_paused && i2c_runtime_ready) {
         fanControl.poll(now, &currentData, sensorManager.isWarmupActive(), displayThresholds.snapshot());
     }
     const FanControl::Snapshot fan_snapshot = fanControl.snapshot();
@@ -713,11 +725,13 @@ void loop()
                             alert_blink_enabled,
                             backlightManager.isOn(),
                             nightModeManager.isAutoEnabled());
-    if (!network_plane_running) {
+    if (!wake_background_paused && !network_plane_running) {
         mqttManager.poll(mqttRuntimeState);
         connectivityRuntime.update(networkManager, mqttManager);
     }
-    storage.poll(now);
+    if (!wake_background_paused) {
+        storage.poll(now);
+    }
     memoryMonitor.poll(now);
     uiController.poll(now);
     Watchdog::kick();

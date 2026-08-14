@@ -31,6 +31,7 @@
 #include "core/BacklightWakeBreadcrumbs.h"
 #include "core/Logger.h"
 #include "core/SafeRestart.h"
+#include "core/WakePowerGuard.h"
 #include "web/WebRuntime.h"
 #include "core/SystemLogFilter.h"
 #include "modules/StorageManager.h"
@@ -1548,16 +1549,23 @@ void UiController::poll(uint32_t now) {
         return;
     }
     lvgl_lock_fail_streak = 0;
-    mqtt_apply_pending();
-    if ((now - last_ui_tick_ms) >= UI_TICK_MS) {
-        ui_tick();
-        last_ui_tick_ms = now;
+    if (!WakePowerGuard::uiPaused(now)) {
+        mqtt_apply_pending();
+        if ((now - last_ui_tick_ms) >= UI_TICK_MS) {
+            ui_tick();
+            last_ui_tick_ms = now;
+        }
     }
     backlightManager.poll(lvgl_ready);
     BacklightWakeBreadcrumbs::markUiPostBacklightContext(
         static_cast<uint32_t>(reinterpret_cast<uintptr_t>(g_expected_network_manager)),
         static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&networkManager)),
         static_cast<uint32_t>(reinterpret_cast<uintptr_t>(xTaskGetCurrentTaskHandle())));
+    if (WakePowerGuard::uiPaused(millis())) {
+        lvgl_port_unlock();
+        publishWebUiSnapshot();
+        return;
+    }
     update_status_icons();
     UiScreenFlow::processPendingScreen(*this, now);
     UiScreenFlow::processBootRelease(*this, now);
