@@ -127,29 +127,54 @@ bool BacklightManager::setOnWithGateHeld(bool on) {
     }
     if (on == backlight_on_) {
         const bool cancelled_retry = pending_command_.active();
+        if (!lvgl_port_set_wake_touch_probe(!on)) {
+            ++command_failure_count_;
+            pending_command_.recordFailure(on, millis());
+            LOGE("Backlight", "failed to synchronize touch IRQ for unchanged %s state",
+                 on ? "on" : "off");
+            return false;
+        }
         pending_command_.clear();
         if (on && cancelled_retry) {
             lv_disp_trig_activity(nullptr);
             last_inactive_ms_ = 0;
         }
-        lvgl_port_set_wake_touch_probe(!on);
         return true;
+    }
+
+    const bool previous_on = backlight_on_;
+    const BacklightStatePolicy::WakeProbePlan wake_probe_plan =
+        BacklightStatePolicy::planWakeProbe(previous_on, on);
+    if (wake_probe_plan.mask_before_driver &&
+        !lvgl_port_set_wake_touch_probe(false)) {
+        ++command_failure_count_;
+        pending_command_.recordFailure(on, millis());
+        const uint32_t retry_delay_ms = BacklightStatePolicy::retryDelayMs(
+            pending_command_.consecutiveFailures());
+        LOGE("Backlight",
+             "touch IRQ could not be safely masked before backlight %s; driver skipped, retry in %lu ms",
+             on ? "on" : "off",
+             static_cast<unsigned long>(retry_delay_ms));
+        return false;
     }
 
     const bool driver_succeeded = on ? panel_backlight_->on() : panel_backlight_->off();
     const BacklightStatePolicy::Transition transition =
-        BacklightStatePolicy::resolve(backlight_on_, on, driver_succeeded);
+        BacklightStatePolicy::resolve(previous_on, on, driver_succeeded);
     backlight_on_ = transition.actual_on;
-    lvgl_port_set_wake_touch_probe(transition.wake_probe_enabled);
+    const bool wake_probe_updated =
+        lvgl_port_set_wake_touch_probe(transition.wake_probe_enabled);
 
-    if (!transition.command_succeeded) {
+    if (!transition.command_succeeded || !wake_probe_updated) {
         ++command_failure_count_;
         pending_command_.recordFailure(on, millis());
         const uint32_t retry_delay_ms =
             BacklightStatePolicy::retryDelayMs(pending_command_.consecutiveFailures());
         LOGE("Backlight",
-             "failed to turn backlight %s (failures=%lu); keeping state %s, retry in %lu ms",
+             "failed to complete backlight %s transition (driver=%s touch_irq=%s failures=%lu); keeping state %s, retry in %lu ms",
              on ? "on" : "off",
+             transition.command_succeeded ? "ok" : "failed",
+             wake_probe_updated ? "ok" : "failed",
              static_cast<unsigned long>(command_failure_count_),
              backlight_on_ ? "on" : "off",
              static_cast<unsigned long>(retry_delay_ms));

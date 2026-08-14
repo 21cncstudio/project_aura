@@ -4,6 +4,7 @@
 
 using TouchWakePolicy::Sample;
 using TouchWakePolicy::ErrorStreak;
+using TouchWakePolicy::InterruptLatch;
 using TouchWakePolicy::RecoveryStateMachine;
 using TouchWakePolicy::StateMachine;
 
@@ -19,12 +20,50 @@ void test_boot_quiet_window_uses_reliable_cold_start_classification() {
         TouchWakePolicy::bootQuietWindowMs(false));
 }
 
+void test_interrupt_active_level_matches_touch_configuration() {
+    TEST_ASSERT_TRUE(TouchWakePolicy::interruptLineActive(false, 0));
+    TEST_ASSERT_FALSE(TouchWakePolicy::interruptLineActive(false, 1));
+    TEST_ASSERT_TRUE(TouchWakePolicy::interruptLineActive(true, 1));
+    TEST_ASSERT_FALSE(TouchWakePolicy::interruptLineActive(true, 0));
+}
+
 void test_disabled_policy_never_probes_or_wakes() {
     StateMachine policy;
 
     TEST_ASSERT_FALSE(policy.shouldProbe(false, true, 100));
     policy.recordProbe(Sample::Pressed, 100);
     TEST_ASSERT_FALSE(policy.takePendingWake());
+}
+
+void test_interrupt_latch_coalesces_repeated_signals() {
+    InterruptLatch latch;
+
+    latch.signal();
+    latch.signal();
+
+    TEST_ASSERT_TRUE(latch.take());
+    TEST_ASSERT_FALSE(latch.take());
+}
+
+void test_interrupt_latch_clear_discards_stale_signal() {
+    InterruptLatch latch;
+
+    latch.signal();
+    latch.clear();
+
+    TEST_ASSERT_FALSE(latch.take());
+}
+
+void test_enabling_order_preserves_signal_after_stale_clear() {
+    InterruptLatch latch;
+    StateMachine policy;
+
+    latch.signal();
+    latch.clear();
+    policy.setEnabled(true, true, 100);
+    latch.signal();
+
+    TEST_ASSERT_TRUE(policy.shouldProbe(true, latch.take(), 101));
 }
 
 void test_fresh_interrupt_and_valid_point_wake_immediately() {
@@ -196,7 +235,11 @@ void test_sparse_wake_errors_form_a_recovery_streak() {
 int main(int, char **) {
     UNITY_BEGIN();
     RUN_TEST(test_boot_quiet_window_uses_reliable_cold_start_classification);
+    RUN_TEST(test_interrupt_active_level_matches_touch_configuration);
     RUN_TEST(test_disabled_policy_never_probes_or_wakes);
+    RUN_TEST(test_interrupt_latch_coalesces_repeated_signals);
+    RUN_TEST(test_interrupt_latch_clear_discards_stale_signal);
+    RUN_TEST(test_enabling_order_preserves_signal_after_stale_clear);
     RUN_TEST(test_fresh_interrupt_and_valid_point_wake_immediately);
     RUN_TEST(test_touch_held_while_sleep_starts_requires_release_before_wake);
     RUN_TEST(test_interrupt_gate_uses_sparse_fallback_probe);

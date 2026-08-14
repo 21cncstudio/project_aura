@@ -38,6 +38,26 @@ void test_successful_off_transition_enables_wake_probe() {
     TEST_ASSERT_TRUE(result.wake_probe_enabled);
 }
 
+void test_wake_probe_plan_masks_every_real_driver_transition() {
+    const auto off_to_on = BacklightStatePolicy::planWakeProbe(false, true);
+    TEST_ASSERT_TRUE(off_to_on.driver_call_required);
+    TEST_ASSERT_TRUE(off_to_on.mask_before_driver);
+
+    const auto on_to_off = BacklightStatePolicy::planWakeProbe(true, false);
+    TEST_ASSERT_TRUE(on_to_off.driver_call_required);
+    TEST_ASSERT_TRUE(on_to_off.mask_before_driver);
+}
+
+void test_wake_probe_plan_leaves_noop_for_state_synchronization() {
+    const auto stays_off = BacklightStatePolicy::planWakeProbe(false, false);
+    TEST_ASSERT_FALSE(stays_off.driver_call_required);
+    TEST_ASSERT_FALSE(stays_off.mask_before_driver);
+
+    const auto stays_on = BacklightStatePolicy::planWakeProbe(true, true);
+    TEST_ASSERT_FALSE(stays_on.driver_call_required);
+    TEST_ASSERT_FALSE(stays_on.mask_before_driver);
+}
+
 void test_retry_delay_uses_bounded_exponential_backoff() {
     TEST_ASSERT_EQUAL_UINT32(0, BacklightStatePolicy::retryDelayMs(0));
     TEST_ASSERT_EQUAL_UINT32(500, BacklightStatePolicy::retryDelayMs(1));
@@ -188,6 +208,8 @@ int main(int, char **) {
     RUN_TEST(test_failed_on_transition_keeps_off_state_and_wake_probe);
     RUN_TEST(test_failed_off_transition_keeps_on_state_without_wake_probe);
     RUN_TEST(test_successful_off_transition_enables_wake_probe);
+    RUN_TEST(test_wake_probe_plan_masks_every_real_driver_transition);
+    RUN_TEST(test_wake_probe_plan_leaves_noop_for_state_synchronization);
     RUN_TEST(test_retry_delay_uses_bounded_exponential_backoff);
     RUN_TEST(test_retry_gate_handles_deadline_and_millisecond_wraparound);
     RUN_TEST(test_input_block_deadline_handles_millisecond_wraparound);

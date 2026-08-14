@@ -259,7 +259,7 @@ bool lvgl_port_get_screen_flip_180(void);
  *
  * @param duration_ms Blocking window duration in milliseconds
  *
- * @return true if parameter accepted
+ * @return true if the touch-read blocking window was updated.
  */
 bool lvgl_port_block_touch_read(uint32_t duration_ms);
 
@@ -286,10 +286,13 @@ bool lvgl_port_finalize_touch_i2c_disable(uint32_t timeout_ms);
  * In probe mode touch reads do not generate LVGL pressed events.
  * When the controller exposes an interrupt line, touch is sampled only after
  * a new interrupt, with a sparse polling fallback if interrupts are lost.
+ * The physical interrupt is armed only in probe mode and remains masked while
+ * the screen is on; normal screen-on touch input uses the regular LVGL poll.
  *
  * @param enabled True to enable wake-touch probe mode.
  *
- * @return true if parameter accepted
+ * @return true if the requested physical state was confirmed, or direct IRQ
+ *         control was safely retired in favor of polling fallback.
  */
 bool lvgl_port_set_wake_touch_probe(bool enabled);
 

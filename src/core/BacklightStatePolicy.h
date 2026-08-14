@@ -17,12 +17,25 @@ struct Transition {
     bool command_succeeded;
 };
 
+struct WakeProbePlan {
+    bool driver_call_required;
+    bool mask_before_driver;
+};
+
 static constexpr uint32_t RETRY_BASE_MS = 500;
 static constexpr uint32_t RETRY_MAX_MS = 8000;
 
 inline Transition resolve(bool current_on, bool requested_on, bool driver_succeeded) {
     const bool actual_on = driver_succeeded ? requested_on : current_on;
     return {actual_on, !actual_on, driver_succeeded};
+}
+
+// Every real backlight transition crosses the shared CH422G bus. Keep the
+// touch interrupt physically masked across that call even when the logical
+// wake policy already says that it should be disabled.
+inline WakeProbePlan planWakeProbe(bool current_on, bool requested_on) {
+    const bool driver_call_required = current_on != requested_on;
+    return {driver_call_required, driver_call_required};
 }
 
 inline uint32_t retryDelayMs(uint8_t consecutive_failures) {

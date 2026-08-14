@@ -38,11 +38,19 @@ static void *lvgl_buf[LVGL_PORT_BUFFER_NUM_MAX] = {};
 static std::atomic<uint32_t> lvgl_touch_read_block_until_ms{0};
 static std::atomic<bool> lvgl_touch_wait_release_after_block{false};
 static SharedI2cRuntimeGate::Gate lvgl_touch_i2c_runtime_gate;
+// Runtime callers are serialized by the recursive LVGL mutex. Initialization
+// runs before the LVGL task starts, and shutdown mutates this state only after
+// the touch-I2C gate has drained. The GPIO ISR never accesses this object, so a
+// separate portMUX would add an interrupt-disabled spin path without protecting
+// any real concurrent access.
 static TouchWakePolicy::StateMachine lvgl_touch_wake_policy;
-static portMUX_TYPE lvgl_touch_wake_policy_mux = portMUX_INITIALIZER_UNLOCKED;
-static SemaphoreHandle_t lvgl_touch_interrupt_sem = nullptr;
-static StaticSemaphore_t lvgl_touch_interrupt_sem_buffer;
+static DRAM_ATTR TouchWakePolicy::InterruptLatch lvgl_touch_interrupt_latch;
+// `gated` means that the bounded direct ISR is registered. `armed` means that
+// its GPIO source is physically enabled. The source stays masked while the
+// screen is lit; normal screen-on touch input is polled by LVGL.
 static bool lvgl_touch_interrupt_gated = false;
+static bool lvgl_touch_interrupt_armed = false;
+static esp_lcd_touch_handle_t lvgl_touch_registered_interrupt_handle = nullptr;
 static uint32_t lvgl_touch_last_sample_ms = 0;
 static lv_indev_state_t lvgl_touch_cached_state = LV_INDEV_STATE_RELEASED;
 static std::atomic<bool> lvgl_touch_pressed{false};
@@ -88,61 +96,43 @@ static inline void lvgl_touch_set_cached_state(lv_indev_state_t state)
 
 static bool lvgl_touch_wake_policy_enabled()
 {
-    portENTER_CRITICAL(&lvgl_touch_wake_policy_mux);
-    const bool enabled = lvgl_touch_wake_policy.isEnabled();
-    portEXIT_CRITICAL(&lvgl_touch_wake_policy_mux);
-    return enabled;
+    return lvgl_touch_wake_policy.isEnabled();
 }
 
 static bool lvgl_touch_wake_policy_has_pending()
 {
-    portENTER_CRITICAL(&lvgl_touch_wake_policy_mux);
-    const bool pending = lvgl_touch_wake_policy.hasPendingWake();
-    portEXIT_CRITICAL(&lvgl_touch_wake_policy_mux);
-    return pending;
+    return lvgl_touch_wake_policy.hasPendingWake();
 }
 
 static bool lvgl_touch_wake_policy_should_probe(bool interrupt_gated,
                                                 bool interrupt_pending,
                                                 uint32_t now_ms)
 {
-    portENTER_CRITICAL(&lvgl_touch_wake_policy_mux);
-    const bool should_probe = lvgl_touch_wake_policy.shouldProbe(
+    return lvgl_touch_wake_policy.shouldProbe(
         interrupt_gated, interrupt_pending, now_ms);
-    portEXIT_CRITICAL(&lvgl_touch_wake_policy_mux);
-    return should_probe;
 }
 
 static void lvgl_touch_wake_policy_record(TouchWakePolicy::Sample sample,
                                           uint32_t now_ms)
 {
-    portENTER_CRITICAL(&lvgl_touch_wake_policy_mux);
     lvgl_touch_wake_policy.recordProbe(sample, now_ms);
-    portEXIT_CRITICAL(&lvgl_touch_wake_policy_mux);
 }
 
 static void lvgl_touch_wake_policy_set(bool enabled,
                                        bool touch_released,
                                        uint32_t now_ms)
 {
-    portENTER_CRITICAL(&lvgl_touch_wake_policy_mux);
     lvgl_touch_wake_policy.setEnabled(enabled, touch_released, now_ms);
-    portEXIT_CRITICAL(&lvgl_touch_wake_policy_mux);
 }
 
 static void lvgl_touch_wake_policy_reset()
 {
-    portENTER_CRITICAL(&lvgl_touch_wake_policy_mux);
     lvgl_touch_wake_policy = TouchWakePolicy::StateMachine{};
-    portEXIT_CRITICAL(&lvgl_touch_wake_policy_mux);
 }
 
 static bool lvgl_touch_wake_policy_take_pending()
 {
-    portENTER_CRITICAL(&lvgl_touch_wake_policy_mux);
-    const bool pending = lvgl_touch_wake_policy.takePendingWake();
-    portEXIT_CRITICAL(&lvgl_touch_wake_policy_mux);
-    return pending;
+    return lvgl_touch_wake_policy.takePendingWake();
 }
 
 static inline void lvgl_diag_mark_timer_handler()
@@ -277,29 +267,197 @@ static inline bool is_before_deadline(uint32_t now_ms, uint32_t deadline_ms)
     return static_cast<int32_t>(deadline_ms - now_ms) > 0;
 }
 
-static bool IRAM_ATTR lvgl_touch_interrupt_callback(void *user_data)
+static void IRAM_ATTR lvgl_touch_interrupt_callback(esp_lcd_touch_handle_t touch_panel)
 {
-    (void)user_data;
-    BaseType_t higher_priority_task_woken = pdFALSE;
-    SemaphoreHandle_t sem = lvgl_touch_interrupt_sem;
-    if (sem != nullptr) {
-        xSemaphoreGiveFromISR(sem, &higher_priority_task_woken);
-    }
-    return higher_priority_task_woken == pdTRUE;
+    (void)touch_panel;
+    lvgl_touch_interrupt_latch.signal();
 }
 
 static inline bool lvgl_touch_take_interrupt()
 {
-    return lvgl_touch_interrupt_gated &&
-           (lvgl_touch_interrupt_sem != nullptr &&
-            xSemaphoreTake(lvgl_touch_interrupt_sem, 0) == pdTRUE);
+    return lvgl_touch_interrupt_gated && lvgl_touch_interrupt_armed &&
+           lvgl_touch_interrupt_latch.take();
 }
 
 static inline void lvgl_touch_clear_interrupt()
 {
-    if (lvgl_touch_interrupt_sem != nullptr) {
-        xSemaphoreTake(lvgl_touch_interrupt_sem, 0);
+    lvgl_touch_interrupt_latch.clear();
+}
+
+enum class LvglTouchInterruptAttachResult : uint8_t {
+    Registered,
+    PollingFallback,
+    UnsafeFailure,
+};
+
+static bool lvgl_touch_force_interrupt_off(esp_lcd_touch_handle_t panel,
+                                           const char *operation)
+{
+    if (panel == nullptr || panel->config.int_gpio_num == GPIO_NUM_NC) {
+        ESP_LOGW("LVGL", "%s touch IRQ cleanup has no valid panel/GPIO",
+                 operation);
+        return false;
     }
+
+    const gpio_num_t interrupt_gpio = panel->config.int_gpio_num;
+    const esp_err_t initial_disable = gpio_intr_disable(interrupt_gpio);
+
+    // esp_lcd_touch mutates panel->config.interrupt_callback before its GPIO
+    // operations. Always follow a failed call with explicit best-effort remove
+    // and disable operations so polling fallback never leaves an old handler
+    // runnable merely because the configuration pointer was already cleared.
+    const esp_err_t unregister_result =
+        esp_lcd_touch_register_interrupt_callback(panel, nullptr);
+    if (initial_disable == ESP_OK && unregister_result == ESP_OK) {
+        return true;
+    }
+
+    const esp_err_t remove_result = gpio_isr_handler_remove(interrupt_gpio);
+    const esp_err_t final_disable = gpio_intr_disable(interrupt_gpio);
+    const bool handler_absent =
+        remove_result == ESP_OK || remove_result == ESP_ERR_INVALID_STATE;
+    const bool safely_off = handler_absent && final_disable == ESP_OK;
+    ESP_LOGW(
+        "LVGL",
+        "%s touch IRQ cleanup: disable=%s unregister=%s remove=%s final_disable=%s safe=%s",
+        operation,
+        esp_err_to_name(initial_disable),
+        esp_err_to_name(unregister_result),
+        esp_err_to_name(remove_result),
+        esp_err_to_name(final_disable),
+        safely_off ? "yes" : "no");
+    return safely_off;
+}
+
+static bool lvgl_touch_unregister_direct_interrupt()
+{
+    esp_lcd_touch_handle_t panel = lvgl_touch_registered_interrupt_handle;
+    if (panel == nullptr) {
+        lvgl_touch_interrupt_gated = false;
+        lvgl_touch_interrupt_armed = false;
+        return true;
+    }
+
+    if (!lvgl_touch_force_interrupt_off(panel, "unregister direct")) {
+        return false;
+    }
+
+    lvgl_touch_registered_interrupt_handle = nullptr;
+    lvgl_touch_interrupt_gated = false;
+    lvgl_touch_interrupt_armed = false;
+    return true;
+}
+
+static bool lvgl_touch_mask_direct_interrupt()
+{
+    esp_lcd_touch_handle_t panel = lvgl_touch_registered_interrupt_handle;
+    if (!lvgl_touch_interrupt_gated || panel == nullptr) {
+        lvgl_touch_interrupt_armed = false;
+        lvgl_touch_clear_interrupt();
+        return true;
+    }
+
+    const gpio_num_t interrupt_gpio = panel->config.int_gpio_num;
+    const esp_err_t result = gpio_intr_disable(interrupt_gpio);
+    if (result == ESP_OK) {
+        // gpio_intr_disable() also clears the peripheral pending bit. Clear the
+        // software latch only after the physical source has stopped racing it.
+        lvgl_touch_interrupt_armed = false;
+        lvgl_touch_clear_interrupt();
+        return true;
+    }
+
+    ESP_LOGW("LVGL", "failed to mask touch IRQ: %s; retiring direct ISR",
+             esp_err_to_name(result));
+    lvgl_touch_interrupt_armed = false;
+    const bool safely_retired = lvgl_touch_unregister_direct_interrupt();
+    lvgl_touch_clear_interrupt();
+    return safely_retired;
+}
+
+static bool lvgl_touch_arm_direct_interrupt()
+{
+    esp_lcd_touch_handle_t panel = lvgl_touch_registered_interrupt_handle;
+    if (!lvgl_touch_interrupt_gated || panel == nullptr) {
+        lvgl_touch_interrupt_armed = false;
+        return true;
+    }
+
+    const gpio_num_t interrupt_gpio = panel->config.int_gpio_num;
+    const esp_err_t result = gpio_intr_enable(interrupt_gpio);
+    if (result != ESP_OK) {
+        ESP_LOGW("LVGL", "failed to arm touch IRQ: %s; using polling fallback",
+                 esp_err_to_name(result));
+        lvgl_touch_interrupt_armed = false;
+        const bool safely_retired = lvgl_touch_unregister_direct_interrupt();
+        lvgl_touch_clear_interrupt();
+        return safely_retired;
+    }
+
+    lvgl_touch_interrupt_armed = true;
+    // gpio_intr_enable() clears stale peripheral status. Sampling immediately
+    // afterwards closes the lost-edge window for a touch already holding the
+    // GT911 line active. Any concurrent ISR signal coalesces into this latch.
+    if (TouchWakePolicy::interruptLineActive(
+            panel->config.levels.interrupt,
+            gpio_get_level(interrupt_gpio))) {
+        lvgl_touch_interrupt_latch.signal();
+    }
+    return true;
+}
+
+static LvglTouchInterruptAttachResult
+lvgl_touch_register_direct_interrupt(Touch *tp)
+{
+    if (tp == nullptr || tp->getPanelHandle() == nullptr) {
+        return LvglTouchInterruptAttachResult::UnsafeFailure;
+    }
+    if (!lvgl_touch_unregister_direct_interrupt()) {
+        ESP_LOGW("LVGL", "stale touch IRQ registration could not be removed");
+        return LvglTouchInterruptAttachResult::UnsafeFailure;
+    }
+
+    esp_lcd_touch_handle_t panel = tp->getPanelHandle();
+    // Track the physical handle before touching registration state. If any
+    // cleanup fails, a later teardown/init retains the exact handle to retry.
+    lvgl_touch_registered_interrupt_handle = panel;
+
+    // The vendor Touch wrapper always gives its own FreeRTOS semaphore from
+    // the physical ISR. Disable the line first, then remove that handler.
+    if (!lvgl_touch_force_interrupt_off(panel, "replace vendor")) {
+        return LvglTouchInterruptAttachResult::UnsafeFailure;
+    }
+    lvgl_touch_registered_interrupt_handle = nullptr;
+
+    lvgl_touch_clear_interrupt();
+    // Track before registration because the low-level API enables the GPIO
+    // before adding its handler and mutates callback state before either step.
+    lvgl_touch_registered_interrupt_handle = panel;
+    const esp_err_t result = esp_lcd_touch_register_interrupt_callback(
+        panel, lvgl_touch_interrupt_callback);
+    if (result != ESP_OK) {
+        ESP_LOGW("LVGL", "failed to register direct touch IRQ callback: %s",
+                 esp_err_to_name(result));
+        if (!lvgl_touch_unregister_direct_interrupt()) {
+            return LvglTouchInterruptAttachResult::UnsafeFailure;
+        }
+        return LvglTouchInterruptAttachResult::PollingFallback;
+    }
+
+    // The library registration call enables the GPIO. Mask it immediately and
+    // keep only the bounded latch ISR installed until dark-wake mode is armed.
+    lvgl_touch_interrupt_gated = true;
+    lvgl_touch_interrupt_armed = true;
+    if (!lvgl_touch_mask_direct_interrupt()) {
+        ESP_LOGE("LVGL", "direct touch IRQ could not be safely masked");
+        return LvglTouchInterruptAttachResult::UnsafeFailure;
+    }
+    if (!lvgl_touch_interrupt_gated) {
+        ESP_LOGW("LVGL", "direct touch IRQ retired during initial mask; using polling fallback");
+        return LvglTouchInterruptAttachResult::PollingFallback;
+    }
+    ESP_LOGI("LVGL", "vendor touch ISR replaced with masked direct IRQ latch");
+    return LvglTouchInterruptAttachResult::Registered;
 }
 
 static void lvgl_port_copy_frame_180(const lv_color_t *src, lv_color_t *dst, uint32_t width, uint32_t height)
@@ -1245,7 +1403,8 @@ static void touchpad_read(lv_indev_drv_t *indev_drv, lv_indev_data_t *data)
         // lost interrupt from making the dark screen impossible to wake while
         // avoiding the continuous I2C traffic which caused the original fault.
         if (!lvgl_touch_wake_policy_should_probe(
-                lvgl_touch_interrupt_gated, interrupt_pending, now_ms)) {
+                lvgl_touch_interrupt_gated && lvgl_touch_interrupt_armed,
+                interrupt_pending, now_ms)) {
             lvgl_touch_set_cached_state(LV_INDEV_STATE_RELEASED);
             data->state = lvgl_touch_cached_state;
             return;
@@ -1332,15 +1491,16 @@ static lv_indev_t *indev_init(Touch *tp)
     static lv_indev_drv_t indev_drv_tp;
 
     if (tp->isInterruptEnabled()) {
-        lvgl_touch_interrupt_sem =
-            xSemaphoreCreateBinaryStatic(&lvgl_touch_interrupt_sem_buffer);
-        if (lvgl_touch_interrupt_sem != nullptr &&
-            tp->attachInterruptCallback(lvgl_touch_interrupt_callback, nullptr)) {
-            lvgl_touch_interrupt_gated = true;
-            lvgl_touch_clear_interrupt();
-        } else {
-            lvgl_touch_interrupt_sem = nullptr;
+        const LvglTouchInterruptAttachResult attach_result =
+            lvgl_touch_register_direct_interrupt(tp);
+        if (attach_result == LvglTouchInterruptAttachResult::Registered) {
+            // Registered but physically masked until dark-wake mode is armed.
+        } else if (attach_result ==
+                   LvglTouchInterruptAttachResult::PollingFallback) {
             ESP_LOGW("LVGL", "touch interrupt gate unavailable; wake probe will use polling fallback");
+        } else {
+            ESP_LOGE("LVGL", "touch IRQ replacement failed without confirmed cleanup");
+            return nullptr;
         }
     }
 
@@ -1438,12 +1598,10 @@ static bool lvgl_port_cleanup_partial_init(lv_disp_t *disp, lv_indev_t *indev)
     if (lvgl_port_lcd != nullptr) {
         lvgl_port_lcd->attachDrawBitmapFinishCallback(nullptr, nullptr);
     }
-    if (lvgl_port_touch != nullptr &&
-        lvgl_port_touch->isInterruptEnabled()) {
-        lvgl_port_touch->attachInterruptCallback(nullptr, nullptr);
+    if (!lvgl_touch_unregister_direct_interrupt()) {
+        success = false;
     }
-    lvgl_touch_interrupt_gated = false;
-    lvgl_touch_interrupt_sem = nullptr;
+    lvgl_touch_clear_interrupt();
 
 #if !LV_TICK_CUSTOM
     if (!tick_deinit()) {
@@ -1574,6 +1732,10 @@ bool lvgl_port_init(LCD *lcd, Touch *tp)
         (lvgl_task_handle == nullptr) && (lvgl_mux == nullptr),
         false,
         "LVGL port is already initialized");
+    ESP_UTILS_CHECK_FALSE_RETURN(
+        lvgl_touch_unregister_direct_interrupt(),
+        false,
+        "Stale touch IRQ registration could not be removed");
 
     ESP_UTILS_CHECK_FALSE_RETURN(
         lvgl_touch_i2c_runtime_gate.resetForBoot(),
@@ -1591,8 +1753,9 @@ bool lvgl_port_init(LCD *lcd, Touch *tp)
     lvgl_touch_read_block_until_ms.store(0, std::memory_order_release);
     lvgl_touch_wait_release_after_block.store(false, std::memory_order_release);
     lvgl_touch_wake_policy_reset();
-    lvgl_touch_interrupt_sem = nullptr;
+    lvgl_touch_clear_interrupt();
     lvgl_touch_interrupt_gated = false;
+    lvgl_touch_interrupt_armed = false;
     lvgl_touch_last_sample_ms = 0;
     lvgl_touch_set_cached_state(LV_INDEV_STATE_RELEASED);
     lvgl_touch_cached_point = {};
@@ -1789,6 +1952,9 @@ bool lvgl_port_finalize_touch_i2c_disable(uint32_t timeout_ms)
 
     const uint32_t now_ms = get_monotonic_ms();
     lvgl_touch_wake_policy_set(false, true, now_ms);
+    if (!lvgl_touch_unregister_direct_interrupt()) {
+        return false;
+    }
     lvgl_touch_clear_interrupt();
     lvgl_touch_read_block_until_ms.store(0, std::memory_order_release);
     lvgl_touch_wait_release_after_block.store(false, std::memory_order_release);
@@ -1799,28 +1965,47 @@ bool lvgl_port_finalize_touch_i2c_disable(uint32_t timeout_ms)
 
 bool lvgl_port_set_wake_touch_probe(bool enabled)
 {
-    SharedI2cRuntimeGate::Gate::Access access =
-        lvgl_touch_i2c_runtime_gate.acquire();
-    if (!access) {
+    // This transition performs no I2C. Its callers already own the LVGL
+    // serialization boundary, so only honor the lifecycle admission state;
+    // do not enter the refcounted atomic RMW path at the wake edge.
+    if (!lvgl_touch_i2c_runtime_gate.available()) {
         return !enabled;
-    }
-    if (enabled == lvgl_touch_wake_policy_enabled()) {
-        return true;
     }
 
     const uint32_t now_ms = get_monotonic_ms();
     const bool touch_released =
         !lvgl_touch_pressed.load(std::memory_order_acquire);
-    lvgl_touch_wake_policy_set(enabled, touch_released, now_ms);
+
+    if (!enabled) {
+        // This is intentionally not a logical no-op. Every screen-on sync must
+        // confirm that TP_INT is physically masked before CH422G can switch the
+        // backlight. Disable the source first, then discard its stale latch.
+        const bool safely_masked = lvgl_touch_mask_direct_interrupt();
+        lvgl_touch_wake_policy_set(false, touch_released, now_ms);
+        return safely_masked;
+    }
+
+    // Publish dark-wake policy before the source can fire, discard only stale
+    // pre-arm state, then enable the GPIO. The arm helper samples the active
+    // level immediately so a held touch cannot be lost between clear/enable.
+    lvgl_touch_wake_policy_set(true, touch_released, now_ms);
     lvgl_touch_clear_interrupt();
+    if (!lvgl_touch_arm_direct_interrupt()) {
+        // A safely retired handler leaves `gated` false, which explicitly
+        // selects the existing sparse polling fallback. False is reserved for
+        // cleanup failures where the physical ISR state is not confirmed.
+        return false;
+    }
+    if (!lvgl_touch_interrupt_gated) {
+        // Direct registration was unavailable or was safely retired.
+        lvgl_touch_clear_interrupt();
+    }
     return true;
 }
 
 bool lvgl_port_take_wake_touch_pending(void)
 {
-    SharedI2cRuntimeGate::Gate::Access access =
-        lvgl_touch_i2c_runtime_gate.acquire();
-    if (!access) {
+    if (!lvgl_touch_i2c_runtime_gate.available()) {
         return false;
     }
     return lvgl_touch_wake_policy_take_pending();
@@ -1921,6 +2106,10 @@ bool lvgl_port_deinit(void)
     // Keep VSYNC notifications alive until the finite mutex acquisition above
     // proves that no flush is still waiting for the current frame hand-off.
     lvgl_vsync_notify_enabled = false;
+    if (!lvgl_touch_unregister_direct_interrupt()) {
+        (void)lvgl_port_unlock();
+        return false;
+    }
     if (task != nullptr) {
         vTaskDelete(task);
         lvgl_task_handle = nullptr;
@@ -1964,11 +2153,8 @@ bool lvgl_port_prepare_restart(void)
     // CONFIG_LCD_RGB_ISR_IRAM_SAFE is enabled. Do not pretend to detach it:
     // the gate above makes the retained callback inert, and the task handle
     // is cleared below after the LVGL task has been suspended.
-    if (lvgl_port_touch != nullptr && lvgl_port_touch->isInterruptEnabled()) {
-        lvgl_port_touch->attachInterruptCallback(nullptr, nullptr);
-    }
-    lvgl_touch_interrupt_gated = false;
-    lvgl_touch_interrupt_sem = nullptr;
+    (void)lvgl_touch_unregister_direct_interrupt();
+    lvgl_touch_clear_interrupt();
 #if !LV_TICK_CUSTOM
     if (lvgl_tick_timer != nullptr) {
         esp_timer_stop(lvgl_tick_timer);

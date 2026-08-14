@@ -5,6 +5,13 @@
 
 #include <stdint.h>
 
+#if defined(ESP_PLATFORM)
+#include "esp_attr.h"
+#include "esp_cpu.h"
+#else
+#include <atomic>
+#endif
+
 namespace TouchWakePolicy {
 
 constexpr uint32_t FALLBACK_PROBE_INTERVAL_MS = 2500;
@@ -16,6 +23,44 @@ constexpr uint32_t RECOVERY_COOLDOWN_MS = 90UL * 1000UL;
 constexpr uint8_t RECOVERY_MAX_BACKOFF_SHIFT = 4;
 constexpr uint32_t RECOVERY_MAX_COOLDOWN_MS = 8UL * 60UL * 1000UL;
 
+// Coalesces touch IRQs without adding a second Project Aura FreeRTOS semaphore
+// to the vendor interrupt path. On ESP32-S3 the one-shot compare-and-set is a
+// bounded S32C1I operation in internal RAM.
+class InterruptLatch {
+public:
+#if defined(ESP_PLATFORM)
+    __attribute__((always_inline)) void signal() noexcept {
+        (void)esp_cpu_compare_and_set(&pending_, 0U, 1U);
+    }
+
+    __attribute__((always_inline)) bool take() noexcept {
+        return esp_cpu_compare_and_set(&pending_, 1U, 0U);
+    }
+
+    __attribute__((always_inline)) void clear() noexcept {
+        (void)esp_cpu_compare_and_set(&pending_, 1U, 0U);
+    }
+
+private:
+    alignas(uint32_t) volatile uint32_t pending_ = 0U;
+#else
+    void signal() noexcept {
+        pending_.store(1U, std::memory_order_release);
+    }
+
+    bool take() noexcept {
+        return pending_.exchange(0U, std::memory_order_acq_rel) != 0U;
+    }
+
+    void clear() noexcept {
+        pending_.store(0U, std::memory_order_release);
+    }
+
+private:
+    alignas(uint32_t) std::atomic<uint32_t> pending_{0U};
+#endif
+};
+
 enum class Sample : uint8_t {
     Error = 0,
     Released,
@@ -24,6 +69,11 @@ enum class Sample : uint8_t {
 
 constexpr uint32_t bootQuietWindowMs(bool cold_start) {
     return cold_start ? BOOT_QUIET_COLD_MS : BOOT_QUIET_WARM_MS;
+}
+
+constexpr bool interruptLineActive(bool configured_active_high,
+                                   int sampled_level) {
+    return sampled_level == (configured_active_high ? 1 : 0);
 }
 
 class StateMachine {

@@ -25,6 +25,10 @@ using esp_panel::board::Board;
 using esp_panel::drivers::BusRGB;
 
 constexpr uint32_t kBeginTimeoutMs = 10000;
+// Board::begin() allocates the shared-I2C, touch-GPIO and RGB-panel interrupts
+// on the calling core. Keep the board-owned interrupt set on the Arduino/LVGL
+// core instead of routing it through the Core 0 network/system workload.
+constexpr BaseType_t kBoardInitCore = ARDUINO_RUNNING_CORE;
 
 using BeginResult = BoardInitPolicy::BeginOutcome;
 
@@ -67,7 +71,7 @@ BeginResult runBoardBeginOnce(Board *board) {
         nullptr,
         1,
         &g_begin_task,
-        0);
+        kBoardInitCore);
     if (created != pdPASS || g_begin_task == nullptr) {
         LOGE("Main", "Failed to create board_init task");
         g_begin_task = nullptr;
