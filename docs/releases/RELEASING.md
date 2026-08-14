@@ -16,6 +16,31 @@ Keep the generated DPAPI-protected private key on this Windows account. Add the
 public PEM and the printed key ID to `AURA_FIRMWARE_SIGNING_PUBLIC_KEYS` in Aura
 Link.
 
+Immediately create a portable encrypted backup. Use a long unique password and
+store it in a password manager, not beside the backup file:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\backup_installer_release_key.ps1 `
+  -AdditionalBackupDirectory "E:\Project Aura Keys"
+```
+
+The command creates a local backup under `.project_aura\backups`, copies the
+same encrypted file to the additional directory, and performs a full restore
+test before reporting success. A copied DPAPI file alone is not a portable
+backup because it is tied to the Windows account that protected it.
+
+For local automation, `-UseClipboardPassphrase` reads a single-line password
+from the Windows clipboard without placing it in command-line arguments or
+console output. Use it only when the clipboard is under the release operator's
+control.
+
+To recover on another Windows account, use a clean target key directory:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\restore_installer_release_key_backup.ps1 `
+  -BackupPath "E:\Project Aura Keys\aura-installer-ed25519-KEYID.aura-key-backup"
+```
+
 For every Stable release, run:
 
 ```powershell
