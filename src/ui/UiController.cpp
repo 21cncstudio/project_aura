@@ -16,6 +16,8 @@
 #include <string.h>
 #include <time.h>
 #include <esp_wifi.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
 
 #include "lvgl_v8_port.h"
 #include "ui/ui.h"
@@ -26,6 +28,7 @@
 #include "core/BootState.h"
 #include "core/AppVersion.h"
 #include "core/AirQualityEngine.h"
+#include "core/BacklightWakeBreadcrumbs.h"
 #include "core/Logger.h"
 #include "core/SafeRestart.h"
 #include "web/WebRuntime.h"
@@ -48,6 +51,8 @@
 using namespace Config;
 
 namespace {
+
+AuraNetworkManager *g_expected_network_manager = nullptr;
 
 constexpr uint32_t STATUS_ROTATE_MS = 5000;
 constexpr int UI_LVGL_LOCK_TIMEOUT_MS = 500;
@@ -352,6 +357,7 @@ UiController::UiController(const UiContext &context)
       co2_asc_enabled(context.co2_asc_enabled),
       temp_offset(context.temp_offset),
       hum_offset(context.hum_offset) {
+    g_expected_network_manager = &context.networkManager;
     instance_ = this;
     webUiBridge.bindSettingsApplier(this, &UiController::applyWebUiSettingsBridge);
     webUiBridge.bindThemeApplier(this, &UiController::applyThemePreviewBridge);
@@ -1548,11 +1554,19 @@ void UiController::poll(uint32_t now) {
         last_ui_tick_ms = now;
     }
     backlightManager.poll(lvgl_ready);
+    BacklightWakeBreadcrumbs::markUiPostBacklightContext(
+        static_cast<uint32_t>(reinterpret_cast<uintptr_t>(g_expected_network_manager)),
+        static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&networkManager)),
+        static_cast<uint32_t>(reinterpret_cast<uintptr_t>(xTaskGetCurrentTaskHandle())));
     update_status_icons();
     UiScreenFlow::processPendingScreen(*this, now);
     UiScreenFlow::processBootRelease(*this, now);
     UiScreenFlow::processDeferredUnloads(*this, now);
 
+    BacklightWakeBreadcrumbs::markUiPreRenderContext(
+        static_cast<uint32_t>(reinterpret_cast<uintptr_t>(g_expected_network_manager)),
+        static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&networkManager)),
+        static_cast<uint32_t>(reinterpret_cast<uintptr_t>(xTaskGetCurrentTaskHandle())));
     UiRenderLoop::process(*this, now);
     lvgl_port_unlock();
     publishWebUiSnapshot();

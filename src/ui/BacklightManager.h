@@ -7,6 +7,7 @@
 #pragma once
 #include <Arduino.h>
 #include "config/AppConfig.h"
+#include "core/BacklightWakeBreadcrumbs.h"
 #include "core/BacklightStatePolicy.h"
 
 namespace esp_panel {
@@ -51,10 +52,13 @@ public:
 
 private:
     uint32_t normalizeTimeoutMs(uint32_t timeout_ms) const;
-    bool setOnWithGateHeld(bool on);
+    bool setOnWithGateHeld(
+        bool on,
+        BacklightWakeBreadcrumbs::Event trace_event =
+            BacklightWakeBreadcrumbs::Event::None);
     void storeSchedulePrefs();
     void refreshSchedule();
-    void refreshScheduleWithGateHeld();
+    void refreshScheduleWithGateHeld(bool trace_clock_transition = false);
     void consumeInput();
 
     esp_panel::drivers::Backlight *panel_backlight_ = nullptr;
@@ -67,6 +71,8 @@ private:
     bool alarm_wake_enabled_ = false;
     bool alarm_wake_active_ = false;
     bool schedule_active_ = false;
+    BacklightWakeBreadcrumbs::Event pending_wake_event_ =
+        BacklightWakeBreadcrumbs::Event::None;
     int sleep_hour_ = 23;
     int sleep_minute_ = 0;
     int wake_hour_ = 6;

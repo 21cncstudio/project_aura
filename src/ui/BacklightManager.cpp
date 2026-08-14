@@ -10,6 +10,8 @@
 #include <time.h>
 #include <esp_display_panel.hpp>
 #include "modules/StorageManager.h"
+#include "core/BacklightWakeBreadcrumbs.h"
+#include "core/I2cBusRecovery.h"
 #include "core/Logger.h"
 #include "lvgl_v8_port.h"
 #include "ui/ui.h"
@@ -120,14 +122,51 @@ bool BacklightManager::setOn(bool on) {
     return setOnWithGateHeld(on);
 }
 
-bool BacklightManager::setOnWithGateHeld(bool on) {
+bool BacklightManager::setOnWithGateHeld(
+    bool on,
+    BacklightWakeBreadcrumbs::Event trace_event) {
+    const bool trace_wake = trace_event != BacklightWakeBreadcrumbs::Event::None;
+    const auto sample_bus = []() {
+        const I2cBusRecovery::LineState lines = I2cBusRecovery::sample(
+            static_cast<gpio_num_t>(Config::I2C_SDA_PIN),
+            static_cast<gpio_num_t>(Config::I2C_SCL_PIN));
+        return BacklightWakeBreadcrumbs::LineState{
+            true,
+            lines.sda_high,
+            lines.scl_high,
+        };
+    };
+
+    if (trace_wake) {
+        BacklightWakeBreadcrumbs::beginWake(
+            trace_event,
+            millis(),
+            static_cast<uint32_t>(time(nullptr)),
+            on,
+            backlight_on_,
+            sample_bus());
+    }
+
     if (!panel_backlight_) {
+        if (trace_wake) {
+            BacklightWakeBreadcrumbs::markDriverCallBegin();
+            BacklightWakeBreadcrumbs::markDriverCallReturned(false, false, 0, sample_bus());
+        }
         LOGE("Backlight", "cannot turn backlight %s: driver unavailable", on ? "on" : "off");
         return false;
     }
     if (on == backlight_on_) {
         const bool cancelled_retry = pending_command_.active();
-        if (!lvgl_port_set_wake_touch_probe(!on)) {
+        if (trace_wake) {
+            BacklightWakeBreadcrumbs::markDriverCallBegin();
+            BacklightWakeBreadcrumbs::markDriverCallReturned(true, true, 0, sample_bus());
+            BacklightWakeBreadcrumbs::markWakeProbeUpdateBegin();
+        }
+        const bool wake_probe_updated = lvgl_port_set_wake_touch_probe(!on);
+        if (trace_wake) {
+            BacklightWakeBreadcrumbs::markWakeProbeUpdateReturned(sample_bus());
+        }
+        if (!wake_probe_updated) {
             ++command_failure_count_;
             pending_command_.recordFailure(on, millis());
             LOGE("Backlight", "failed to synchronize touch IRQ for unchanged %s state",
@@ -136,7 +175,13 @@ bool BacklightManager::setOnWithGateHeld(bool on) {
         }
         pending_command_.clear();
         if (on && cancelled_retry) {
+            if (trace_wake) {
+                BacklightWakeBreadcrumbs::markLvglActivityBegin();
+            }
             lv_disp_trig_activity(nullptr);
+            if (trace_wake) {
+                BacklightWakeBreadcrumbs::markLvglActivityReturned();
+            }
             last_inactive_ms_ = 0;
         }
         return true;
@@ -145,25 +190,46 @@ bool BacklightManager::setOnWithGateHeld(bool on) {
     const bool previous_on = backlight_on_;
     const BacklightStatePolicy::WakeProbePlan wake_probe_plan =
         BacklightStatePolicy::planWakeProbe(previous_on, on);
-    if (wake_probe_plan.mask_before_driver &&
-        !lvgl_port_set_wake_touch_probe(false)) {
-        ++command_failure_count_;
-        pending_command_.recordFailure(on, millis());
-        const uint32_t retry_delay_ms = BacklightStatePolicy::retryDelayMs(
-            pending_command_.consecutiveFailures());
-        LOGE("Backlight",
-             "touch IRQ could not be safely masked before backlight %s; driver skipped, retry in %lu ms",
-             on ? "on" : "off",
-             static_cast<unsigned long>(retry_delay_ms));
-        return false;
+    if (wake_probe_plan.mask_before_driver) {
+        if (trace_wake) {
+            BacklightWakeBreadcrumbs::markTouchIrqMaskBegin();
+        }
+        const bool touch_irq_masked = lvgl_port_set_wake_touch_probe(false);
+        if (trace_wake) {
+            BacklightWakeBreadcrumbs::markTouchIrqMaskReturned();
+        }
+        if (!touch_irq_masked) {
+            ++command_failure_count_;
+            pending_command_.recordFailure(on, millis());
+            const uint32_t retry_delay_ms = BacklightStatePolicy::retryDelayMs(
+                pending_command_.consecutiveFailures());
+            LOGE("Backlight",
+                 "touch IRQ could not be safely masked before backlight %s; driver skipped, retry in %lu ms",
+                 on ? "on" : "off",
+                 static_cast<unsigned long>(retry_delay_ms));
+            return false;
+        }
     }
 
+    if (trace_wake) {
+        BacklightWakeBreadcrumbs::markDriverCallBegin();
+    }
+    const uint32_t driver_started_us = micros();
     const bool driver_succeeded = on ? panel_backlight_->on() : panel_backlight_->off();
+    const uint32_t driver_duration_us = micros() - driver_started_us;
+    if (trace_wake) {
+        BacklightWakeBreadcrumbs::markDriverCallReturned(
+            driver_succeeded, false, driver_duration_us, sample_bus());
+        BacklightWakeBreadcrumbs::markWakeProbeUpdateBegin();
+    }
     const BacklightStatePolicy::Transition transition =
         BacklightStatePolicy::resolve(previous_on, on, driver_succeeded);
     backlight_on_ = transition.actual_on;
     const bool wake_probe_updated =
         lvgl_port_set_wake_touch_probe(transition.wake_probe_enabled);
+    if (trace_wake) {
+        BacklightWakeBreadcrumbs::markWakeProbeUpdateReturned(sample_bus());
+    }
 
     if (!transition.command_succeeded || !wake_probe_updated) {
         ++command_failure_count_;
@@ -183,7 +249,13 @@ bool BacklightManager::setOnWithGateHeld(bool on) {
 
     pending_command_.clear();
     if (on) {
+        if (trace_wake) {
+            BacklightWakeBreadcrumbs::markLvglActivityBegin();
+        }
         lv_disp_trig_activity(nullptr);
+        if (trace_wake) {
+            BacklightWakeBreadcrumbs::markLvglActivityReturned();
+        }
         last_inactive_ms_ = 0;
     }
     return true;
@@ -298,7 +370,7 @@ void BacklightManager::refreshSchedule() {
     refreshScheduleWithGateHeld();
 }
 
-void BacklightManager::refreshScheduleWithGateHeld() {
+void BacklightManager::refreshScheduleWithGateHeld(bool trace_clock_transition) {
     if (schedule_enabled_ && schedule_boot_grace_until_ms_ != 0) {
         if (static_cast<int32_t>(millis() - schedule_boot_grace_until_ms_) < 0) {
             return;
@@ -316,8 +388,21 @@ void BacklightManager::refreshScheduleWithGateHeld() {
         }
     }
     if (active != schedule_active_) {
+        const bool schedule_wake = BacklightWakeBreadcrumbs::shouldTraceScheduleWake(
+            trace_clock_transition, schedule_active_, active);
         schedule_active_ = active;
-        setOnWithGateHeld(!active);
+        const BacklightWakeBreadcrumbs::Event wake_event = schedule_wake
+            ? BacklightWakeBreadcrumbs::Event::ScheduleWake
+            : BacklightWakeBreadcrumbs::Event::None;
+        const bool command_succeeded = setOnWithGateHeld(!active, wake_event);
+        if (schedule_wake) {
+            BacklightWakeBreadcrumbs::markCommandReturned();
+            BacklightWakeBreadcrumbs::markCompleted();
+            pending_wake_event_ =
+                !command_succeeded && pending_command_.active() && pending_command_.targetOn()
+                    ? wake_event
+                    : BacklightWakeBreadcrumbs::Event::None;
+        }
     }
 }
 
@@ -403,7 +488,11 @@ void BacklightManager::poll(bool lvgl_ready) {
         BacklightStatePolicy::inputActivitySince(last_inactive_ms_, inactive_ms);
     last_inactive_ms_ = inactive_ms;
 
-    refreshScheduleWithGateHeld();
+    refreshScheduleWithGateHeld(true);
+
+    if (!pending_command_.active()) {
+        pending_wake_event_ = BacklightWakeBreadcrumbs::Event::None;
+    }
 
     const bool alarm_wake_requested = alarm_wake_enabled_ && alarm_wake_active_;
     if (backlight_on_ && pending_command_.active() && !pending_command_.targetOn() &&
@@ -416,22 +505,48 @@ void BacklightManager::poll(bool lvgl_ready) {
     if (pending_command_.ready(now_ms)) {
         const bool retry_target_on = pending_command_.targetOn();
         const bool was_on = backlight_on_;
-        if (setOnWithGateHeld(retry_target_on) && retry_target_on && !was_on) {
+        const BacklightWakeBreadcrumbs::Event retry_event = retry_target_on
+            ? pending_wake_event_
+            : BacklightWakeBreadcrumbs::Event::None;
+        const bool retry_succeeded =
+            setOnWithGateHeld(retry_target_on, retry_event);
+        if (retry_event != BacklightWakeBreadcrumbs::Event::None) {
+            BacklightWakeBreadcrumbs::markCommandReturned();
+            pending_wake_event_ =
+                !retry_succeeded && pending_command_.active() &&
+                        pending_command_.targetOn()
+                    ? retry_event
+                    : BacklightWakeBreadcrumbs::Event::None;
+        }
+        if (retry_succeeded && retry_target_on && !was_on) {
             block_input_until_ms_ = now_ms + Config::BACKLIGHT_WAKE_BLOCK_MS;
             lvgl_port_block_touch_read(Config::BACKLIGHT_WAKE_BLOCK_MS);
             consumeInput();
         }
+        if (retry_event != BacklightWakeBreadcrumbs::Event::None) {
+            BacklightWakeBreadcrumbs::markCompleted();
+        }
     }
 
     if (!backlight_on_) {
-        bool wake_touch = lvgl_port_take_wake_touch_pending();
-        const bool wake_requested = wake_touch || alarm_wake_requested;
-        if (wake_requested && !pending_command_.active()) {
-            if (setOnWithGateHeld(true)) {
+        const bool wake_touch = lvgl_port_take_wake_touch_pending();
+        const BacklightWakeBreadcrumbs::Event wake_event =
+            BacklightWakeBreadcrumbs::selectDarkWakeEvent(
+                wake_touch, alarm_wake_requested);
+        if (wake_event != BacklightWakeBreadcrumbs::Event::None &&
+            !pending_command_.active()) {
+            const bool wake_succeeded = setOnWithGateHeld(true, wake_event);
+            BacklightWakeBreadcrumbs::markCommandReturned();
+            if (wake_succeeded) {
                 block_input_until_ms_ = now_ms + Config::BACKLIGHT_WAKE_BLOCK_MS;
                 lvgl_port_block_touch_read(Config::BACKLIGHT_WAKE_BLOCK_MS);
                 consumeInput();
             }
+            pending_wake_event_ =
+                !wake_succeeded && pending_command_.active() && pending_command_.targetOn()
+                    ? wake_event
+                    : BacklightWakeBreadcrumbs::Event::None;
+            BacklightWakeBreadcrumbs::markCompleted();
         }
         return;
     }

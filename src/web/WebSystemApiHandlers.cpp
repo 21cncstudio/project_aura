@@ -117,6 +117,47 @@ void handleDiagData(WebHandlerContext &context,
     payload.boot.board_stage = BoardInit::stageText(boot.board_stage);
     payload.boot.board_failure = BoardInit::failureText(boot.board_failure);
     payload.boot.lvgl_ready = boot.lvgl_ready;
+    const BacklightWakeBreadcrumbs::BootSnapshot &previous_trace =
+        boot.previous_backlight_trace;
+    payload.boot.previous_backlight_trace_status =
+        BacklightWakeBreadcrumbs::statusText(previous_trace.status);
+    payload.boot.previous_backlight_trace_valid = previous_trace.has_trace;
+    if (previous_trace.has_trace) {
+        const BacklightWakeBreadcrumbs::Trace &trace = previous_trace.trace;
+        payload.boot.previous_backlight_trace_event =
+            BacklightWakeBreadcrumbs::eventText(trace.event);
+        payload.boot.previous_backlight_trace_stage =
+            BacklightWakeBreadcrumbs::stageText(trace.stage);
+        payload.boot.previous_backlight_trace_driver_result =
+            BacklightWakeBreadcrumbs::driverResultText(trace.driver_result);
+        payload.boot.previous_backlight_trace_sequence = trace.sequence;
+        payload.boot.previous_backlight_trace_uptime_ms = trace.uptime_ms;
+        payload.boot.previous_backlight_trace_epoch_s = trace.epoch_s;
+        payload.boot.previous_backlight_trace_driver_duration_us = trace.driver_duration_us;
+        payload.boot.previous_backlight_trace_expected_network_manager_addr =
+            trace.expected_network_manager_addr;
+        payload.boot.previous_backlight_trace_post_backlight_network_manager_addr =
+            trace.post_backlight_network_manager_addr;
+        payload.boot.previous_backlight_trace_pre_render_network_manager_addr =
+            trace.pre_render_network_manager_addr;
+        payload.boot.previous_backlight_trace_post_backlight_task_handle =
+            trace.post_backlight_task_handle;
+        payload.boot.previous_backlight_trace_pre_render_task_handle =
+            trace.pre_render_task_handle;
+        payload.boot.previous_backlight_trace_target_on = trace.target_on;
+        payload.boot.previous_backlight_trace_previous_on = trace.previous_on;
+        payload.boot.previous_backlight_trace_before_valid = trace.before.valid;
+        payload.boot.previous_backlight_trace_before_sda_high = trace.before.sda_high;
+        payload.boot.previous_backlight_trace_before_scl_high = trace.before.scl_high;
+        payload.boot.previous_backlight_trace_after_driver_valid = trace.after_driver.valid;
+        payload.boot.previous_backlight_trace_after_driver_sda_high = trace.after_driver.sda_high;
+        payload.boot.previous_backlight_trace_after_driver_scl_high = trace.after_driver.scl_high;
+        payload.boot.previous_backlight_trace_after_probe_valid = trace.after_wake_probe.valid;
+        payload.boot.previous_backlight_trace_after_probe_sda_high =
+            trace.after_wake_probe.sda_high;
+        payload.boot.previous_backlight_trace_after_probe_scl_high =
+            trace.after_wake_probe.scl_high;
+    }
     WebDiagApiUtils::fillJson(doc.to<ArduinoJson::JsonObject>(),
                               payload,
                               g_events_snapshot,

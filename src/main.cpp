@@ -13,6 +13,7 @@
 #include "core/AppInit.h"
 #include "core/BoardInit.h"
 #include "core/BoardRecoveryPolicy.h"
+#include "core/BacklightWakeBreadcrumbs.h"
 #include "core/BootDiagnostics.h"
 #include "core/BootPolicy.h"
 #include "core/ChartsRuntimeState.h"
@@ -321,9 +322,51 @@ void setup()
 
     StorageManager::BootAction boot_action = AppInit::handleBootState();
     const bool auto_recovery_boot = boot_any_auto_recovery_boot();
+    BacklightWakeBreadcrumbs::initializeAtBoot(boot_board_cold_start);
     BootDiagnostics::state = BootDiagnostics::Snapshot{};
     BootDiagnostics::state.reset_reason = boot_reset_reason;
     BootDiagnostics::state.auto_recovery_boot = auto_recovery_boot;
+    BootDiagnostics::state.previous_backlight_trace =
+        BacklightWakeBreadcrumbs::bootSnapshot();
+    const BacklightWakeBreadcrumbs::BootSnapshot &previous_backlight_trace =
+        BootDiagnostics::state.previous_backlight_trace;
+    if (previous_backlight_trace.has_trace) {
+        const BacklightWakeBreadcrumbs::Trace &trace = previous_backlight_trace.trace;
+        const bool incomplete =
+            previous_backlight_trace.status == BacklightWakeBreadcrumbs::CaptureStatus::Active;
+        if (incomplete) {
+            LOGW("BacklightTrace",
+                 "previous boot trace incomplete: event=%s stage=%s seq=%lu uptime=%lu ms epoch=%lu driver=%s duration=%lu us target=%s previous=%s lines(before=%s/%u%u after_driver=%s/%u%u after_probe=%s/%u%u)",
+                 BacklightWakeBreadcrumbs::eventText(trace.event),
+                 BacklightWakeBreadcrumbs::stageText(trace.stage),
+                 static_cast<unsigned long>(trace.sequence),
+                 static_cast<unsigned long>(trace.uptime_ms),
+                 static_cast<unsigned long>(trace.epoch_s),
+                 BacklightWakeBreadcrumbs::driverResultText(trace.driver_result),
+                 static_cast<unsigned long>(trace.driver_duration_us),
+                 trace.target_on ? "on" : "off",
+                 trace.previous_on ? "on" : "off",
+                 trace.before.valid ? "valid" : "invalid",
+                 trace.before.sda_high ? 1u : 0u,
+                 trace.before.scl_high ? 1u : 0u,
+                 trace.after_driver.valid ? "valid" : "invalid",
+                 trace.after_driver.sda_high ? 1u : 0u,
+                 trace.after_driver.scl_high ? 1u : 0u,
+                 trace.after_wake_probe.valid ? "valid" : "invalid",
+                 trace.after_wake_probe.sda_high ? 1u : 0u,
+                 trace.after_wake_probe.scl_high ? 1u : 0u);
+        } else {
+            LOGI("BacklightTrace",
+                 "previous boot trace completed: event=%s seq=%lu driver=%s duration=%lu us",
+                 BacklightWakeBreadcrumbs::eventText(trace.event),
+                 static_cast<unsigned long>(trace.sequence),
+                 BacklightWakeBreadcrumbs::driverResultText(trace.driver_result),
+                 static_cast<unsigned long>(trace.driver_duration_us));
+        }
+    } else if (previous_backlight_trace.status ==
+               BacklightWakeBreadcrumbs::CaptureStatus::Corrupt) {
+        LOGW("BacklightTrace", "previous boot trace corrupt; ignoring retained data");
+    }
     restart_task_ready = safe_restart_init();
     if (!restart_task_ready) {
         LOGW("Restart", "Core0 restart task init failed; automatic recovery will be suppressed");
@@ -462,6 +505,8 @@ void setup()
              "Scheduling one controlled startup recovery restart in %lu ms",
              static_cast<unsigned long>(Config::BOARD_RECOVERY_RESTART_DELAY_MS));
         WebHandlersRequestRestart(Config::BOARD_RECOVERY_RESTART_DELAY_MS);
+    } else {
+        BacklightWakeBreadcrumbs::acknowledgeBootSnapshot();
     }
 }
 

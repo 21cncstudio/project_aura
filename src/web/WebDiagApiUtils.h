@@ -45,6 +45,31 @@ struct BootPayload {
     const char *board_stage = "bus";
     const char *board_failure = "none";
     bool lvgl_ready = false;
+    const char *previous_backlight_trace_status = "empty";
+    bool previous_backlight_trace_valid = false;
+    const char *previous_backlight_trace_event = "none";
+    const char *previous_backlight_trace_stage = "none";
+    const char *previous_backlight_trace_driver_result = "unknown";
+    uint32_t previous_backlight_trace_sequence = 0;
+    uint32_t previous_backlight_trace_uptime_ms = 0;
+    uint32_t previous_backlight_trace_epoch_s = 0;
+    uint32_t previous_backlight_trace_driver_duration_us = 0;
+    uint32_t previous_backlight_trace_expected_network_manager_addr = 0;
+    uint32_t previous_backlight_trace_post_backlight_network_manager_addr = 0;
+    uint32_t previous_backlight_trace_pre_render_network_manager_addr = 0;
+    uint32_t previous_backlight_trace_post_backlight_task_handle = 0;
+    uint32_t previous_backlight_trace_pre_render_task_handle = 0;
+    bool previous_backlight_trace_target_on = false;
+    bool previous_backlight_trace_previous_on = false;
+    bool previous_backlight_trace_before_valid = false;
+    bool previous_backlight_trace_before_sda_high = false;
+    bool previous_backlight_trace_before_scl_high = false;
+    bool previous_backlight_trace_after_driver_valid = false;
+    bool previous_backlight_trace_after_driver_sda_high = false;
+    bool previous_backlight_trace_after_driver_scl_high = false;
+    bool previous_backlight_trace_after_probe_valid = false;
+    bool previous_backlight_trace_after_probe_sda_high = false;
+    bool previous_backlight_trace_after_probe_scl_high = false;
 };
 
 struct Payload {

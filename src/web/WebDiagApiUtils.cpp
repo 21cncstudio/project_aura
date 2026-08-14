@@ -73,6 +73,57 @@ void fillJson(ArduinoJson::JsonObject root,
     boot["board_stage"] = payload.boot.board_stage;
     boot["board_failure"] = payload.boot.board_failure;
     boot["lvgl_ready"] = payload.boot.lvgl_ready;
+    boot["previous_backlight_trace_status"] = payload.boot.previous_backlight_trace_status;
+    if (payload.boot.previous_backlight_trace_valid) {
+        ArduinoJson::JsonObject trace =
+            boot["previous_backlight_trace"].to<ArduinoJson::JsonObject>();
+        trace["event"] = payload.boot.previous_backlight_trace_event;
+        trace["stage"] = payload.boot.previous_backlight_trace_stage;
+        trace["driver_result"] = payload.boot.previous_backlight_trace_driver_result;
+        trace["sequence"] = payload.boot.previous_backlight_trace_sequence;
+        trace["uptime_ms"] = payload.boot.previous_backlight_trace_uptime_ms;
+        trace["epoch_s"] = payload.boot.previous_backlight_trace_epoch_s;
+        trace["driver_duration_us"] = payload.boot.previous_backlight_trace_driver_duration_us;
+        trace["expected_network_manager_addr"] =
+            payload.boot.previous_backlight_trace_expected_network_manager_addr;
+        trace["post_backlight_network_manager_addr"] =
+            payload.boot.previous_backlight_trace_post_backlight_network_manager_addr;
+        trace["pre_render_network_manager_addr"] =
+            payload.boot.previous_backlight_trace_pre_render_network_manager_addr;
+        trace["post_backlight_task_handle"] =
+            payload.boot.previous_backlight_trace_post_backlight_task_handle;
+        trace["pre_render_task_handle"] =
+            payload.boot.previous_backlight_trace_pre_render_task_handle;
+        trace["target_on"] = payload.boot.previous_backlight_trace_target_on;
+        trace["previous_on"] = payload.boot.previous_backlight_trace_previous_on;
+        if (payload.boot.previous_backlight_trace_before_valid) {
+            trace["before_sda_high"] = payload.boot.previous_backlight_trace_before_sda_high;
+            trace["before_scl_high"] = payload.boot.previous_backlight_trace_before_scl_high;
+        } else {
+            trace["before_sda_high"] = nullptr;
+            trace["before_scl_high"] = nullptr;
+        }
+        if (payload.boot.previous_backlight_trace_after_driver_valid) {
+            trace["after_driver_sda_high"] =
+                payload.boot.previous_backlight_trace_after_driver_sda_high;
+            trace["after_driver_scl_high"] =
+                payload.boot.previous_backlight_trace_after_driver_scl_high;
+        } else {
+            trace["after_driver_sda_high"] = nullptr;
+            trace["after_driver_scl_high"] = nullptr;
+        }
+        if (payload.boot.previous_backlight_trace_after_probe_valid) {
+            trace["after_probe_sda_high"] =
+                payload.boot.previous_backlight_trace_after_probe_sda_high;
+            trace["after_probe_scl_high"] =
+                payload.boot.previous_backlight_trace_after_probe_scl_high;
+        } else {
+            trace["after_probe_sda_high"] = nullptr;
+            trace["after_probe_scl_high"] = nullptr;
+        }
+    } else {
+        boot["previous_backlight_trace"] = nullptr;
+    }
 
     ArduinoJson::JsonObject network = root["network"].to<ArduinoJson::JsonObject>();
     WebNetworkUtils::fillDiagJson(network, payload.network);

@@ -7,6 +7,7 @@
 #include <stdint.h>
 
 #include "core/BoardInit.h"
+#include "core/BacklightWakeBreadcrumbs.h"
 
 namespace BootDiagnostics {
 
@@ -38,6 +39,7 @@ struct Snapshot {
     BoardInit::Stage board_stage = BoardInit::Stage::Bus;
     BoardInit::Failure board_failure = BoardInit::Failure::None;
     bool lvgl_ready = false;
+    BacklightWakeBreadcrumbs::BootSnapshot previous_backlight_trace{};
 };
 
 extern Snapshot state;
