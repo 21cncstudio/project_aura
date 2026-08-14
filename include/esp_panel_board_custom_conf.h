@@ -16,6 +16,7 @@
 #pragma once
 
 #include "BoardInitCallbacks.h"
+#include "Gt911Hardware.h"
 
 // *INDENT-OFF*
 #define ESP_OPEN_TOUCH 1 // 1 initiates the touch, 0 closes the touch.
@@ -412,26 +413,8 @@
 #define ESP_PANEL_BOARD_TOUCH_PRE_BEGIN_FUNCTION(p) \
     {  \
         auraBoardInitNoteStage(AuraBoardInitStage::Touch); \
-        constexpr gpio_num_t TP_INT = static_cast<gpio_num_t>(ESP_PANEL_BOARD_TOUCH_INT_IO); \
-        constexpr int TP_RST = 1; \
         auto board = static_cast<Board *>(p);  \
-        auto expander = board->getIO_Expander()->getBase(); \
-        if (gpio_set_direction(TP_INT, GPIO_MODE_OUTPUT) != ESP_OK) \
-            return auraBoardInitStageResult(AuraBoardInitStage::Touch, false); \
-        if (gpio_set_level(TP_INT, 0) != ESP_OK) \
-            return auraBoardInitStageResult(AuraBoardInitStage::Touch, false); \
-        vTaskDelay(pdMS_TO_TICKS(50)); \
-        if (!expander->digitalWrite(TP_RST, 0)) \
-            return auraBoardInitStageResult(AuraBoardInitStage::Touch, false); \
-        vTaskDelay(pdMS_TO_TICKS(50)); \
-        if (gpio_set_level(TP_INT, 1) != ESP_OK) \
-            return auraBoardInitStageResult(AuraBoardInitStage::Touch, false); \
-        vTaskDelay(pdMS_TO_TICKS(5)); \
-        if (!expander->digitalWrite(TP_RST, 1)) \
-            return auraBoardInitStageResult(AuraBoardInitStage::Touch, false); \
-        vTaskDelay(pdMS_TO_TICKS(350)); \
-        vTaskDelay(pdMS_TO_TICKS(ESP_PANEL_BOARD_TOUCH_I2C_PRE_INIT_DELAY_MS)); \
-        if (gpio_reset_pin(TP_INT) != ESP_OK) \
+        if (!Gt911Hardware::selectBackupAddress(board)) \
             return auraBoardInitStageResult(AuraBoardInitStage::Touch, false); \
         return true;    \
     }

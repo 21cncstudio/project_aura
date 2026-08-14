@@ -15,10 +15,12 @@
 #include "core/BoardRecoveryPolicy.h"
 #include "core/BacklightWakeBreadcrumbs.h"
 #include "core/BootDiagnostics.h"
+#include "core/BootHelpers.h"
 #include "core/BootPolicy.h"
 #include "core/ChartsRuntimeState.h"
 #include "core/ConnectivityRuntime.h"
 #include "core/Logger.h"
+#include "Gt911Hardware.h"
 #include "core/MemoryMonitor.h"
 #include "core/MqttRuntimeState.h"
 #include "core/NetworkCommandQueue.h"
@@ -151,6 +153,8 @@ bool restart_task_ready = false;
 bool restart_request_pending = false;
 bool restart_ota_deferral_logged = false;
 RuntimeI2cRecoveryPolicy::State runtime_i2c_recovery_policy;
+esp_panel::board::Board *runtime_board = nullptr;
+bool gt911_runtime_recovery_attempted = false;
 
 void quiesce_network_for_restart() {
     const wifi_mode_t wifi_mode = WiFi.getMode();
@@ -217,6 +221,59 @@ bool drain_runtime_shared_i2c_owners() {
     return true;
 }
 
+bool try_runtime_gt911_recovery() {
+    if (runtime_board == nullptr || !lvgl_ready || !uiController.isLvglReady()) {
+        LOGE("GT911", "runtime recovery unavailable: board/LVGL not ready");
+        return false;
+    }
+
+    LOGW("GT911", "touch offline with idle bus; attempting one address recovery");
+    if (!quiesce_lvgl_for_shared_i2c("GT911 address recovery")) {
+        return false;
+    }
+
+    const bool wake_probe_enabled = !backlightManager.isOn();
+    if (!lvgl_port_prepare_touch_hard_recovery()) {
+        LOGE("GT911", "runtime recovery could not isolate touch/IRQ state");
+        (void)lvgl_port_request_resume();
+        return false;
+    }
+
+    const bool address_selected = Gt911Hardware::selectBackupAddress(runtime_board);
+    uint8_t product_id[3] = {};
+    const bool product_read =
+        address_selected && BootHelpers::readGt911ConfiguredProductId(product_id);
+    const bool product_valid =
+        product_read && BootHelpers::isExpectedGt911ProductId(product_id);
+    const bool touch_restored = lvgl_port_complete_touch_hard_recovery(
+        product_valid, wake_probe_enabled);
+    (void)lvgl_port_request_resume();
+
+    if (!product_valid || !touch_restored) {
+        if (product_read) {
+            LOGE("GT911",
+                 "runtime recovery verification failed at 0x%02X: %02X,%02X,%02X",
+                 GT911_ADDR_ALT,
+                 product_id[0],
+                 product_id[1],
+                 product_id[2]);
+        } else {
+            LOGE("GT911",
+                 "runtime recovery verification found no response at 0x%02X",
+                 GT911_ADDR_ALT);
+        }
+        return false;
+    }
+
+    LOGI("GT911",
+         "runtime address recovery verified at 0x%02X: %02X,%02X,%02X",
+         GT911_ADDR_ALT,
+         product_id[0],
+         product_id[1],
+         product_id[2]);
+    return true;
+}
+
 void poll_runtime_i2c_recovery(uint32_t now_ms) {
     if (!i2c_runtime_ready ||
         static_cast<uint32_t>(now_ms - boot_start_ms) < RUNTIME_I2C_MONITOR_START_MS) {
@@ -232,6 +289,15 @@ void poll_runtime_i2c_recovery(uint32_t now_ms) {
     const I2cBusRecovery::LineState lines = I2cBusRecovery::sample(
         static_cast<gpio_num_t>(I2C_SDA_PIN),
         static_cast<gpio_num_t>(I2C_SCL_PIN));
+
+    if (touch_offline && lines.idle() && !gt911_runtime_recovery_attempted) {
+        gt911_runtime_recovery_attempted = true;
+        if (try_runtime_gt911_recovery()) {
+            return;
+        }
+        LOGE("GT911", "runtime address recovery failed; falling back to restart policy");
+    }
+
     const RuntimeI2cRecoveryPolicy::Decision decision =
         runtime_i2c_recovery_policy.poll(now_ms,
                                          lines.idle(),
@@ -380,6 +446,7 @@ void setup()
                                                           pre_init_i2c_state,
                                                           auto_recovery_boot);
     auto *board = board_result.board;
+    runtime_board = board;
     board_ready = board_result.ready();
     i2c_runtime_ready = board_ready;
     BootDiagnostics::state.i2c_status = board_result.last_recovery.status;

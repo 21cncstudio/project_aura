@@ -1930,6 +1930,78 @@ bool lvgl_port_block_touch_read(uint32_t duration_ms)
     return true;
 }
 
+bool lvgl_port_prepare_touch_hard_recovery(void)
+{
+    if (!lvgl_port_is_paused() || !lvgl_touch_i2c_runtime_gate.available() ||
+        lvgl_port_touch == nullptr || lvgl_port_touch->getPanelHandle() == nullptr) {
+        return false;
+    }
+
+    if (!lvgl_touch_mask_direct_interrupt()) {
+        return false;
+    }
+
+    const uint32_t now_ms = get_monotonic_ms();
+    lvgl_touch_wake_policy_set(false, true, now_ms);
+    lvgl_touch_clear_interrupt();
+    lvgl_touch_set_cached_state(LV_INDEV_STATE_RELEASED);
+    lvgl_touch_wait_release_after_block.store(false, std::memory_order_release);
+    return true;
+}
+
+bool lvgl_port_complete_touch_hard_recovery(bool recovered,
+                                            bool wake_probe_enabled)
+{
+    if (!lvgl_port_is_paused() || lvgl_port_touch == nullptr ||
+        lvgl_port_touch->getPanelHandle() == nullptr) {
+        return false;
+    }
+
+    esp_lcd_touch_handle_t panel = lvgl_port_touch->getPanelHandle();
+    const gpio_num_t interrupt_gpio = panel->config.int_gpio_num;
+    if (interrupt_gpio == GPIO_NUM_NC) {
+        recovered = false;
+    } else {
+        gpio_config_t int_gpio_config = {};
+        int_gpio_config.mode = GPIO_MODE_INPUT;
+        int_gpio_config.intr_type = panel->config.levels.interrupt
+                                        ? GPIO_INTR_POSEDGE
+                                        : GPIO_INTR_NEGEDGE;
+        int_gpio_config.pin_bit_mask = BIT64(interrupt_gpio);
+        if (gpio_config(&int_gpio_config) != ESP_OK) {
+            recovered = false;
+        }
+    }
+
+    const uint32_t now_ms = get_monotonic_ms();
+    lvgl_port_touch->resetPoints();
+    lvgl_touch_set_cached_state(LV_INDEV_STATE_RELEASED);
+    lvgl_touch_cached_point = {};
+    lvgl_touch_last_sample_ms = 0;
+    lvgl_touch_clear_interrupt();
+
+    if (!recovered) {
+        lvgl_touch_recovery.suspendUntilRetry();
+        lvgl_touch_offline.store(true, std::memory_order_release);
+        lvgl_touch_wake_policy_set(false, true, now_ms);
+        (void)lvgl_touch_mask_direct_interrupt();
+        return false;
+    }
+
+    lvgl_touch_error_streak.reset();
+    lvgl_touch_recovery.reset();
+    lvgl_touch_offline.store(false, std::memory_order_release);
+    lvgl_touch_wait_release_after_block.store(true, std::memory_order_release);
+    lvgl_touch_read_block_until_ms.store(now_ms + LVGL_TOUCH_RECOVER_BLOCK_MS,
+                                         std::memory_order_release);
+
+    lvgl_touch_wake_policy_set(wake_probe_enabled, true, now_ms);
+    if (wake_probe_enabled) {
+        return lvgl_touch_arm_direct_interrupt();
+    }
+    return lvgl_touch_mask_direct_interrupt();
+}
+
 void lvgl_port_disable_touch_i2c(void)
 {
     if (!lvgl_touch_i2c_runtime_gate.disable()) {

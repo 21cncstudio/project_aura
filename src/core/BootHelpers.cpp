@@ -83,10 +83,22 @@ const char *BootHelpers::resetReasonText(esp_reset_reason_t reason) {
     }
 }
 
+bool BootHelpers::readGt911ConfiguredProductId(uint8_t out[3]) {
+    if (out == nullptr) {
+        return false;
+    }
+    return gt911_read_product_id(GT911_PROBE_PLAN.address, out, 3U);
+}
+
+bool BootHelpers::isExpectedGt911ProductId(const uint8_t id[3]) {
+    return id != nullptr && id[0] == static_cast<uint8_t>('9') &&
+           id[1] == static_cast<uint8_t>('1') &&
+           id[2] == static_cast<uint8_t>('1');
+}
+
 void BootHelpers::logGt911Address() {
     uint8_t id[3] = {};
-    const bool ok =
-        gt911_read_product_id(GT911_PROBE_PLAN.address, id, sizeof(id));
+    const bool ok = readGt911ConfiguredProductId(id);
     if (ok) {
         Logger::log(Logger::Info,
                     "GT911",

@@ -264,6 +264,26 @@ bool lvgl_port_get_screen_flip_180(void);
 bool lvgl_port_block_touch_read(uint32_t duration_ms);
 
 /**
+ * @brief Prepare paused LVGL touch state for a coordinated GT911 hard reset.
+ *
+ * The LVGL task must already be paused. This masks the direct touch IRQ and
+ * clears cached input without disabling the one-way runtime I2C gate.
+ *
+ * @return true when the touch path is safe for the external reset sequence.
+ */
+bool lvgl_port_prepare_touch_hard_recovery(void);
+
+/**
+ * @brief Restore GT911 GPIO/input state after a coordinated hard reset.
+ *
+ * @param recovered True only after product ID was verified at address 0x14.
+ * @param wake_probe_enabled Restore dark-screen wake probing when true.
+ * @return true when the recovered touch and IRQ state were restored.
+ */
+bool lvgl_port_complete_touch_hard_recovery(bool recovered,
+                                            bool wake_probe_enabled);
+
+/**
  * @brief Permanently disable touch-controller I2C traffic for this boot.
  *
  * The gate is reset only by a new lvgl_port_init() lifecycle. Once disabled,
