@@ -22,7 +22,10 @@ This repository contains the firmware source code and configuration needed to fl
 > enclosure models, Bambu-ready 3MF files, and wiring instructions:
 > https://makerworld.com/en/crowdfunding/159-project-aura-aq-make-the-invisible-visible
 
-**Join the community:** [GitHub Discussions](https://github.com/21cncstudio/project_aura/discussions)
+- **Official website:** [aura-aq.com](https://aura-aq.com/)
+- **Aura AQ device page:** [features, supported hardware, and build paths](https://aura-aq.com/devices/aura-aq)
+- **Web Installer:** [install or update Aura AQ from a compatible browser](https://aura-aq.com/installer/aura-aq)
+- **Community:** [Discord](https://discord.gg/axDMfQv9de) | [GitHub Discussions](https://github.com/21cncstudio/project_aura/discussions)
 
 ## TL;DR
 - **What it is:** a finished DIY air-quality monitor with touchscreen UI, local dashboard, OTA updates, and Home Assistant support.
@@ -326,11 +329,12 @@ Feature managers are in `src/modules/`, UI in `src/ui/`, and web pages in `src/w
 ## Build and Flash (PlatformIO)
 For most builders, the first flash is easiest through the browser-based Aura Web Installer:
 
-https://aura.21cncstudio.com/
+[Open the Aura AQ Web Installer](https://aura-aq.com/installer/aura-aq)
 
 Connect the Waveshare board through its data USB-C port, open the installer in a compatible browser,
-and follow the build guide. After first flash and Wi-Fi setup, normal firmware updates can be done
-from Aura's local dashboard using OTA `.bin` files from GitHub releases.
+sign in with the Aura Account that has Installer access, and follow the build guide. After first flash
+and Wi-Fi setup, normal firmware updates can be done from Aura's local dashboard using OTA `.bin`
+files from GitHub releases.
 
 For development builds, use PlatformIO CLI or VSCode + PlatformIO extension.
 The firmware is built with Arduino ESP32 core 3.1.1 (ESP-IDF 5.3.x).
@@ -415,6 +419,7 @@ Community contributions that were manually integrated or reworked are acknowledg
 
 Found a bug? Open an Issue: https://github.com/21cncstudio/project_aura/issues
 Have a question? Ask in Discussions: https://github.com/21cncstudio/project_aura/discussions
+Want to talk with Aura builders and follow the wider ecosystem? Join Discord: https://discord.gg/axDMfQv9de
 
 ## License and Commercial Use
 - Firmware in this repository is licensed under GPL-3.0-or-later (see `LICENSE`).
