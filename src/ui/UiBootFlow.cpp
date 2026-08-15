@@ -240,11 +240,12 @@ void UiBootFlow::updateBootDiag(UiController &owner, uint32_t now_ms) {
     if (objects.lbl_diag_heap) {
         size_t free_bytes = heap_caps_get_free_size(MALLOC_CAP_8BIT);
         size_t min_bytes = heap_caps_get_minimum_free_size(MALLOC_CAP_8BIT);
-        size_t max_bytes = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT);
-        snprintf(buf, sizeof(buf), "free %uk / min %uk / max %uk",
+        // Do not walk every heap here. The largest-block query holds a heap
+        // critical section while the RGB bounce-buffer ISR is running on the
+        // same core, which can starve the refill and shift display scanlines.
+        snprintf(buf, sizeof(buf), "free %uk / min %uk",
                  static_cast<unsigned>(free_bytes / 1024),
-                 static_cast<unsigned>(min_bytes / 1024),
-                 static_cast<unsigned>(max_bytes / 1024));
+                 static_cast<unsigned>(min_bytes / 1024));
         owner.safe_label_set_text(objects.lbl_diag_heap, buf);
     }
     if (objects.lbl_diag_storage) {
