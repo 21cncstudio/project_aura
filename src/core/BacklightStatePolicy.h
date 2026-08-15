@@ -11,6 +11,12 @@
 
 namespace BacklightStatePolicy {
 
+inline bool needsPostDriverSettle(bool previous_on,
+                                  bool requested_on,
+                                  bool driver_succeeded) {
+    return !previous_on && requested_on && driver_succeeded;
+}
+
 struct Transition {
     bool actual_on;
     bool wake_probe_enabled;

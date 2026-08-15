@@ -172,6 +172,10 @@ void test_enum_text_is_stable() {
                              stageText(Stage::TouchIrqMaskBegin));
     TEST_ASSERT_EQUAL_STRING("touch_irq_mask_returned",
                              stageText(Stage::TouchIrqMaskReturned));
+    TEST_ASSERT_EQUAL_STRING("power_settle_begin",
+                             stageText(Stage::PowerSettleBegin));
+    TEST_ASSERT_EQUAL_STRING("power_settle_returned",
+                             stageText(Stage::PowerSettleReturned));
     TEST_ASSERT_EQUAL_STRING("wake_probe_update_returned",
                              stageText(Stage::WakeProbeUpdateReturned));
     TEST_ASSERT_EQUAL_STRING("succeeded", driverResultText(DriverResult::Succeeded));
@@ -183,6 +187,8 @@ void assert_event_advances_through_all_stages(Event event) {
     markTouchIrqMaskReturned();
     markDriverCallBegin();
     markDriverCallReturned(true, false, 30, {true, true, true});
+    markPowerSettleBegin();
+    markPowerSettleReturned();
     markWakeProbeUpdateBegin();
     markWakeProbeUpdateReturned({true, true, true});
     markLvglActivityBegin();
@@ -203,6 +209,20 @@ void test_touch_and_alarm_wakes_advance_through_all_stages() {
     assert_event_advances_through_all_stages(Event::TouchWake);
     test::resetRetained();
     assert_event_advances_through_all_stages(Event::AlarmWake);
+}
+
+void test_warm_boot_preserves_incomplete_power_settle() {
+    beginWake(Event::AlarmWake, 900, 1786746847, true, false, {true, true, true});
+    markDriverCallBegin();
+    markDriverCallReturned(true, false, 40, {true, true, true});
+    markPowerSettleBegin();
+
+    initializeAtBoot(false);
+
+    TEST_ASSERT_EQUAL_INT(static_cast<int>(CaptureStatus::Active),
+                          static_cast<int>(bootSnapshot().status));
+    TEST_ASSERT_EQUAL_INT(static_cast<int>(Stage::PowerSettleBegin),
+                          static_cast<int>(bootSnapshot().trace.stage));
 }
 
 void test_dark_wake_source_prefers_alarm_over_touch() {
@@ -258,6 +278,7 @@ int main(int, char **) {
     RUN_TEST(test_new_operation_increments_sequence);
     RUN_TEST(test_enum_text_is_stable);
     RUN_TEST(test_touch_and_alarm_wakes_advance_through_all_stages);
+    RUN_TEST(test_warm_boot_preserves_incomplete_power_settle);
     RUN_TEST(test_dark_wake_source_prefers_alarm_over_touch);
     RUN_TEST(test_ui_context_checkpoints_survive_warm_boot);
     RUN_TEST(test_retained_record_layout_remains_60_bytes);

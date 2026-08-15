@@ -89,7 +89,7 @@ bool recordValid(const RetainedRecord &record) {
            record.version == kVersion &&
            record.size == sizeof(RetainedRecord) &&
            record.event <= static_cast<uint8_t>(Event::AlarmWake) &&
-           record.stage <= static_cast<uint8_t>(Stage::TouchIrqMaskReturned) &&
+           record.stage <= static_cast<uint8_t>(Stage::PowerSettleReturned) &&
            record.driver_result <= static_cast<uint8_t>(DriverResult::Failed) &&
            record.crc32 == recordCrc(record);
 }
@@ -335,6 +335,14 @@ void markDriverCallReturned(bool succeeded,
     commitRecord(record);
 }
 
+void markPowerSettleBegin() {
+    markStage(Stage::PowerSettleBegin);
+}
+
+void markPowerSettleReturned() {
+    markStage(Stage::PowerSettleReturned);
+}
+
 void markWakeProbeUpdateBegin() {
     markStage(Stage::WakeProbeUpdateBegin);
 }
@@ -431,6 +439,8 @@ const char *stageText(Stage stage) {
         case Stage::Completed: return "completed";
         case Stage::TouchIrqMaskBegin: return "touch_irq_mask_begin";
         case Stage::TouchIrqMaskReturned: return "touch_irq_mask_returned";
+        case Stage::PowerSettleBegin: return "power_settle_begin";
+        case Stage::PowerSettleReturned: return "power_settle_returned";
         default: return "unknown";
     }
 }

@@ -29,6 +29,8 @@ enum class Stage : uint8_t {
     // Appended to preserve the numeric meaning of retained v1 records.
     TouchIrqMaskBegin,
     TouchIrqMaskReturned,
+    PowerSettleBegin,
+    PowerSettleReturned,
 };
 
 enum class DriverResult : uint8_t {
@@ -114,6 +116,8 @@ void markDriverCallReturned(bool succeeded,
                             bool skipped,
                             uint32_t duration_us,
                             LineState after);
+void markPowerSettleBegin();
+void markPowerSettleReturned();
 void markWakeProbeUpdateBegin();
 void markWakeProbeUpdateReturned(LineState after);
 void markLvglActivityBegin();

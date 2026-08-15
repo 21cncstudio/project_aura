@@ -311,10 +311,25 @@ bool BacklightManager::setOnWithGateHeld(
     if (trace_wake) {
         BacklightWakeBreadcrumbs::markDriverCallReturned(
             driver_succeeded, false, driver_duration_us, sample_bus());
-        BacklightWakeBreadcrumbs::markWakeProbeUpdateBegin();
     }
     const BacklightStatePolicy::Transition transition =
         BacklightStatePolicy::resolve(previous_on, on, driver_succeeded);
+    if (BacklightStatePolicy::needsPostDriverSettle(
+            previous_on, on, driver_succeeded)) {
+        if (trace_wake) {
+            BacklightWakeBreadcrumbs::markPowerSettleBegin();
+        }
+        // CH422G applies the complete backlight load in one step. Keep the
+        // cross-core quiet gate closed before touch-I2C or LVGL work so the
+        // display rail and cable-mounted bulk capacitor can settle.
+        delay(Config::BACKLIGHT_WAKE_DRIVER_SETTLE_MS);
+        if (trace_wake) {
+            BacklightWakeBreadcrumbs::markPowerSettleReturned();
+        }
+    }
+    if (trace_wake) {
+        BacklightWakeBreadcrumbs::markWakeProbeUpdateBegin();
+    }
     backlight_on_ = transition.actual_on;
     const bool wake_probe_updated =
         lvgl_port_set_wake_touch_probe(transition.wake_probe_enabled);
