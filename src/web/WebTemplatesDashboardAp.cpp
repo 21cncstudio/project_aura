@@ -1727,7 +1727,7 @@ function renderEvents(payload) {
   const uptimeS = isNum(payload && payload.uptime_s) ? payload.uptime_s : null;
   const severityClass = { warning:'sev-warning', danger:'sev-danger', critical:'sev-critical', info:'sev-info' };
 
-  const items = events.slice(0, 40).reverse().map(e => {
+  const items = events.slice(-40).reverse().map(e => {
     const sev = (e && typeof e.severity === 'string') ? e.severity : 'info';
     const sevClass = severityClass[sev] || 'sev-info';
     const tsMs = isNum(e && e.ts_ms) ? e.ts_ms : null;
