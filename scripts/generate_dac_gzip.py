@@ -48,23 +48,23 @@ SHELL = ShellConfig(
 </div>
 """.strip(),
     shell_critical_css="""
-:root{color-scheme:dark}
+:root{color-scheme:dark;--bg:#04080b;--surface:#11181d;--surface-2:#1c282d;--border:rgba(169,199,196,.12);--text:#f9fafb;--subtle:#9ca3af}
 *{box-sizing:border-box}
-html,body{margin:0;min-height:100%;background:#0f172a;color:#f1f5f9;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
+html,body{margin:0;min-height:100%;background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
 body{padding:16px;display:flex;justify-content:center}
 body.shell-loading .container{display:none}
 .shell-boot{display:none;width:100%;max-width:560px}
 body.shell-loading .shell-boot{display:block}
-.shell-boot-card{width:100%;border:1px solid rgba(255,255,255,.08);border-radius:18px;padding:16px;background:rgba(30,41,59,.74);box-shadow:0 26px 64px -28px rgba(0,0,0,.7)}
+.shell-boot-card{width:100%;border:1px solid var(--border);border-radius:18px;padding:16px;background:rgba(17,24,29,.96);box-shadow:inset 0 1px 0 rgba(226,250,245,.04),0 10px 26px rgba(0,0,0,.18)}
 .shell-head{display:flex;align-items:flex-start;justify-content:space-between;gap:16px}
-.shell-kicker{font-size:10px;font-weight:800;letter-spacing:.14em;text-transform:uppercase;color:#94a3b8}
+.shell-kicker{font-size:10px;font-weight:800;letter-spacing:.14em;text-transform:uppercase;color:var(--subtle)}
 .shell-title{margin-top:8px;font-size:27px;font-weight:800;letter-spacing:-.04em}
-.shell-sub{margin-top:4px;font-size:13px;color:#94a3b8}
-.shell-chip{padding:8px 12px;border-radius:999px;border:1px solid rgba(74,222,128,.3);background:rgba(15,23,42,.72);color:#86efac;font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.08em}
+.shell-sub{margin-top:4px;font-size:13px;color:var(--subtle)}
+.shell-chip{padding:8px 12px;border-radius:999px;border:1px solid rgba(111,201,143,.3);background:rgba(7,16,20,.72);color:#6fc98f;font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.08em}
 .shell-stat-grid,.shell-panel-grid{display:grid;gap:10px;margin-top:14px}
 .shell-stat-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
 .shell-panel-grid{grid-template-columns:1fr}
-.shell-stat,.shell-panel{border-radius:14px;border:1px solid rgba(255,255,255,.08);background:linear-gradient(110deg,rgba(15,23,42,.96) 8%,rgba(51,65,85,.78) 18%,rgba(15,23,42,.96) 33%);background-size:200% 100%;animation:shell-shimmer 1.2s linear infinite}
+.shell-stat,.shell-panel{border-radius:14px;border:1px solid var(--border);background:linear-gradient(110deg,rgba(7,16,20,.96) 8%,rgba(28,40,45,.82) 18%,rgba(7,16,20,.96) 33%);background-size:200% 100%;animation:shell-shimmer 1.2s linear infinite}
 .shell-stat{height:86px}
 .shell-panel{height:154px}
 .shell-panel-tall{height:202px}

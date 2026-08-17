@@ -43,21 +43,21 @@ SHELL = ShellConfig(
 </div>
 """.strip(),
     shell_critical_css="""
-:root{color-scheme:dark}
+:root{color-scheme:dark;--bg:#04080b;--surface:#11181d;--surface-2:#1c282d;--border:rgba(169,199,196,.12);--text:#f9fafb;--subtle:#9ca3af;--teal:#2bb4bd}
 *{box-sizing:border-box}
-html,body{margin:0;min-height:100%;background:#0f172a;color:#f1f5f9;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
+html,body{margin:0;min-height:100%;background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
 body{min-height:100vh}
 body.shell-loading .main-container,body.shell-loading .toast-notification,body.shell-loading .aura{display:none}
 .app-viewport{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:18px}
 .shell-boot{display:none;width:100%;max-width:920px}
 body.shell-loading .shell-boot{display:block}
-.shell-boot-card{border:1px solid rgba(255,255,255,.08);border-radius:28px;padding:24px;background:rgba(15,23,42,.78);box-shadow:0 30px 80px -26px rgba(0,0,0,.68)}
-.shell-kicker{font-size:11px;font-weight:800;letter-spacing:.14em;text-transform:uppercase;color:#94a3b8}
+.shell-boot-card{border:1px solid var(--border);border-radius:28px;padding:24px;background:rgba(17,24,29,.96);box-shadow:inset 0 1px 0 rgba(226,250,245,.04),0 10px 26px rgba(0,0,0,.18)}
+.shell-kicker{font-size:11px;font-weight:800;letter-spacing:.14em;text-transform:uppercase;color:var(--subtle)}
 .shell-title{margin-top:10px;font-size:30px;font-weight:800;letter-spacing:-.04em}
-.shell-sub{margin-top:6px;color:#94a3b8;font-size:14px}
+.shell-sub{margin-top:6px;color:var(--subtle);font-size:14px}
 .shell-preview{display:grid;grid-template-columns:minmax(240px,320px) 1fr;gap:18px;margin-top:22px;align-items:center}
-.shell-preview-card{min-height:220px;border-radius:22px;border:1px solid rgba(255,255,255,.08);background:linear-gradient(135deg,rgba(99,102,241,.65),rgba(15,23,42,.92) 58%,rgba(51,65,85,.92));position:relative;overflow:hidden}
-.shell-preview-card::after,.shell-line{content:"";display:block;background:linear-gradient(110deg,rgba(30,41,59,.92) 8%,rgba(71,85,105,.78) 18%,rgba(30,41,59,.92) 33%);background-size:200% 100%;animation:shell-shimmer 1.2s linear infinite}
+.shell-preview-card{min-height:220px;border-radius:22px;border:1px solid var(--border);background:linear-gradient(135deg,rgba(43,180,189,.5),rgba(7,16,20,.94) 58%,rgba(28,40,45,.94));position:relative;overflow:hidden}
+.shell-preview-card::after,.shell-line{content:"";display:block;background:linear-gradient(110deg,rgba(17,24,29,.94) 8%,rgba(28,40,45,.82) 18%,rgba(17,24,29,.94) 33%);background-size:200% 100%;animation:shell-shimmer 1.2s linear infinite}
 .shell-preview-card::after{position:absolute;inset:18px;border-radius:18px}
 .shell-preview-meta{display:flex;flex-direction:column;gap:12px}
 .shell-line{height:16px;border-radius:999px}

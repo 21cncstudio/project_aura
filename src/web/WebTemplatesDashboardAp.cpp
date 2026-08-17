@@ -20,13 +20,30 @@ const char kDashboardPageTemplateAp[] PROGMEM = R"HTML_DASH_AP(
   <title>Aura Dashboard</title>
   <link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHZpZXdCb3g9JzAgMCAxNjkzLjMyIDE2OTMuMzInPjxwYXRoIGZpbGw9JyNFNkI4NzMnIGZpbGwtcnVsZT0nZXZlbm9kZCcgY2xpcC1ydWxlPSdldmVub2RkJyBkPSdNODQ2LjY2IDE2NDIuNTNjNDM5LjU1LDAgNzk1Ljg3LC0zNTYuMzIgNzk1Ljg3LC03OTUuODcgMCwtNDM5LjU1IC0zNTYuMzIsLTc5NS44NyAtNzk1Ljg3LC03OTUuODcgLTQzOS41NSwwIC03OTUuODcsMzU2LjMyIC03OTUuODcsNzk1Ljg3IDAsNDM5LjU1IDM1Ni4zMiw3OTUuODcgNzk1Ljg3LDc5NS44N3ptLTQxOS4zMiAtMTM3MC4yOGMzMjcuMTcsLTYwLjE4IDY3NS4xNCwxNTAuNDQgNjkwLjYzLDUxMi44IDU2LjE2LC0xODAuOSAtMTEuMTksLTM3My44MiAtMTQzLjQxLC01MDMuNTIgLTY2LjY4LC02NS40IC0xNDkuNjgsLTExNC4zNiAtMjQxLjE0LC0xMzcuMDcgLTExMy4xNywxOC4xMSAtMjE3LjQsNjIuOTQgLTMwNi4wOCwxMjcuNzl6bTU4Ny44NyAzNTMuMjZjLTcyLjgsLTE3NC42NCAtMjQ5LjE4LC0yNzkuNTUgLTQzMy42OCwtMjkzLjkxIC05My4xNiwtNy4yNSAtMTg4LjA3LDguNDQgLTI3Mi40OCw0OS41NCAtNzIuNSw4My42NSAtMTI1LjgsMTg0LjM3IC0xNTMuMDUsMjk1LjM2IDIxMi4wOCwtMjU2LjcxIDYxNC4yOSwtMzE5LjMzIDg1OS4yMSwtNTAuOTl6bS0xMjAuNiAtNDg4LjQ1YzEyOC42OCw3My4xOCAyMzAuMDQsMTk0IDI3OSwzMzMuMjQgNjAuODgsMTczLjE0IDM1LjAyLDM1NC44MiAtNzkuNjgsNTAzLjcxIDE1OS4xNywtMTAyLjIzIDIzMS44NiwtMjkzLjk1IDIxMy45OCwtNDc4LjEgLTkuMDIsLTkyLjkgLTQxLjEsLTE4My43IC05Ni41MSwtMjU5Ljg3IC05My43NSwtNTYuMTQgLTIwMS41MSwtOTEuMyAtMzE2Ljc5LC05OC45OHptNDQ0LjkzIDE5Ni45N2MxMTUuODMsMzEyLjA3IC0zMC44NCw2OTEuMzEgLTM4NS41NSw3NjkuMTUgMTg3LjU3LDI0LjE0IDM2Ni43MSwtNzYuMDkgNDcxLjM0LC0yMjguNjEgNTIuOTQsLTc3LjE3IDg2LjgsLTE2Ny40NSA5My4yOCwtMjYxLjM1IC0zNy4xNiwtMTA2Ljk4IC05OS4xNiwtMjAyLjMyIC0xNzkuMDcsLTI3OS4xOXptMjE0LjI3IDQzNi41N2MtMTExLjU0LDMxMy41MiAtNDY3LjgzLDUwOS43MiAtNzg5LjQ0LDM0MS44MSAxMjguMjQsMTM4Ljc3IDMyOS44MiwxNzcuMSA1MDcuNzcsMTI3LjU5IDkwLjAzLC0yNS4wNSAxNzQuMDEsLTcyLjUzIDIzOS40NCwtMTQwLjUxIDI5LjksLTc4LjU1IDQ2LjI4LC0xNjMuNzggNDYuMjgsLTI1Mi44MyAwLC0yNS43IC0xLjM5LC01MS4wNyAtNC4wNSwtNzYuMDZ6bS0xMTYuNTcgNDcyLjM4Yy0yODcuMTIsMTY4LjIzIC02ODYuMjIsODkuOTYgLTgyNC41NCwtMjQ1Ljk4IDguNzEsMTg5LjA4IDEzOC40NSwzNDcuNzUgMzA2LjkzLDQyNC4zNiA4NS4xMywzOC43MSAxNzkuODQsNTYuMzggMjczLjQzLDQ2LjUzIDk4LjAzLC01NC43OCAxODEuNzUsLTEzMi4wOSAyNDQuMTgsLTIyNC45MXptLTM5Mi42NSAyODYuOTRjLTMyOC4xLC01NS4yOCAtNTgzLjU4LC0zNzIuMzUgLTQ3My44NywtNzE4LjM5IC0xMTQuNzgsMTUwLjY2IC0xMTcuNCwzNTUuNDIgLTM3LjU5LDUyMi40IDQwLjMxLDg0LjMzIDEwMS41NCwxNTguNzUgMTc5LjY4LDIxMS4zNCA0My4zNSw4LjI2IDg4LjEsMTIuNTkgMTMzLjg1LDEyLjU5IDY4LjY5LDAgMTM1LjEsLTkuNzcgMTk3LjkzLC0yNy45NHptLTQ4NS4zOCAtMzIuNTdjLTIxNS44MSwtMjUzLjM0IC0yMDgsLTY2MC4yOSA5OC42NCwtODU0Ljg4IC0xODQuNjksNDEuNjUgLTMxOC40MywxOTYuNzIgLTM2NC41OCwzNzUuODUgLTIzLjI5LDkwLjQgLTI0LjIsMTg2LjczIDEuODQsMjc3LjMyIDcwLjQ1LDg2LjQ0IDE2MC44MSwxNTYuMDEgMjY0LjEsMjAxLjcxem0tMzUxLjA0IC0zMzcuMTZjLTIuMTgsLTMzMy4wNiAyNjUuMzYsLTYzOS43MSA2MjUuNDgsLTU5MS4yNiAtMTY4LjE0LC04Ny4wMyAtMzcwLjYyLC01NC4wNCAtNTIxLjM0LDUzLjY2IC01OS43Miw0Mi42OCAtMTc2Ljg1LDE2NS4xNiAtMTc2Ljg1LDIyNC4wNyAwLDExMi41MyAyNi4xOCwyMTguOTQgNzIuNzEsMzEzLjUzem02MzguNDkgLTEyMy4yM2MxMDUuMSwwIDE5MC4zLC04NS4yIDE5MC4zLC0xOTAuMyAwLC0xMDUuMSAtODUuMiwtMTkwLjMgLTE5MC4zLC0xOTAuMyAtMTA1LjEsMCAtMTkwLjMsODUuMiAtMTkwLjMsMTkwLjMgMCwxMDUuMSA4NS4yLDE5MC4zIDE5MC4zLDE5MC4zeicvPjwvc3ZnPg==" />
   <style>
+    :root {
+      color-scheme: dark;
+      --bg: #04080b;
+      --surface: #11181d;
+      --surface-raised: #141e22;
+      --surface-recessed: #071014;
+      --border: rgba(169,199,196,.12);
+      --border-medium: rgba(169,199,196,.18);
+      --text: #f9fafb;
+      --muted: #d1d5db;
+      --subtle: #9ca3af;
+      --teal: #2bb4bd;
+      --teal-hover: #57c4c2;
+      --mist: #a9c7c4;
+      --good: #6fc98f;
+      --card-shadow: inset 0 1px 0 rgba(226,250,245,.04), 0 10px 26px rgba(0,0,0,.18);
+    }
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     html, body {
-      color: #f9fafb;
+      color: var(--text);
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
       font-size: 14px;
       line-height: 1.5;
-      background: #111827;
+      background: var(--bg);
     }
     body { padding: 16px; }
     @media (min-width: 768px) { body { padding: 16px 24px; } }
@@ -54,8 +71,8 @@ const char kDashboardPageTemplateAp[] PROGMEM = R"HTML_DASH_AP(
       position: absolute;
       inset: 0;
       border-radius: 999px;
-      border: 1px solid rgba(52, 211, 153, 0.75);
-      box-shadow: 0 0 10px rgba(34, 197, 94, 0.75);
+      border: 1px solid rgba(43, 180, 189, 0.75);
+      box-shadow: 0 0 10px rgba(43, 180, 189, 0.58);
       animation: pulse-dot 1.8s ease-in-out infinite;
     }
     .brand-dot::after {
@@ -63,20 +80,20 @@ const char kDashboardPageTemplateAp[] PROGMEM = R"HTML_DASH_AP(
       width: 8px;
       height: 8px;
       border-radius: 999px;
-      background: #34d399;
-      box-shadow: 0 0 8px rgba(74, 222, 128, 0.95);
+      background: var(--teal);
+      box-shadow: 0 0 8px rgba(43, 180, 189, 0.75);
     }
     @keyframes pulse-dot {
       0% { transform: scale(0.88); opacity: 0.72; }
       70% { transform: scale(1.1); opacity: 0.2; }
       100% { transform: scale(0.88); opacity: 0.72; }
     }
-    .brand-name { font-size: 20px; font-weight: 700; color: #f9fafb; letter-spacing: .01em; }
+    .brand-name { font-size: 20px; font-weight: 700; color: var(--text); letter-spacing: .01em; }
     .brand-sub {
       margin-left: 22px;
       margin-top: 3px;
       font-size: 13px;
-      color: #9ca3af;
+      color: var(--subtle);
       font-weight: 600;
       letter-spacing: .03em;
       text-transform: none;
@@ -88,7 +105,7 @@ const char kDashboardPageTemplateAp[] PROGMEM = R"HTML_DASH_AP(
     .hdr-right { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; justify-content: flex-end; }
     .clock { text-align: right; }
     .clock-time { font-size: 20px; font-weight: 700; line-height: 1; letter-spacing: .03em; }
-    .clock-date { margin-top: 4px; color: #9ca3af; font-size: 11px; font-weight: 600; letter-spacing: .12em; text-transform: uppercase; }
+    .clock-date { margin-top: 4px; color: var(--subtle); font-size: 11px; font-weight: 600; letter-spacing: .12em; text-transform: uppercase; }
     @media (min-width: 768px) {
       .hdr { margin-bottom: 24px; }
       .brand-name { font-size: 24px; }
@@ -103,15 +120,15 @@ const char kDashboardPageTemplateAp[] PROGMEM = R"HTML_DASH_AP(
       padding: 9px 14px;
       font-size: 13px;
       font-weight: 700;
-      border: 1px solid #374151;
-      background: rgba(31,41,55,.78);
-      color: #d1d5db;
+      border: 1px solid var(--border-medium);
+      background: rgba(17,24,29,.78);
+      color: var(--muted);
       transition: border-color .15s, background .15s, color .15s;
     }
-    .btn:hover { border-color: #4b5563; background: rgba(55,65,81,.55); color: #f9fafb; }
+    .btn:hover { border-color: rgba(43,180,189,.34); background: rgba(43,180,189,.08); color: var(--text); }
     .btn:disabled { opacity: .5; cursor: not-allowed; }
-    .btn-cyan { background: rgba(6,182,212,.12); border-color: rgba(6,182,212,.45); color: #67e8f9; }
-    .btn-cyan:hover { background: rgba(6,182,212,.22); border-color: rgba(6,182,212,.62); color: #a5f3fc; }
+    .btn-cyan { background: rgba(43,180,189,.12); border-color: rgba(43,180,189,.45); color: var(--teal-hover); }
+    .btn-cyan:hover { background: rgba(43,180,189,.2); border-color: rgba(43,180,189,.62); color: var(--mist); }
     .btn-danger { background: rgba(239,68,68,.12); border-color: rgba(239,68,68,.45); color: #fca5a5; }
     .btn-danger:hover { background: rgba(239,68,68,.2); border-color: rgba(239,68,68,.62); color: #fecaca; }
     .btn-amber { background: rgba(245,158,11,.12); border-color: rgba(245,158,11,.45); color: #fcd34d; }
@@ -122,8 +139,8 @@ const char kDashboardPageTemplateAp[] PROGMEM = R"HTML_DASH_AP(
       margin: 16px 0 0;
       padding: 9px 12px;
       border-radius: 10px;
-      border: 1px solid #374151;
-      background: rgba(31, 41, 55, 0.7);
+      border: 1px solid var(--border-medium);
+      background: rgba(17, 24, 29, 0.72);
       display: flex;
       align-items: center;
       justify-content: space-between;
@@ -131,9 +148,9 @@ const char kDashboardPageTemplateAp[] PROGMEM = R"HTML_DASH_AP(
       flex-wrap: wrap;
     }
     .net-status-text { font-size: 12px; font-weight: 700; letter-spacing: 0.01em; }
-    .net-status-meta { font-size: 11px; color: #9ca3af; }
-    .net-status.ok { border-color: rgba(34,197,94,.45); background: rgba(20,83,45,.35); }
-    .net-status.ok .net-status-text { color: #86efac; }
+    .net-status-meta { font-size: 11px; color: var(--subtle); }
+    .net-status.ok { border-color: rgba(111,201,143,.45); background: rgba(111,201,143,.1); }
+    .net-status.ok .net-status-text { color: var(--good); }
     .net-status.warn { border-color: rgba(245,158,11,.45); background: rgba(120,53,15,.28); }
     .net-status.warn .net-status-text { color: #fcd34d; }
     .net-status.err { border-color: rgba(239,68,68,.45); background: rgba(127,29,29,.32); }
@@ -146,7 +163,7 @@ const char kDashboardPageTemplateAp[] PROGMEM = R"HTML_DASH_AP(
       align-items: center;
       justify-content: center;
       padding: 20px;
-      background: rgba(2, 6, 23, 0.74);
+      background: rgba(4, 8, 11, 0.78);
       backdrop-filter: blur(3px);
       -webkit-backdrop-filter: blur(3px);
     }
@@ -156,8 +173,8 @@ const char kDashboardPageTemplateAp[] PROGMEM = R"HTML_DASH_AP(
       max-width: 460px;
       border-radius: 14px;
       border: 1px solid rgba(245,158,11,.45);
-      background: linear-gradient(160deg, rgba(31,41,55,.96), rgba(17,24,39,.96));
-      box-shadow: 0 18px 42px rgba(2,6,23,.45);
+      background: linear-gradient(160deg, rgba(20,30,34,.98), rgba(7,16,20,.98));
+      box-shadow: 0 18px 42px rgba(0,0,0,.42);
       padding: 18px 20px;
       color: #e5e7eb;
       text-align: center;
@@ -176,24 +193,24 @@ const char kDashboardPageTemplateAp[] PROGMEM = R"HTML_DASH_AP(
     }
 
     /* ── Tab nav ── */
-    .tab-nav { display: flex; flex-wrap: wrap; background: #1f2937; padding: 4px; border-radius: 12px; margin-bottom: 16px; border: 1px solid rgba(55,65,81,.5); gap: 4px; }
-    .tab-btn { display: flex; align-items: center; justify-content: center; gap: 7px; flex: 1; min-width: 48%; padding: 8px 12px; border-radius: 8px; border: none; background: transparent; color: #9ca3af; font-size: 13px; font-weight: 700; cursor: pointer; transition: background .15s, color .15s; }
+    .tab-nav { display: flex; flex-wrap: wrap; background: var(--surface-recessed); padding: 4px; border-radius: 12px; margin-bottom: 16px; border: 1px solid var(--border); gap: 4px; box-shadow: inset 0 1px 0 rgba(226,250,245,.035); }
+    .tab-btn { display: flex; align-items: center; justify-content: center; gap: 7px; flex: 1; min-width: 48%; padding: 8px 12px; border-radius: 8px; border: none; background: transparent; color: var(--subtle); font-size: 13px; font-weight: 700; cursor: pointer; transition: background .15s, color .15s; }
     @media (min-width:640px) { .tab-btn { min-width: 132px; flex: none; } }
-    .tab-btn:hover { color: #e5e7eb; }
-    .tab-btn.active { background: #0891b2; color: #fff; box-shadow: 0 4px 16px rgba(8,145,178,.3); }
+    .tab-btn:hover { color: var(--text); }
+    .tab-btn.active { background: var(--teal); color: #041012; box-shadow: 0 3px 12px rgba(43,180,189,.16); }
     .tab-btn svg { width: 16px; height: 16px; flex-shrink: 0; }
     .tab-panel { display: none; }
     .tab-panel.active { display: block; }
 
     /* ── Cards & grids ── */
     .card-g8 {
-      background: linear-gradient(135deg, #1f2937 0%, #111827 100%);
-      border: 1px solid rgba(55,65,81,.62);
+      background: linear-gradient(135deg, var(--surface) 0%, var(--surface-recessed) 100%);
+      border: 1px solid var(--border-medium);
       border-radius: 16px;
-      box-shadow: 0 12px 24px rgba(2, 6, 23, 0.32);
+      box-shadow: var(--card-shadow);
     }
-    .card-g7 { background: #1f2937; border: 1px solid rgba(55,65,81,.55); border-radius: 12px; }
-    .mini-card { background: rgba(55,65,81,.32); border: 1px solid rgba(75,85,99,.5); border-radius: 12px; padding: 12px 14px; }
+    .card-g7 { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; box-shadow: var(--card-shadow); }
+    .mini-card { background: rgba(28,40,45,.58); border: 1px solid var(--border-medium); border-radius: 12px; padding: 12px 14px; box-shadow: inset 0 1px 0 rgba(226,250,245,.025); }
 
     /* ── HeroMetric ── */
     .hero-wrap { padding: 20px 22px 16px; }
@@ -202,10 +219,10 @@ const char kDashboardPageTemplateAp[] PROGMEM = R"HTML_DASH_AP(
     .hero-val { font-size: 64px; font-weight: 600; line-height: 1; }
     .hero-unit { font-size: 16px; color: #9ca3af; padding-bottom: 6px; }
     .hero-pill { margin-top: 2px; }
-    .hero-progress-track { margin-top: 14px; height: 10px; background: rgba(55,65,81,.8); border-radius: 999px; overflow: hidden; }
+    .hero-progress-track { margin-top: 14px; height: 10px; background: rgba(28,40,45,.8); border-radius: 999px; overflow: hidden; }
     .hero-progress-fill { height: 100%; border-radius: 999px; transition: width .7s; }
     .hero-advice { margin-top: 10px; font-size: 14px; color: #d1d5db; }
-    .hero-trend-sep { margin-top: 18px; padding-top: 14px; border-top: 1px solid rgba(55,65,81,.6); }
+    .hero-trend-sep { margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--border); }
     .hero-trend-hdr { display: flex; align-items: center; justify-content: space-between; }
     .hero-trend-label { font-size: 10px; text-transform: uppercase; letter-spacing: .08em; color: #9ca3af; font-weight: 600; }
     .hero-trend-delta { font-size: 13px; font-weight: 600; }
@@ -243,7 +260,7 @@ const char kDashboardPageTemplateAp[] PROGMEM = R"HTML_DASH_AP(
     .gas-unit { font-size: 10px; color: #6b7280; }
     .gas-val-row { display: flex; align-items: flex-end; justify-content: space-between; margin-top: 6px; }
     .gas-val { font-size: 28px; font-weight: 600; line-height: 1; }
-    .gas-progress { margin-top: 10px; height: 6px; background: #374151; border-radius: 999px; overflow: hidden; }
+    .gas-progress { margin-top: 10px; height: 6px; background: var(--surface-raised); border-radius: 999px; overflow: hidden; }
     .gas-bar { height: 100%; border-radius: 999px; }
 
     /* ── PM compact grid ── */
@@ -258,7 +275,7 @@ const char kDashboardPageTemplateAp[] PROGMEM = R"HTML_DASH_AP(
     .pm-unit { font-size: 10px; color: #6b7280; padding-bottom: 0; }
     .pm-val-row { display: flex; align-items: flex-end; justify-content: space-between; gap: 5px; margin-top: 5px; }
     .pm-val-left { display: flex; align-items: flex-end; gap: 5px; }
-    .pm-progress { margin-top: 6px; height: 5px; background: #374151; border-radius: 999px; overflow: hidden; }
+    .pm-progress { margin-top: 6px; height: 5px; background: var(--surface-raised); border-radius: 999px; overflow: hidden; }
     .pm-bar { height: 100%; border-radius: 999px; }
 
     /* ── Section title (sensors tab) ── */
@@ -289,22 +306,22 @@ const char kDashboardPageTemplateAp[] PROGMEM = R"HTML_DASH_AP(
       }
     }
     .chart-controls .seg-ctrl {
-      background: #1f2937;
-      border: 1px solid rgba(55,65,81,.55);
+      background: var(--surface);
+      border: 1px solid var(--border);
       border-radius: 8px;
       padding: 4px;
       gap: 4px;
     }
-    .seg-ctrl { display: flex; background: rgba(17,24,39,.6); border: 1px solid #374151; border-radius: 8px; padding: 2px; gap: 2px; }
+    .seg-ctrl { display: flex; background: rgba(7,16,20,.72); border: 1px solid var(--border-medium); border-radius: 8px; padding: 2px; gap: 2px; }
     .seg-btn { border: none; background: transparent; color: #9ca3af; padding: 5px 11px; font-size: 12px; font-weight: 600; border-radius: 6px; cursor: pointer; transition: background .12s, color .12s; }
     .chart-controls .seg-btn { flex: 1; padding: 6px 10px; font-size: 12px; font-weight: 700; color: #6b7280; }
     .chart-controls .seg-btn:hover { color: #d1d5db; }
-    .seg-btn.active { background: #0891b2; color: #fff; }
+    .seg-btn.active { background: var(--teal); color: #041012; }
     #cgroupSeg .seg-btn.active,
     #crangeSeg .seg-btn.active {
-      background: #374151;
-      color: #f9fafb;
-      box-shadow: 0 1px 3px rgba(2,6,23,.35), inset 0 0 0 1px rgba(148,163,184,.2);
+      background: var(--surface-raised);
+      color: var(--text);
+      box-shadow: 0 1px 3px rgba(0,0,0,.35), inset 0 0 0 1px var(--border-medium);
     }
     .chart-grid { display: grid; grid-template-columns: 1fr; gap: 12px; }
     @media (min-width: 768px) { .chart-grid { gap: 16px; } }
@@ -340,7 +357,7 @@ const char kDashboardPageTemplateAp[] PROGMEM = R"HTML_DASH_AP(
       width: 8px;
       height: 8px;
       border-radius: 999px;
-      border: 1px solid #0f172a;
+      border: 1px solid var(--bg);
       background: #22c55e;
       box-shadow: 0 0 0 4px rgba(34, 197, 94, 0.28);
       transform: translate(-50%, -50%);
@@ -353,9 +370,9 @@ const char kDashboardPageTemplateAp[] PROGMEM = R"HTML_DASH_AP(
       position: absolute;
       z-index: 6;
       pointer-events: none;
-      background: rgba(17, 24, 39, 0.95);
-      border: 1px solid rgba(75, 85, 99, 0.95);
-      box-shadow: 0 10px 24px rgba(2, 6, 23, 0.45);
+      background: rgba(17, 24, 29, 0.97);
+      border: 1px solid var(--border-medium);
+      box-shadow: 0 10px 24px rgba(0, 0, 0, 0.4);
       border-radius: 8px;
       color: #f9fafb;
       font-size: 11px;
@@ -390,15 +407,15 @@ const char kDashboardPageTemplateAp[] PROGMEM = R"HTML_DASH_AP(
     .alert-time { font-size: 12px; color: #a5f3fc; font-weight: 600; white-space: nowrap; }
 
     /* ── Settings ── */
-    .sg { background: #1f2937; border: 1px solid rgba(55,65,81,.5); border-radius: 12px; padding: 16px 18px; }
+    .sg { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 16px 18px; box-shadow: var(--card-shadow); }
     .sg + .sg { margin-top: 12px; }
     .sg-title { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: #6b7280; font-weight: 700; margin-bottom: 12px; }
     .sg-rows { display: flex; flex-direction: column; gap: 12px; }
     .toggle-row { display: flex; align-items: center; justify-content: space-between; cursor: pointer; user-select: none; }
     .toggle-row.disabled { opacity: .6; cursor: not-allowed; }
     .toggle-label { font-size: 14px; color: #d1d5db; }
-    .toggle-sw { width: 40px; height: 20px; border-radius: 999px; background: #374151; position: relative; transition: background .2s; flex-shrink: 0; }
-    .toggle-sw.on { background: #0891b2; }
+    .toggle-sw { width: 40px; height: 20px; border-radius: 999px; background: var(--surface-raised); position: relative; transition: background .2s; flex-shrink: 0; }
+    .toggle-sw.on { background: var(--teal); }
     .toggle-knob { position: absolute; top: 3px; left: 3px; width: 14px; height: 14px; border-radius: 50%; background: #fff; transition: left .2s; box-shadow: 0 1px 3px rgba(0,0,0,.4); }
     .toggle-sw.on .toggle-knob { left: 23px; }
     .toggle-msg { min-height: 14px; font-size: 11px; color: #6b7280; }
@@ -408,29 +425,29 @@ const char kDashboardPageTemplateAp[] PROGMEM = R"HTML_DASH_AP(
     .stepper-row { display: flex; align-items: center; justify-content: space-between; }
     .stepper-label { font-size: 14px; color: #d1d5db; }
     .stepper-ctrl { display: flex; align-items: center; gap: 8px; }
-    .stepper-btn { width: 30px; height: 30px; border-radius: 8px; border: 1px solid #374151; background: #111827; color: #d1d5db; font-size: 18px; cursor: pointer; display: flex; align-items: center; justify-content: center; line-height: 1; }
-    .stepper-btn:hover { border-color: #4b5563; }
+    .stepper-btn { width: 30px; height: 30px; border-radius: 8px; border: 1px solid var(--border-medium); background: var(--surface-recessed); color: var(--muted); font-size: 18px; cursor: pointer; display: flex; align-items: center; justify-content: center; line-height: 1; }
+    .stepper-btn:hover { border-color: rgba(43,180,189,.34); }
     .stepper-val { min-width: 52px; text-align: center; font-size: 14px; font-weight: 600; color: #f9fafb; font-family: Consolas, "Courier New", monospace; }
     .text-field-row { display: flex; flex-direction: column; gap: 6px; }
     .text-field-lbl { font-size: 12px; color: #9ca3af; }
-    .text-input { width: 100%; background: #111827; border: 1px solid #374151; border-radius: 8px; padding: 8px 12px; color: #f9fafb; font-size: 14px; }
-    .text-input:focus { outline: none; border-color: #0891b2; }
+    .text-input { width: 100%; background: var(--surface-recessed); border: 1px solid var(--border-medium); border-radius: 8px; padding: 8px 12px; color: var(--text); font-size: 14px; }
+    .text-input:focus { outline: none; border-color: var(--teal); }
     .field-hint { font-size: 11px; color: #6b7280; line-height: 1.4; }
     .save-btn {
       margin-top: 14px;
       padding: 9px 18px;
       border-radius: 10px;
-      border: 1px solid #374151;
+      border: 1px solid var(--border-medium);
       font-size: 13px;
       font-weight: 700;
       cursor: pointer;
       transition: background .15s, border-color .15s, color .15s;
     }
-    .save-btn.idle { background: rgba(31,41,55,.7); color: #6b7280; border-color: #374151; cursor: default; }
-    .save-btn.dirty { background: rgba(6,182,212,.12); color: #67e8f9; border-color: rgba(6,182,212,.45); }
-    .save-btn.dirty:hover { background: rgba(6,182,212,.22); border-color: rgba(6,182,212,.62); }
-    .save-btn.saving { background: rgba(31,41,55,.85); color: #6b7280; border-color: #374151; cursor: not-allowed; }
-    .save-btn.saved { background: rgba(34,197,94,.14); color: #86efac; border-color: rgba(34,197,94,.45); }
+    .save-btn.idle { background: rgba(17,24,29,.72); color: #6b7280; border-color: var(--border); cursor: default; }
+    .save-btn.dirty { background: rgba(43,180,189,.12); color: var(--teal-hover); border-color: rgba(43,180,189,.45); }
+    .save-btn.dirty:hover { background: rgba(43,180,189,.2); border-color: rgba(43,180,189,.62); }
+    .save-btn.saving { background: rgba(17,24,29,.88); color: #6b7280; border-color: var(--border); cursor: not-allowed; }
+    .save-btn.saved { background: rgba(111,201,143,.12); color: var(--good); border-color: rgba(111,201,143,.45); }
     .save-btn.error { background: rgba(239,68,68,.12); color: #fca5a5; border-color: rgba(239,68,68,.45); }
     .settings-grid { display: grid; grid-template-columns: 1fr; gap: 12px; align-items: start; }
     .settings-col { display: flex; flex-direction: column; gap: 12px; }
@@ -450,7 +467,7 @@ const char kDashboardPageTemplateAp[] PROGMEM = R"HTML_DASH_AP(
     @media (min-width: 768px) { .system-col { gap: 16px; } }
     @media (min-width: 1024px) { .system-grid { grid-template-columns: 1fr 1fr; } }
     .info-rows { display: flex; flex-direction: column; gap: 0; }
-    .info-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 0; border-bottom: 1px solid rgba(55,65,81,.4); font-size: 13px; }
+    .info-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--border); font-size: 13px; }
     .info-row:last-child { border-bottom: none; }
     .info-key { color: #9ca3af; flex-shrink: 0; }
     .info-val { color: #f9fafb; text-align: right; font-weight: 500; }
@@ -467,8 +484,8 @@ const char kDashboardPageTemplateAp[] PROGMEM = R"HTML_DASH_AP(
     .sd-note.warn { color: #fcd34d; }
 
     /* ── OTA progress ── */
-    .progress-track { height: 8px; background: #1f2937; border-radius: 999px; overflow: hidden; border: 1px solid #374151; margin-top: 10px; }
-    .progress-fill { height: 100%; background: linear-gradient(90deg, #0891b2, #67e8f9); border-radius: 999px; width: 0%; transition: width .25s; }
+    .progress-track { height: 8px; background: var(--surface-recessed); border-radius: 999px; overflow: hidden; border: 1px solid var(--border); margin-top: 10px; }
+    .progress-fill { height: 100%; background: linear-gradient(90deg, var(--teal), var(--teal-hover)); border-radius: 999px; width: 0%; transition: width .25s; }
     .ota-status { font-size: 12px; color: #9ca3af; margin-top: 6px; }
     .ota-status.ok { color: #4ade80; }
     .ota-status.warn { color: #fcd34d; }
@@ -477,8 +494,8 @@ const char kDashboardPageTemplateAp[] PROGMEM = R"HTML_DASH_AP(
       margin-bottom: 4px;
       padding: 8px 10px;
       border-radius: 8px;
-      border: 1px solid #374151;
-      background: rgba(31, 41, 55, 0.6);
+      border: 1px solid var(--border);
+      background: rgba(17, 24, 29, 0.72);
       color: #9ca3af;
       font-size: 12px;
       line-height: 1.35;
@@ -495,8 +512,8 @@ const char kDashboardPageTemplateAp[] PROGMEM = R"HTML_DASH_AP(
     .file-input::file-selector-button {
       margin-right: 10px;
       border-radius: 6px;
-      border: 1px solid #4b5563;
-      background: #1f2937;
+      border: 1px solid var(--border-medium);
+      background: var(--surface);
       color: #e5e7eb;
       padding: 6px 10px;
       font-size: 12px;
@@ -519,7 +536,7 @@ const char kDashboardPageTemplateAp[] PROGMEM = R"HTML_DASH_AP(
     <div class="hdr-left">
       <div class="brand">
         <span class="brand-dot"></span>
-        <span class="brand-name">AURA</span>
+        <span class="brand-name">AURA AQ</span>
       </div>
       <div id="deviceNameLabel" class="brand-sub">Device</div>
     </div>
@@ -694,12 +711,15 @@ const char kDashboardPageTemplateAp[] PROGMEM = R"HTML_DASH_AP(
           <div class="info-rows">
             <div class="info-row"><span class="info-key">Card</span><span class="info-val" id="sd-status">--</span></div>
             <div class="info-row"><span class="info-key">Card size</span><span class="info-val" id="sd-capacity">--</span></div>
+            <div class="info-row"><span class="info-key">Free space</span><span class="info-val" id="sd-free-space">--</span></div>
             <div class="info-row"><span class="info-key">Current day</span><span class="info-val" id="sd-day">--</span></div>
             <div class="info-row"><span class="info-key">CSV units</span><span class="info-val" id="sd-csv-units">--</span></div>
-            <div class="info-row"><span class="info-key">Samples</span><span class="info-val" id="sd-samples">--</span></div>
+            <div class="info-row"><span class="info-key">Metric samples</span><span class="info-val" id="sd-samples">--</span></div>
+            <div class="info-row"><span class="info-key">Pending days</span><span class="info-val" id="sd-pending-days">--</span></div>
             <div class="info-row"><span class="info-key">State file</span><span class="info-val" id="sd-state-file">--</span></div>
             <div class="info-row"><span class="info-key">Daily CSV</span><span class="info-val" id="sd-daily-csv">--</span></div>
             <div class="info-row"><span class="info-key">Last write</span><span class="info-val" id="sd-last-write">--</span></div>
+            <div class="info-row"><span class="info-key">SD error</span><span class="info-val" id="sd-runtime-error">--</span></div>
           </div>
           <div class="sd-action-row">
             <button class="btn" type="button" id="sdRefreshBtn">Refresh SD</button>
@@ -909,6 +929,9 @@ function formatDayKey(dayKey) {
   return text.slice(0, 4) + '-' + text.slice(4, 6) + '-' + text.slice(6, 8);
 }
 function formatFileStatus(fileInfo) {
+  if (fileInfo && typeof fileInfo.error === 'string' && fileInfo.error) {
+    return 'Check failed: ' + fileInfo.error;
+  }
   if (!fileInfo || fileInfo.exists !== true) return 'Not available';
   return formatBytes(Number(fileInfo.size_bytes || 0));
 }
@@ -990,7 +1013,7 @@ function pillHtml(status, compact) {
 
 function trendToken(delta, is24h) {
   if (!isNum(delta)) {
-    return { textStyle:'color:'+fallbackColor, surfaceStyle:'color:'+fallbackColor+';border-color:rgba(156,163,175,.32);background:rgba(75,85,99,.2)' };
+    return { textStyle:'color:'+fallbackColor, surfaceStyle:'color:'+fallbackColor+';border-color:rgba(169,199,196,.18);background:rgba(28,40,45,.42)' };
   }
   const absDelta = Math.abs(pressureDeltaToMslHpa(delta));
   const status = getStatus(absDelta, is24h ? thresholds.pressureDelta24h : thresholds.pressureDelta3h);
@@ -1076,9 +1099,9 @@ function buildChartSvg(data, keys, colors, height, options) {
   });
   defs += '</defs>';
 
-  const grid = `<line x1="0" y1="25" x2="100" y2="25" stroke="#374151" stroke-width="0.7" stroke-dasharray="2.5 2.5" vector-effect="non-scaling-stroke"/>
-    <line x1="0" y1="50" x2="100" y2="50" stroke="#374151" stroke-width="0.7" stroke-dasharray="2.5 2.5" vector-effect="non-scaling-stroke"/>
-    <line x1="0" y1="75" x2="100" y2="75" stroke="#374151" stroke-width="0.7" stroke-dasharray="2.5 2.5" vector-effect="non-scaling-stroke"/>`;
+  const grid = `<line x1="0" y1="25" x2="100" y2="25" stroke="#35464a" stroke-width="0.7" stroke-dasharray="2.5 2.5" vector-effect="non-scaling-stroke"/>
+    <line x1="0" y1="50" x2="100" y2="50" stroke="#35464a" stroke-width="0.7" stroke-dasharray="2.5 2.5" vector-effect="non-scaling-stroke"/>
+    <line x1="0" y1="75" x2="100" y2="75" stroke="#35464a" stroke-width="0.7" stroke-dasharray="2.5 2.5" vector-effect="non-scaling-stroke"/>`;
 
   let referenceBands = '';
   if (normalRange) {
@@ -1843,6 +1866,20 @@ function formatSdCsvUnits(daily) {
          '; next: ' + sdCsvUnitShortLabel(preferredUnitsC);
 }
 
+function formatSdRuntimeError(sd) {
+  if (!sd || (sd.write_fault !== true && sd.runtime_healthy !== false)) return 'None';
+  const operation = typeof sd.last_operation === 'string' ? sd.last_operation : '';
+  const stage = typeof sd.last_stage === 'string' ? sd.last_stage : '';
+  const kind = typeof sd.runtime_error_kind === 'string' ? sd.runtime_error_kind : '';
+  const code = Number(sd.runtime_error_code || 0);
+  const detail = typeof sd.runtime_error === 'string' ? sd.runtime_error : '';
+  const where = [operation, stage].filter(Boolean).join(' / ');
+  const cause = [kind && kind !== 'none' ? kind : '', code ? ('code ' + code) : '', detail]
+    .filter(Boolean)
+    .join(': ');
+  return [where, cause].filter(Boolean).join(' - ') || 'Unknown SD error';
+}
+
 function renderSdHistoryStatus(payload) {
   const sd = (payload && payload.sd) || {};
   const daily = (payload && payload.daily) || {};
@@ -1856,12 +1893,16 @@ function renderSdHistoryStatus(payload) {
   const dailyCsv = files.daily_csv || null;
   const stateFile = files.current_day_state || null;
   const lastError = typeof sd.last_error === 'string' ? sd.last_error : '';
+  const runtimeFault = sd.write_fault === true || sd.runtime_healthy === false;
+  const pendingDays = Number(daily.pending_day_count || 0);
+  const droppedDays = Number(daily.dropped_pending_days || 0);
+  const retryMs = Number(daily.pending_retry_ms || 0);
 
   let statusText = 'Not attempted';
   let statusClass = '';
   if (mounted) {
-    statusText = 'Mounted';
-    statusClass = 'ok';
+    statusText = runtimeFault ? 'Mounted - degraded' : 'Mounted';
+    statusClass = runtimeFault ? 'err' : 'ok';
   } else if (sdState === 'not_detected') {
     statusText = 'Not detected';
   } else if (sdState === 'board_unavailable') {
@@ -1874,14 +1915,20 @@ function renderSdHistoryStatus(payload) {
 
   setInfoValue('sd-status', statusText, statusClass);
   setInfoValue('sd-capacity', mounted ? formatBytes(Number(sd.card_size_bytes || 0)) : '--');
+  setInfoValue('sd-free-space', mounted ? formatBytes(Number(sd.filesystem_free_bytes || 0)) : '--');
   setInfoValue('sd-day', formatDayKey(Number(daily.current_day || 0)));
   setInfoValue('sd-csv-units', formatSdCsvUnits(daily));
   setInfoValue('sd-samples', isNum(daily.current_sample_count) ? String(daily.current_sample_count) : '--');
-  setInfoValue('sd-state-file', formatFileStatus(stateFile), stateFile && stateFile.exists === true ? 'ok' : '');
-  setInfoValue('sd-daily-csv', formatFileStatus(dailyCsv), dailyCsv && dailyCsv.exists === true ? 'ok' : '');
+  const pendingText = pendingDays > 0
+    ? String(pendingDays) + ' (oldest ' + formatDayKey(Number(daily.oldest_pending_day || 0)) + ')'
+    : '0';
+  setInfoValue('sd-pending-days', pendingText, pendingDays > 0 ? 'warn' : 'ok');
+  setInfoValue('sd-state-file', formatFileStatus(stateFile), stateFile && stateFile.error ? 'err' : (stateFile && stateFile.exists === true ? 'ok' : ''));
+  setInfoValue('sd-daily-csv', formatFileStatus(dailyCsv), dailyCsv && dailyCsv.error ? 'err' : (dailyCsv && dailyCsv.exists === true ? 'ok' : ''));
   setInfoValue('sd-last-write',
                mounted ? (daily.last_write_ok === true ? 'OK' : 'Failed') : 'Unavailable',
                mounted ? (daily.last_write_ok === true ? 'ok' : 'err') : '');
+  setInfoValue('sd-runtime-error', mounted ? formatSdRuntimeError(sd) : '--', runtimeFault ? 'err' : (mounted ? 'ok' : ''));
 
   const currentReady = isNum(daily.current_sample_count) && daily.current_sample_count > 0;
   const exportReady = mounted && dailyCsv && dailyCsv.exists === true && Number(dailyCsv.size_bytes || 0) > 0;
@@ -1899,6 +1946,13 @@ function renderSdHistoryStatus(payload) {
   } else if (!mounted) {
     setSdNote(lastError || (sdFault ? 'SD storage fault.' : 'SD card was not checked.'),
               sdFault ? 'err' : '');
+  } else if (droppedDays > 0) {
+    setSdNote(String(droppedDays) + ' daily record(s) were dropped after the pending queue filled. Check or replace the SD card.', 'err');
+  } else if (runtimeFault || daily.last_write_ok === false) {
+    setSdNote('SD operation failed: ' + formatSdRuntimeError(sd) + '. Today\'s measurements continue in memory and Aura will retry automatically.', 'err');
+  } else if (pendingDays > 0) {
+    const retryText = retryMs > 0 ? (' Next retry in ' + Math.ceil(retryMs / 1000) + ' s.') : ' Retry is due now.';
+    setSdNote(String(pendingDays) + ' completed day(s) are waiting for SD. Current-day collection continues.' + retryText, 'warn');
   } else if (!exportReady) {
     setSdNote('Daily CSV will appear after the first day rollover. Use Export current day to preview today.', 'warn');
   } else {

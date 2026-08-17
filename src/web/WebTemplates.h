@@ -70,15 +70,17 @@ static const char kWifiPageTemplate[] PROGMEM = R"HTML(
     <title>Project Aura | WiFi Setup</title>
     <style>
         :root {
-            --bg: #0f172a;
-            --panel: rgba(30, 41, 59, 0.7);
-            --border: rgba(255, 255, 255, 0.1);
-            --primary: #6366f1;
-            --primary-hover: #818cf8;
-            --text: #f1f5f9;
-            --text-dim: #94a3b8;
-            --item-hover: rgba(255, 255, 255, 0.05);
-            --item-selected: rgba(99, 102, 241, 0.15);
+            color-scheme: dark;
+            --bg: #04080b;
+            --panel: rgba(17, 24, 29, 0.96);
+            --border: rgba(169, 199, 196, 0.18);
+            --primary: #2bb4bd;
+            --primary-hover: #57c4c2;
+            --primary-text: #041012;
+            --text: #f9fafb;
+            --text-dim: #9ca3af;
+            --item-hover: rgba(169, 199, 196, 0.06);
+            --item-selected: rgba(43, 180, 189, 0.12);
             --danger: #ef4444;
         }
 
@@ -140,8 +142,8 @@ static const char kWifiPageTemplate[] PROGMEM = R"HTML(
 
         .logo {
             width: 48px; height: 48px;
-            background: rgba(99, 102, 241, 0.15);
-            border: 1px solid rgba(99, 102, 241, 0.3);
+            background: rgba(43, 180, 189, 0.12);
+            border: 1px solid rgba(43, 180, 189, 0.3);
             border-radius: 16px;
             display: flex; align-items: center; justify-content: center;
             margin-bottom: 12px; color: var(--primary);
@@ -178,7 +180,7 @@ static const char kWifiPageTemplate[] PROGMEM = R"HTML(
         .network-list-container {
             flex: 1;
             min-height: 120px;
-            background: rgba(15, 23, 42, 0.6);
+            background: rgba(7, 16, 20, 0.72);
             border: 1px solid var(--border);
             border-radius: 16px;
             overflow: hidden;
@@ -241,7 +243,7 @@ static const char kWifiPageTemplate[] PROGMEM = R"HTML(
 
         input[type="password"], input[type="text"], select, textarea {
             width: 100%;
-            background: rgba(15, 23, 42, 0.8);
+            background: rgba(7, 16, 20, 0.86);
             border: 1px solid var(--border);
             border-radius: 14px;
             padding: 14px 44px 14px 14px;
@@ -256,11 +258,11 @@ static const char kWifiPageTemplate[] PROGMEM = R"HTML(
 
         .mode-toggle { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
         .mode-btn {
-            border: 1px solid var(--border); background: rgba(15, 23, 42, 0.6);
+            border: 1px solid var(--border); background: rgba(7, 16, 20, 0.72);
             color: var(--text-dim); border-radius: 14px; padding: 11px 10px;
             font-weight: 700; cursor: pointer;
         }
-        .mode-btn.active { border-color: var(--primary); color: var(--text); background: rgba(99, 102, 241, 0.2); }
+        .mode-btn.active { border-color: var(--primary); color: var(--text); background: rgba(43, 180, 189, 0.16); }
         .hidden { display: none; }
         .warning { font-size: 11px; color: #fbbf24; line-height: 1.4; margin: 4px 0 8px; }
 
@@ -275,17 +277,17 @@ static const char kWifiPageTemplate[] PROGMEM = R"HTML(
 
         button[type="submit"] {
             width: 100%;
-            background: var(--primary); color: white;
+            background: var(--primary); color: var(--primary-text);
             border: none; border-radius: 16px; padding: 16px;
             font-size: 15px; font-weight: 700;
             cursor: pointer; transition: all 0.2s;
-            box-shadow: 0 10px 15px -3px rgba(99, 102, 241, 0.3);
+            box-shadow: 0 10px 18px -5px rgba(43, 180, 189, 0.28);
             flex-shrink: 0; margin-top: 8px;
         }
         button[type="submit"]:hover { background: var(--primary-hover); }
         button[type="submit"]:disabled {
             opacity: 0.5; cursor: not-allowed; box-shadow: none;
-            background: #334155; color: #94a3b8;
+            background: #141e22; color: #9ca3af;
         }
 
         .footer {
@@ -582,12 +584,13 @@ static const char kWifiSavePage[] PROGMEM = R"HTML(
     <title>Project Aura | Setup</title>
     <style>
         :root {
-            --bg: #0f172a;
-            --panel: rgba(30, 41, 59, 0.8);
-            --border: rgba(255, 255, 255, 0.1);
-            --primary: #6366f1;
-            --text: #f1f5f9;
-            --text-dim: #94a3b8;
+            color-scheme: dark;
+            --bg: #04080b;
+            --panel: rgba(17, 24, 29, 0.96);
+            --border: rgba(169, 199, 196, 0.18);
+            --primary: #2bb4bd;
+            --text: #f9fafb;
+            --text-dim: #9ca3af;
         }
         * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
         body, html {
@@ -622,8 +625,8 @@ static const char kWifiSavePage[] PROGMEM = R"HTML(
             max-height: calc(100vh - 72px); overflow-y: auto;
         }
         .logo {
-            width: 56px; height: 56px; background: rgba(99, 102, 241, 0.15);
-            border: 1px solid rgba(99, 102, 241, 0.3); border-radius: 18px;
+            width: 56px; height: 56px; background: rgba(43, 180, 189, 0.12);
+            border: 1px solid rgba(43, 180, 189, 0.3); border-radius: 18px;
             display: flex; align-items: center; justify-content: center;
             margin: 0 auto 16px; color: var(--primary);
         }
@@ -672,12 +675,13 @@ static const char kDiagPageTemplate[] PROGMEM = R"HTML(
     <title>Project Aura | Diagnostics</title>
     <style>
         :root {
-            --bg: #0f172a;
-            --panel: rgba(30, 41, 59, 0.72);
-            --border: rgba(255, 255, 255, 0.12);
-            --text: #f1f5f9;
-            --text-dim: #94a3b8;
-            --ok: #4ade80;
+            color-scheme: dark;
+            --bg: #04080b;
+            --panel: rgba(17, 24, 29, 0.96);
+            --border: rgba(169, 199, 196, 0.18);
+            --text: #f9fafb;
+            --text-dim: #9ca3af;
+            --ok: #6fc98f;
             --warn: #fbbf24;
             --err: #f87171;
         }
@@ -687,7 +691,7 @@ static const char kDiagPageTemplate[] PROGMEM = R"HTML(
             padding: 14px;
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
             color: var(--text);
-            background: radial-gradient(900px 500px at -20% -20%, rgba(99, 102, 241, 0.22), transparent 60%), var(--bg);
+            background: radial-gradient(900px 500px at -20% -20%, rgba(43, 180, 189, 0.14), transparent 60%), var(--bg);
         }
         .wrap {
             max-width: 900px;
@@ -945,13 +949,15 @@ static const char kMqttPageTemplate[] PROGMEM = R"HTML(
     <title>Project Aura | MQTT Setup</title>
     <style>
         :root {
-            --bg: #0f172a;
-            --panel: rgba(30, 41, 59, 0.7);
-            --border: rgba(255, 255, 255, 0.1);
-            --primary: #6366f1;
-            --primary-hover: #818cf8;
-            --text: #f1f5f9;
-            --text-dim: #94a3b8;
+            color-scheme: dark;
+            --bg: #04080b;
+            --panel: rgba(17, 24, 29, 0.96);
+            --border: rgba(169, 199, 196, 0.18);
+            --primary: #2bb4bd;
+            --primary-hover: #57c4c2;
+            --primary-text: #041012;
+            --text: #f9fafb;
+            --text-dim: #9ca3af;
         }
 
         * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
@@ -994,8 +1000,8 @@ static const char kMqttPageTemplate[] PROGMEM = R"HTML(
         .header { text-align: center; margin-bottom: 24px; }
 
         .logo {
-            width: 48px; height: 48px; background: rgba(99, 102, 241, 0.15);
-            border: 1px solid rgba(99, 102, 241, 0.3); border-radius: 16px;
+            width: 48px; height: 48px; background: rgba(43, 180, 189, 0.12);
+            border: 1px solid rgba(43, 180, 189, 0.3); border-radius: 16px;
             display: flex; align-items: center; justify-content: center;
             margin: 0 auto 12px; color: var(--primary);
         }
@@ -1004,7 +1010,7 @@ static const char kMqttPageTemplate[] PROGMEM = R"HTML(
         .subtitle { color: var(--text-dim); font-size: 13px; margin-top: 4px; }
 
         .info-section {
-            background: rgba(15, 23, 42, 0.6); border: 1px solid var(--border);
+            background: rgba(7, 16, 20, 0.72); border: 1px solid var(--border);
             border-radius: 16px; padding: 16px; margin-bottom: 20px;
         }
 
@@ -1034,7 +1040,7 @@ static const char kMqttPageTemplate[] PROGMEM = R"HTML(
         }
 
         input[type="text"], input[type="number"], input[type="password"], textarea {
-            width: 100%; background: rgba(15, 23, 42, 0.8); border: 1px solid var(--border);
+            width: 100%; background: rgba(7, 16, 20, 0.86); border: 1px solid var(--border);
             border-radius: 14px; padding: 14px; color: white; font-size: 15px;
             transition: all 0.2s; outline: none;
         }
@@ -1045,7 +1051,7 @@ static const char kMqttPageTemplate[] PROGMEM = R"HTML(
         }
 
         input:focus, textarea:focus { border-color: var(--primary); }
-        input:disabled { opacity: 0.5; cursor: not-allowed; background: rgba(15, 23, 42, 0.4); }
+        input:disabled { opacity: 0.5; cursor: not-allowed; background: rgba(7, 16, 20, 0.5); }
 
         .input-container { position: relative; }
         .input-container input[type="password"] { padding-right: 50px; }
@@ -1061,10 +1067,10 @@ static const char kMqttPageTemplate[] PROGMEM = R"HTML(
         /* ИСПРАВЛЕНО: Checkbox logic */
         .checkbox-wrapper {
             display: flex; align-items: center; gap: 10px; padding: 12px 16px;
-            background: rgba(15, 23, 42, 0.6); border: 1px solid var(--border);
+            background: rgba(7, 16, 20, 0.72); border: 1px solid var(--border);
             border-radius: 14px; cursor: pointer; transition: all 0.2s;
         }
-        .checkbox-wrapper:hover { background: rgba(15, 23, 42, 0.8); }
+        .checkbox-wrapper:hover { background: rgba(17, 24, 29, 0.92); }
 
         input[type="checkbox"] {
             width: 18px; height: 18px; cursor: pointer; accent-color: var(--primary);
@@ -1086,15 +1092,15 @@ static const char kMqttPageTemplate[] PROGMEM = R"HTML(
         }
 
         button[type="submit"] {
-            background: var(--primary); color: white;
-            box-shadow: 0 10px 15px -3px rgba(99, 102, 241, 0.3);
+            background: var(--primary); color: var(--primary-text);
+            box-shadow: 0 10px 18px -5px rgba(43, 180, 189, 0.28);
         }
         button[type="submit"]:hover { background: var(--primary-hover); }
 
         button[type="button"] {
-            background: rgba(99, 102, 241, 0.15); color: var(--primary); margin-bottom: 12px;
+            background: rgba(43, 180, 189, 0.12); color: var(--primary); margin-bottom: 12px;
         }
-        button[type="button"]:hover { background: rgba(99, 102, 241, 0.25); }
+        button[type="button"]:hover { background: rgba(43, 180, 189, 0.2); }
 
         button:disabled { opacity: 0.6; cursor: wait; }
 
@@ -1308,11 +1314,12 @@ static const char kMqttLockedPage[] PROGMEM = R"HTML(
   <title>Project Aura | MQTT</title>
   <style>
     :root {
-      --bg: #0f172a;
-      --panel: rgba(15, 23, 42, 0.7);
-      --border: rgba(255, 255, 255, 0.08);
-      --text: #f1f5f9;
-      --text-dim: #94a3b8;
+      color-scheme: dark;
+      --bg: #04080b;
+      --panel: rgba(17, 24, 29, 0.96);
+      --border: rgba(169, 199, 196, 0.12);
+      --text: #f9fafb;
+      --text-dim: #9ca3af;
     }
     * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
     body, html {
@@ -1355,7 +1362,7 @@ static const char kMqttLockedPage[] PROGMEM = R"HTML(
       font-weight: 600;
       cursor: pointer;
     }
-    .btn:hover { background: rgba(255, 255, 255, 0.12); }
+    .btn:hover { background: rgba(43, 180, 189, 0.1); border-color: rgba(43, 180, 189, 0.28); }
   </style>
 </head>
 <body>
@@ -1378,12 +1385,13 @@ static const char kMqttSavePage[] PROGMEM = R"HTML(
     <title>Project Aura | MQTT Setup</title>
     <style>
         :root {
-            --bg: #0f172a;
-            --panel: rgba(30, 41, 59, 0.8);
-            --border: rgba(255, 255, 255, 0.1);
-            --primary: #6366f1;
-            --text: #f1f5f9;
-            --text-dim: #94a3b8;
+            color-scheme: dark;
+            --bg: #04080b;
+            --panel: rgba(17, 24, 29, 0.96);
+            --border: rgba(169, 199, 196, 0.18);
+            --primary: #2bb4bd;
+            --text: #f9fafb;
+            --text-dim: #9ca3af;
         }
         * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
         body, html {
@@ -1417,8 +1425,8 @@ static const char kMqttSavePage[] PROGMEM = R"HTML(
             text-align: center;
         }
         .logo {
-            width: 56px; height: 56px; background: rgba(99, 102, 241, 0.15);
-            border: 1px solid rgba(99, 102, 241, 0.3); border-radius: 18px;
+            width: 56px; height: 56px; background: rgba(43, 180, 189, 0.12);
+            border: 1px solid rgba(43, 180, 189, 0.3); border-radius: 18px;
             display: flex; align-items: center; justify-content: center;
             margin: 0 auto 16px; color: var(--primary);
         }
@@ -1469,12 +1477,14 @@ static const char kThemePageTemplate[] PROGMEM = R"HTML(
   <title>Project Aura | Custom Theme Studio</title>
   <style>
     :root {
-      --primary-accent: #6366f1;
-      --bg-dark: #0f172a;
-      --card-bg: rgba(30, 41, 59, 0.7);
-      --border-soft: rgba(255, 255, 255, 0.1);
-      --text-main: #f1f5f9;
-      --text-muted: #94a3b8;
+      color-scheme: dark;
+      --primary-accent: #2bb4bd;
+      --primary-text: #041012;
+      --bg-dark: #04080b;
+      --card-bg: rgba(17, 24, 29, 0.96);
+      --border-soft: rgba(169, 199, 196, 0.18);
+      --text-main: #f9fafb;
+      --text-muted: #9ca3af;
     }
 
     * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
@@ -1591,7 +1601,7 @@ static const char kThemePageTemplate[] PROGMEM = R"HTML(
       background: none; cursor: pointer;
     }
     input[type="color"]::-webkit-color-swatch-wrapper { padding: 0; }
-    input[type="color"]::-webkit-color-swatch { border-radius: 6px; border: 1px solid rgba(255,255,255,0.1); }
+    input[type="color"]::-webkit-color-swatch { border-radius: 6px; border: 1px solid rgba(169,199,196,0.18); }
 
     input[type="text"] {
       flex: 1; background: transparent; border: none; color: #fff;
@@ -1626,7 +1636,7 @@ static const char kThemePageTemplate[] PROGMEM = R"HTML(
       left: 0;
       right: 0;
       bottom: 0;
-      background-color: rgba(255, 255, 255, 0.1);
+      background-color: rgba(169, 199, 196, 0.12);
       transition: .3s cubic-bezier(0.4, 0, 0.2, 1);
       border-radius: 20px;
       border: 1px solid rgba(255, 255, 255, 0.05);
@@ -1671,11 +1681,11 @@ static const char kThemePageTemplate[] PROGMEM = R"HTML(
 
     .submit-button {
       width: 100%; padding: 16px; border-radius: 16px; border: none;
-      background: var(--primary-accent); color: #fff; font-size: 15px; font-weight: 700;
-      cursor: pointer; transition: 0.3s; box-shadow: 0 8px 24px -4px rgba(99, 102, 241, 0.4);
+      background: var(--primary-accent); color: var(--primary-text); font-size: 15px; font-weight: 700;
+      cursor: pointer; transition: 0.3s; box-shadow: 0 8px 24px -4px rgba(43, 180, 189, 0.32);
       margin-top: 10px;
     }
-    .submit-button:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 12px 32px -4px rgba(99, 102, 241, 0.5); }
+    .submit-button:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 12px 32px -4px rgba(43, 180, 189, 0.4); }
     .submit-button:disabled { opacity: 0.7; cursor: not-allowed; }
 
     .toast-notification {
@@ -2040,11 +2050,12 @@ static const char kThemeLockedPage[] PROGMEM = R"HTML(
   <title>Project Aura | Custom Theme</title>
   <style>
     :root {
-      --bg: #0f172a;
-      --panel: rgba(15, 23, 42, 0.7);
-      --border: rgba(255, 255, 255, 0.08);
-      --text: #f1f5f9;
-      --text-dim: #94a3b8;
+      color-scheme: dark;
+      --bg: #04080b;
+      --panel: rgba(17, 24, 29, 0.96);
+      --border: rgba(169, 199, 196, 0.12);
+      --text: #f9fafb;
+      --text-dim: #9ca3af;
     }
     * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
     body, html {
@@ -2087,7 +2098,7 @@ static const char kThemeLockedPage[] PROGMEM = R"HTML(
       font-weight: 600;
       cursor: pointer;
     }
-    .btn:hover { background: rgba(255, 255, 255, 0.12); }
+    .btn:hover { background: rgba(43, 180, 189, 0.1); border-color: rgba(43, 180, 189, 0.28); }
   </style>
 </head>
 <body>
@@ -2113,18 +2124,20 @@ static const char kDacPageTemplate[] PROGMEM = R"HTML(
   <title>Project Aura | Fan Control Settings</title>
   <style>
     :root {
-      --bg: #0f172a;
-      --panel: rgba(30, 41, 59, 0.7);
-      --panel-strong: rgba(30, 41, 59, 0.8);
-      --panel-locked: rgba(15, 23, 42, 0.7);
-      --border: rgba(255, 255, 255, 0.1);
-      --border-soft: rgba(255, 255, 255, 0.08);
-      --primary: #6366f1;
-      --primary-hover: #818cf8;
-      --primary-soft: rgba(99, 102, 241, 0.15);
-      --text: #f1f5f9;
-      --text-dim: #94a3b8;
-      --success: #4ade80;
+      color-scheme: dark;
+      --bg: #04080b;
+      --panel: rgba(17, 24, 29, 0.96);
+      --panel-strong: rgba(20, 30, 34, 0.98);
+      --panel-locked: rgba(7, 16, 20, 0.92);
+      --border: rgba(169, 199, 196, 0.18);
+      --border-soft: rgba(169, 199, 196, 0.12);
+      --primary: #2bb4bd;
+      --primary-hover: #57c4c2;
+      --primary-soft: rgba(43, 180, 189, 0.12);
+      --primary-text: #041012;
+      --text: #f9fafb;
+      --text-dim: #9ca3af;
+      --success: #6fc98f;
       --success-bg: rgba(34, 197, 94, 0.2);
       --error: #f87171;
       --error-bg: rgba(239, 68, 68, 0.2);
@@ -2132,8 +2145,8 @@ static const char kDacPageTemplate[] PROGMEM = R"HTML(
       --orange: #fb923c;
       --warning-bg: rgba(251, 191, 36, 0.2);
       --offline-bg: rgba(148, 163, 184, 0.2);
-      --neutral-btn: #334155;
-      --input-bg: rgba(15, 23, 42, 0.6);
+      --neutral-btn: #1c282d;
+      --input-bg: rgba(7, 16, 20, 0.72);
     }
     * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
     body, html {
@@ -2183,7 +2196,7 @@ static const char kDacPageTemplate[] PROGMEM = R"HTML(
       flex: 1; border: none; padding: 10px; border-radius: 10px;
       background: transparent; color: var(--text-dim); font-weight: 700; cursor: pointer;
     }
-    .switch button.active { background: var(--primary); color: #fff; }
+    .switch button.active { background: var(--primary); color: var(--primary-text); }
     .hidden { display: none !important; }
     .speed-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; margin-top: 8px; }
     .timer-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 8px; }
@@ -2257,7 +2270,7 @@ static const char kDacPageTemplate[] PROGMEM = R"HTML(
 
     .auto-note { color: var(--text-dim); font-size: 12px; line-height: 1.4; margin-top: 10px; }
     .save-row { display: flex; gap: 10px; margin-top: 12px; }
-    .btn.save { background: var(--primary); border-color: #818cf8; }
+    .btn.save { background: var(--primary); border-color: var(--primary-hover); color: var(--primary-text); }
     .save.unsaved { background: var(--primary-hover); }
     .btn.save.saving {
       background: var(--neutral-btn);
@@ -2886,15 +2899,15 @@ static const char kThresholdsPageTemplate[] PROGMEM = R"HTML(
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>AURA | Display Thresholds</title>
   <style>
-    :root{color-scheme:dark;--bg:#111827;--panel:#1f2937;--panel2:#172033;--border:#374151;--text:#f9fafb;--muted:#9ca3af;--cyan:#67e8f9;--green:#22c55e;--yellow:#facc15;--orange:#f97316;--red:#ef4444}
+    :root{color-scheme:dark;--bg:#04080b;--panel:#11181d;--panel2:#141e22;--recessed:#071014;--border:rgba(169,199,196,.18);--text:#f9fafb;--muted:#9ca3af;--cyan:#2bb4bd;--green:#6fc98f;--yellow:#facc15;--orange:#f97316;--red:#ef4444}
     *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;padding:16px}
     .wrap{max-width:980px;margin:0 auto}.hdr{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:16px;flex-wrap:wrap}.brand{font-size:24px;font-weight:800;letter-spacing:.04em}.sub{color:var(--muted);font-size:13px;margin-top:2px}
-    .btn{border:1px solid var(--border);background:rgba(31,41,55,.82);color:var(--text);border-radius:8px;padding:9px 12px;font-size:13px;font-weight:700;cursor:pointer;text-decoration:none}.btn:hover{border-color:#4b5563;background:#263244}.btn.primary{border-color:rgba(6,182,212,.5);background:rgba(6,182,212,.16);color:var(--cyan)}.btn.danger{border-color:rgba(239,68,68,.45);color:#fca5a5;background:rgba(239,68,68,.12)}.btn:disabled{opacity:.45;cursor:not-allowed}
-    .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:14px}.card{background:var(--panel);border:1px solid rgba(55,65,81,.72);border-radius:12px;padding:14px}.card h2{font-size:16px;margin:0 0 10px}.card p{color:var(--muted);font-size:12px;margin:0 0 12px;line-height:1.4}
-    .row{display:grid;grid-template-columns:1fr 86px;gap:10px;align-items:center;margin:8px 0}.label{font-size:13px;color:#d1d5db}.hint{font-size:11px;color:var(--muted);margin-top:2px}.input{width:100%;background:#111827;border:1px solid var(--border);border-radius:8px;color:var(--text);padding:8px 9px;font-size:14px;text-align:right}.input.invalid{border-color:var(--red);box-shadow:0 0 0 2px rgba(239,68,68,.16)}
+    .btn{border:1px solid var(--border);background:rgba(17,24,29,.82);color:var(--text);border-radius:8px;padding:9px 12px;font-size:13px;font-weight:700;cursor:pointer;text-decoration:none}.btn:hover{border-color:rgba(43,180,189,.34);background:rgba(43,180,189,.08)}.btn.primary{border-color:rgba(43,180,189,.5);background:rgba(43,180,189,.14);color:#57c4c2}.btn.danger{border-color:rgba(239,68,68,.45);color:#fca5a5;background:rgba(239,68,68,.12)}.btn:disabled{opacity:.45;cursor:not-allowed}
+    .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:14px}.card{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:14px;box-shadow:inset 0 1px 0 rgba(226,250,245,.04),0 10px 26px rgba(0,0,0,.18)}.card h2{font-size:16px;margin:0 0 10px}.card p{color:var(--muted);font-size:12px;margin:0 0 12px;line-height:1.4}
+    .row{display:grid;grid-template-columns:1fr 86px;gap:10px;align-items:center;margin:8px 0}.label{font-size:13px;color:#d1d5db}.hint{font-size:11px;color:var(--muted);margin-top:2px}.input{width:100%;background:var(--recessed);border:1px solid var(--border);border-radius:8px;color:var(--text);padding:8px 9px;font-size:14px;text-align:right}.input.invalid{border-color:var(--red);box-shadow:0 0 0 2px rgba(239,68,68,.16)}
     .tone{display:inline-flex;align-items:center;gap:7px}.dot{width:10px;height:10px;border-radius:999px;display:inline-block}.green{background:var(--green)}.yellow{background:var(--yellow)}.orange{background:var(--orange)}.red{background:var(--red)}
-    .switch-row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 0;border-top:1px solid rgba(55,65,81,.55)}.switch{width:42px;height:22px;background:#374151;border-radius:999px;position:relative;cursor:pointer;flex-shrink:0}.switch.on{background:#0891b2}.switch::after{content:"";position:absolute;top:3px;left:3px;width:16px;height:16px;border-radius:50%;background:#fff;transition:left .16s}.switch.on::after{left:23px}
-    .actions{display:flex;gap:10px;margin-top:16px;flex-wrap:wrap}.status{margin-top:10px;font-size:13px;color:var(--muted)}.status.ok{color:#86efac}.status.err{color:#fca5a5}.banner{border:1px solid rgba(103,232,249,.25);background:rgba(6,182,212,.08);border-radius:10px;padding:10px 12px;color:#cffafe;font-size:13px;margin-bottom:14px}
+    .switch-row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 0;border-top:1px solid rgba(169,199,196,.12)}.switch{width:42px;height:22px;background:#1c282d;border-radius:999px;position:relative;cursor:pointer;flex-shrink:0}.switch.on{background:var(--cyan)}.switch::after{content:"";position:absolute;top:3px;left:3px;width:16px;height:16px;border-radius:50%;background:#fff;transition:left .16s}.switch.on::after{left:23px}
+    .actions{display:flex;gap:10px;margin-top:16px;flex-wrap:wrap}.status{margin-top:10px;font-size:13px;color:var(--muted)}.status.ok{color:var(--green)}.status.err{color:#fca5a5}.banner{border:1px solid rgba(43,180,189,.25);background:rgba(43,180,189,.08);border-radius:10px;padding:10px 12px;color:#a9c7c4;font-size:13px;margin-bottom:14px}
   </style>
 </head>
 <body>

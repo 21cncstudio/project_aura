@@ -43,9 +43,9 @@ SHELL = ShellConfig(
 </div>
 """.strip(),
     shell_critical_css="""
-:root{color-scheme:dark}
+:root{color-scheme:dark;--bg:#04080b;--surface:#11181d;--surface-2:#1c282d;--border:rgba(169,199,196,.12);--teal:#2bb4bd;--text:#f9fafb;--subtle:#9ca3af}
 *{box-sizing:border-box}
-html,body{margin:0;min-height:100%;background:#111827;color:#f9fafb;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
+html,body{margin:0;min-height:100%;background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
 body{padding:16px}
 body.shell-loading .wrap{display:none}
 body.shell-loading #otaGlobalOverlay{display:none}
@@ -53,10 +53,10 @@ body.shell-loading #otaGlobalOverlay{display:none}
 body.shell-loading .shell-boot{display:block}
 .shell-boot-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:18px;flex-wrap:wrap}
 .shell-boot-title{font-size:24px;font-weight:800;letter-spacing:.02em}
-.shell-boot-sub{margin-top:4px;color:#9ca3af;font-size:13px}
-.shell-boot-chip{padding:8px 12px;border-radius:999px;border:1px solid rgba(61,214,198,.35);background:rgba(17,24,39,.82);color:#9ae6dc;font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.08em}
+.shell-boot-sub{margin-top:4px;color:var(--subtle);font-size:13px}
+.shell-boot-chip{padding:8px 12px;border-radius:999px;border:1px solid rgba(43,180,189,.35);background:rgba(17,24,29,.82);color:#57c4c2;font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.08em}
 .shell-boot-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px}
-.shell-boot-card{height:132px;border-radius:18px;border:1px solid rgba(255,255,255,.08);background:linear-gradient(110deg,rgba(31,41,55,.95) 8%,rgba(55,65,81,.82) 18%,rgba(31,41,55,.95) 33%);background-size:200% 100%;animation:shell-shimmer 1.2s linear infinite}
+.shell-boot-card{height:132px;border-radius:18px;border:1px solid var(--border);background:linear-gradient(110deg,rgba(17,24,29,.96) 8%,rgba(28,40,45,.88) 18%,rgba(17,24,29,.96) 33%);background-size:200% 100%;animation:shell-shimmer 1.2s linear infinite}
 .shell-boot-card-hero{min-height:196px;grid-column:span 2}
 @keyframes shell-shimmer{to{background-position-x:-200%}}
 @media (max-width:720px){body{padding:14px}.shell-boot-title{font-size:21px}.shell-boot-card-hero{grid-column:span 1;min-height:164px}}
