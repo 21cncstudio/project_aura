@@ -27,6 +27,8 @@ constexpr uint8_t kFlagAfterDriverSclHigh = 1u << 7;
 constexpr uint8_t kProbeFlagValid = 1u << 0;
 constexpr uint8_t kProbeFlagSdaHigh = 1u << 1;
 constexpr uint8_t kProbeFlagSclHigh = 1u << 2;
+constexpr uint8_t kPreQuietForcedByTimeout = 1u << 7;
+constexpr uint8_t kPreQuietActiveOperationsMask = 0x7Fu;
 
 struct RetainedRecord {
     uint32_t magic;
@@ -47,7 +49,8 @@ struct RetainedRecord {
     uint8_t driver_result;
     uint8_t flags;
     uint8_t probe_flags;
-    uint8_t reserved[3];
+    uint8_t pre_quiet_state;
+    uint16_t pre_quiet_elapsed_ms;
     uint32_t crc32;
 };
 
@@ -194,6 +197,9 @@ Trace decodeTrace(const RetainedRecord &record) {
     trace.uptime_ms = record.uptime_ms;
     trace.epoch_s = record.epoch_s;
     trace.driver_duration_us = record.driver_duration_us;
+    trace.pre_quiet_elapsed_ms = record.pre_quiet_elapsed_ms;
+    trace.pre_quiet_active_operations =
+        record.pre_quiet_state & kPreQuietActiveOperationsMask;
     trace.expected_network_manager_addr = record.expected_network_manager_addr;
     trace.post_backlight_network_manager_addr =
         record.post_backlight_network_manager_addr;
@@ -205,6 +211,8 @@ Trace decodeTrace(const RetainedRecord &record) {
     trace.driver_result = static_cast<DriverResult>(record.driver_result);
     trace.target_on = (record.flags & kFlagTargetOn) != 0;
     trace.previous_on = (record.flags & kFlagPreviousOn) != 0;
+    trace.pre_quiet_forced_by_timeout =
+        (record.pre_quiet_state & kPreQuietForcedByTimeout) != 0;
     trace.before = decodeLine(record.flags,
                               kFlagBeforeValid,
                               kFlagBeforeSdaHigh,
@@ -278,7 +286,10 @@ void beginWake(Event event,
                uint32_t epoch_s,
                bool target_on,
                bool previous_on,
-               LineState before) {
+               LineState before,
+               uint32_t pre_quiet_elapsed_ms,
+               uint32_t pre_quiet_active_operations,
+               bool pre_quiet_forced_by_timeout) {
     if (event == Event::None || event > Event::AlarmWake) {
         return;
     }
@@ -296,6 +307,15 @@ void beginWake(Event event,
     record.stage = static_cast<uint8_t>(Stage::Request);
     record.driver_result = static_cast<uint8_t>(DriverResult::Unknown);
     record.flags = encodePrimaryFlags(target_on, previous_on, before, {});
+    record.pre_quiet_elapsed_ms = static_cast<uint16_t>(
+        pre_quiet_elapsed_ms > UINT16_MAX ? UINT16_MAX : pre_quiet_elapsed_ms);
+    record.pre_quiet_state = static_cast<uint8_t>(
+        pre_quiet_active_operations > kPreQuietActiveOperationsMask
+            ? kPreQuietActiveOperationsMask
+            : pre_quiet_active_operations);
+    if (pre_quiet_forced_by_timeout) {
+        record.pre_quiet_state |= kPreQuietForcedByTimeout;
+    }
     commitRecord(record);
 }
 

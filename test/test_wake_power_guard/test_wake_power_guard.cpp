@@ -38,9 +38,27 @@ void test_request_closes_admission_and_waits_for_existing_activity() {
 void test_max_wait_bounds_wake_latency_when_activity_remains_busy() {
     Activity active = tryAcquireActivity(1000U);
     TEST_ASSERT_TRUE(request(1001U));
-    TEST_ASSERT_FALSE(readyToSwitch(1075U, 20U, 75U));
-    TEST_ASSERT_TRUE(readyToSwitch(1076U, 20U, 75U));
+    const SwitchDecision waiting = evaluateSwitch(1075U, 20U, 75U);
+    TEST_ASSERT_FALSE(waiting.ready);
+    TEST_ASSERT_EQUAL_UINT32(74U, waiting.elapsed_ms);
+    TEST_ASSERT_EQUAL_UINT32(1U, waiting.active_operations);
+    TEST_ASSERT_FALSE(waiting.forced_by_timeout);
+
+    const SwitchDecision forced = evaluateSwitch(1076U, 20U, 75U);
+    TEST_ASSERT_TRUE(forced.ready);
+    TEST_ASSERT_TRUE(forced.forced_by_timeout);
+    TEST_ASSERT_EQUAL_UINT32(75U, forced.elapsed_ms);
+    TEST_ASSERT_EQUAL_UINT32(1U, forced.active_operations);
     TEST_ASSERT_EQUAL_UINT32(1, activeOperations());
+}
+
+void test_drained_activity_records_normal_switch_decision() {
+    TEST_ASSERT_TRUE(request(3000U));
+    const SwitchDecision ready = evaluateSwitch(3100U, 100U, 500U);
+    TEST_ASSERT_TRUE(ready.ready);
+    TEST_ASSERT_FALSE(ready.forced_by_timeout);
+    TEST_ASSERT_EQUAL_UINT32(100U, ready.elapsed_ms);
+    TEST_ASSERT_EQUAL_UINT32(0U, ready.active_operations);
 }
 
 void test_settle_window_pauses_then_resumes_background_work() {
@@ -80,6 +98,7 @@ int main(int, char **) {
     RUN_TEST(test_idle_guard_admits_and_releases_background_activity);
     RUN_TEST(test_request_closes_admission_and_waits_for_existing_activity);
     RUN_TEST(test_max_wait_bounds_wake_latency_when_activity_remains_busy);
+    RUN_TEST(test_drained_activity_records_normal_switch_decision);
     RUN_TEST(test_settle_window_pauses_then_resumes_background_work);
     RUN_TEST(test_settle_deadline_handles_millisecond_wraparound);
     RUN_TEST(test_cancel_and_prequiet_failsafe_restore_admission);

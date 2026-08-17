@@ -55,7 +55,10 @@ private:
     bool setOnWithGateHeld(
         bool on,
         BacklightWakeBreadcrumbs::Event trace_event =
-            BacklightWakeBreadcrumbs::Event::None);
+            BacklightWakeBreadcrumbs::Event::None,
+        uint32_t pre_quiet_elapsed_ms = 0,
+        uint32_t pre_quiet_active_operations = 0,
+        bool pre_quiet_forced_by_timeout = false);
     void storeSchedulePrefs();
     void refreshSchedule();
     void refreshScheduleWithGateHeld(bool trace_clock_transition = false);

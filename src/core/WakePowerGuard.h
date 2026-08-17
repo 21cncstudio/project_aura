@@ -13,6 +13,13 @@ enum class Phase : uint8_t {
     Settle,
 };
 
+struct SwitchDecision {
+    bool ready = false;
+    bool forced_by_timeout = false;
+    uint32_t elapsed_ms = 0;
+    uint32_t active_operations = 0;
+};
+
 class Activity {
 public:
     Activity() = default;
@@ -43,6 +50,9 @@ bool request(uint32_t now_ms);
 bool readyToSwitch(uint32_t now_ms,
                    uint32_t min_quiet_ms,
                    uint32_t max_wait_ms);
+SwitchDecision evaluateSwitch(uint32_t now_ms,
+                              uint32_t min_quiet_ms,
+                              uint32_t max_wait_ms);
 
 void beginSettle(uint32_t now_ms, uint32_t settle_ms);
 void cancel();

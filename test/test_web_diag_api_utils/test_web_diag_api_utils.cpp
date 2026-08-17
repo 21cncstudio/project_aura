@@ -97,6 +97,9 @@ void test_web_diag_api_utils_fill_json_populates_network_errors_and_stream() {
     payload.boot.previous_backlight_trace_sequence = 7;
     payload.boot.previous_backlight_trace_uptime_ms = 20142000;
     payload.boot.previous_backlight_trace_epoch_s = 1786597200;
+    payload.boot.previous_backlight_trace_pre_quiet_elapsed_ms = 500;
+    payload.boot.previous_backlight_trace_pre_quiet_active_operations = 2;
+    payload.boot.previous_backlight_trace_pre_quiet_forced_by_timeout = true;
     payload.boot.previous_backlight_trace_expected_network_manager_addr = 0x3fca1000;
     payload.boot.previous_backlight_trace_post_backlight_network_manager_addr = 0x3fca1000;
     payload.boot.previous_backlight_trace_pre_render_network_manager_addr = 0;
@@ -155,6 +158,14 @@ void test_web_diag_api_utils_fill_json_populates_network_errors_and_stream() {
                              doc["boot"]["previous_backlight_trace"]["epoch_s"].as<uint32_t>());
     TEST_ASSERT_EQUAL_UINT32(0,
                              doc["boot"]["previous_backlight_trace"]["driver_duration_us"].as<uint32_t>());
+    TEST_ASSERT_EQUAL_UINT32(
+        500,
+        doc["boot"]["previous_backlight_trace"]["pre_quiet_elapsed_ms"].as<uint32_t>());
+    TEST_ASSERT_EQUAL_UINT32(
+        2,
+        doc["boot"]["previous_backlight_trace"]["pre_quiet_active_operations"].as<uint32_t>());
+    TEST_ASSERT_TRUE(
+        doc["boot"]["previous_backlight_trace"]["pre_quiet_forced_by_timeout"].as<bool>());
     TEST_ASSERT_EQUAL_UINT32(
         0x3fca1000,
         doc["boot"]["previous_backlight_trace"]["expected_network_manager_addr"].as<uint32_t>());

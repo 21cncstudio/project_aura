@@ -94,20 +94,32 @@ bool request(uint32_t now_ms) {
     return true;
 }
 
+SwitchDecision evaluateSwitch(uint32_t now_ms,
+                              uint32_t min_quiet_ms,
+                              uint32_t max_wait_ms) {
+    refresh(now_ms);
+    SwitchDecision decision{};
+    if (g_phase.load(std::memory_order_acquire) != Phase::PreQuiet) {
+        return decision;
+    }
+    decision.elapsed_ms = static_cast<uint32_t>(
+        now_ms - g_phase_started_ms.load(std::memory_order_acquire));
+    decision.active_operations =
+        g_active_operations.load(std::memory_order_acquire);
+    if (decision.elapsed_ms >= max_wait_ms) {
+        decision.ready = true;
+        decision.forced_by_timeout = decision.active_operations != 0U;
+        return decision;
+    }
+    decision.ready = decision.elapsed_ms >= min_quiet_ms &&
+                     decision.active_operations == 0U;
+    return decision;
+}
+
 bool readyToSwitch(uint32_t now_ms,
                    uint32_t min_quiet_ms,
                    uint32_t max_wait_ms) {
-    refresh(now_ms);
-    if (g_phase.load(std::memory_order_acquire) != Phase::PreQuiet) {
-        return false;
-    }
-    const uint32_t elapsed = static_cast<uint32_t>(
-        now_ms - g_phase_started_ms.load(std::memory_order_acquire));
-    if (elapsed >= max_wait_ms) {
-        return true;
-    }
-    return elapsed >= min_quiet_ms &&
-           g_active_operations.load(std::memory_order_acquire) == 0U;
+    return evaluateSwitch(now_ms, min_quiet_ms, max_wait_ms).ready;
 }
 
 void beginSettle(uint32_t now_ms, uint32_t settle_ms) {

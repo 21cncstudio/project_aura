@@ -545,9 +545,9 @@ namespace Config {
     constexpr uint32_t BACKLIGHT_SCHEDULE_WAKE_MS = 30UL * 1000UL;
     constexpr uint32_t BACKLIGHT_BOOT_GRACE_MS = 30UL * 1000UL;
     constexpr uint32_t BACKLIGHT_WAKE_BLOCK_MS = 400;
-    constexpr uint32_t BACKLIGHT_WAKE_PRE_QUIET_MIN_MS = 20;
-    constexpr uint32_t BACKLIGHT_WAKE_PRE_QUIET_MAX_MS = 75;
-    constexpr uint32_t BACKLIGHT_WAKE_DRIVER_SETTLE_MS = 250;
+    constexpr uint32_t BACKLIGHT_WAKE_PRE_QUIET_MIN_MS = 100;
+    constexpr uint32_t BACKLIGHT_WAKE_PRE_QUIET_MAX_MS = 500;
+    constexpr uint32_t BACKLIGHT_WAKE_DRIVER_SETTLE_MS = 500;
     constexpr uint32_t BACKLIGHT_WAKE_SETTLE_MS = 200;
     constexpr uint32_t AUTO_NIGHT_POLL_MS = 1000;
     constexpr uint32_t BLINK_PERIOD_MS = 500;

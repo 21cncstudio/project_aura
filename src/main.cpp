@@ -446,12 +446,15 @@ void setup()
             previous_backlight_trace.status == BacklightWakeBreadcrumbs::CaptureStatus::Active;
         if (incomplete) {
             LOGW("BacklightTrace",
-                 "previous boot trace incomplete: event=%s stage=%s seq=%lu uptime=%lu ms epoch=%lu driver=%s duration=%lu us target=%s previous=%s lines(before=%s/%u%u after_driver=%s/%u%u after_probe=%s/%u%u)",
+                 "previous boot trace incomplete: event=%s stage=%s seq=%lu uptime=%lu ms epoch=%lu prequiet=%lu ms active=%lu forced=%s driver=%s duration=%lu us target=%s previous=%s lines(before=%s/%u%u after_driver=%s/%u%u after_probe=%s/%u%u)",
                  BacklightWakeBreadcrumbs::eventText(trace.event),
                  BacklightWakeBreadcrumbs::stageText(trace.stage),
                  static_cast<unsigned long>(trace.sequence),
                  static_cast<unsigned long>(trace.uptime_ms),
                  static_cast<unsigned long>(trace.epoch_s),
+                 static_cast<unsigned long>(trace.pre_quiet_elapsed_ms),
+                 static_cast<unsigned long>(trace.pre_quiet_active_operations),
+                 trace.pre_quiet_forced_by_timeout ? "yes" : "no",
                  BacklightWakeBreadcrumbs::driverResultText(trace.driver_result),
                  static_cast<unsigned long>(trace.driver_duration_us),
                  trace.target_on ? "on" : "off",
@@ -467,9 +470,12 @@ void setup()
                  trace.after_wake_probe.scl_high ? 1u : 0u);
         } else {
             LOGI("BacklightTrace",
-                 "previous boot trace completed: event=%s seq=%lu driver=%s duration=%lu us",
+                 "previous boot trace completed: event=%s seq=%lu prequiet=%lu ms active=%lu forced=%s driver=%s duration=%lu us",
                  BacklightWakeBreadcrumbs::eventText(trace.event),
                  static_cast<unsigned long>(trace.sequence),
+                 static_cast<unsigned long>(trace.pre_quiet_elapsed_ms),
+                 static_cast<unsigned long>(trace.pre_quiet_active_operations),
+                 trace.pre_quiet_forced_by_timeout ? "yes" : "no",
                  BacklightWakeBreadcrumbs::driverResultText(trace.driver_result),
                  static_cast<unsigned long>(trace.driver_duration_us));
         }

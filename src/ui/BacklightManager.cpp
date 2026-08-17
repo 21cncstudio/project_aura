@@ -170,17 +170,24 @@ bool BacklightManager::processGuardedWake(uint32_t now_ms) {
     if (WakePowerGuard::phase(now_ms) == WakePowerGuard::Phase::Idle) {
         (void)WakePowerGuard::request(now_ms);
     }
-    if (!WakePowerGuard::readyToSwitch(
+    const WakePowerGuard::SwitchDecision switch_decision =
+        WakePowerGuard::evaluateSwitch(
             now_ms,
             Config::BACKLIGHT_WAKE_PRE_QUIET_MIN_MS,
-            Config::BACKLIGHT_WAKE_PRE_QUIET_MAX_MS)) {
+            Config::BACKLIGHT_WAKE_PRE_QUIET_MAX_MS);
+    if (!switch_decision.ready) {
         return true;
     }
 
     const BacklightWakeBreadcrumbs::Event wake_event = guarded_wake_event_;
     guarded_wake_pending_ = false;
     guarded_wake_event_ = BacklightWakeBreadcrumbs::Event::None;
-    const bool wake_succeeded = setOnWithGateHeld(true, wake_event);
+    const bool wake_succeeded = setOnWithGateHeld(
+        true,
+        wake_event,
+        switch_decision.elapsed_ms,
+        switch_decision.active_operations,
+        switch_decision.forced_by_timeout);
     if (wake_event != BacklightWakeBreadcrumbs::Event::None) {
         BacklightWakeBreadcrumbs::markCommandReturned();
     }
@@ -215,7 +222,10 @@ void BacklightManager::cancelGuardedWake() {
 
 bool BacklightManager::setOnWithGateHeld(
     bool on,
-    BacklightWakeBreadcrumbs::Event trace_event) {
+    BacklightWakeBreadcrumbs::Event trace_event,
+    uint32_t pre_quiet_elapsed_ms,
+    uint32_t pre_quiet_active_operations,
+    bool pre_quiet_forced_by_timeout) {
     const bool trace_wake = trace_event != BacklightWakeBreadcrumbs::Event::None;
     const auto sample_bus = []() {
         const I2cBusRecovery::LineState lines = I2cBusRecovery::sample(
@@ -235,7 +245,10 @@ bool BacklightManager::setOnWithGateHeld(
             static_cast<uint32_t>(time(nullptr)),
             on,
             backlight_on_,
-            sample_bus());
+            sample_bus(),
+            pre_quiet_elapsed_ms,
+            pre_quiet_active_operations,
+            pre_quiet_forced_by_timeout);
     }
 
     if (!panel_backlight_) {

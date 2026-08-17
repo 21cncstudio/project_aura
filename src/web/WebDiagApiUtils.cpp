@@ -84,6 +84,12 @@ void fillJson(ArduinoJson::JsonObject root,
         trace["uptime_ms"] = payload.boot.previous_backlight_trace_uptime_ms;
         trace["epoch_s"] = payload.boot.previous_backlight_trace_epoch_s;
         trace["driver_duration_us"] = payload.boot.previous_backlight_trace_driver_duration_us;
+        trace["pre_quiet_elapsed_ms"] =
+            payload.boot.previous_backlight_trace_pre_quiet_elapsed_ms;
+        trace["pre_quiet_active_operations"] =
+            payload.boot.previous_backlight_trace_pre_quiet_active_operations;
+        trace["pre_quiet_forced_by_timeout"] =
+            payload.boot.previous_backlight_trace_pre_quiet_forced_by_timeout;
         trace["expected_network_manager_addr"] =
             payload.boot.previous_backlight_trace_expected_network_manager_addr;
         trace["post_backlight_network_manager_addr"] =

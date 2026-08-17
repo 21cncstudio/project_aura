@@ -59,6 +59,8 @@ struct Trace {
     uint32_t uptime_ms = 0;
     uint32_t epoch_s = 0;
     uint32_t driver_duration_us = 0;
+    uint32_t pre_quiet_elapsed_ms = 0;
+    uint32_t pre_quiet_active_operations = 0;
     uint32_t expected_network_manager_addr = 0;
     uint32_t post_backlight_network_manager_addr = 0;
     uint32_t pre_render_network_manager_addr = 0;
@@ -69,6 +71,7 @@ struct Trace {
     DriverResult driver_result = DriverResult::Unknown;
     bool target_on = false;
     bool previous_on = false;
+    bool pre_quiet_forced_by_timeout = false;
     LineState before{};
     LineState after_driver{};
     LineState after_wake_probe{};
@@ -108,7 +111,10 @@ void beginWake(Event event,
                uint32_t epoch_s,
                bool target_on,
                bool previous_on,
-               LineState before);
+               LineState before,
+               uint32_t pre_quiet_elapsed_ms = 0,
+               uint32_t pre_quiet_active_operations = 0,
+               bool pre_quiet_forced_by_timeout = false);
 void markTouchIrqMaskBegin();
 void markTouchIrqMaskReturned();
 void markDriverCallBegin();

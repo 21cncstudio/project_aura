@@ -70,7 +70,15 @@ void test_warm_boot_isolates_pre_driver_touch_irq_mask() {
 }
 
 void test_completed_trace_retains_result_duration_and_lines() {
-    beginWake(Event::ScheduleWake, 300, 1786617600, true, false, {true, true, true});
+    beginWake(Event::ScheduleWake,
+              300,
+              1786617600,
+              true,
+              false,
+              {true, true, true},
+              500,
+              3,
+              true);
     markDriverCallBegin();
     markDriverCallReturned(true, false, 912, {true, false, true});
     markWakeProbeUpdateBegin();
@@ -90,6 +98,9 @@ void test_completed_trace_retains_result_duration_and_lines() {
     TEST_ASSERT_EQUAL_INT(static_cast<int>(DriverResult::Succeeded),
                           static_cast<int>(snapshot.trace.driver_result));
     TEST_ASSERT_EQUAL_UINT32(912, snapshot.trace.driver_duration_us);
+    TEST_ASSERT_EQUAL_UINT32(500, snapshot.trace.pre_quiet_elapsed_ms);
+    TEST_ASSERT_EQUAL_UINT32(3, snapshot.trace.pre_quiet_active_operations);
+    TEST_ASSERT_TRUE(snapshot.trace.pre_quiet_forced_by_timeout);
     TEST_ASSERT_TRUE(snapshot.trace.after_driver.valid);
     TEST_ASSERT_FALSE(snapshot.trace.after_driver.sda_high);
     TEST_ASSERT_TRUE(snapshot.trace.after_driver.scl_high);

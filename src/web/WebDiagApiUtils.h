@@ -54,6 +54,9 @@ struct BootPayload {
     uint32_t previous_backlight_trace_uptime_ms = 0;
     uint32_t previous_backlight_trace_epoch_s = 0;
     uint32_t previous_backlight_trace_driver_duration_us = 0;
+    uint32_t previous_backlight_trace_pre_quiet_elapsed_ms = 0;
+    uint32_t previous_backlight_trace_pre_quiet_active_operations = 0;
+    bool previous_backlight_trace_pre_quiet_forced_by_timeout = false;
     uint32_t previous_backlight_trace_expected_network_manager_addr = 0;
     uint32_t previous_backlight_trace_post_backlight_network_manager_addr = 0;
     uint32_t previous_backlight_trace_pre_render_network_manager_addr = 0;
