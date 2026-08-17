@@ -52,6 +52,9 @@ public:
     // Wait for operations admitted before disableSharedI2c() to drain. This
     // wait is bounded and returns false when timeout_ms expires.
     bool waitForSharedI2cIdle(uint32_t timeout_ms);
+    // Stop the active continuous HCHO measurement during controlled teardown.
+    // Call only after disableSharedI2c() and waitForSharedI2cIdle() succeeded.
+    bool stopHchoForRestart();
     bool isSharedI2cAvailable() const {
         return shared_i2c_available_.load(std::memory_order_acquire);
     }

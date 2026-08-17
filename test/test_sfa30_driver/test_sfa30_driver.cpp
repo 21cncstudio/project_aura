@@ -350,10 +350,10 @@ void test_real_sfa30_cooperative_late_start_honors_command_delays() {
     TEST_ASSERT_EQUAL(static_cast<int>(CooperativeStart::Result::InProgress),
                       static_cast<int>(sfa.pollLateStart(getMillis()))); // Start command.
 
-    setMillis(Config::SFA3X_READ_DELAY_MS + Config::SFA3X_START_DELAY_MS - 1U);
+    setMillis(Config::SFA3X_READ_DELAY_MS + Config::SFA30_START_SETTLE_MS - 1U);
     TEST_ASSERT_EQUAL(static_cast<int>(CooperativeStart::Result::InProgress),
                       static_cast<int>(sfa.pollLateStart(getMillis())));
-    setMillis(Config::SFA3X_READ_DELAY_MS + Config::SFA3X_START_DELAY_MS);
+    setMillis(Config::SFA3X_READ_DELAY_MS + Config::SFA30_START_SETTLE_MS);
     TEST_ASSERT_EQUAL(static_cast<int>(CooperativeStart::Result::Success),
                       static_cast<int>(sfa.pollLateStart(getMillis())));
     TEST_ASSERT_TRUE(sfa.isOk());

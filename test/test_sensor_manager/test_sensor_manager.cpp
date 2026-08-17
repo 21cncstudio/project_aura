@@ -749,6 +749,49 @@ void test_sensor_manager_warm_restart_prefers_confirmed_sfa30_before_sfa40() {
     TEST_ASSERT_TRUE(manager.isSfaOk());
 }
 
+void test_sensor_manager_restart_stops_only_active_sfa30_after_bus_drain() {
+    StorageManager storage;
+    storage.begin();
+    SensorManager manager;
+
+    boot_reset_reason = ESP_RST_SW;
+    boot_board_cold_start = false;
+    boot_peripherals_cold_start = false;
+
+    auto &sfa30 = Sfa30::state();
+    sfa30.probe_ok = true;
+    sfa30.status = Sfa30::Status::Ok;
+    Sfa40::state().status = Sfa40::Status::Ok;
+
+    manager.begin(storage, 0.0f, 0.0f);
+    TEST_ASSERT_FALSE(manager.stopHchoForRestart());
+    TEST_ASSERT_EQUAL_UINT8(0U, sfa30.stop_call_count);
+
+    manager.disableSharedI2c();
+    TEST_ASSERT_TRUE(manager.waitForSharedI2cIdle(0U));
+    TEST_ASSERT_TRUE(manager.stopHchoForRestart());
+    TEST_ASSERT_EQUAL_UINT8(1U, sfa30.stop_call_count);
+    TEST_ASSERT_EQUAL_UINT8(0U, Sfa40::state().stop_call_count);
+}
+
+void test_sensor_manager_restart_propagates_active_sfa40_stop_failure() {
+    StorageManager storage;
+    storage.begin();
+    SensorManager manager;
+
+    auto &sfa40 = Sfa40::state();
+    sfa40.status = Sfa40::Status::Ok;
+    sfa40.stop_ok = false;
+    Sfa30::state().status = Sfa30::Status::Absent;
+
+    manager.begin(storage, 0.0f, 0.0f);
+    manager.disableSharedI2c();
+    TEST_ASSERT_TRUE(manager.waitForSharedI2cIdle(0U));
+    TEST_ASSERT_FALSE(manager.stopHchoForRestart());
+    TEST_ASSERT_EQUAL_UINT8(1U, sfa40.stop_call_count);
+    TEST_ASSERT_EQUAL_UINT8(0U, Sfa30::state().stop_call_count);
+}
+
 void test_sensor_manager_warm_restart_tries_sfa40_when_sfa30_probe_does_not_confirm() {
     StorageManager storage;
     storage.begin();
@@ -1355,6 +1398,8 @@ int main(int, char **) {
     RUN_TEST(test_sensor_manager_sfa_absent_is_not_fault);
     RUN_TEST(test_sensor_manager_falls_back_to_sfa30_when_sfa40_probe_is_rejected);
     RUN_TEST(test_sensor_manager_warm_restart_prefers_confirmed_sfa30_before_sfa40);
+    RUN_TEST(test_sensor_manager_restart_stops_only_active_sfa30_after_bus_drain);
+    RUN_TEST(test_sensor_manager_restart_propagates_active_sfa40_stop_failure);
     RUN_TEST(test_sensor_manager_warm_restart_tries_sfa40_when_sfa30_probe_does_not_confirm);
     RUN_TEST(test_sensor_manager_hcho_sensor_label_reports_sfa30_when_active);
     RUN_TEST(test_sensor_manager_cold_start_reported_as_sw_still_tries_sfa40_first);

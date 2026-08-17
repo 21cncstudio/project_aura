@@ -17,6 +17,8 @@ struct Sfa40TestState {
     bool warmup_active = false;
     bool fallback_to_sfa30 = false;
     bool start_called = false;
+    bool stop_ok = true;
+    uint8_t stop_call_count = 0;
     uint8_t start_call_count = 0;
     uint8_t late_start_begin_count = 0;
     uint8_t late_start_poll_count = 0;
@@ -101,7 +103,10 @@ public:
                                             : CooperativeStart::Result::Failed;
     }
     bool isLateStartActive() const { return state().late_start_active; }
-    void stop() {}
+    bool stop() {
+        ++state().stop_call_count;
+        return state().stop_ok;
+    }
     bool readData(float &) { return false; }
     bool startSelfTest() { return false; }
     SelfTestStatus readSelfTestStatus(uint16_t &raw_result) {

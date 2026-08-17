@@ -17,6 +17,8 @@ struct Sfa30TestState {
     bool probe_ok = false;
     bool probe_called = false;
     bool start_called = false;
+    bool stop_ok = true;
+    uint8_t stop_call_count = 0;
     uint8_t probe_call_count = 0;
     uint8_t start_call_count = 0;
     uint8_t late_start_begin_count = 0;
@@ -64,7 +66,10 @@ public:
     }
     bool isLateStartActive() const { return state().late_start_active; }
     bool lateStartIdentified() const { return state().probe_ok; }
-    void stop() {}
+    bool stop() {
+        ++state().stop_call_count;
+        return state().stop_ok;
+    }
     bool readData(float &) { return false; }
     void poll() { ++state().poll_call_count; }
     bool isDataValid() const { return state().data_valid; }

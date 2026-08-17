@@ -15,6 +15,7 @@
 #include "config/AppConfig.h"
 #include "core/BoardInitPolicy.h"
 #include "core/BootState.h"
+#include "core/Ch422gReadyProbe.h"
 #include "core/Logger.h"
 #include "lvgl_v8_port.h"
 
@@ -25,6 +26,24 @@ using esp_panel::board::Board;
 using esp_panel::drivers::BusRGB;
 
 constexpr uint32_t kBeginTimeoutMs = 10000;
+// Prepare CH422G before the display library touches it. The safe sequence
+// preloads the output latches, enables the outputs, waits for the attached
+// display load to settle, and only then validates the vendor reset writes.
+// A two-second bound leaves room for fresh-host retries on a marginal bus
+// without allowing startup to loop indefinitely.
+constexpr uint32_t kStartupProbeTimeoutMs = 2000;
+constexpr uint32_t kStartupProbePollMs = 250;
+constexpr uint32_t kStartupProbeLoadSettleMs = 250;
+constexpr uint32_t kStartupProbeTransactionTimeoutMs = 25;
+constexpr uint32_t kStartupProbeHostHandoffMs = 15;
+// This probe runs only after the vendor init has already failed at the
+// expander stage. Keep it to one bounded attempt so it records the immediate
+// post-failure bus state without turning diagnostics into another recovery
+// path.
+constexpr uint32_t kPostFailureProbeTimeoutMs = 200;
+constexpr uint32_t kPostFailureProbePollMs = 200;
+constexpr uint32_t kPostFailureProbeLoadSettleMs = 25;
+constexpr uint32_t kPostFailureProbeTransactionTimeoutMs = 25;
 // Board::begin() allocates the shared-I2C, touch-GPIO and RGB-panel interrupts
 // on the calling core. Keep the board-owned interrupt set on the Arduino/LVGL
 // core instead of routing it through the Core 0 network/system workload.
@@ -135,6 +154,68 @@ I2cBusRecovery::Result observeBus(const I2cBusRecovery::LineState &state) {
     return result;
 }
 
+Ch422gReadyProbe::Result prepareExpanderForVendorInit() {
+    LOGI("Main", "Preparing CH422G outputs before vendor board init");
+    const Ch422gReadyProbe::Result probe = Ch422gReadyProbe::wait(
+        Config::I2C_PORT,
+        static_cast<gpio_num_t>(Config::I2C_SDA_PIN),
+        static_cast<gpio_num_t>(Config::I2C_SCL_PIN),
+        Config::I2C_FREQ_HZ,
+        kStartupProbeTimeoutMs,
+        kStartupProbePollMs,
+        kStartupProbeLoadSettleMs,
+        kStartupProbeTransactionTimeoutMs);
+    LOGI("Main",
+         "CH422G startup prepare: status=%s phase=%s attempts=%u recoveries=%u wait=%lu ms failed=0x%02X/0x%02X error=%d lines_valid=%u lines=%u/%u recovered=%u/%u pulses=%u",
+         Ch422gReadyProbe::statusText(probe.status),
+         Ch422gReadyProbe::phaseText(probe.phase),
+         static_cast<unsigned>(probe.attempts),
+         static_cast<unsigned>(probe.bus_recoveries),
+         static_cast<unsigned long>(probe.waited_ms),
+         static_cast<unsigned>(probe.failed_address),
+         static_cast<unsigned>(probe.failed_value),
+         static_cast<int>(probe.last_error),
+         probe.failure_lines_valid ? 1u : 0u,
+         probe.failure_sda_high ? 1u : 0u,
+         probe.failure_scl_high ? 1u : 0u,
+         probe.recovery_sda_high ? 1u : 0u,
+         probe.recovery_scl_high ? 1u : 0u,
+         static_cast<unsigned>(probe.recovery_pulses));
+    return probe;
+}
+
+Ch422gReadyProbe::Result probeExpanderAfterVendorFailure() {
+    // Board destruction releases the vendor-owned legacy I2C host. Give that
+    // cleanup a short handoff before installing the probe's temporary host.
+    vTaskDelay(pdMS_TO_TICKS(5));
+    const Ch422gReadyProbe::Result probe = Ch422gReadyProbe::wait(
+        Config::I2C_PORT,
+        static_cast<gpio_num_t>(Config::I2C_SDA_PIN),
+        static_cast<gpio_num_t>(Config::I2C_SCL_PIN),
+        Config::I2C_FREQ_HZ,
+        kPostFailureProbeTimeoutMs,
+        kPostFailureProbePollMs,
+        kPostFailureProbeLoadSettleMs,
+        kPostFailureProbeTransactionTimeoutMs);
+    LOGW("Main",
+         "CH422G post-failure probe: status=%s phase=%s attempts=%u recoveries=%u wait=%lu ms failed=0x%02X/0x%02X error=%d lines_valid=%u lines=%u/%u recovered=%u/%u pulses=%u",
+         Ch422gReadyProbe::statusText(probe.status),
+         Ch422gReadyProbe::phaseText(probe.phase),
+         static_cast<unsigned>(probe.attempts),
+         static_cast<unsigned>(probe.bus_recoveries),
+         static_cast<unsigned long>(probe.waited_ms),
+         static_cast<unsigned>(probe.failed_address),
+         static_cast<unsigned>(probe.failed_value),
+         static_cast<int>(probe.last_error),
+         probe.failure_lines_valid ? 1u : 0u,
+         probe.failure_sda_high ? 1u : 0u,
+         probe.failure_scl_high ? 1u : 0u,
+         probe.recovery_sda_high ? 1u : 0u,
+         probe.recovery_scl_high ? 1u : 0u,
+         static_cast<unsigned>(probe.recovery_pulses));
+    return probe;
+}
+
 } // namespace
 
 void noteStage(Stage stage) {
@@ -210,9 +291,28 @@ Result initBoard(const I2cBusRecovery::LineState &early_state,
     }
     if (result.cold_power_start) {
         boot_mark_board_power_settle_complete();
-        LOGI("Main", "Cold power start: using vendor board init without an I2C pre-probe");
+        LOGI("Main", "Cold power start: preparing CH422G before vendor board init");
     }
-    LOGI("Main", "Initializing board with one bounded vendor attempt and no I2C pre-probe");
+
+    result.last_stage = Stage::Expander;
+    noteStage(Stage::Expander);
+    result.expander_probe = prepareExpanderForVendorInit();
+    if (!result.expander_probe.ready()) {
+        result.failure = Failure::ExpanderNotReady;
+        LOGE("Main",
+             "CH422G safe startup preparation failed after %lu ms at phase=%s address=0x%02X error=%d",
+             static_cast<unsigned long>(result.expander_probe.waited_ms),
+             Ch422gReadyProbe::phaseText(result.expander_probe.phase),
+             static_cast<unsigned>(result.expander_probe.failed_address),
+             static_cast<int>(result.expander_probe.last_error));
+        return result;
+    }
+
+    // The readiness probe owns a temporary legacy I2C host and deletes it
+    // before returning. Give that teardown a deterministic handoff window
+    // before the display library installs its shared host.
+    vTaskDelay(pdMS_TO_TICKS(kStartupProbeHostHandoffMs));
+    LOGI("Main", "CH422G outputs stable; starting one bounded vendor board attempt");
 
     result.last_stage = Stage::Bus;
     g_stage.store(static_cast<uint8_t>(Stage::Bus), std::memory_order_relaxed);
@@ -262,6 +362,9 @@ Result initBoard(const I2cBusRecovery::LineState &early_state,
     LOGI("Main", "Deleting board @%p", board);
     delete board;
     logMemory("after cleanup");
+    if (begin_result == BeginResult::Failed && result.last_stage == Stage::Expander) {
+        result.expander_probe = probeExpanderAfterVendorFailure();
+    }
     return result;
 }
 

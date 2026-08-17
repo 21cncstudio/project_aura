@@ -71,7 +71,7 @@ public:
     void beginLateStart();
     CooperativeStart::Result pollLateStart(uint32_t now_ms);
     bool isLateStartActive() const { return late_start_phase_ != LateStartPhase::Idle; }
-    void stop();
+    bool stop();
     bool readData(float &hcho_ppb);
     bool startSelfTest();
     SelfTestStatus readSelfTestStatus(uint16_t &raw_result);

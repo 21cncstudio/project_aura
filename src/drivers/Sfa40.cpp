@@ -300,13 +300,13 @@ CooperativeStart::Result Sfa40::pollLateStart(uint32_t now_ms) {
     }
 }
 
-void Sfa40::stop() {
+bool Sfa40::stop() {
     if (!measuring_ && !measurement_state_unknown_) {
-        return;
+        return true;
     }
     if (!writeCmd(Config::SFA40_CMD_STOP)) {
         measurement_state_unknown_ = true;
-        return;
+        return false;
     }
     delay(Config::SFA3X_STOP_DELAY_MS);
     measuring_ = false;
@@ -314,6 +314,7 @@ void Sfa40::stop() {
     warmup_active_ = false;
     selftest_active_ = false;
     next_measurement_read_ms_ = 0;
+    return true;
 }
 
 bool Sfa40::readMeasurement(MeasurementReadResult &result) {

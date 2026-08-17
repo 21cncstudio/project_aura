@@ -30,6 +30,7 @@
 #include "core/RuntimeReadinessPolicy.h"
 #include "core/SafeRestart.h"
 #include "core/SharedI2cShutdownPolicy.h"
+#include "core/I2cBusRecovery.h"
 #include "core/WebRuntimeState.h"
 #include "core/WakePowerGuard.h"
 #include "core/Watchdog.h"
@@ -92,6 +93,9 @@ constexpr uint32_t RUNTIME_I2C_MONITOR_START_MS = 10UL * 1000UL;
 constexpr uint32_t SHARED_I2C_LVGL_QUIESCE_TIMEOUT_MS = 250U;
 constexpr uint32_t SHARED_I2C_OWNER_DRAIN_TIMEOUT_MS = 250U;
 constexpr uint32_t SHARED_I2C_SENSOR_DRAIN_TIMEOUT_MS = 6000U;
+constexpr uint32_t RESTART_I2C_RELEASE_TIMEOUT_MS = 2000U;
+constexpr uint32_t RESTART_I2C_STABLE_IDLE_MS = 200U;
+constexpr uint32_t RESTART_I2C_RELEASE_POLL_MS = 5U;
 
 bool night_mode = false;
 bool temp_units_c = true;
@@ -219,6 +223,45 @@ bool drain_runtime_shared_i2c_owners() {
         return false;
     }
     return true;
+}
+
+bool wait_for_shared_i2c_release_before_restart() {
+    const gpio_num_t sda = static_cast<gpio_num_t>(I2C_SDA_PIN);
+    const gpio_num_t scl = static_cast<gpio_num_t>(I2C_SCL_PIN);
+    const uint32_t started_ms = millis();
+    uint32_t idle_started_ms = 0U;
+    bool idle_window_active = false;
+    I2cBusRecovery::LineState lines = I2cBusRecovery::sample(sda, scl);
+
+    while (static_cast<uint32_t>(millis() - started_ms) <
+           RESTART_I2C_RELEASE_TIMEOUT_MS) {
+        lines = I2cBusRecovery::sample(sda, scl);
+        if (lines.idle()) {
+            if (!idle_window_active) {
+                idle_window_active = true;
+                idle_started_ms = millis();
+            }
+            if (static_cast<uint32_t>(millis() - idle_started_ms) >=
+                RESTART_I2C_STABLE_IDLE_MS) {
+                LOGI("Restart",
+                     "shared I2C released before restart (stable=%lu ms wait=%lu ms)",
+                     static_cast<unsigned long>(RESTART_I2C_STABLE_IDLE_MS),
+                     static_cast<unsigned long>(millis() - started_ms));
+                return true;
+            }
+        } else {
+            idle_window_active = false;
+        }
+        delay(RESTART_I2C_RELEASE_POLL_MS);
+    }
+
+    lines = I2cBusRecovery::sample(sda, scl);
+    LOGE("Restart",
+         "shared I2C did not release before restart (SDA=%u SCL=%u wait=%lu ms)",
+         lines.sda_high ? 1U : 0U,
+         lines.scl_high ? 1U : 0U,
+         static_cast<unsigned long>(millis() - started_ms));
+    return false;
 }
 
 bool try_runtime_gt911_recovery() {
@@ -616,6 +659,13 @@ void loop()
             const bool lvgl_quiesced =
                 quiesce_lvgl_for_shared_i2c("DAC safe write for restart");
             const bool owners_drained = drain_runtime_shared_i2c_owners();
+            if (owners_drained) {
+                if (!sensorManager.stopHchoForRestart()) {
+                    LOGW("Restart", "active HCHO measurement did not stop cleanly");
+                }
+            } else {
+                LOGW("Restart", "active HCHO stop skipped: shared-I2C owners still active");
+            }
             const SharedI2cShutdownPolicy::SafeOutputDecision safe_output_decision =
                 SharedI2cShutdownPolicy::decideSafeOutput(lvgl_quiesced,
                                                           owners_drained);
@@ -632,6 +682,7 @@ void loop()
                     LOGW("Restart", "DAC safe output could not be confirmed before restart");
                 }
             }
+            (void)wait_for_shared_i2c_release_before_restart();
             dailyExtremaHistory.flush();
             // This remains safe after a failed or only partially completed
             // lvgl_port_init(). Forced suspension is last, after the bounded

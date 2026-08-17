@@ -86,7 +86,10 @@ void Sfa30::start() {
         LOGW(label(), "start failed (%s)", errorCauseLabel());
         return;
     }
-    delay(Config::SFA3X_START_DELAY_MS);
+    // The wired SFA30 assembly is the most electrically sensitive device on
+    // the shared bus. Keep the bus quiet after entering continuous mode before
+    // SensorManager starts probing the next I2C device.
+    delay(Config::SFA30_START_SETTLE_MS);
     measuring_ = true;
     measurement_state_unknown_ = false;
     ok_ = true;
@@ -183,7 +186,7 @@ CooperativeStart::Result Sfa30::pollLateStart(uint32_t now_ms) {
                 last_error_cause_ = ErrorCause::StartCommand;
                 return finishLateStart(false);
             }
-            late_start_due_ms_ = millis() + Config::SFA3X_START_DELAY_MS;
+            late_start_due_ms_ = millis() + Config::SFA30_START_SETTLE_MS;
             late_start_phase_ = LateStartPhase::WaitStart;
             return CooperativeStart::Result::InProgress;
         case LateStartPhase::WaitStart:
@@ -203,17 +206,18 @@ bool Sfa30::isWarmupActive() const {
     return static_cast<int32_t>(millis() - warmup_deadline_ms_) < 0;
 }
 
-void Sfa30::stop() {
+bool Sfa30::stop() {
     if (!measuring_ && !measurement_state_unknown_) {
-        return;
+        return true;
     }
     if (!writeCmd(Config::SFA3X_CMD_STOP)) {
         measurement_state_unknown_ = true;
-        return;
+        return false;
     }
     delay(Config::SFA3X_STOP_DELAY_MS);
     measuring_ = false;
     measurement_state_unknown_ = false;
+    return true;
 }
 
 bool Sfa30::readData(float &hcho_ppb) {

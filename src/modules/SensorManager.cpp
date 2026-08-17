@@ -640,6 +640,28 @@ bool SensorManager::waitForSharedI2cIdle(uint32_t timeout_ms) {
     return true;
 }
 
+bool SensorManager::stopHchoForRestart() {
+    if (shared_i2c_available_.load(std::memory_order_acquire) ||
+        shared_i2c_active_users_.load(std::memory_order_acquire) != 0U) {
+        Logger::log(Logger::Warn,
+                    "Sensors",
+                    "HCHO stop skipped: shared I2C shutdown incomplete");
+        return false;
+    }
+
+    switch (hcho_sensor_type_) {
+        case HCHO_SENSOR_SFA30:
+            Logger::log(Logger::Info, "Restart", "stopping SFA30 measurement");
+            return sfa30_.stop();
+        case HCHO_SENSOR_SFA40:
+            Logger::log(Logger::Info, "Restart", "stopping SFA40 measurement");
+            return sfa40_.stop();
+        case HCHO_SENSOR_NONE:
+        default:
+            return true;
+    }
+}
+
 void SensorManager::begin(StorageManager &storage, float temp_offset, float hum_offset) {
     // begin() is the only operation allowed to reopen the one-way runtime gate.
     // A fresh startup cannot have callers left from the previous runtime.
