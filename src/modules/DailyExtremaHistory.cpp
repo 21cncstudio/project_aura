@@ -7,6 +7,7 @@
 #include "modules/DailyExtremaHistory.h"
 
 #include <math.h>
+#include <stddef.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -23,7 +24,11 @@ namespace {
 constexpr uint32_t kDailyExtremaMagic = 0x44455848; // "DEXH"
 constexpr uint16_t kDailyExtremaVersionV1 = 1;
 constexpr uint16_t kDailyExtremaVersion = 2;
+constexpr uint32_t kDailySnapshotMagic = 0x44585333; // "DXS3"
+constexpr uint16_t kDailySnapshotVersion = 1;
 constexpr float kHpaToInhg = 0.0295299830714f;
+constexpr const char *kDailyCsvHeader =
+    "date,metric,unit,min,min_time,max,max_time,sample_count\n";
 
 const DailyExtremaHistory::MetricDef kMetricDefs[] = {
     {ChartsHistory::METRIC_CO2, "co2", "ppm", 0},
@@ -177,6 +182,10 @@ void DailyExtremaHistory::begin(DailyHistoryStorage &storage, bool initial_units
     }
     storage_ = &storage;
     memset(&state_, 0, sizeof(state_));
+    memset(pending_days_, 0, sizeof(pending_days_));
+    pending_count_ = 0;
+    state_generation_ = 0;
+    dropped_pending_days_ = 0;
     preferred_units_c_ = initial_units_c;
     restored_ = false;
     dirty_ = false;
@@ -184,6 +193,9 @@ void DailyExtremaHistory::begin(DailyHistoryStorage &storage, bool initial_units
     last_save_ms_ = 0;
     last_save_attempt_ms_ = 0;
     save_retry_pending_ = false;
+    last_pending_attempt_ms_ = 0;
+    pending_retry_delay_ms_ = 0;
+    pending_failure_count_ = 0;
 }
 
 void DailyExtremaHistory::setPreferredUnitsC(bool units_c) {
@@ -220,6 +232,30 @@ bool DailyExtremaHistory::currentDayUnitsC() const {
 bool DailyExtremaHistory::preferredUnitsC() const {
     ScopedLock guard(*this);
     return guard.locked() ? preferred_units_c_ : true;
+}
+
+uint8_t DailyExtremaHistory::pendingDayCount() const {
+    ScopedLock guard(*this);
+    return guard.locked() ? pending_count_ : 0;
+}
+
+uint32_t DailyExtremaHistory::oldestPendingDayKey() const {
+    ScopedLock guard(*this);
+    return guard.locked() && pending_count_ > 0 ? pending_days_[0].day_key : 0;
+}
+
+uint32_t DailyExtremaHistory::droppedPendingDayCount() const {
+    ScopedLock guard(*this);
+    return guard.locked() ? dropped_pending_days_ : 0;
+}
+
+uint32_t DailyExtremaHistory::pendingRetryRemainingMs(uint32_t now_ms) const {
+    ScopedLock guard(*this);
+    if (!guard.locked() || pending_count_ == 0 || pending_retry_delay_ms_ == 0) {
+        return 0;
+    }
+    const uint32_t elapsed = now_ms - last_pending_attempt_ms_;
+    return elapsed >= pending_retry_delay_ms_ ? 0 : pending_retry_delay_ms_ - elapsed;
 }
 
 uint32_t DailyExtremaHistory::currentSampleCountLocked() const {
@@ -280,11 +316,30 @@ void DailyExtremaHistory::formatTime(uint32_t epoch, char *out, size_t len) {
 }
 
 bool DailyExtremaHistory::validPersistedState(const PersistedState &state) {
-    return state.magic == kDailyExtremaMagic &&
-           (state.version == kDailyExtremaVersionV1 ||
-            state.version == kDailyExtremaVersion) &&
-           state.metric_count == ChartsHistory::kMetricCount &&
-           state.day_key >= 20200101U;
+    if (state.magic != kDailyExtremaMagic ||
+        (state.version != kDailyExtremaVersionV1 && state.version != kDailyExtremaVersion) ||
+        state.metric_count != ChartsHistory::kMetricCount ||
+        state.day_key < 20200101U || state.day_key > 20991231U) {
+        return false;
+    }
+    const uint32_t month = (state.day_key / 100U) % 100U;
+    const uint32_t day = state.day_key % 100U;
+    if (month < 1 || month > 12 || day < 1 || day > 31) {
+        return false;
+    }
+    for (const MetricState &metric : state.metrics) {
+        if (metric.valid > 1) {
+            return false;
+        }
+        if (!metric.valid) {
+            continue;
+        }
+        if (metric.sample_count == 0 || !isfinite(metric.min_value) ||
+            !isfinite(metric.max_value) || metric.min_value > metric.max_value) {
+            return false;
+        }
+    }
+    return true;
 }
 
 void DailyExtremaHistory::migratePersistedState(PersistedState &state) {
@@ -296,57 +351,186 @@ void DailyExtremaHistory::migratePersistedState(PersistedState &state) {
     }
 }
 
+uint32_t DailyExtremaHistory::snapshotCrc32(const PersistedSnapshot &snapshot) {
+    const uint8_t *bytes = reinterpret_cast<const uint8_t *>(&snapshot);
+    const size_t length = offsetof(PersistedSnapshot, crc32);
+    uint32_t crc = 0xFFFFFFFFU;
+    for (size_t i = 0; i < length; ++i) {
+        crc ^= bytes[i];
+        for (uint8_t bit = 0; bit < 8; ++bit) {
+            crc = (crc >> 1U) ^ (0xEDB88320U & (0U - (crc & 1U)));
+        }
+    }
+    return ~crc;
+}
+
+bool DailyExtremaHistory::validSnapshot(const PersistedSnapshot &snapshot) {
+    const PersistedState empty_state{};
+    const bool current_valid =
+        snapshot.current.day_key == 0
+            ? memcmp(&snapshot.current, &empty_state, sizeof(empty_state)) == 0
+            : validPersistedState(snapshot.current);
+    if (snapshot.magic != kDailySnapshotMagic ||
+        snapshot.version != kDailySnapshotVersion ||
+        snapshot.size != sizeof(PersistedSnapshot) ||
+        snapshot.pending_count > kMaxPendingDays ||
+        snapshot.crc32 != snapshotCrc32(snapshot) ||
+        !current_valid) {
+        return false;
+    }
+    for (uint8_t i = 0; i < snapshot.pending_count; ++i) {
+        if (!validPersistedState(snapshot.pending[i])) {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool DailyExtremaHistory::generationNewer(uint32_t lhs, uint32_t rhs) {
+    return static_cast<int32_t>(lhs - rhs) > 0;
+}
+
 const DailyExtremaHistory::MetricDef &DailyExtremaHistory::metricDef(uint8_t index) {
     return kMetricDefs[index];
 }
 
-bool DailyExtremaHistory::restoreOrFinalizeStoredDay(uint32_t current_day_key) {
+bool DailyExtremaHistory::readSnapshotFile(const char *path, PersistedSnapshot &snapshot) const {
+    if (!storage_ || !storage_->isReady() || !path) {
+        return false;
+    }
+    bool exists = false;
+    size_t size = 0;
+    if (!storage_->fileInfo(path, exists, size) || !exists) {
+        return false;
+    }
+    size_t read_len = 0;
+    memset(&snapshot, 0, sizeof(snapshot));
+    if (!storage_->readBinary(path, &snapshot, sizeof(snapshot), read_len) ||
+        read_len != sizeof(snapshot) || !validSnapshot(snapshot)) {
+        LOGW("DailyHistory", "ignored invalid state snapshot path=%s size=%u",
+             path, static_cast<unsigned>(read_len));
+        return false;
+    }
+    return true;
+}
+
+bool DailyExtremaHistory::readLegacyState(PersistedState &state) const {
+    if (!storage_ || !storage_->isReady()) {
+        return false;
+    }
+    bool exists = false;
+    size_t size = 0;
+    if (!storage_->fileInfo(kLegacyStatePath, exists, size) || !exists) {
+        return false;
+    }
+    size_t read_len = 0;
+    memset(&state, 0, sizeof(state));
+    if (!storage_->readBinary(kLegacyStatePath, &state, sizeof(state), read_len) ||
+        read_len != sizeof(state) || !validPersistedState(state)) {
+        LOGW("DailyHistory", "ignored invalid legacy state size=%u",
+             static_cast<unsigned>(read_len));
+        return false;
+    }
+    return true;
+}
+
+bool DailyExtremaHistory::enqueuePendingDay(const PersistedState &state) {
+    if (state.day_key == 0 || !hasAnySamples(state)) {
+        return true;
+    }
+    for (uint8_t i = 0; i < pending_count_; ++i) {
+        if (pending_days_[i].day_key == state.day_key) {
+            pending_days_[i] = state;
+            dirty_ = true;
+            return true;
+        }
+    }
+    if (pending_count_ >= kMaxPendingDays) {
+        const uint32_t dropped_day = pending_days_[0].day_key;
+        removeOldestPendingDay();
+        ++dropped_pending_days_;
+        LOGE("DailyHistory", "pending queue full; dropped oldest day=%u",
+             static_cast<unsigned>(dropped_day));
+    }
+    pending_days_[pending_count_++] = state;
+    dirty_ = true;
+    LOGI("DailyHistory", "queued day=%u for SD finalization pending=%u",
+         static_cast<unsigned>(state.day_key), static_cast<unsigned>(pending_count_));
+    return true;
+}
+
+void DailyExtremaHistory::removeOldestPendingDay() {
+    if (pending_count_ == 0) {
+        return;
+    }
+    for (uint8_t i = 1; i < pending_count_; ++i) {
+        pending_days_[i - 1] = pending_days_[i];
+    }
+    --pending_count_;
+    memset(&pending_days_[pending_count_], 0, sizeof(PersistedState));
+    dirty_ = true;
+}
+
+bool DailyExtremaHistory::restoreStoredState(uint32_t current_day_key) {
     restored_ = true;
     if (!storage_ || !storage_->isReady()) {
         return true;
     }
 
-    PersistedState stored{};
-    size_t read_len = 0;
-    if (!storage_->readBinary(kStatePath, &stored, sizeof(stored), read_len) ||
-        read_len != sizeof(stored) ||
-        !validPersistedState(stored)) {
-        return true;
+    PersistedSnapshot snapshot_a{};
+    PersistedSnapshot snapshot_b{};
+    const bool valid_a = readSnapshotFile(kStatePathA, snapshot_a);
+    const bool valid_b = readSnapshotFile(kStatePathB, snapshot_b);
+    const PersistedSnapshot *selected = nullptr;
+    if (valid_a && valid_b) {
+        selected = generationNewer(snapshot_b.generation, snapshot_a.generation)
+                       ? &snapshot_b
+                       : &snapshot_a;
+    } else if (valid_a) {
+        selected = &snapshot_a;
+    } else if (valid_b) {
+        selected = &snapshot_b;
     }
 
-    const bool migrated = stored.version != kDailyExtremaVersion;
-    migratePersistedState(stored);
-    state_ = stored;
-    if (migrated) {
-        dirty_ = true;
-    }
-    if (state_.day_key == current_day_key) {
-        LOGI("DailyHistory", "restored day=%u samples=%u",
+    if (selected) {
+        state_ = selected->current;
+        if (state_.day_key != 0) {
+            migratePersistedState(state_);
+        }
+        pending_count_ = selected->pending_count;
+        for (uint8_t i = 0; i < pending_count_; ++i) {
+            pending_days_[i] = selected->pending[i];
+            migratePersistedState(pending_days_[i]);
+        }
+        state_generation_ = selected->generation;
+        dropped_pending_days_ = selected->dropped_pending_days;
+        LOGI("DailyHistory", "restored snapshot generation=%u day=%u pending=%u samples=%u",
+             static_cast<unsigned>(state_generation_),
              static_cast<unsigned>(state_.day_key),
+             static_cast<unsigned>(pending_count_),
              static_cast<unsigned>(currentSampleCountLocked()));
-        return true;
+    } else {
+        PersistedState legacy{};
+        if (readLegacyState(legacy)) {
+            migratePersistedState(legacy);
+            state_ = legacy;
+            dirty_ = true;
+            LOGI("DailyHistory", "restored legacy day=%u samples=%u",
+                 static_cast<unsigned>(state_.day_key),
+                 static_cast<unsigned>(currentSampleCountLocked()));
+        }
     }
 
-    LOGI("DailyHistory", "finalizing stored day=%u before current day=%u",
-         static_cast<unsigned>(state_.day_key),
-         static_cast<unsigned>(current_day_key));
-    if (!finalizeCurrentDayCsv()) {
-        return false;
+    if (state_.day_key != 0 && state_.day_key != current_day_key) {
+        enqueuePendingDay(state_);
+        resetForDay(current_day_key);
     }
-    if (!storage_->removeFile(kStatePath)) {
-        LOGW("DailyHistory", "failed to remove finalized current day state");
-    }
-    memset(&state_, 0, sizeof(state_));
-    dirty_ = false;
-    last_save_ms_ = 0;
-    last_save_attempt_ms_ = 0;
-    save_retry_pending_ = false;
     return true;
 }
 
 bool DailyExtremaHistory::ensureDay(uint32_t day_key) {
-    if (!restored_ && !restoreOrFinalizeStoredDay(day_key)) {
-        return false;
+    if (!restored_) {
+        restoreStoredState(day_key);
     }
 
     if (state_.day_key == 0) {
@@ -355,9 +539,7 @@ bool DailyExtremaHistory::ensureDay(uint32_t day_key) {
     }
 
     if (state_.day_key != day_key) {
-        if (!finalizeCurrentDayCsv()) {
-            return false;
-        }
+        enqueuePendingDay(state_);
         resetForDay(day_key);
     }
     return state_.day_key == day_key;
@@ -371,6 +553,9 @@ void DailyExtremaHistory::resetForDay(uint32_t day_key) {
     state_.day_key = day_key;
     state_.units_c = preferred_units_c_ ? 1 : 0;
     dirty_ = true;
+    last_save_ms_ = 0;
+    last_save_attempt_ms_ = 0;
+    save_retry_pending_ = false;
 }
 
 void DailyExtremaHistory::resetMetric(ChartsHistory::Metric metric) {
@@ -462,6 +647,9 @@ void DailyExtremaHistory::update(const SensorData &data, uint32_t now_ms) {
     updateOptionalGasMetric(data, epoch);
 
     saveStateIfDue(now_ms, false);
+    if (flushOldestPendingDay(now_ms, false)) {
+        saveStateIfDue(now_ms, true, false);
+    }
 }
 
 void DailyExtremaHistory::poll(uint32_t now_ms) {
@@ -469,7 +657,10 @@ void DailyExtremaHistory::poll(uint32_t now_ms) {
     if (!guard.locked()) {
         return;
     }
-    saveStateIfDue(now_ms, false);
+    saveStateIfDue(now_ms, false, pending_failure_count_ > 0);
+    if (flushOldestPendingDay(now_ms, false)) {
+        saveStateIfDue(now_ms, true, false);
+    }
 }
 
 void DailyExtremaHistory::flush() {
@@ -477,11 +668,15 @@ void DailyExtremaHistory::flush() {
     if (!guard.locked()) {
         return;
     }
-    saveStateIfDue(millis(), true);
+    const uint32_t now_ms = millis();
+    saveStateIfDue(now_ms, true, pending_failure_count_ > 0);
+    if (flushOldestPendingDay(now_ms, true)) {
+        saveStateIfDue(now_ms, true, false);
+    }
 }
 
-bool DailyExtremaHistory::hasAnySamples() const {
-    for (const auto &metric : state_.metrics) {
+bool DailyExtremaHistory::hasAnySamples(const PersistedState &state) {
+    for (const auto &metric : state.metrics) {
         if (metric.valid && metric.sample_count > 0) {
             return true;
         }
@@ -489,34 +684,23 @@ bool DailyExtremaHistory::hasAnySamples() const {
     return false;
 }
 
-bool DailyExtremaHistory::ensureCsvHeader() {
-    if (!storage_ || !storage_->isReady()) {
-        return false;
-    }
-    size_t size = 0;
-    if (storage_->fileExists(kDailyCsvPath) && storage_->fileSize(kDailyCsvPath, size) && size > 0) {
-        return true;
-    }
-    return storage_->appendText(
-        kDailyCsvPath,
-        "date,metric,unit,min,min_time,max,max_time,sample_count\n");
-}
-
-bool DailyExtremaHistory::appendCsvRows(String &rows, bool include_header) const {
-    if (state_.day_key == 0 || !hasAnySamples()) {
+bool DailyExtremaHistory::appendCsvRowsForState(const PersistedState &state,
+                                                String &rows,
+                                                bool include_header) const {
+    if (state.day_key == 0 || !hasAnySamples(state)) {
         return false;
     }
     if (include_header) {
-        rows += "date,metric,unit,min,min_time,max,max_time,sample_count\n";
+        rows += kDailyCsvHeader;
     }
 
     char day_buf[16] = {};
     char min_time[16] = {};
     char max_time[16] = {};
-    formatDay(state_.day_key, day_buf, sizeof(day_buf));
+    formatDay(state.day_key, day_buf, sizeof(day_buf));
 
     for (uint8_t i = 0; i < ChartsHistory::kMetricCount; ++i) {
-        const MetricState &metric = state_.metrics[i];
+        const MetricState &metric = state.metrics[i];
         if (!metric.valid || metric.sample_count == 0) {
             continue;
         }
@@ -528,15 +712,15 @@ bool DailyExtremaHistory::appendCsvRows(String &rows, bool include_header) const
         rows += ',';
         rows += def.key;
         rows += ',';
-        rows += csv_metric_unit(def, state_.units_c != 0, state_.optional_gas_type);
+        rows += csv_metric_unit(def, state.units_c != 0, state.optional_gas_type);
         rows += ',';
-        rows += format_value(csv_metric_value(def.metric, metric.min_value, state_.units_c != 0),
-                             csv_metric_decimals(def, state_.units_c != 0, state_.optional_gas_type));
+        rows += format_value(csv_metric_value(def.metric, metric.min_value, state.units_c != 0),
+                             csv_metric_decimals(def, state.units_c != 0, state.optional_gas_type));
         rows += ',';
         rows += min_time;
         rows += ',';
-        rows += format_value(csv_metric_value(def.metric, metric.max_value, state_.units_c != 0),
-                             csv_metric_decimals(def, state_.units_c != 0, state_.optional_gas_type));
+        rows += format_value(csv_metric_value(def.metric, metric.max_value, state.units_c != 0),
+                             csv_metric_decimals(def, state.units_c != 0, state.optional_gas_type));
         rows += ',';
         rows += max_time;
         rows += ',';
@@ -554,74 +738,171 @@ bool DailyExtremaHistory::currentDayCsv(String &out, bool include_header) const 
     }
     out = "";
     out.reserve(1152);
-    return appendCsvRows(out, include_header);
+    return appendCsvRowsForState(state_, out, include_header);
 }
 
 DailyExtremaHistory::ClearCurrentDayResult
-DailyExtremaHistory::clearCurrentDay(bool remove_state_file) {
+DailyExtremaHistory::clearCurrentDay(bool remove_state_files, bool clear_pending_days) {
     ClearCurrentDayResult result{};
     ScopedLock guard(*this);
     if (!guard.locked()) {
         return result;
     }
-    if (remove_state_file) {
+    const PersistedState previous_state = state_;
+    if (remove_state_files) {
         if (!storage_ || !storage_->isReady()) {
             return result;
         }
-        size_t state_size = 0;
-        if (!storage_->fileInfo(kStatePath, result.state_existed, state_size)) {
-            return result;
-        }
-        if (result.state_existed && !storage_->removeFile(kStatePath)) {
+        if (!removeAllStateFiles(result.state_existed)) {
             return result;
         }
     }
     memset(&state_, 0, sizeof(state_));
-    dirty_ = false;
+    if (clear_pending_days) {
+        memset(pending_days_, 0, sizeof(pending_days_));
+        pending_count_ = 0;
+        dropped_pending_days_ = 0;
+    }
+    state_generation_ = 0;
+    dirty_ = pending_count_ > 0;
     restored_ = true;
     last_save_ms_ = 0;
     last_save_attempt_ms_ = 0;
     save_retry_pending_ = false;
+    last_pending_attempt_ms_ = 0;
+    pending_retry_delay_ms_ = 0;
+    pending_failure_count_ = 0;
     last_write_ok_ = true;
+    if (dirty_) {
+        saveStateIfDue(millis(), true, false);
+        if (dirty_) {
+            state_ = previous_state;
+            dirty_ = true;
+            restored_ = true;
+            return result;
+        }
+    }
     result.ok = true;
     return result;
 }
 
-bool DailyExtremaHistory::finalizeCurrentDayCsv() {
-    if (state_.day_key == 0 || !hasAnySamples()) {
-        return true;
+bool DailyExtremaHistory::removeAllStateFiles(bool &existed) {
+    existed = false;
+    if (!storage_ || !storage_->isReady()) {
+        return false;
     }
-    return appendCurrentDayCsv();
+    const char *paths[] = {kStatePathA, kStatePathB, kLegacyStatePath};
+    for (const char *path : paths) {
+        bool path_exists = false;
+        size_t path_size = 0;
+        if (!storage_->fileInfo(path, path_exists, path_size)) {
+            return false;
+        }
+        if (!path_exists) {
+            continue;
+        }
+        existed = true;
+        if (!storage_->removeFile(path)) {
+            return false;
+        }
+    }
+    return true;
 }
 
-bool DailyExtremaHistory::appendCurrentDayCsv() {
-    if (!storage_ || !storage_->isReady() || state_.day_key == 0 || !hasAnySamples()) {
+void DailyExtremaHistory::buildSnapshot(PersistedSnapshot &snapshot,
+                                        uint32_t generation) const {
+    memset(&snapshot, 0, sizeof(snapshot));
+    snapshot.magic = kDailySnapshotMagic;
+    snapshot.version = kDailySnapshotVersion;
+    snapshot.size = sizeof(PersistedSnapshot);
+    snapshot.generation = generation;
+    snapshot.pending_count = pending_count_;
+    snapshot.dropped_pending_days = dropped_pending_days_;
+    snapshot.current = state_;
+    for (uint8_t i = 0; i < pending_count_; ++i) {
+        snapshot.pending[i] = pending_days_[i];
+    }
+    snapshot.crc32 = snapshotCrc32(snapshot);
+}
+
+uint32_t DailyExtremaHistory::pendingRetryDelayMs(uint8_t failure_count) {
+    if (failure_count <= 1) {
+        return 5000UL;
+    }
+    if (failure_count == 2) {
+        return 30000UL;
+    }
+    if (failure_count == 3) {
+        return 60000UL;
+    }
+    return 5UL * 60UL * 1000UL;
+}
+
+bool DailyExtremaHistory::flushOldestPendingDay(uint32_t now_ms, bool force) {
+    if (pending_count_ == 0 || !storage_ || !storage_->isReady()) {
         return false;
     }
-    if (!ensureCsvHeader()) {
-        last_write_ok_ = false;
+    if (!force && pending_retry_delay_ms_ > 0 &&
+        now_ms - last_pending_attempt_ms_ < pending_retry_delay_ms_) {
         return false;
     }
 
+    const PersistedState pending = pending_days_[0];
     String rows;
     rows.reserve(1024);
-    appendCsvRows(rows, false);
+    if (!appendCsvRowsForState(pending, rows, false)) {
+        removeOldestPendingDay();
+        pending_failure_count_ = 0;
+        pending_retry_delay_ms_ = 0;
+        last_pending_attempt_ms_ = 0;
+        return true;
+    }
 
-    const bool ok = rows.length() == 0 || storage_->appendText(kDailyCsvPath, rows.c_str());
-    last_write_ok_ = ok;
-    if (!ok) {
-        LOGW("DailyHistory", "failed to append daily CSV for day=%u",
-             static_cast<unsigned>(state_.day_key));
+    char day_prefix[16] = {};
+    formatDay(pending.day_key, day_prefix, sizeof(day_prefix));
+    const size_t prefix_len = strlen(day_prefix);
+    if (prefix_len + 1 < sizeof(day_prefix)) {
+        day_prefix[prefix_len] = ',';
+        day_prefix[prefix_len + 1] = '\0';
+    }
+
+    last_pending_attempt_ms_ = now_ms;
+    if (!storage_->appendUniqueTextBlockAtomic(
+            kDailyCsvPath, day_prefix, kDailyCsvHeader, rows.c_str())) {
+        if (pending_failure_count_ < UINT8_MAX) {
+            ++pending_failure_count_;
+        }
+        pending_retry_delay_ms_ = pendingRetryDelayMs(pending_failure_count_);
+        if (storage_->lastFailureKind() != DailyStorageFailureKind::Busy) {
+            last_write_ok_ = false;
+        }
+        LOGW("DailyHistory",
+             "failed to finalize day=%u pending=%u retry_ms=%u",
+             static_cast<unsigned>(pending.day_key),
+             static_cast<unsigned>(pending_count_),
+             static_cast<unsigned>(pending_retry_delay_ms_));
         return false;
     }
-    LOGI("DailyHistory", "saved daily extrema day=%u samples=%u",
-         static_cast<unsigned>(state_.day_key),
-         static_cast<unsigned>(currentSampleCountLocked()));
+
+    removeOldestPendingDay();
+    pending_failure_count_ = 0;
+    pending_retry_delay_ms_ = 0;
+    last_pending_attempt_ms_ = 0;
+    last_write_ok_ = true;
+    uint32_t samples = 0;
+    for (const MetricState &metric : pending.metrics) {
+        samples += metric.sample_count;
+    }
+    LOGI("DailyHistory", "saved daily extrema day=%u samples=%u pending=%u",
+         static_cast<unsigned>(pending.day_key),
+         static_cast<unsigned>(samples),
+         static_cast<unsigned>(pending_count_));
     return true;
 }
 
 void DailyExtremaHistory::saveStateIfDue(uint32_t now_ms, bool force, bool preserve_failure) {
-    if (!dirty_ || !storage_ || !storage_->isReady() || state_.day_key == 0) {
+    if (!dirty_ || !storage_ || !storage_->isReady() ||
+        (state_.day_key == 0 && pending_count_ == 0)) {
         return;
     }
     if (!force) {
@@ -633,17 +914,33 @@ void DailyExtremaHistory::saveStateIfDue(uint32_t now_ms, bool force, bool prese
             return;
         }
     }
-    state_.magic = kDailyExtremaMagic;
-    state_.version = kDailyExtremaVersion;
-    state_.metric_count = ChartsHistory::kMetricCount;
+    if (state_.day_key != 0) {
+        state_.magic = kDailyExtremaMagic;
+        state_.version = kDailyExtremaVersion;
+        state_.metric_count = ChartsHistory::kMetricCount;
+    }
+    uint32_t next_generation = state_generation_ + 1U;
+    if (next_generation == 0) {
+        next_generation = 1;
+    }
+    PersistedSnapshot snapshot{};
+    buildSnapshot(snapshot, next_generation);
+    const char *target_path = (next_generation & 1U) ? kStatePathA : kStatePathB;
     last_save_attempt_ms_ = now_ms;
-    const bool ok = storage_->writeBinaryAtomic(kStatePath, &state_, sizeof(state_));
+    const bool ok = storage_->writeBinaryAtomic(target_path, &snapshot, sizeof(snapshot));
     if (ok) {
+        state_generation_ = next_generation;
         dirty_ = false;
         save_retry_pending_ = false;
         last_save_ms_ = now_ms;
-        if (!preserve_failure) {
+        if (!preserve_failure && pending_failure_count_ == 0) {
             last_write_ok_ = true;
+        }
+        bool legacy_exists = false;
+        size_t legacy_size = 0;
+        if (storage_->fileInfo(kLegacyStatePath, legacy_exists, legacy_size) && legacy_exists &&
+            !storage_->removeFile(kLegacyStatePath)) {
+            LOGW("DailyHistory", "failed to remove migrated legacy state");
         }
     } else {
         save_retry_pending_ = true;

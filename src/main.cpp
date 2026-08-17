@@ -683,12 +683,15 @@ void loop()
                 }
             }
             (void)wait_for_shared_i2c_release_before_restart();
-            dailyExtremaHistory.flush();
             // This remains safe after a failed or only partially completed
             // lvgl_port_init(). Forced suspension is last, after the bounded
             // DAC transaction, so it cannot strand the I2C driver mutex.
             lvgl_port_prepare_restart();
             quiesce_network_for_restart();
+            dailyExtremaHistory.flush();
+            if (!sdCardManager.end()) {
+                LOGW("Restart", "SD card did not unmount cleanly before restart");
+            }
             delay(50);
             // Delegate restart to a dedicated Core 0 task so Core 0 is the initiator.
             // This avoids using the small IPC task stack and reduces restart races.

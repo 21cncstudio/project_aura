@@ -7,6 +7,7 @@
 #include "web/WebDailyHistoryHandlers.h"
 
 #include <ArduinoJson.h>
+#include <errno.h>
 #include <stdio.h>
 
 #include "core/Logger.h"
@@ -49,6 +50,47 @@ void fill_file_status(ArduinoJson::JsonObject target, SdCardManager &sd_card, co
     if (!checked) {
         target["error"] = "stat failed";
     }
+}
+
+const char *failure_kind_text(DailyStorageFailureKind kind) {
+    switch (kind) {
+        case DailyStorageFailureKind::None: return "none";
+        case DailyStorageFailureKind::Busy: return "busy";
+        case DailyStorageFailureKind::Missing: return "missing";
+        case DailyStorageFailureKind::Io: return "io";
+        case DailyStorageFailureKind::NoSpace: return "no_space";
+        case DailyStorageFailureKind::ReadOnly: return "read_only";
+        case DailyStorageFailureKind::Invalid: return "invalid";
+        case DailyStorageFailureKind::Unknown: return "unknown";
+    }
+    return "unknown";
+}
+
+void fill_state_file_status(ArduinoJson::JsonObject target, SdCardManager &sd_card) {
+    target["path"] = "/aura/history/current_day.*.bin";
+    const char *paths[] = {
+        DailyExtremaHistory::kStatePathA,
+        DailyExtremaHistory::kStatePathB,
+        DailyExtremaHistory::kLegacyStatePath,
+    };
+    bool any_exists = false;
+    size_t total_size = 0;
+    for (const char *path : paths) {
+        bool exists = false;
+        size_t size = 0;
+        if (!sd_card.fileInfo(path, exists, size)) {
+            target["exists"] = any_exists;
+            target["size_bytes"] = total_size;
+            target["error"] = "stat failed";
+            return;
+        }
+        if (exists) {
+            any_exists = true;
+            total_size += size;
+        }
+    }
+    target["exists"] = any_exists;
+    target["size_bytes"] = total_size;
 }
 
 void send_json(WebRequest &server, int status_code, ArduinoJson::JsonDocument &doc) {
@@ -138,8 +180,22 @@ void handleStatus(WebHandlerContext &context, bool ota_busy, const char *ota_bus
         sd["attempted"] = status.attempted;
         sd["mount_point"] = status.mount_point;
         sd["card_size_bytes"] = status.card_size_bytes;
+        sd["filesystem_total_bytes"] = status.filesystem_total_bytes;
+        sd["filesystem_free_bytes"] = status.filesystem_free_bytes;
         sd["last_error"] = status.last_error;
         sd["last_error_code"] = status.last_error_code;
+        sd["runtime_healthy"] = status.runtime_healthy;
+        sd["write_fault"] = status.write_fault;
+        sd["runtime_error_kind"] = failure_kind_text(status.runtime_failure_kind);
+        sd["runtime_error_code"] = status.runtime_error_code;
+        sd["last_operation"] = status.last_operation;
+        sd["last_stage"] = status.last_stage;
+        sd["runtime_error"] = status.runtime_error;
+        sd["last_failure_ms"] = status.last_failure_ms;
+        sd["last_write_success_ms"] = status.last_write_success_ms;
+        sd["consecutive_failures"] = status.consecutive_failures;
+        sd["total_failures"] = status.total_failures;
+        sd["busy_count"] = status.busy_count;
     } else {
         sd["state"] = "manager_unavailable";
         sd["optional"] = true;
@@ -157,19 +213,26 @@ void handleStatus(WebHandlerContext &context, bool ota_busy, const char *ota_bus
         daily["last_write_ok"] = context.daily_extrema->lastWriteOk();
         daily["current_day_units_c"] = context.daily_extrema->currentDayUnitsC();
         daily["preferred_units_c"] = context.daily_extrema->preferredUnitsC();
+        daily["pending_day_count"] = context.daily_extrema->pendingDayCount();
+        daily["oldest_pending_day"] = context.daily_extrema->oldestPendingDayKey();
+        daily["dropped_pending_days"] = context.daily_extrema->droppedPendingDayCount();
+        daily["pending_retry_ms"] = context.daily_extrema->pendingRetryRemainingMs(millis());
     } else {
         daily["current_day"] = 0;
         daily["current_sample_count"] = 0;
         daily["last_write_ok"] = false;
         daily["current_day_units_c"] = true;
         daily["preferred_units_c"] = true;
+        daily["pending_day_count"] = 0;
+        daily["oldest_pending_day"] = 0;
+        daily["dropped_pending_days"] = 0;
+        daily["pending_retry_ms"] = 0;
     }
 
     ArduinoJson::JsonObject files = root["files"].to<ArduinoJson::JsonObject>();
     if (context.sd_card && context.sd_card->isReady()) {
-        fill_file_status(files["current_day_state"].to<ArduinoJson::JsonObject>(),
-                         *context.sd_card,
-                         DailyExtremaHistory::kStatePath);
+        fill_state_file_status(files["current_day_state"].to<ArduinoJson::JsonObject>(),
+                               *context.sd_card);
         fill_file_status(files["daily_csv"].to<ArduinoJson::JsonObject>(),
                          *context.sd_card,
                          DailyExtremaHistory::kDailyCsvPath);
@@ -201,7 +264,7 @@ void handleCsv(WebHandlerContext &context, bool ota_busy, const char *ota_busy_j
 
     bool exists = false;
     size_t file_size = 0;
-    if (!context.sd_card->fileInfo(DailyExtremaHistory::kDailyCsvPath, exists, file_size)) {
+    if (!context.sd_card->fileInfoLocked(DailyExtremaHistory::kDailyCsvPath, exists, file_size)) {
         send_error(server, 500, "Failed to inspect daily history CSV");
         return;
     }
@@ -210,7 +273,7 @@ void handleCsv(WebHandlerContext &context, bool ota_busy, const char *ota_busy_j
         return;
     }
 
-    FILE *file = context.sd_card->openRead(DailyExtremaHistory::kDailyCsvPath);
+    FILE *file = context.sd_card->openReadLocked(DailyExtremaHistory::kDailyCsvPath);
     if (!file) {
         send_error(server, 500, "Failed to open daily history CSV");
         return;
@@ -227,11 +290,17 @@ void handleCsv(WebHandlerContext &context, bool ota_busy, const char *ota_busy_j
     size_t sent = 0;
     int last_error = 0;
     bool ok = true;
+    bool sd_read_failed = false;
     while (sent < file_size) {
         const size_t remaining = file_size - sent;
         const size_t to_read = remaining < sizeof(buffer) ? remaining : sizeof(buffer);
+        errno = 0;
         const size_t read = fread(buffer, 1, to_read, file);
         if (read == 0) {
+            if (ferror(file)) {
+                context.sd_card->noteStreamReadFailure("read", errno);
+                sd_read_failed = true;
+            }
             ok = false;
             break;
         }
@@ -255,7 +324,14 @@ void handleCsv(WebHandlerContext &context, bool ota_busy, const char *ota_busy_j
             break;
         }
     }
-    fclose(file);
+    errno = 0;
+    if (fclose(file) != 0) {
+        context.sd_card->noteStreamReadFailure("close", errno);
+        sd_read_failed = true;
+        ok = false;
+    } else if (!sd_read_failed) {
+        context.sd_card->noteStreamReadSuccess();
+    }
 
     if (ok) {
         server.endStreamResponse();
@@ -303,7 +379,7 @@ void handleClearHistory(WebHandlerContext &context, bool ota_busy, const char *o
 
     DailyExtremaHistory::ClearCurrentDayResult clear_result{};
     if (context.daily_extrema) {
-        clear_result = context.daily_extrema->clearCurrentDay(true);
+        clear_result = context.daily_extrema->clearCurrentDay(true, true);
     }
 
     bool daily_existed = false;
@@ -318,7 +394,7 @@ void handleClearHistory(WebHandlerContext &context, bool ota_busy, const char *o
     root["success"] = ok;
     ArduinoJson::JsonArray files = root["files"].to<ArduinoJson::JsonArray>();
     add_remove_result(files, DailyExtremaHistory::kDailyCsvPath, daily_existed, daily_ok);
-    add_remove_result(files, DailyExtremaHistory::kStatePath, state_existed, state_ok);
+    add_remove_result(files, "/aura/history/current_day.*.bin", state_existed, state_ok);
     send_json(*server, ok ? 200 : 500, doc);
 }
 
@@ -339,7 +415,7 @@ void handleClearCurrentDay(WebHandlerContext &context, bool ota_busy, const char
     ArduinoJson::JsonObject root = doc.to<ArduinoJson::JsonObject>();
     root["success"] = state_ok;
     ArduinoJson::JsonArray files = root["files"].to<ArduinoJson::JsonArray>();
-    add_remove_result(files, DailyExtremaHistory::kStatePath, state_existed, state_ok);
+    add_remove_result(files, "/aura/history/current_day.*.bin", state_existed, state_ok);
     send_json(*server, state_ok ? 200 : 500, doc);
 }
 
