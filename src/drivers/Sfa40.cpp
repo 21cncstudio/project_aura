@@ -141,7 +141,10 @@ void Sfa40::start() {
         return;
     }
     const uint32_t start_command_ms = millis();
-    delay(Config::SFA3X_START_DELAY_MS);
+    // Keep the shared bus quiet while continuous measurement settles. This is
+    // a defensive startup boundary for wired installations, matching the
+    // protection applied to SFA30 without coupling the two timing policies.
+    delay(Config::SFA40_START_SETTLE_MS);
     measuring_ = true;
     measurement_state_unknown_ = false;
     warmup_active_ = true;
@@ -287,7 +290,8 @@ CooperativeStart::Result Sfa40::pollLateStart(uint32_t now_ms) {
                 return finishLateStart(false, now_ms);
             }
             late_start_command_ms_ = millis();
-            late_start_due_ms_ = late_start_command_ms_ + Config::SFA3X_START_DELAY_MS;
+            late_start_due_ms_ =
+                late_start_command_ms_ + Config::SFA40_START_SETTLE_MS;
             late_start_phase_ = LateStartPhase::WaitStart;
             return CooperativeStart::Result::InProgress;
         case LateStartPhase::WaitStart:

@@ -145,7 +145,7 @@ void test_real_sfa40_can_restart_after_runtime_stop_failure_once_bus_recovers() 
     TEST_ASSERT_FALSE(sfa.hasFault());
 
     const uint32_t ready_ms =
-        getMillis() + Config::SFA40_FIRST_READ_DELAY_MS - Config::SFA3X_START_DELAY_MS;
+        getMillis() + Config::SFA40_FIRST_READ_DELAY_MS - Config::SFA40_START_SETTLE_MS;
     setMillis(ready_ms);
     sfa.poll();
 
@@ -658,10 +658,10 @@ void test_real_sfa40_cooperative_late_start_uses_start_command_timestamp() {
     setMillis(command_begin_ms);
     TEST_ASSERT_EQUAL(static_cast<int>(CooperativeStart::Result::InProgress),
                       static_cast<int>(sfa.pollLateStart(getMillis()))); // Start command.
-    setMillis(command_begin_ms + Config::SFA3X_START_DELAY_MS);
+    setMillis(command_complete_ms + Config::SFA40_START_SETTLE_MS - 1U);
     TEST_ASSERT_EQUAL(static_cast<int>(CooperativeStart::Result::InProgress),
                       static_cast<int>(sfa.pollLateStart(getMillis())));
-    setMillis(command_complete_ms + Config::SFA3X_START_DELAY_MS);
+    setMillis(command_complete_ms + Config::SFA40_START_SETTLE_MS);
     TEST_ASSERT_EQUAL(static_cast<int>(CooperativeStart::Result::Success),
                       static_cast<int>(sfa.pollLateStart(getMillis())));
 
