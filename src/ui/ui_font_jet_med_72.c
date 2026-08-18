@@ -1188,7 +1188,6 @@ static LV_ATTRIBUTE_LARGE_CONST const uint8_t glyph_bitmap[] = {
     0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0
 };
 
-
 /*---------------------
  *  GLYPH DESCRIPTION
  *--------------------*/
@@ -1226,8 +1225,6 @@ static const lv_font_fmt_txt_cmap_t cmaps[] =
     }
 };
 
-
-
 /*--------------------
  *  ALL CUSTOM DATA
  *--------------------*/
@@ -1255,8 +1252,6 @@ static lv_font_fmt_txt_dsc_t font_dsc = {
     .cache = &cache
 #endif
 };
-
-
 
 /*-----------------
  *  PUBLIC FONT
@@ -1286,7 +1281,4 @@ lv_font_t ui_font_jet_med_72 = {
     .user_data = NULL,
 };
 
-
-
 #endif /*#if UI_FONT_JET_MED_72*/
-

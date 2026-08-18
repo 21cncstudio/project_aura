@@ -87,7 +87,7 @@ StatusMessageResult build_status_messages(const SensorData &data,
         } else if (co2_sev == STATUS_ORANGE) {
             co2_msg = text(TextId::MsgCo2High);
         } else if (co2_sev == STATUS_YELLOW) {
-            co2_msg = text(TextId::MsgCo2Rising);
+            co2_msg = text(TextId::MsgCo2Elevated);
         }
     }
 
@@ -163,7 +163,7 @@ StatusMessageResult build_status_messages(const SensorData &data,
         } else if (hcho_sev == STATUS_ORANGE) {
             hcho_msg = text(TextId::MsgHchoHigh);
         } else if (hcho_sev == STATUS_YELLOW) {
-            hcho_msg = text(TextId::MsgHchoDetected);
+            hcho_msg = text(TextId::MsgHchoElevated);
         }
     }
 
@@ -175,7 +175,7 @@ StatusMessageResult build_status_messages(const SensorData &data,
         } else if (voc_sev == STATUS_ORANGE) {
             voc_msg = text(TextId::MsgVocHigh);
         } else if (voc_sev == STATUS_YELLOW) {
-            voc_msg = text(TextId::MsgVocHigh);
+            voc_msg = text(TextId::MsgVocElevated);
         }
     }
 
@@ -243,26 +243,48 @@ StatusMessageResult build_status_messages(const SensorData &data,
     }
 
     if (data.temp_valid && data.hum_valid) {
-        float ah_gm3 = MathUtils::compute_absolute_humidity_gm3(data.temperature, data.humidity);
+        const float ah_gm3 = MathUtils::compute_absolute_humidity_gm3(data.temperature, data.humidity);
         if (isfinite(ah_gm3)) {
             result.has_valid = true;
             ah_sev = classify_range_severity(ah_gm3, thresholds.ah);
             const bool low = is_low_side(ah_gm3, thresholds.ah);
             if (ah_sev == STATUS_RED) {
                 ah_msg = text(low ? TextId::MsgAhVeryLow : TextId::MsgAhVeryHigh);
-            } else if (ah_sev == STATUS_ORANGE || ah_sev == STATUS_YELLOW) {
+            } else if (ah_sev == STATUS_ORANGE) {
                 ah_msg = text(low ? TextId::MsgAhLow : TextId::MsgAhHigh);
+            } else if (ah_sev == STATUS_YELLOW) {
+                ah_msg = text(low ? TextId::MsgAhSlightlyLow : TextId::MsgAhSlightlyHigh);
             }
         }
     }
 
-    if (dp_high && data.hum_valid && data.humidity > thresholds.rh.good_max) {
-        hum_sev = STATUS_NONE;
-        hum_msg = nullptr;
-    }
-    if (dp_low && data.hum_valid && data.humidity < thresholds.rh.good_min) {
-        dp_sev = STATUS_NONE;
-        dp_msg = nullptr;
+    // These metrics come from the same temperature and humidity sample.
+    // Keep the strongest moisture status, with RH then dew point winning ties.
+    StatusSeverity moisture_sev = STATUS_NONE;
+    StatusSensor moisture_sensor = STATUS_SENSOR_HUM;
+    auto consider_moisture = [&](StatusSeverity severity, StatusSensor sensor) {
+        if (severity > moisture_sev) {
+            moisture_sev = severity;
+            moisture_sensor = sensor;
+        }
+    };
+    consider_moisture(hum_sev, STATUS_SENSOR_HUM);
+    consider_moisture(dp_sev, STATUS_SENSOR_DP);
+    consider_moisture(ah_sev, STATUS_SENSOR_AH);
+
+    if (moisture_sev != STATUS_NONE) {
+        if (moisture_sensor != STATUS_SENSOR_HUM) {
+            hum_sev = STATUS_NONE;
+            hum_msg = nullptr;
+        }
+        if (moisture_sensor != STATUS_SENSOR_DP) {
+            dp_sev = STATUS_NONE;
+            dp_msg = nullptr;
+        }
+        if (moisture_sensor != STATUS_SENSOR_AH) {
+            ah_sev = STATUS_NONE;
+            ah_msg = nullptr;
+        }
     }
 
     auto add_msg = [&](StatusSeverity target_sev, StatusSeverity sensor_sev, StatusSensor sensor, const char *text) {

@@ -7,6 +7,28 @@
 extern "C" {
 #endif
 
+// Screens
+
+enum ScreensEnum {
+    _SCREEN_ID_FIRST = 1,
+    SCREEN_ID_PAGE_BOOT_LOGO = 1,
+    SCREEN_ID_PAGE_BOOT_DIAG = 2,
+    SCREEN_ID_PAGE_MAIN_PRO = 3,
+    SCREEN_ID_PAGE_SETTINGS = 4,
+    SCREEN_ID_PAGE_WIFI = 5,
+    SCREEN_ID_PAGE_THEME = 6,
+    SCREEN_ID_PAGE_CLOCK = 7,
+    SCREEN_ID_PAGE_CO2_CALIB = 8,
+    SCREEN_ID_PAGE_AUTO_NIGHT_MODE = 9,
+    SCREEN_ID_PAGE_BACKLIGHT = 10,
+    SCREEN_ID_PAGE_MQTT = 11,
+    SCREEN_ID_PAGE_SENSORS_INFO = 12,
+    SCREEN_ID_PAGE_DAC_SETTINGS = 13,
+    SCREEN_ID_PAGE_FW_UPDATE = 14,
+    SCREEN_ID_PAGE_DIAG = 15,
+    _SCREEN_ID_LAST = 15
+};
+
 typedef struct _objects_t {
     lv_obj_t *page_boot_logo;
     lv_obj_t *page_boot_diag;
@@ -268,6 +290,8 @@ typedef struct _objects_t {
     lv_obj_t *log_status;
     lv_obj_t *label_log_title;
     lv_obj_t *label_log_status;
+    lv_obj_t *chip_firmware_trust;
+    lv_obj_t *label_firmware_trust;
     lv_obj_t *background_3;
     lv_obj_t *container_wifi_status;
     lv_obj_t *label_wifi_status_value;
@@ -961,24 +985,6 @@ typedef struct _objects_t {
 
 extern objects_t objects;
 
-enum ScreensEnum {
-    SCREEN_ID_PAGE_BOOT_LOGO = 1,
-    SCREEN_ID_PAGE_BOOT_DIAG = 2,
-    SCREEN_ID_PAGE_MAIN_PRO = 3,
-    SCREEN_ID_PAGE_SETTINGS = 4,
-    SCREEN_ID_PAGE_WIFI = 5,
-    SCREEN_ID_PAGE_THEME = 6,
-    SCREEN_ID_PAGE_CLOCK = 7,
-    SCREEN_ID_PAGE_CO2_CALIB = 8,
-    SCREEN_ID_PAGE_AUTO_NIGHT_MODE = 9,
-    SCREEN_ID_PAGE_BACKLIGHT = 10,
-    SCREEN_ID_PAGE_MQTT = 11,
-    SCREEN_ID_PAGE_SENSORS_INFO = 12,
-    SCREEN_ID_PAGE_DAC_SETTINGS = 13,
-    SCREEN_ID_PAGE_FW_UPDATE = 14,
-    SCREEN_ID_PAGE_DIAG = 15,
-};
-
 void create_screen_page_boot_logo();
 void tick_screen_page_boot_logo();
 
@@ -1028,7 +1034,6 @@ void tick_screen_by_id(enum ScreensEnum screenId);
 void tick_screen(int screen_index);
 
 void create_screens();
-
 
 #ifdef __cplusplus
 }

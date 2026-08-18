@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import ast
+import os
 from pathlib import Path
 import re
 import shlex
@@ -34,8 +35,12 @@ def read_c_string_literals(path: Path) -> list[str]:
     return strings
 
 
-def collect_symbols(strings_path: Path, extra_symbols: str) -> str:
-    strings = read_c_string_literals(strings_path)
+def collect_symbols(strings_paths: list[Path], extra_symbols: str) -> str:
+    strings = [
+        value
+        for strings_path in strings_paths
+        for value in read_c_string_literals(strings_path)
+    ]
     chars = {
         char
         for value in strings
@@ -54,9 +59,12 @@ def normalize_text_file(path: Path) -> None:
 def run_font_conv(args: argparse.Namespace, size: int, symbols: str) -> None:
     font_name = f"{args.lv_font_name_prefix}_{size}"
     output = args.output_dir / f"{font_name}.c"
-    command = [
-        args.npx,
-        "lv_font_conv",
+    converter_command = (
+        shlex.split(args.converter_command, posix=os.name != "nt")
+        if args.converter_command
+        else [args.npx, "lv_font_conv"]
+    )
+    command = converter_command + [
         "--bpp",
         str(args.bpp),
         "--size",
@@ -76,7 +84,8 @@ def run_font_conv(args: argparse.Namespace, size: int, symbols: str) -> None:
         str(output),
     ]
 
-    print(shlex.join(command))
+    printable_command = shlex.join(command).encode("ascii", "backslashreplace").decode("ascii")
+    print(printable_command)
     if not args.dry_run:
         subprocess.run(command, cwd=args.repo_root, check=True)
         normalize_text_file(output)
@@ -96,8 +105,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--strings",
         type=Path,
-        default=root / "src/ui/strings/UiStrings.ja.inc",
-        help="Translation .inc file to scan for non-ASCII glyphs.",
+        nargs="+",
+        default=[root / "src/ui/strings/UiStrings.ja.inc"],
+        help="Translation .inc file(s) to scan for non-ASCII glyphs.",
     )
     parser.add_argument(
         "--output-dir",
@@ -125,11 +135,15 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--bpp", type=int, default=4, help="Bits per pixel for lv_font_conv.")
     parser.add_argument("--ascii-range", default="32-126", help="ASCII range passed to lv_font_conv.")
     parser.add_argument("--npx", default="npx", help="npx executable used to run lv_font_conv.")
+    parser.add_argument(
+        "--converter-command",
+        help="Direct converter command, for example 'pnpm dlx lv_font_conv@1.5.3'.",
+    )
     parser.add_argument("--dry-run", action="store_true", help="Print commands without running them.")
     args = parser.parse_args()
     args.repo_root = root
     args.font = args.font.resolve()
-    args.strings = args.strings.resolve()
+    args.strings = [path.resolve() for path in args.strings]
     args.output_dir = args.output_dir.resolve()
     return args
 
@@ -139,9 +153,10 @@ def main() -> int:
     if not args.font.is_file():
         print(f"font file not found: {args.font}", file=sys.stderr)
         return 2
-    if not args.strings.is_file():
-        print(f"strings file not found: {args.strings}", file=sys.stderr)
-        return 2
+    for strings_path in args.strings:
+        if not strings_path.is_file():
+            print(f"strings file not found: {strings_path}", file=sys.stderr)
+            return 2
     args.output_dir.mkdir(parents=True, exist_ok=True)
 
     symbols = collect_symbols(args.strings, args.extra_symbols)

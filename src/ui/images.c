@@ -1,7 +1,6 @@
 #include "images.h"
 
-const ext_img_desc_t images[10] = {
-    { "project_aura_logo", &img_project_aura_logo },
+const ext_img_desc_t images[9] = {
     { "wifi_green", &img_wifi_green },
     { "wifi_red", &img_wifi_red },
     { "wifi_yellow", &img_wifi_yellow },

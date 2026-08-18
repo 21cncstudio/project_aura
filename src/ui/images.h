@@ -7,7 +7,6 @@
 extern "C" {
 #endif
 
-extern const lv_img_dsc_t img_project_aura_logo;
 extern const lv_img_dsc_t img_wifi_green;
 extern const lv_img_dsc_t img_wifi_red;
 extern const lv_img_dsc_t img_wifi_yellow;
@@ -26,8 +25,7 @@ typedef struct _ext_img_desc_t {
 } ext_img_desc_t;
 #endif
 
-extern const ext_img_desc_t images[10];
-
+extern const ext_img_desc_t images[9];
 
 #ifdef __cplusplus
 }
