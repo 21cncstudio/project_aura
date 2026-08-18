@@ -12,27 +12,20 @@ constexpr uint32_t kPreQuietFailsafeMs = 2000U;
 
 std::atomic<Phase> g_phase{Phase::Idle};
 std::atomic<uint32_t> g_phase_started_ms{0U};
+std::atomic<uint32_t> g_quiet_started_ms{0U};
 std::atomic<uint32_t> g_settle_until_ms{0U};
 std::atomic<uint32_t> g_active_operations{0U};
+std::atomic<bool> g_waiting_for_drain{false};
 
 bool deadlinePending(uint32_t now_ms, uint32_t deadline_ms) {
-    return deadline_ms != 0U &&
-           static_cast<int32_t>(now_ms - deadline_ms) < 0;
+    return static_cast<int32_t>(now_ms - deadline_ms) < 0;
 }
 
 void refresh(uint32_t now_ms) {
     const Phase current = g_phase.load(std::memory_order_acquire);
     if (current == Phase::Settle) {
-        const uint32_t deadline = g_settle_until_ms.load(std::memory_order_acquire);
-        if (!deadlinePending(now_ms, deadline)) {
-            Phase expected = Phase::Settle;
-            if (g_phase.compare_exchange_strong(expected,
-                                                Phase::Idle,
-                                                std::memory_order_acq_rel)) {
-                g_phase_started_ms.store(0U, std::memory_order_release);
-                g_settle_until_ms.store(0U, std::memory_order_release);
-            }
-        }
+        // Settle completion is owner-advanced by beginRenderWait(). A reader
+        // such as the LVGL task must never publish RenderWait on its own.
         return;
     }
 
@@ -40,11 +33,13 @@ void refresh(uint32_t now_ms) {
         const uint32_t started = g_phase_started_ms.load(std::memory_order_acquire);
         if (static_cast<uint32_t>(now_ms - started) >= kPreQuietFailsafeMs) {
             Phase expected = Phase::PreQuiet;
-            if (g_phase.compare_exchange_strong(expected,
-                                                Phase::Idle,
-                                                std::memory_order_acq_rel)) {
-                g_phase_started_ms.store(0U, std::memory_order_release);
-            }
+            // Publish Idle last. Auxiliary state is intentionally left alone:
+            // request() overwrites it before the next PreQuiet transition. A
+            // cleanup after the CAS could otherwise erase a new request won by
+            // the other core in the small Idle hand-off window.
+            (void)g_phase.compare_exchange_strong(expected,
+                                                  Phase::Idle,
+                                                  std::memory_order_acq_rel);
         }
     }
 }
@@ -83,20 +78,33 @@ void Activity::release() {
 
 bool request(uint32_t now_ms) {
     refresh(now_ms);
+    const Phase current = g_phase.load(std::memory_order_acquire);
+    if (current == Phase::PreQuiet) {
+        return true;
+    }
+    if (current != Phase::Idle) {
+        return false;
+    }
     g_phase_started_ms.store(now_ms, std::memory_order_release);
+    g_quiet_started_ms.store(now_ms, std::memory_order_release);
     Phase expected = Phase::Idle;
     if (!g_phase.compare_exchange_strong(expected,
                                          Phase::PreQuiet,
                                          std::memory_order_acq_rel)) {
         return expected == Phase::PreQuiet;
     }
+    // Always establish the quiet baseline from the owner's first evaluation.
+    // An already-admitted Activity may drain after the Idle -> PreQuiet CAS but
+    // before we can sample g_active_operations. Sampling zero here would lose
+    // that overlap and could count part of the Activity as quiet time.
+    g_waiting_for_drain.store(true, std::memory_order_release);
     g_settle_until_ms.store(0U, std::memory_order_release);
     return true;
 }
 
 SwitchDecision evaluateSwitch(uint32_t now_ms,
                               uint32_t min_quiet_ms,
-                              uint32_t max_wait_ms) {
+                              uint32_t wait_warning_ms) {
     refresh(now_ms);
     SwitchDecision decision{};
     if (g_phase.load(std::memory_order_acquire) != Phase::PreQuiet) {
@@ -106,32 +114,96 @@ SwitchDecision evaluateSwitch(uint32_t now_ms,
         now_ms - g_phase_started_ms.load(std::memory_order_acquire));
     decision.active_operations =
         g_active_operations.load(std::memory_order_acquire);
-    if (decision.elapsed_ms >= max_wait_ms) {
-        decision.ready = true;
-        decision.forced_by_timeout = decision.active_operations != 0U;
+    decision.wait_exceeded = decision.active_operations != 0U &&
+                             decision.elapsed_ms >= wait_warning_ms;
+    if (decision.active_operations != 0U) {
+        // The quiet interval begins only after the last tracked operation has
+        // drained. Merely waiting min_quiet_ms since the original request is
+        // insufficient when HTTP, MQTT, Hub or Wi-Fi work was still active.
+        g_waiting_for_drain.store(true, std::memory_order_release);
+        g_quiet_started_ms.store(now_ms, std::memory_order_release);
         return decision;
     }
-    decision.ready = decision.elapsed_ms >= min_quiet_ms &&
-                     decision.active_operations == 0U;
+    if (g_waiting_for_drain.exchange(false, std::memory_order_acq_rel)) {
+        g_quiet_started_ms.store(now_ms, std::memory_order_release);
+    }
+    const uint32_t quiet_elapsed_ms = static_cast<uint32_t>(
+        now_ms - g_quiet_started_ms.load(std::memory_order_acquire));
+    decision.ready = quiet_elapsed_ms >= min_quiet_ms;
     return decision;
 }
 
 bool readyToSwitch(uint32_t now_ms,
                    uint32_t min_quiet_ms,
-                   uint32_t max_wait_ms) {
-    return evaluateSwitch(now_ms, min_quiet_ms, max_wait_ms).ready;
+                   uint32_t wait_warning_ms) {
+    return evaluateSwitch(now_ms, min_quiet_ms, wait_warning_ms).ready;
+}
+
+bool beginSwitch() {
+    if (g_active_operations.load(std::memory_order_acquire) != 0U) {
+        return false;
+    }
+    Phase expected = Phase::PreQuiet;
+    const bool switched = g_phase.compare_exchange_strong(
+        expected, Phase::Switching, std::memory_order_acq_rel);
+    if (switched) {
+        g_waiting_for_drain.store(false, std::memory_order_release);
+    }
+    return switched;
 }
 
 void beginSettle(uint32_t now_ms, uint32_t settle_ms) {
     g_phase_started_ms.store(now_ms, std::memory_order_release);
     g_settle_until_ms.store(now_ms + settle_ms, std::memory_order_release);
-    g_phase.store(settle_ms == 0U ? Phase::Idle : Phase::Settle,
-                  std::memory_order_release);
+    g_phase.store(Phase::Settle, std::memory_order_release);
+}
+
+bool settleReady(uint32_t now_ms) {
+    if (g_phase.load(std::memory_order_acquire) != Phase::Settle) {
+        return false;
+    }
+    const uint32_t deadline = g_settle_until_ms.load(std::memory_order_acquire);
+    return !deadlinePending(now_ms, deadline);
+}
+
+bool beginRenderWait(uint32_t now_ms) {
+    const Phase current = g_phase.load(std::memory_order_acquire);
+    if (current == Phase::RenderWait) {
+        return true;
+    }
+    if (current != Phase::Settle || !settleReady(now_ms)) {
+        return false;
+    }
+    Phase expected = Phase::Settle;
+    return g_phase.compare_exchange_strong(expected,
+                                           Phase::RenderWait,
+                                           std::memory_order_acq_rel);
+}
+
+bool completeRenderWait() {
+    Phase expected = Phase::RenderWait;
+    return g_phase.compare_exchange_strong(expected,
+                                           Phase::Idle,
+                                           std::memory_order_acq_rel);
+}
+
+void latchFailClosed() {
+    Phase current = g_phase.load(std::memory_order_acquire);
+    while (current == Phase::Idle || current == Phase::PreQuiet) {
+        if (g_phase.compare_exchange_weak(current,
+                                          Phase::FailClosed,
+                                          std::memory_order_acq_rel,
+                                          std::memory_order_acquire)) {
+            return;
+        }
+    }
 }
 
 void cancel() {
     g_settle_until_ms.store(0U, std::memory_order_release);
     g_phase_started_ms.store(0U, std::memory_order_release);
+    g_quiet_started_ms.store(0U, std::memory_order_release);
+    g_waiting_for_drain.store(false, std::memory_order_release);
     g_phase.store(Phase::Idle, std::memory_order_release);
 }
 
@@ -140,7 +212,8 @@ bool backgroundPaused(uint32_t now_ms) {
 }
 
 bool uiPaused(uint32_t now_ms) {
-    return backgroundPaused(now_ms);
+    const Phase current = phase(now_ms);
+    return current != Phase::Idle && current != Phase::RenderWait;
 }
 
 Phase phase(uint32_t now_ms) {

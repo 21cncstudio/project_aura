@@ -57,6 +57,7 @@ AuraNetworkManager *g_expected_network_manager = nullptr;
 
 constexpr uint32_t STATUS_ROTATE_MS = 5000;
 constexpr int UI_LVGL_LOCK_TIMEOUT_MS = 500;
+constexpr uint32_t UI_LVGL_QUIESCE_TIMEOUT_MS = 250U;
 constexpr int UI_LVGL_STARTUP_LOCK_TIMEOUT_MS = 2000;
 constexpr uint32_t UI_LVGL_LOCK_WARN_MS = 60000;
 constexpr uint16_t UI_LVGL_LOCK_WARN_FAIL_STREAK = 3;
@@ -426,10 +427,15 @@ void UiController::syncConnectivityRuntime() {
 
 WebUiBridge::Snapshot UiController::buildWebUiSnapshot() const {
     WebUiBridge::Snapshot snapshot;
+    const BacklightManager::RuntimeSnapshot backlight_snapshot =
+        backlightManager.runtimeSnapshot();
     snapshot.available = lvgl_ready;
     snapshot.night_mode = night_mode;
     snapshot.night_mode_locked = nightModeManager.isAutoEnabled();
-    snapshot.backlight_on = backlightManager.isOn();
+    snapshot.backlight_on = backlight_snapshot.actual_on;
+    snapshot.backlight_transition_pending =
+        backlight_snapshot.transition_pending;
+    snapshot.backlight_target_on = backlight_snapshot.target_on;
     snapshot.ntp_enabled = timeManager.isNtpEnabledPref();
     snapshot.ntp_active = timeManager.isNtpEnabled();
     snapshot.ntp_syncing = timeManager.isNtpSyncing();
@@ -474,6 +480,9 @@ void UiController::processWebUiBridgeCommands() {
         webUiBridge.completePendingSettingsRequest(
             settings_request_id,
             applyWebUiSettingsBridge(settings_update, this));
+        if (WakePowerGuard::phase(millis()) != WakePowerGuard::Phase::Idle) {
+            return;
+        }
     }
 
     WebUiBridge::ThemeUpdate theme_update;
@@ -482,6 +491,9 @@ void UiController::processWebUiBridgeCommands() {
         webUiBridge.completePendingThemeRequest(
             theme_request_id,
             applyThemePreviewBridge(theme_update, this));
+        if (WakePowerGuard::phase(millis()) != WakePowerGuard::Phase::Idle) {
+            return;
+        }
     }
 
     WebUiBridge::DacActionUpdate dac_action_update;
@@ -490,6 +502,9 @@ void UiController::processWebUiBridgeCommands() {
         webUiBridge.completePendingDacActionRequest(
             dac_action_request_id,
             applyDacActionBridge(dac_action_update, this));
+        if (WakePowerGuard::phase(millis()) != WakePowerGuard::Phase::Idle) {
+            return;
+        }
     }
 
     WebUiBridge::DacAutoUpdate dac_auto_update;
@@ -498,6 +513,9 @@ void UiController::processWebUiBridgeCommands() {
         webUiBridge.completePendingDacAutoRequest(
             dac_auto_request_id,
             applyDacAutoBridge(dac_auto_update, this));
+        if (WakePowerGuard::phase(millis()) != WakePowerGuard::Phase::Idle) {
+            return;
+        }
     }
 
     WebUiBridge::WifiSaveUpdate wifi_save_update;
@@ -506,6 +524,9 @@ void UiController::processWebUiBridgeCommands() {
         webUiBridge.completePendingWifiSaveRequest(
             wifi_save_request_id,
             applyWifiSaveBridge(wifi_save_update, this));
+        if (WakePowerGuard::phase(millis()) != WakePowerGuard::Phase::Idle) {
+            return;
+        }
     }
 
     WebUiBridge::MqttSaveUpdate mqtt_save_update;
@@ -514,8 +535,14 @@ void UiController::processWebUiBridgeCommands() {
         webUiBridge.completePendingMqttSaveRequest(
             mqtt_save_request_id,
             applyMqttSaveBridge(mqtt_save_update, this));
+        if (WakePowerGuard::phase(millis()) != WakePowerGuard::Phase::Idle) {
+            return;
+        }
     }
 
+    if (WakePowerGuard::phase(millis()) != WakePowerGuard::Phase::Idle) {
+        return;
+    }
     WebUiBridge::FirmwareUpdateScreenRequest firmware_update_request;
     if (!webUiBridge.consumePendingFirmwareUpdateScreen(firmware_update_request)) {
         return;
@@ -546,6 +573,19 @@ WebUiBridge::ApplyResult UiController::applyWebUiSettingsBridge(
         return result;
     }
 
+    if (update.restart_requested &&
+        update.has_backlight &&
+        update.backlight_on &&
+        !controller->webBacklightOn()) {
+        result.success = false;
+        result.status_code = 409;
+        result.error_message = "restart cannot be combined with a queued backlight wake";
+        result.restart_requested = false;
+        result.snapshot = controller->buildWebUiSnapshot();
+        controller->publishWebUiSnapshot();
+        return result;
+    }
+
     const bool previous_backlight = controller->webBacklightOn();
     const bool previous_night_mode = controller->webNightModeEnabled();
     const bool previous_units_c = controller->webUnitsC();
@@ -564,11 +604,13 @@ WebUiBridge::ApplyResult UiController::applyWebUiSettingsBridge(
     bool applied_units = false;
     bool applied_offsets = false;
     bool applied_display_name = false;
+    bool backlight_request_pending = false;
 
     auto finalize = [&](bool success, uint16_t status_code, const char *message) {
         result.success = success;
         result.status_code = status_code;
         result.error_message = message ? message : "";
+        result.pending = success && backlight_request_pending;
         result.snapshot = controller->buildWebUiSnapshot();
         controller->publishWebUiSnapshot();
         return result;
@@ -692,9 +734,10 @@ WebUiBridge::ApplyResult UiController::applyWebUiSettingsBridge(
             return fail(409, "backlight state could not be applied");
         }
         applied_backlight = true;
+        backlight_request_pending = controller->last_web_backlight_request_pending_;
     }
 
-    return finalize(true, 200, nullptr);
+    return finalize(true, backlight_request_pending ? 202 : 200, nullptr);
 }
 
 WebUiBridge::ApplyResult UiController::applyThemePreviewBridge(
@@ -1005,6 +1048,7 @@ bool UiController::webSetNightMode(bool enabled) {
 }
 
 bool UiController::webSetBacklight(bool enabled) {
+    last_web_backlight_request_pending_ = false;
     if (!lvgl_ready) {
         // Do not re-arm wake-touch probing or issue display I/O after the
         // LVGL runtime has been permanently quiesced. A no-op request can
@@ -1018,19 +1062,31 @@ bool UiController::webSetBacklight(bool enabled) {
         return false;
     }
 
-    bool previous = backlightManager.isOn();
-    const bool applied = backlightManager.setOn(enabled);
-    bool changed = backlightManager.isOn() != previous;
-    if (changed) {
+    const BacklightManager::RuntimeSnapshot before =
+        backlightManager.runtimeSnapshot();
+    const BacklightManager::RequestResult request = backlightManager.requestState(
+        enabled,
+        BacklightWakeBreadcrumbs::Event::WebWake,
+        millis());
+    last_web_backlight_request_pending_ = request.pending();
+    const BacklightManager::RuntimeSnapshot after =
+        backlightManager.runtimeSnapshot();
+    const bool changed = after.actual_on != before.actual_on;
+    const bool transition_changed =
+        after.transition_pending != before.transition_pending ||
+        after.target_on != before.target_on;
+    if (changed || transition_changed) {
         data_dirty = true;
         mqttRuntimeState.requestPublish();
     }
-    const bool target_reached = backlightManager.isOn() == enabled;
     const bool unlock_ok = !lock_required || lvgl_port_unlock();
     if (!unlock_ok) {
         LOGE("UI", "LVGL unlock failed after web backlight command");
     }
-    return applied && target_reached && unlock_ok;
+    // The command has already been accepted by BacklightManager. A later LVGL
+    // unlock failure must not turn a queued physical operation into a false
+    // HTTP rejection while its retry remains active.
+    return request.accepted();
 }
 
 bool UiController::webSetNtpEnabled(bool enabled) {
@@ -1261,6 +1317,169 @@ void UiController::sync_display_threshold_revision() {
     data_dirty = true;
 }
 
+void UiController::pollBacklightWithLvglLockHeld() {
+    const BacklightManager::RuntimeSnapshot before =
+        backlightManager.runtimeSnapshot();
+    // The LVGL mutex is held here. If the task-level handler counter advanced
+    // since the prior UI update, that handler and its synchronous flush have
+    // returned without a panic and the wake trace can be completed.
+    const bool wake_render_completed =
+        backlightManager.completeWakeAfterRender();
+    if (!wake_render_completed) {
+        backlightManager.poll(lvgl_ready);
+    }
+    const BacklightManager::RuntimeSnapshot after =
+        backlightManager.runtimeSnapshot();
+    const bool backlight_state_changed = after.actual_on != before.actual_on;
+    const bool backlight_transition_changed =
+        after.transition_pending != before.transition_pending ||
+        after.target_on != before.target_on;
+    if (backlight_state_changed || backlight_transition_changed) {
+        data_dirty = true;
+        mqttRuntimeState.requestPublish();
+    }
+    if (wake_render_completed) {
+        (void)publishFinalBacklightRuntimeAndRelease();
+    }
+    if (backlight_state_changed) {
+        BacklightWakeBreadcrumbs::markUiPostBacklightContext(
+            static_cast<uint32_t>(reinterpret_cast<uintptr_t>(g_expected_network_manager)),
+            static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&networkManager)),
+            static_cast<uint32_t>(reinterpret_cast<uintptr_t>(xTaskGetCurrentTaskHandle())));
+    }
+}
+
+bool UiController::publishFinalBacklightRuntimeAndRelease() {
+    // The manager deliberately leaves WakePowerGuard closed until this exact
+    // final tuple is visible to both Core 0 MQTT and the web snapshot. Reopen
+    // background admission only after both publications complete.
+    const BacklightManager::RuntimeSnapshot backlight_snapshot =
+        backlightManager.runtimeSnapshot();
+    data_dirty = true;
+    mqttRuntimeState.requestPublish();
+    const FanControl::Snapshot fan_snapshot = fanControl.snapshot();
+    mqttRuntimeState.update(currentData,
+                            fan_snapshot,
+                            sensorManager.isWarmupActive(),
+                            night_mode,
+                            alert_blink_enabled,
+                            backlight_snapshot.actual_on,
+                            backlight_snapshot.transition_pending,
+                            backlight_snapshot.target_on,
+                            nightModeManager.isAutoEnabled());
+    publishWebUiSnapshot();
+    if (!backlightManager.releaseWakeAfterRuntimePublish()) {
+        LOGE("UI",
+             "failed to release background after backlight runtime publish");
+        return false;
+    }
+    return true;
+}
+
+void UiController::renderUiWithLvglLockHeld(uint32_t now) {
+    BacklightWakeBreadcrumbs::markUiPreRenderContext(
+        static_cast<uint32_t>(reinterpret_cast<uintptr_t>(g_expected_network_manager)),
+        static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&networkManager)),
+        static_cast<uint32_t>(reinterpret_cast<uintptr_t>(xTaskGetCurrentTaskHandle())));
+    const BacklightManager::RuntimeSnapshot before =
+        backlightManager.runtimeSnapshot();
+    UiRenderLoop::process(*this, now);
+    backlightManager.armWakeCompletionAfterRender();
+    const BacklightManager::RuntimeSnapshot after =
+        backlightManager.runtimeSnapshot();
+    if (after.transition_pending != before.transition_pending ||
+        after.target_on != before.target_on) {
+        mqttRuntimeState.requestPublish();
+    }
+}
+
+bool UiController::quiesceLvglAndAbortBacklightWake() {
+    const bool lvgl_task_active = lvgl_port_request_quiesce();
+    // Idle and PreQuiet otherwise have automatic reopen paths. Convert them to
+    // a terminal latch before touching lifecycle gates so every failure below
+    // leaves background admission closed until the safe success path publishes
+    // final state and explicitly cancels the guard.
+    WakePowerGuard::latchFailClosed();
+    bool lvgl_task_paused = !lvgl_task_active;
+    if (lvgl_task_active) {
+        const uint32_t started_ms = millis();
+        while (!lvgl_port_is_paused() &&
+               static_cast<uint32_t>(millis() - started_ms) <
+                   UI_LVGL_QUIESCE_TIMEOUT_MS) {
+            delay(1);
+        }
+        lvgl_task_paused = lvgl_port_is_paused();
+    }
+
+    // This is a permanent headless fallback on the already-marked recovery
+    // boot. Close both independent writer entry points before inspecting their
+    // counters. Do not clean up plain touch state until an LVGL mutex fence
+    // proves that a late handler cannot be changing it concurrently.
+    lvgl_port_disable_touch_i2c();
+    backlightManager.disableSharedBus();
+    if (!backlightManager.waitForSharedBusWriterIdle(
+            UI_LVGL_QUIESCE_TIMEOUT_MS)) {
+        LOGE("UI",
+             "backlight writer did not drain; wake guard not released");
+        return false;
+    }
+    if (!lvgl_port_wait_touch_i2c_idle(UI_LVGL_QUIESCE_TIMEOUT_MS)) {
+        LOGE("UI",
+             "touch I2C did not drain; wake guard not released");
+        return false;
+    }
+
+    bool lvgl_mutex_held = false;
+    bool terminal_display_fail_stop =
+        lvgl_port_display_task_fail_stopped();
+    if (!lvgl_task_paused && lvgl_task_active &&
+        !terminal_display_fail_stop) {
+        lvgl_mutex_held = lvgl_port_lock(UI_LVGL_LOCK_TIMEOUT_MS);
+        if (!lvgl_mutex_held) {
+            // The display task may have entered its terminal self-suspend
+            // while this owner was waiting. That acknowledgement is an
+            // equivalent writer fence because no task code runs after it.
+            terminal_display_fail_stop =
+                lvgl_port_display_task_fail_stopped();
+            if (!terminal_display_fail_stop) {
+                LOGE("UI",
+                     "LVGL mutex fence timed out; wake guard not released");
+                return false;
+            }
+        }
+    }
+    if (!lvgl_port_finalize_touch_i2c_disable_after_drain()) {
+        if (lvgl_mutex_held) {
+            lvgl_port_unlock();
+        }
+        LOGE("UI",
+             "failed to finalize disabled touch state; wake guard not released");
+        return false;
+    }
+    if (!backlightManager.prepareSuppressedLvglAbortAfterDrain()) {
+        if (lvgl_mutex_held) {
+            lvgl_port_unlock();
+        }
+        LOGE("UI",
+             "failed to finalize headless backlight state; wake guard not released");
+        return false;
+    }
+
+    // From this point every UI-originated touch/backlight I2C entry point is
+    // permanently closed for this boot. Publish headless state while the wake
+    // guard still blocks background work, then release admission last.
+    lvgl_ready = false;
+    if (lvgl_mutex_held) {
+        lvgl_port_unlock();
+    }
+    if (!publishFinalBacklightRuntimeAndRelease()) {
+        return false;
+    }
+    LOGW("UI",
+         "LVGL recovery suppressed; touch/backlight isolated and headless management resumed");
+    return true;
+}
+
 void UiController::poll(uint32_t now) {
     lvgl_port_diagnostics_t early_lvgl_diag = {};
     if (lvgl_ready &&
@@ -1291,18 +1510,67 @@ void UiController::poll(uint32_t now) {
         // make the shared-I2C DAC safe first. A sync-faulted task may not
         // acknowledge this request, but keeping its handle intact lets the
         // main restart path perform the final teardown in the correct order.
-        (void)lvgl_port_request_quiesce();
+        if (recovery_decision ==
+            UiAutoRecoveryPolicy::Decision::SuppressRecoveryBoot) {
+            (void)quiesceLvglAndAbortBacklightWake();
+        } else {
+            (void)lvgl_port_request_quiesce();
+        }
         lvgl_ready = false;
         publishWebUiSnapshot();
         return;
     }
 
-    refreshConnectivitySnapshot();
-    processWebUiBridgeCommands();
+    const WakePowerGuard::Phase wake_phase = WakePowerGuard::phase(now);
+    if ((wake_phase == WakePowerGuard::Phase::Idle ||
+         wake_phase == WakePowerGuard::Phase::PreQuiet) &&
+        !backlightManager.isWakeCriticalSectionPending()) {
+        // Requests admitted just before a wake hold an Activity lease while
+        // waiting for their deferred UI reply. Drain those reply-bearing
+        // commands during PreQuiet; the guard still waits for their leases to
+        // release and then enforces a fresh full quiet interval.
+        processWebUiBridgeCommands();
+    }
     if (!lvgl_ready) {
         publishWebUiSnapshot();
         return;
     }
+
+    const WakePowerGuard::Phase wake_phase_after_web =
+        WakePowerGuard::phase(now);
+    if (wake_phase_after_web == WakePowerGuard::Phase::PreQuiet ||
+        wake_phase_after_web == WakePowerGuard::Phase::Switching ||
+        wake_phase_after_web == WakePowerGuard::Phase::Settle) {
+        // Once PreQuiet begins, this owner does only the work required to
+        // advance the guarded state machine. In particular, do not run
+        // auto-night persistence, MQTT commands, diagnostics or UI updates
+        // while the post-drain quiet interval is being measured.
+        if (!lvgl_port_lock(UI_LVGL_LOCK_TIMEOUT_MS)) {
+            if (lvgl_lock_fail_streak != 0xFFFFu) {
+                ++lvgl_lock_fail_streak;
+            }
+            return;
+        }
+        lvgl_lock_fail_streak = 0;
+        pollBacklightWithLvglLockHeld();
+        const bool render_wait_ready =
+            WakePowerGuard::phase(millis()) ==
+            WakePowerGuard::Phase::RenderWait;
+        if (render_wait_ready) {
+            // beginRenderWait() was published by BacklightManager while this
+            // mutex is held. Render and arm the completion baseline before
+            // unlocking, so the LVGL task cannot run an untracked handler in
+            // the gap between Settle and the owner-prepared RenderWait.
+            renderUiWithLvglLockHeld(now);
+        }
+        lvgl_port_unlock();
+        if (render_wait_ready) {
+            publishWebUiSnapshot();
+        }
+        return;
+    }
+
+    refreshConnectivitySnapshot();
 
     if (firmware_update_autoclose_due_ms_ != 0 &&
         static_cast<int32_t>(now - firmware_update_autoclose_due_ms_) >= 0) {
@@ -1479,7 +1747,7 @@ void UiController::poll(uint32_t now) {
                         // Keep the task handle alive and request only a
                         // cooperative pause: force-suspending an unknown I2C
                         // owner could strand the sensor and DAC bus forever.
-                        (void)lvgl_port_request_quiesce();
+                        (void)quiesceLvglAndAbortBacklightWake();
                         lvgl_ready = false;
                         publishWebUiSnapshot();
                         return;
@@ -1549,33 +1817,30 @@ void UiController::poll(uint32_t now) {
         return;
     }
     lvgl_lock_fail_streak = 0;
-    if (!WakePowerGuard::uiPaused(now)) {
-        mqtt_apply_pending();
-        if ((now - last_ui_tick_ms) >= UI_TICK_MS) {
-            ui_tick();
-            last_ui_tick_ms = now;
-        }
-    }
-    backlightManager.poll(lvgl_ready);
-    BacklightWakeBreadcrumbs::markUiPostBacklightContext(
-        static_cast<uint32_t>(reinterpret_cast<uintptr_t>(g_expected_network_manager)),
-        static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&networkManager)),
-        static_cast<uint32_t>(reinterpret_cast<uintptr_t>(xTaskGetCurrentTaskHandle())));
+    pollBacklightWithLvglLockHeld();
     if (WakePowerGuard::uiPaused(millis())) {
         lvgl_port_unlock();
         publishWebUiSnapshot();
         return;
+    }
+    if (!backlightManager.isWakeCriticalSectionPending()) {
+        mqtt_apply_pending();
+    }
+    if (WakePowerGuard::uiPaused(millis())) {
+        lvgl_port_unlock();
+        publishWebUiSnapshot();
+        return;
+    }
+    if ((now - last_ui_tick_ms) >= UI_TICK_MS) {
+        ui_tick();
+        last_ui_tick_ms = now;
     }
     update_status_icons();
     UiScreenFlow::processPendingScreen(*this, now);
     UiScreenFlow::processBootRelease(*this, now);
     UiScreenFlow::processDeferredUnloads(*this, now);
 
-    BacklightWakeBreadcrumbs::markUiPreRenderContext(
-        static_cast<uint32_t>(reinterpret_cast<uintptr_t>(g_expected_network_manager)),
-        static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&networkManager)),
-        static_cast<uint32_t>(reinterpret_cast<uintptr_t>(xTaskGetCurrentTaskHandle())));
-    UiRenderLoop::process(*this, now);
+    renderUiWithLvglLockHeld(now);
     lvgl_port_unlock();
     publishWebUiSnapshot();
 }
@@ -2581,13 +2846,6 @@ void UiController::mqtt_apply_pending() {
             publish_needed = true;
         }
     }
-    if (pending.backlight) {
-        bool prev_backlight = backlightManager.isOn();
-        backlightManager.setOn(pending.backlight_value);
-        if (backlightManager.isOn() != prev_backlight) {
-            publish_needed = true;
-        }
-    }
     FanControl::Mode effective_fan_mode = fanControl.mode();
     if (pending.fan_timer && Config::isDacTimerPresetSeconds(pending.fan_timer_seconds)) {
         fanControl.setTimerSeconds(pending.fan_timer_seconds);
@@ -2640,6 +2898,32 @@ void UiController::mqtt_apply_pending() {
             fanControl.setManualStep(static_cast<uint8_t>(step));
             fanControl.requestStart();
             publish_needed = true;
+        }
+    }
+    const bool restart_conflicts_with_dark_wake =
+        pending.restart && pending.backlight && pending.backlight_value &&
+        !backlightManager.isOn();
+    if (restart_conflicts_with_dark_wake) {
+        LOGW("UI",
+             "MQTT backlight ON ignored because it was combined with restart");
+        publish_needed = true;
+    } else if (pending.backlight) {
+        const bool previous_backlight = backlightManager.isOn();
+        const BacklightManager::RequestResult request = backlightManager.requestState(
+            pending.backlight_value,
+            BacklightWakeBreadcrumbs::Event::MqttWake,
+            millis());
+        if (backlightManager.isOn() != previous_backlight) {
+            data_dirty = true;
+        }
+        // Start any guarded OFF-to-ON transition only after the rest of this
+        // MQTT batch has finished its DAC and persistence work. PreQuiet then
+        // begins with no same-owner work left behind it.
+        publish_needed = true;
+        if (request.status == BacklightManager::RequestStatus::Rejected) {
+            LOGW("UI", "MQTT backlight command rejected (requested=%s, actual=%s)",
+                 pending.backlight_value ? "ON" : "OFF",
+                 request.actual_on ? "ON" : "OFF");
         }
     }
     if (pending.restart) {

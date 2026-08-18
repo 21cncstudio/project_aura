@@ -50,13 +50,17 @@ struct BootPayload {
     const char *previous_backlight_trace_event = "none";
     const char *previous_backlight_trace_stage = "none";
     const char *previous_backlight_trace_driver_result = "unknown";
+    const char *previous_backlight_trace_command_result = "unknown";
     uint32_t previous_backlight_trace_sequence = 0;
     uint32_t previous_backlight_trace_uptime_ms = 0;
     uint32_t previous_backlight_trace_epoch_s = 0;
     uint32_t previous_backlight_trace_driver_duration_us = 0;
     uint32_t previous_backlight_trace_pre_quiet_elapsed_ms = 0;
     uint32_t previous_backlight_trace_pre_quiet_active_operations = 0;
+    bool previous_backlight_trace_pre_quiet_wait_exceeded = false;
+    uint32_t previous_backlight_trace_pre_quiet_wait_exceeded_active_operations = 0;
     bool previous_backlight_trace_pre_quiet_forced_by_timeout = false;
+    bool previous_backlight_trace_retention_uncertain = false;
     uint32_t previous_backlight_trace_expected_network_manager_addr = 0;
     uint32_t previous_backlight_trace_post_backlight_network_manager_addr = 0;
     uint32_t previous_backlight_trace_pre_render_network_manager_addr = 0;

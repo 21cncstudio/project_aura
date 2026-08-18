@@ -528,7 +528,10 @@ namespace Config {
     constexpr uint32_t MQTT_RETRY_MS = 30000;
     constexpr uint32_t MQTT_RETRY_MEDIUM_MS = 2UL * 60UL * 1000UL;
     constexpr uint32_t MQTT_RETRY_LONG_MS = 10UL * 60UL * 1000UL;
-    constexpr uint16_t MQTT_BUFFER_SIZE = 1024;
+    // The retained state payload includes the physical backlight state plus
+    // guarded-transition target metadata. Keep enough headroom for the full
+    // sensor/fan payload instead of failing the entire publish near 1 KiB.
+    constexpr uint16_t MQTT_BUFFER_SIZE = 1280;
     constexpr uint16_t MQTT_DEFAULT_PORT = Secrets::MQTT_PORT;
     constexpr uint16_t MQTT_TLS_DEFAULT_PORT = 8883;
     constexpr size_t MQTT_CA_CERT_MAX_BYTES = 16UL * 1024UL;
@@ -546,7 +549,7 @@ namespace Config {
     constexpr uint32_t BACKLIGHT_BOOT_GRACE_MS = 30UL * 1000UL;
     constexpr uint32_t BACKLIGHT_WAKE_BLOCK_MS = 400;
     constexpr uint32_t BACKLIGHT_WAKE_PRE_QUIET_MIN_MS = 100;
-    constexpr uint32_t BACKLIGHT_WAKE_PRE_QUIET_MAX_MS = 500;
+    constexpr uint32_t BACKLIGHT_WAKE_PRE_QUIET_WARN_MS = 500;
     constexpr uint32_t BACKLIGHT_WAKE_DRIVER_SETTLE_MS = 500;
     constexpr uint32_t BACKLIGHT_WAKE_SETTLE_MS = 200;
     constexpr uint32_t AUTO_NIGHT_POLL_MS = 1000;

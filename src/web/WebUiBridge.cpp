@@ -4,7 +4,7 @@
 // Want to use this code in a commercial product while keeping modifications proprietary?
 // Purchase a Commercial License: see COMMERCIAL_LICENSE_SUMMARY.md
 
-#include "web/WebUiBridge.h"
+#include "WebUiBridge.h"
 
 WebUiBridge::WebUiBridge() {
     mutex_ = xSemaphoreCreateMutexStatic(&mutex_buffer_);
@@ -14,6 +14,119 @@ WebUiBridge::WebUiBridge() {
     dac_auto_reply_semaphore_ = xSemaphoreCreateBinaryStatic(&dac_auto_reply_semaphore_buffer_);
     wifi_save_reply_semaphore_ = xSemaphoreCreateBinaryStatic(&wifi_save_reply_semaphore_buffer_);
     mqtt_save_reply_semaphore_ = xSemaphoreCreateBinaryStatic(&mqtt_save_reply_semaphore_buffer_);
+}
+
+WebUiBridge::ApplyResult WebUiBridge::waitForDeferredReply(
+    DeferredRequestState &state,
+    uint32_t request_id,
+    uint32_t &active_request_id,
+    ApplyResult &stored_result,
+    uint32_t &stored_result_id,
+    SemaphoreHandle_t reply_semaphore,
+    const char *timeout_message,
+    const char *mismatch_message) {
+    bool wait_without_timeout = false;
+
+    for (;;) {
+        const TickType_t wait_ticks = wait_without_timeout
+                                          ? portMAX_DELAY
+                                          : pdMS_TO_TICKS(5000);
+        const bool signaled = xSemaphoreTake(reply_semaphore, wait_ticks) == pdTRUE;
+
+        lock();
+        if (active_request_id != request_id) {
+            ApplyResult invalid{};
+            invalid.success = false;
+            invalid.status_code = 500;
+            invalid.error_message = mismatch_message;
+            invalid.snapshot = snapshot_;
+            unlock();
+            return invalid;
+        }
+
+        if (state == DeferredRequestState::Completed) {
+            // completeDeferredReply publishes the token while holding mutex_, so a
+            // timeout racing a completion can safely remove the already-published
+            // token before making this channel idle again.
+            if (!signaled) {
+                xSemaphoreTake(reply_semaphore, 0);
+            }
+            if (stored_result_id == request_id) {
+                ApplyResult result = stored_result;
+                state = DeferredRequestState::Idle;
+                stored_result_id = 0;
+                unlock();
+                return result;
+            }
+
+            ApplyResult invalid{};
+            invalid.success = false;
+            invalid.status_code = 500;
+            invalid.error_message = mismatch_message;
+            invalid.snapshot = snapshot_;
+            unlock();
+            return invalid;
+        }
+
+        if (signaled) {
+            // A defensive stale-token drain must never release this request or be
+            // mistaken for another generation's reply.
+            wait_without_timeout = state == DeferredRequestState::InFlight;
+            unlock();
+            continue;
+        }
+
+        if (state == DeferredRequestState::Queued) {
+            // Work that the UI has not accepted can be cancelled without a late
+            // side effect. consumePending* will no longer see this generation.
+            state = DeferredRequestState::Idle;
+            stored_result_id = 0;
+            ApplyResult timeout{};
+            timeout.success = false;
+            timeout.status_code = 504;
+            timeout.error_message = timeout_message;
+            timeout.snapshot = snapshot_;
+            unlock();
+            return timeout;
+        }
+
+        if (state == DeferredRequestState::InFlight) {
+            // Once the UI has accepted the request it may already be applying
+            // persistent changes. Returning 504 would be a false cancellation,
+            // so retain ownership of this generation until its matching reply.
+            wait_without_timeout = true;
+            unlock();
+            continue;
+        }
+
+        ApplyResult invalid{};
+        invalid.success = false;
+        invalid.status_code = 500;
+        invalid.error_message = mismatch_message;
+        invalid.snapshot = snapshot_;
+        unlock();
+        return invalid;
+    }
+}
+
+void WebUiBridge::completeDeferredReply(DeferredRequestState &state,
+                                        uint32_t request_id,
+                                        const uint32_t &active_request_id,
+                                        ApplyResult &stored_result,
+                                        uint32_t &stored_result_id,
+                                        SemaphoreHandle_t reply_semaphore,
+                                        const ApplyResult &result) {
+    lock();
+    if (state == DeferredRequestState::InFlight &&
+        active_request_id == request_id) {
+        stored_result = result;
+        stored_result_id = request_id;
+        state = DeferredRequestState::Completed;
+        // Publish the state and its binary token atomically with respect to the
+        // timeout path. Stale/wrong generations are ignored and never signal.
+        xSemaphoreGive(reply_semaphore);
+    }
+    unlock();
 }
 
 void WebUiBridge::bindSettingsApplier(void *ctx, SettingsApplyFn fn) {
@@ -94,7 +207,16 @@ WebUiBridge::ApplyResult WebUiBridge::applySettings(const SettingsUpdate &update
     fn = settings_apply_fn_;
     ctx = settings_ctx_;
     if (mode == DispatchMode::DeferredReply) {
-        if (pending_settings_request_) {
+        if (!fn || !settings_reply_semaphore_) {
+            ApplyResult unavailable{};
+            unavailable.success = false;
+            unavailable.status_code = 503;
+            unavailable.error_message = "UI bridge unavailable";
+            unavailable.snapshot = snapshot_;
+            unlock();
+            return unavailable;
+        }
+        if (pending_settings_state_ != DeferredRequestState::Idle) {
             ApplyResult busy{};
             busy.success = false;
             busy.status_code = 503;
@@ -103,8 +225,11 @@ WebUiBridge::ApplyResult WebUiBridge::applySettings(const SettingsUpdate &update
             unlock();
             return busy;
         }
+        if (settings_reply_semaphore_) {
+            xSemaphoreTake(settings_reply_semaphore_, 0);
+        }
         pending_settings_update_ = update;
-        pending_settings_request_ = true;
+        pending_settings_state_ = DeferredRequestState::Queued;
         request_id = ++pending_settings_request_id_;
         pending_settings_result_id_ = 0;
     }
@@ -120,30 +245,14 @@ WebUiBridge::ApplyResult WebUiBridge::applySettings(const SettingsUpdate &update
     }
 
     if (mode == DispatchMode::DeferredReply) {
-        if (settings_reply_semaphore_) {
-            xSemaphoreTake(settings_reply_semaphore_, 0);
-            if (xSemaphoreTake(settings_reply_semaphore_, pdMS_TO_TICKS(5000)) != pdTRUE) {
-                ApplyResult timeout{};
-                timeout.success = false;
-                timeout.status_code = 504;
-                timeout.error_message = "UI bridge timeout";
-                timeout.snapshot = snapshot();
-                return timeout;
-            }
-        }
-        lock();
-        const bool result_matches = pending_settings_result_id_ == request_id;
-        ApplyResult result = pending_settings_result_;
-        unlock();
-        if (!result_matches) {
-            ApplyResult invalid{};
-            invalid.success = false;
-            invalid.status_code = 500;
-            invalid.error_message = "UI bridge response mismatch";
-            invalid.snapshot = snapshot();
-            return invalid;
-        }
-        return result;
+        return waitForDeferredReply(pending_settings_state_,
+                                    request_id,
+                                    pending_settings_request_id_,
+                                    pending_settings_result_,
+                                    pending_settings_result_id_,
+                                    settings_reply_semaphore_,
+                                    "UI bridge timeout",
+                                    "UI bridge response mismatch");
     }
 
     return fn(update, ctx);
@@ -159,7 +268,16 @@ WebUiBridge::ApplyResult WebUiBridge::applyTheme(const ThemeUpdate &update) {
     fn = theme_apply_fn_;
     ctx = theme_ctx_;
     if (mode == DispatchMode::DeferredReply) {
-        if (pending_theme_request_) {
+        if (!fn || !theme_reply_semaphore_) {
+            ApplyResult unavailable{};
+            unavailable.success = false;
+            unavailable.status_code = 503;
+            unavailable.error_message = "Theme bridge unavailable";
+            unavailable.snapshot = snapshot_;
+            unlock();
+            return unavailable;
+        }
+        if (pending_theme_state_ != DeferredRequestState::Idle) {
             ApplyResult busy{};
             busy.success = false;
             busy.status_code = 503;
@@ -168,8 +286,11 @@ WebUiBridge::ApplyResult WebUiBridge::applyTheme(const ThemeUpdate &update) {
             unlock();
             return busy;
         }
+        if (theme_reply_semaphore_) {
+            xSemaphoreTake(theme_reply_semaphore_, 0);
+        }
         pending_theme_update_ = update;
-        pending_theme_request_ = true;
+        pending_theme_state_ = DeferredRequestState::Queued;
         request_id = ++pending_theme_request_id_;
         pending_theme_result_id_ = 0;
     }
@@ -185,30 +306,14 @@ WebUiBridge::ApplyResult WebUiBridge::applyTheme(const ThemeUpdate &update) {
     }
 
     if (mode == DispatchMode::DeferredReply) {
-        if (theme_reply_semaphore_) {
-            xSemaphoreTake(theme_reply_semaphore_, 0);
-            if (xSemaphoreTake(theme_reply_semaphore_, pdMS_TO_TICKS(5000)) != pdTRUE) {
-                ApplyResult timeout{};
-                timeout.success = false;
-                timeout.status_code = 504;
-                timeout.error_message = "Theme bridge timeout";
-                timeout.snapshot = snapshot();
-                return timeout;
-            }
-        }
-        lock();
-        const bool result_matches = pending_theme_result_id_ == request_id;
-        ApplyResult result = pending_theme_result_;
-        unlock();
-        if (!result_matches) {
-            ApplyResult invalid{};
-            invalid.success = false;
-            invalid.status_code = 500;
-            invalid.error_message = "Theme bridge response mismatch";
-            invalid.snapshot = snapshot();
-            return invalid;
-        }
-        return result;
+        return waitForDeferredReply(pending_theme_state_,
+                                    request_id,
+                                    pending_theme_request_id_,
+                                    pending_theme_result_,
+                                    pending_theme_result_id_,
+                                    theme_reply_semaphore_,
+                                    "Theme bridge timeout",
+                                    "Theme bridge response mismatch");
     }
 
     return fn(update, ctx);
@@ -224,7 +329,16 @@ WebUiBridge::ApplyResult WebUiBridge::applyDacAction(const DacActionUpdate &upda
     fn = dac_action_apply_fn_;
     ctx = dac_action_ctx_;
     if (mode == DispatchMode::DeferredReply) {
-        if (pending_dac_action_request_) {
+        if (!fn || !dac_action_reply_semaphore_) {
+            ApplyResult unavailable{};
+            unavailable.success = false;
+            unavailable.status_code = 503;
+            unavailable.error_message = "DAC bridge unavailable";
+            unavailable.snapshot = snapshot_;
+            unlock();
+            return unavailable;
+        }
+        if (pending_dac_action_state_ != DeferredRequestState::Idle) {
             ApplyResult busy{};
             busy.success = false;
             busy.status_code = 503;
@@ -233,8 +347,11 @@ WebUiBridge::ApplyResult WebUiBridge::applyDacAction(const DacActionUpdate &upda
             unlock();
             return busy;
         }
+        if (dac_action_reply_semaphore_) {
+            xSemaphoreTake(dac_action_reply_semaphore_, 0);
+        }
         pending_dac_action_update_ = update;
-        pending_dac_action_request_ = true;
+        pending_dac_action_state_ = DeferredRequestState::Queued;
         request_id = ++pending_dac_action_request_id_;
         pending_dac_action_result_id_ = 0;
     }
@@ -250,30 +367,14 @@ WebUiBridge::ApplyResult WebUiBridge::applyDacAction(const DacActionUpdate &upda
     }
 
     if (mode == DispatchMode::DeferredReply) {
-        if (dac_action_reply_semaphore_) {
-            xSemaphoreTake(dac_action_reply_semaphore_, 0);
-            if (xSemaphoreTake(dac_action_reply_semaphore_, pdMS_TO_TICKS(5000)) != pdTRUE) {
-                ApplyResult timeout{};
-                timeout.success = false;
-                timeout.status_code = 504;
-                timeout.error_message = "DAC bridge timeout";
-                timeout.snapshot = snapshot();
-                return timeout;
-            }
-        }
-        lock();
-        const bool result_matches = pending_dac_action_result_id_ == request_id;
-        ApplyResult result = pending_dac_action_result_;
-        unlock();
-        if (!result_matches) {
-            ApplyResult invalid{};
-            invalid.success = false;
-            invalid.status_code = 500;
-            invalid.error_message = "DAC bridge response mismatch";
-            invalid.snapshot = snapshot();
-            return invalid;
-        }
-        return result;
+        return waitForDeferredReply(pending_dac_action_state_,
+                                    request_id,
+                                    pending_dac_action_request_id_,
+                                    pending_dac_action_result_,
+                                    pending_dac_action_result_id_,
+                                    dac_action_reply_semaphore_,
+                                    "DAC bridge timeout",
+                                    "DAC bridge response mismatch");
     }
 
     return fn(update, ctx);
@@ -289,7 +390,16 @@ WebUiBridge::ApplyResult WebUiBridge::applyDacAuto(const DacAutoUpdate &update) 
     fn = dac_auto_apply_fn_;
     ctx = dac_auto_ctx_;
     if (mode == DispatchMode::DeferredReply) {
-        if (pending_dac_auto_request_) {
+        if (!fn || !dac_auto_reply_semaphore_) {
+            ApplyResult unavailable{};
+            unavailable.success = false;
+            unavailable.status_code = 503;
+            unavailable.error_message = "DAC auto bridge unavailable";
+            unavailable.snapshot = snapshot_;
+            unlock();
+            return unavailable;
+        }
+        if (pending_dac_auto_state_ != DeferredRequestState::Idle) {
             ApplyResult busy{};
             busy.success = false;
             busy.status_code = 503;
@@ -298,8 +408,11 @@ WebUiBridge::ApplyResult WebUiBridge::applyDacAuto(const DacAutoUpdate &update) 
             unlock();
             return busy;
         }
+        if (dac_auto_reply_semaphore_) {
+            xSemaphoreTake(dac_auto_reply_semaphore_, 0);
+        }
         pending_dac_auto_update_ = update;
-        pending_dac_auto_request_ = true;
+        pending_dac_auto_state_ = DeferredRequestState::Queued;
         request_id = ++pending_dac_auto_request_id_;
         pending_dac_auto_result_id_ = 0;
     }
@@ -315,30 +428,14 @@ WebUiBridge::ApplyResult WebUiBridge::applyDacAuto(const DacAutoUpdate &update) 
     }
 
     if (mode == DispatchMode::DeferredReply) {
-        if (dac_auto_reply_semaphore_) {
-            xSemaphoreTake(dac_auto_reply_semaphore_, 0);
-            if (xSemaphoreTake(dac_auto_reply_semaphore_, pdMS_TO_TICKS(5000)) != pdTRUE) {
-                ApplyResult timeout{};
-                timeout.success = false;
-                timeout.status_code = 504;
-                timeout.error_message = "DAC auto bridge timeout";
-                timeout.snapshot = snapshot();
-                return timeout;
-            }
-        }
-        lock();
-        const bool result_matches = pending_dac_auto_result_id_ == request_id;
-        ApplyResult result = pending_dac_auto_result_;
-        unlock();
-        if (!result_matches) {
-            ApplyResult invalid{};
-            invalid.success = false;
-            invalid.status_code = 500;
-            invalid.error_message = "DAC auto bridge response mismatch";
-            invalid.snapshot = snapshot();
-            return invalid;
-        }
-        return result;
+        return waitForDeferredReply(pending_dac_auto_state_,
+                                    request_id,
+                                    pending_dac_auto_request_id_,
+                                    pending_dac_auto_result_,
+                                    pending_dac_auto_result_id_,
+                                    dac_auto_reply_semaphore_,
+                                    "DAC auto bridge timeout",
+                                    "DAC auto bridge response mismatch");
     }
 
     return fn(update, ctx);
@@ -354,7 +451,16 @@ WebUiBridge::ApplyResult WebUiBridge::applyWifiSave(const WifiSaveUpdate &update
     fn = wifi_save_apply_fn_;
     ctx = wifi_save_ctx_;
     if (mode == DispatchMode::DeferredReply) {
-        if (pending_wifi_save_request_) {
+        if (!fn || !wifi_save_reply_semaphore_) {
+            ApplyResult unavailable{};
+            unavailable.success = false;
+            unavailable.status_code = 503;
+            unavailable.error_message = "WiFi bridge unavailable";
+            unavailable.snapshot = snapshot_;
+            unlock();
+            return unavailable;
+        }
+        if (pending_wifi_save_state_ != DeferredRequestState::Idle) {
             ApplyResult busy{};
             busy.success = false;
             busy.status_code = 503;
@@ -363,8 +469,11 @@ WebUiBridge::ApplyResult WebUiBridge::applyWifiSave(const WifiSaveUpdate &update
             unlock();
             return busy;
         }
+        if (wifi_save_reply_semaphore_) {
+            xSemaphoreTake(wifi_save_reply_semaphore_, 0);
+        }
         pending_wifi_save_update_ = update;
-        pending_wifi_save_request_ = true;
+        pending_wifi_save_state_ = DeferredRequestState::Queued;
         request_id = ++pending_wifi_save_request_id_;
         pending_wifi_save_result_id_ = 0;
     }
@@ -380,30 +489,14 @@ WebUiBridge::ApplyResult WebUiBridge::applyWifiSave(const WifiSaveUpdate &update
     }
 
     if (mode == DispatchMode::DeferredReply) {
-        if (wifi_save_reply_semaphore_) {
-            xSemaphoreTake(wifi_save_reply_semaphore_, 0);
-            if (xSemaphoreTake(wifi_save_reply_semaphore_, pdMS_TO_TICKS(5000)) != pdTRUE) {
-                ApplyResult timeout{};
-                timeout.success = false;
-                timeout.status_code = 504;
-                timeout.error_message = "WiFi bridge timeout";
-                timeout.snapshot = snapshot();
-                return timeout;
-            }
-        }
-        lock();
-        const bool result_matches = pending_wifi_save_result_id_ == request_id;
-        ApplyResult result = pending_wifi_save_result_;
-        unlock();
-        if (!result_matches) {
-            ApplyResult invalid{};
-            invalid.success = false;
-            invalid.status_code = 500;
-            invalid.error_message = "WiFi bridge response mismatch";
-            invalid.snapshot = snapshot();
-            return invalid;
-        }
-        return result;
+        return waitForDeferredReply(pending_wifi_save_state_,
+                                    request_id,
+                                    pending_wifi_save_request_id_,
+                                    pending_wifi_save_result_,
+                                    pending_wifi_save_result_id_,
+                                    wifi_save_reply_semaphore_,
+                                    "WiFi bridge timeout",
+                                    "WiFi bridge response mismatch");
     }
 
     return fn(update, ctx);
@@ -419,7 +512,16 @@ WebUiBridge::ApplyResult WebUiBridge::applyMqttSave(const MqttSaveUpdate &update
     fn = mqtt_save_apply_fn_;
     ctx = mqtt_save_ctx_;
     if (mode == DispatchMode::DeferredReply) {
-        if (pending_mqtt_save_request_) {
+        if (!fn || !mqtt_save_reply_semaphore_) {
+            ApplyResult unavailable{};
+            unavailable.success = false;
+            unavailable.status_code = 503;
+            unavailable.error_message = "MQTT bridge unavailable";
+            unavailable.snapshot = snapshot_;
+            unlock();
+            return unavailable;
+        }
+        if (pending_mqtt_save_state_ != DeferredRequestState::Idle) {
             ApplyResult busy{};
             busy.success = false;
             busy.status_code = 503;
@@ -428,8 +530,11 @@ WebUiBridge::ApplyResult WebUiBridge::applyMqttSave(const MqttSaveUpdate &update
             unlock();
             return busy;
         }
+        if (mqtt_save_reply_semaphore_) {
+            xSemaphoreTake(mqtt_save_reply_semaphore_, 0);
+        }
         pending_mqtt_save_update_ = update;
-        pending_mqtt_save_request_ = true;
+        pending_mqtt_save_state_ = DeferredRequestState::Queued;
         request_id = ++pending_mqtt_save_request_id_;
         pending_mqtt_save_result_id_ = 0;
     }
@@ -445,30 +550,14 @@ WebUiBridge::ApplyResult WebUiBridge::applyMqttSave(const MqttSaveUpdate &update
     }
 
     if (mode == DispatchMode::DeferredReply) {
-        if (mqtt_save_reply_semaphore_) {
-            xSemaphoreTake(mqtt_save_reply_semaphore_, 0);
-            if (xSemaphoreTake(mqtt_save_reply_semaphore_, pdMS_TO_TICKS(5000)) != pdTRUE) {
-                ApplyResult timeout{};
-                timeout.success = false;
-                timeout.status_code = 504;
-                timeout.error_message = "MQTT bridge timeout";
-                timeout.snapshot = snapshot();
-                return timeout;
-            }
-        }
-        lock();
-        const bool result_matches = pending_mqtt_save_result_id_ == request_id;
-        ApplyResult result = pending_mqtt_save_result_;
-        unlock();
-        if (!result_matches) {
-            ApplyResult invalid{};
-            invalid.success = false;
-            invalid.status_code = 500;
-            invalid.error_message = "MQTT bridge response mismatch";
-            invalid.snapshot = snapshot();
-            return invalid;
-        }
-        return result;
+        return waitForDeferredReply(pending_mqtt_save_state_,
+                                    request_id,
+                                    pending_mqtt_save_request_id_,
+                                    pending_mqtt_save_result_,
+                                    pending_mqtt_save_result_id_,
+                                    mqtt_save_reply_semaphore_,
+                                    "MQTT bridge timeout",
+                                    "MQTT bridge response mismatch");
     }
 
     return fn(update, ctx);
@@ -476,140 +565,140 @@ WebUiBridge::ApplyResult WebUiBridge::applyMqttSave(const MqttSaveUpdate &update
 
 bool WebUiBridge::consumePendingSettingsRequest(SettingsUpdate &update, uint32_t &request_id) {
     lock();
-    if (!pending_settings_request_) {
+    if (pending_settings_state_ != DeferredRequestState::Queued) {
         unlock();
         return false;
     }
     update = pending_settings_update_;
     request_id = pending_settings_request_id_;
-    pending_settings_request_ = false;
+    pending_settings_state_ = DeferredRequestState::InFlight;
     unlock();
     return true;
 }
 
 void WebUiBridge::completePendingSettingsRequest(uint32_t request_id, const ApplyResult &result) {
-    lock();
-    pending_settings_result_ = result;
-    pending_settings_result_id_ = request_id;
-    unlock();
-    if (settings_reply_semaphore_) {
-        xSemaphoreGive(settings_reply_semaphore_);
-    }
+    completeDeferredReply(pending_settings_state_,
+                          request_id,
+                          pending_settings_request_id_,
+                          pending_settings_result_,
+                          pending_settings_result_id_,
+                          settings_reply_semaphore_,
+                          result);
 }
 
 bool WebUiBridge::consumePendingThemeRequest(ThemeUpdate &update, uint32_t &request_id) {
     lock();
-    if (!pending_theme_request_) {
+    if (pending_theme_state_ != DeferredRequestState::Queued) {
         unlock();
         return false;
     }
     update = pending_theme_update_;
     request_id = pending_theme_request_id_;
-    pending_theme_request_ = false;
+    pending_theme_state_ = DeferredRequestState::InFlight;
     unlock();
     return true;
 }
 
 void WebUiBridge::completePendingThemeRequest(uint32_t request_id, const ApplyResult &result) {
-    lock();
-    pending_theme_result_ = result;
-    pending_theme_result_id_ = request_id;
-    unlock();
-    if (theme_reply_semaphore_) {
-        xSemaphoreGive(theme_reply_semaphore_);
-    }
+    completeDeferredReply(pending_theme_state_,
+                          request_id,
+                          pending_theme_request_id_,
+                          pending_theme_result_,
+                          pending_theme_result_id_,
+                          theme_reply_semaphore_,
+                          result);
 }
 
 bool WebUiBridge::consumePendingDacActionRequest(DacActionUpdate &update, uint32_t &request_id) {
     lock();
-    if (!pending_dac_action_request_) {
+    if (pending_dac_action_state_ != DeferredRequestState::Queued) {
         unlock();
         return false;
     }
     update = pending_dac_action_update_;
     request_id = pending_dac_action_request_id_;
-    pending_dac_action_request_ = false;
+    pending_dac_action_state_ = DeferredRequestState::InFlight;
     unlock();
     return true;
 }
 
 void WebUiBridge::completePendingDacActionRequest(uint32_t request_id, const ApplyResult &result) {
-    lock();
-    pending_dac_action_result_ = result;
-    pending_dac_action_result_id_ = request_id;
-    unlock();
-    if (dac_action_reply_semaphore_) {
-        xSemaphoreGive(dac_action_reply_semaphore_);
-    }
+    completeDeferredReply(pending_dac_action_state_,
+                          request_id,
+                          pending_dac_action_request_id_,
+                          pending_dac_action_result_,
+                          pending_dac_action_result_id_,
+                          dac_action_reply_semaphore_,
+                          result);
 }
 
 bool WebUiBridge::consumePendingDacAutoRequest(DacAutoUpdate &update, uint32_t &request_id) {
     lock();
-    if (!pending_dac_auto_request_) {
+    if (pending_dac_auto_state_ != DeferredRequestState::Queued) {
         unlock();
         return false;
     }
     update = pending_dac_auto_update_;
     request_id = pending_dac_auto_request_id_;
-    pending_dac_auto_request_ = false;
+    pending_dac_auto_state_ = DeferredRequestState::InFlight;
     unlock();
     return true;
 }
 
 void WebUiBridge::completePendingDacAutoRequest(uint32_t request_id, const ApplyResult &result) {
-    lock();
-    pending_dac_auto_result_ = result;
-    pending_dac_auto_result_id_ = request_id;
-    unlock();
-    if (dac_auto_reply_semaphore_) {
-        xSemaphoreGive(dac_auto_reply_semaphore_);
-    }
+    completeDeferredReply(pending_dac_auto_state_,
+                          request_id,
+                          pending_dac_auto_request_id_,
+                          pending_dac_auto_result_,
+                          pending_dac_auto_result_id_,
+                          dac_auto_reply_semaphore_,
+                          result);
 }
 
 bool WebUiBridge::consumePendingWifiSaveRequest(WifiSaveUpdate &update, uint32_t &request_id) {
     lock();
-    if (!pending_wifi_save_request_) {
+    if (pending_wifi_save_state_ != DeferredRequestState::Queued) {
         unlock();
         return false;
     }
     update = pending_wifi_save_update_;
     request_id = pending_wifi_save_request_id_;
-    pending_wifi_save_request_ = false;
+    pending_wifi_save_state_ = DeferredRequestState::InFlight;
     unlock();
     return true;
 }
 
 void WebUiBridge::completePendingWifiSaveRequest(uint32_t request_id, const ApplyResult &result) {
-    lock();
-    pending_wifi_save_result_ = result;
-    pending_wifi_save_result_id_ = request_id;
-    unlock();
-    if (wifi_save_reply_semaphore_) {
-        xSemaphoreGive(wifi_save_reply_semaphore_);
-    }
+    completeDeferredReply(pending_wifi_save_state_,
+                          request_id,
+                          pending_wifi_save_request_id_,
+                          pending_wifi_save_result_,
+                          pending_wifi_save_result_id_,
+                          wifi_save_reply_semaphore_,
+                          result);
 }
 
 bool WebUiBridge::consumePendingMqttSaveRequest(MqttSaveUpdate &update, uint32_t &request_id) {
     lock();
-    if (!pending_mqtt_save_request_) {
+    if (pending_mqtt_save_state_ != DeferredRequestState::Queued) {
         unlock();
         return false;
     }
     update = pending_mqtt_save_update_;
     request_id = pending_mqtt_save_request_id_;
-    pending_mqtt_save_request_ = false;
+    pending_mqtt_save_state_ = DeferredRequestState::InFlight;
     unlock();
     return true;
 }
 
 void WebUiBridge::completePendingMqttSaveRequest(uint32_t request_id, const ApplyResult &result) {
-    lock();
-    pending_mqtt_save_result_ = result;
-    pending_mqtt_save_result_id_ = request_id;
-    unlock();
-    if (mqtt_save_reply_semaphore_) {
-        xSemaphoreGive(mqtt_save_reply_semaphore_);
-    }
+    completeDeferredReply(pending_mqtt_save_state_,
+                          request_id,
+                          pending_mqtt_save_request_id_,
+                          pending_mqtt_save_result_,
+                          pending_mqtt_save_result_id_,
+                          mqtt_save_reply_semaphore_,
+                          result);
 }
 
 void WebUiBridge::requestFirmwareUpdateScreen(FirmwareUpdateScreenMode mode,

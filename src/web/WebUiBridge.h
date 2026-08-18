@@ -40,6 +40,8 @@ public:
         bool night_mode = false;
         bool night_mode_locked = false;
         bool backlight_on = false;
+        bool backlight_transition_pending = false;
+        bool backlight_target_on = false;
         bool ntp_enabled = true;
         bool ntp_active = false;
         bool ntp_syncing = false;
@@ -84,6 +86,7 @@ public:
         uint16_t status_code = 503;
         String error_message;
         bool restart_requested = false;
+        bool pending = false;
         Snapshot snapshot;
     };
 
@@ -173,8 +176,30 @@ public:
     void setThemeScreenOpen(bool open, bool custom_open);
 
 private:
+    enum class DeferredRequestState : uint8_t {
+        Idle = 0,
+        Queued,
+        InFlight,
+        Completed,
+    };
+
     void lock() const;
     void unlock() const;
+    ApplyResult waitForDeferredReply(DeferredRequestState &state,
+                                     uint32_t request_id,
+                                     uint32_t &active_request_id,
+                                     ApplyResult &stored_result,
+                                     uint32_t &stored_result_id,
+                                     SemaphoreHandle_t reply_semaphore,
+                                     const char *timeout_message,
+                                     const char *mismatch_message);
+    void completeDeferredReply(DeferredRequestState &state,
+                               uint32_t request_id,
+                               const uint32_t &active_request_id,
+                               ApplyResult &stored_result,
+                               uint32_t &stored_result_id,
+                               SemaphoreHandle_t reply_semaphore,
+                               const ApplyResult &result);
 
     mutable StaticSemaphore_t mutex_buffer_{};
     mutable SemaphoreHandle_t mutex_ = nullptr;
@@ -206,32 +231,32 @@ private:
     MqttSaveApplyFn mqtt_save_apply_fn_ = nullptr;
     SettingsUpdate pending_settings_update_{};
     uint32_t pending_settings_request_id_ = 0;
-    bool pending_settings_request_ = false;
+    DeferredRequestState pending_settings_state_ = DeferredRequestState::Idle;
     ApplyResult pending_settings_result_{};
     uint32_t pending_settings_result_id_ = 0;
     ThemeUpdate pending_theme_update_{};
     uint32_t pending_theme_request_id_ = 0;
-    bool pending_theme_request_ = false;
+    DeferredRequestState pending_theme_state_ = DeferredRequestState::Idle;
     ApplyResult pending_theme_result_{};
     uint32_t pending_theme_result_id_ = 0;
     DacActionUpdate pending_dac_action_update_{};
     uint32_t pending_dac_action_request_id_ = 0;
-    bool pending_dac_action_request_ = false;
+    DeferredRequestState pending_dac_action_state_ = DeferredRequestState::Idle;
     ApplyResult pending_dac_action_result_{};
     uint32_t pending_dac_action_result_id_ = 0;
     DacAutoUpdate pending_dac_auto_update_{};
     uint32_t pending_dac_auto_request_id_ = 0;
-    bool pending_dac_auto_request_ = false;
+    DeferredRequestState pending_dac_auto_state_ = DeferredRequestState::Idle;
     ApplyResult pending_dac_auto_result_{};
     uint32_t pending_dac_auto_result_id_ = 0;
     WifiSaveUpdate pending_wifi_save_update_{};
     uint32_t pending_wifi_save_request_id_ = 0;
-    bool pending_wifi_save_request_ = false;
+    DeferredRequestState pending_wifi_save_state_ = DeferredRequestState::Idle;
     ApplyResult pending_wifi_save_result_{};
     uint32_t pending_wifi_save_result_id_ = 0;
     MqttSaveUpdate pending_mqtt_save_update_{};
     uint32_t pending_mqtt_save_request_id_ = 0;
-    bool pending_mqtt_save_request_ = false;
+    DeferredRequestState pending_mqtt_save_state_ = DeferredRequestState::Idle;
     ApplyResult pending_mqtt_save_result_{};
     uint32_t pending_mqtt_save_result_id_ = 0;
     bool firmware_update_screen_pending_ = false;

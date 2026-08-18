@@ -166,12 +166,16 @@ void AppInit::initManagersAndConfig(Context &ctx, StorageManager::BootAction boo
     ctx.mqttManager.setSystemTimeValid(ctx.timeManager.isSystemTimeValid());
     ctx.mqttManager.syncWithWifi();
     const FanControl::Snapshot fan_snapshot = ctx.fanControl.snapshot();
+    const BacklightManager::RuntimeSnapshot backlight_snapshot =
+        ctx.backlightManager.runtimeSnapshot();
     ctx.mqttRuntimeState.update(ctx.currentData,
                                 fan_snapshot,
                                 ctx.sensorManager.isWarmupActive(),
                                 ctx.night_mode,
                                 ctx.alert_blink_enabled,
-                                ctx.backlightManager.isOn(),
+                                backlight_snapshot.actual_on,
+                                backlight_snapshot.transition_pending,
+                                backlight_snapshot.target_on,
                                 ctx.nightModeManager.isAutoEnabled());
     ctx.chartsRuntimeState.update(ctx.chartsHistory);
     ctx.connectivityRuntime.update(ctx.networkManager, ctx.mqttManager);

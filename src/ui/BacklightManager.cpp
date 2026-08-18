@@ -55,6 +55,29 @@ bool is_sleep_window(int sleep_hour, int sleep_minute, int wake_hour, int wake_m
     return now_min >= sleep_min || now_min < wake_min;
 }
 
+BacklightWakeBreadcrumbs::LineState sample_shared_i2c_lines() {
+    const I2cBusRecovery::LineState lines = I2cBusRecovery::sample(
+        static_cast<gpio_num_t>(Config::I2C_SDA_PIN),
+        static_cast<gpio_num_t>(Config::I2C_SCL_PIN));
+    return BacklightWakeBreadcrumbs::LineState{
+        true,
+        lines.sda_high,
+        lines.scl_high,
+    };
+}
+
+uint8_t wake_event_priority(BacklightWakeBreadcrumbs::Event event) {
+    switch (event) {
+        case BacklightWakeBreadcrumbs::Event::AlarmWake: return 5;
+        case BacklightWakeBreadcrumbs::Event::TouchWake: return 4;
+        case BacklightWakeBreadcrumbs::Event::ScheduleWake: return 3;
+        case BacklightWakeBreadcrumbs::Event::MqttWake: return 2;
+        case BacklightWakeBreadcrumbs::Event::WebWake: return 1;
+        case BacklightWakeBreadcrumbs::Event::None: return 0;
+    }
+    return 0;
+}
+
 } // namespace
 
 void BacklightManager::loadFromPrefs(StorageManager &storage) {
@@ -82,6 +105,7 @@ void BacklightManager::attachBacklight(esp_panel::drivers::Backlight *backlight)
     if (!bus_access) {
         return;
     }
+    RuntimeSnapshotPublishGuard snapshot_guard(*this);
     cancelGuardedWake();
     panel_backlight_ = backlight;
     backlight_on_ = panel_backlight_ != nullptr;
@@ -116,44 +140,150 @@ void BacklightManager::setTimeoutMs(uint32_t timeout_ms) {
     ui_dirty_ = true;
 }
 
-bool BacklightManager::setOn(bool on) {
+BacklightManager::RequestResult BacklightManager::requestState(
+    bool on,
+    BacklightWakeBreadcrumbs::Event source,
+    uint32_t now_ms) {
+    RequestResult result{};
+    const RuntimeSnapshot published = runtimeSnapshot();
+    result.actual_on = published.actual_on;
+    result.target_on = published.target_on;
+    auto bus_access = runtime_gate_.acquire();
+    if (!bus_access || !panel_backlight_) {
+        return result;
+    }
+    RuntimeSnapshotPublishGuard snapshot_guard(*this);
+    result.actual_on = backlight_on_;
+    result.target_on = targetOnInternal();
+
+    if (guarded_wake_settle_pending_ || guarded_wake_render_pending_) {
+        if (on && targetOnInternal()) {
+            result.status = RequestStatus::Queued;
+            result.target_on = true;
+        }
+        return result;
+    }
+
+    const BacklightStatePolicy::CommandRoute command_route =
+        BacklightStatePolicy::route(backlight_on_, on);
+    if (command_route == BacklightStatePolicy::CommandRoute::GuardedOn) {
+        if (!requestGuardedWake(source, now_ms)) {
+            return result;
+        }
+        result.status = RequestStatus::Queued;
+        result.target_on = true;
+        return result;
+    }
+
     if (!on) {
         cancelGuardedWake();
     }
-    auto bus_access = runtime_gate_.acquire();
-    if (!bus_access) {
-        return false;
+    const bool accepted = setOnWithGateHeld(on);
+    result.actual_on = backlight_on_;
+    result.target_on = targetOnInternal();
+    if (accepted) {
+        result.status = RequestStatus::Applied;
+    } else if (pending_command_.active() &&
+               pending_command_.targetOn() == on) {
+        result.status = RequestStatus::Queued;
+    } else {
+        result.status = RequestStatus::Rejected;
     }
-    return setOnWithGateHeld(on);
+    return result;
 }
 
-void BacklightManager::requestGuardedWake(
+BacklightManager::RuntimeSnapshot BacklightManager::runtimeSnapshot() const {
+    const uint8_t bits = runtime_snapshot_bits_.load(std::memory_order_acquire);
+    return RuntimeSnapshot{
+        (bits & RUNTIME_ACTUAL_ON_BIT) != 0U,
+        (bits & RUNTIME_TRANSITION_PENDING_BIT) != 0U,
+        (bits & RUNTIME_TARGET_ON_BIT) != 0U,
+        (bits & RUNTIME_WAKE_CRITICAL_BIT) != 0U,
+    };
+}
+
+bool BacklightManager::isTransitionPending() const {
+    return runtimeSnapshot().transition_pending;
+}
+
+bool BacklightManager::isTransitionPendingInternal() const {
+    return guarded_wake_pending_ || guarded_wake_settle_pending_ ||
+           guarded_wake_render_pending_ || pending_command_.active();
+}
+
+bool BacklightManager::isWakeCriticalSectionPending() const {
+    return runtimeSnapshot().wake_critical_section_pending;
+}
+
+bool BacklightManager::targetOn() const {
+    return runtimeSnapshot().target_on;
+}
+
+bool BacklightManager::targetOnInternal() const {
+    if (guarded_wake_pending_ || guarded_wake_settle_pending_ ||
+        guarded_wake_render_pending_) {
+        return true;
+    }
+    return pending_command_.active() ? pending_command_.targetOn()
+                                     : backlight_on_;
+}
+
+void BacklightManager::publishRuntimeSnapshot() {
+    uint8_t bits = backlight_on_ ? RUNTIME_ACTUAL_ON_BIT : 0U;
+    if (isTransitionPendingInternal()) {
+        bits |= RUNTIME_TRANSITION_PENDING_BIT;
+    }
+    if (targetOnInternal()) {
+        bits |= RUNTIME_TARGET_ON_BIT;
+    }
+    if (guarded_wake_settle_pending_ || guarded_wake_render_pending_) {
+        bits |= RUNTIME_WAKE_CRITICAL_BIT;
+    }
+    runtime_snapshot_bits_.store(bits, std::memory_order_release);
+}
+
+bool BacklightManager::requestGuardedWake(
     BacklightWakeBreadcrumbs::Event event,
     uint32_t now_ms) {
     if (backlight_on_) {
-        return;
+        return true;
     }
-
-    const auto priority = [](BacklightWakeBreadcrumbs::Event value) {
-        switch (value) {
-            case BacklightWakeBreadcrumbs::Event::AlarmWake: return 3;
-            case BacklightWakeBreadcrumbs::Event::TouchWake: return 2;
-            case BacklightWakeBreadcrumbs::Event::ScheduleWake: return 1;
-            case BacklightWakeBreadcrumbs::Event::None: return 0;
-        }
-        return 0;
-    };
+    if (!panel_backlight_ || !runtime_gate_.available() ||
+        event == BacklightWakeBreadcrumbs::Event::None) {
+        LOGE("Backlight", "guarded wake rejected: source or driver unavailable");
+        return false;
+    }
 
     if (!guarded_wake_pending_) {
+        if (guarded_wake_settle_pending_) {
+            return true;
+        }
         guarded_wake_pending_ = true;
+        guarded_wake_wait_exceeded_ = false;
+        guarded_wake_started_ms_ = now_ms;
         guarded_wake_event_ = event;
-        (void)WakePowerGuard::request(now_ms);
-        return;
+        BacklightWakeBreadcrumbs::beginPreQuietWake(
+            event,
+            now_ms,
+            static_cast<uint32_t>(time(nullptr)),
+            true,
+            backlight_on_,
+            sample_shared_i2c_lines());
+        if (!WakePowerGuard::request(now_ms)) {
+            guarded_wake_pending_ = false;
+            guarded_wake_started_ms_ = 0;
+            guarded_wake_event_ = BacklightWakeBreadcrumbs::Event::None;
+            BacklightWakeBreadcrumbs::markAborted();
+            return false;
+        }
+        return true;
     }
 
-    if (priority(event) > priority(guarded_wake_event_)) {
+    if (wake_event_priority(event) > wake_event_priority(guarded_wake_event_)) {
         guarded_wake_event_ = event;
+        BacklightWakeBreadcrumbs::updateWakeEvent(event);
     }
+    return true;
 }
 
 bool BacklightManager::processGuardedWake(uint32_t now_ms) {
@@ -161,100 +291,285 @@ bool BacklightManager::processGuardedWake(uint32_t now_ms) {
         return false;
     }
     if (backlight_on_) {
+        BacklightWakeBreadcrumbs::markAborted();
         guarded_wake_pending_ = false;
+        guarded_wake_wait_exceeded_ = false;
+        guarded_wake_started_ms_ = 0;
         guarded_wake_event_ = BacklightWakeBreadcrumbs::Event::None;
         WakePowerGuard::cancel();
         return false;
     }
 
     if (WakePowerGuard::phase(now_ms) == WakePowerGuard::Phase::Idle) {
-        (void)WakePowerGuard::request(now_ms);
+        // The guard has a defensive failsafe so a lost UI owner cannot pause
+        // background work forever. A live owner rearms the quiet window and
+        // still waits for tracked work to drain before touching CH422G.
+        if (!WakePowerGuard::request(now_ms)) {
+            return true;
+        }
     }
     const WakePowerGuard::SwitchDecision switch_decision =
         WakePowerGuard::evaluateSwitch(
             now_ms,
             Config::BACKLIGHT_WAKE_PRE_QUIET_MIN_MS,
-            Config::BACKLIGHT_WAKE_PRE_QUIET_MAX_MS);
+            Config::BACKLIGHT_WAKE_PRE_QUIET_WARN_MS);
+    const uint32_t total_pre_quiet_elapsed_ms =
+        static_cast<uint32_t>(now_ms - guarded_wake_started_ms_);
+    if (switch_decision.wait_exceeded && !guarded_wake_wait_exceeded_) {
+        guarded_wake_wait_exceeded_ = true;
+        BacklightWakeBreadcrumbs::markPreQuietWaitExceeded(
+            total_pre_quiet_elapsed_ms,
+            switch_decision.active_operations);
+        LOGW("Backlight",
+             "guarded wake still waiting after %lu ms (%lu tracked operations active)",
+             static_cast<unsigned long>(switch_decision.elapsed_ms),
+             static_cast<unsigned long>(switch_decision.active_operations));
+    }
     if (!switch_decision.ready) {
+        return true;
+    }
+    if (!WakePowerGuard::beginSwitch()) {
         return true;
     }
 
     const BacklightWakeBreadcrumbs::Event wake_event = guarded_wake_event_;
+    BacklightWakeBreadcrumbs::markPreQuietReady(
+        total_pre_quiet_elapsed_ms, sample_shared_i2c_lines());
     guarded_wake_pending_ = false;
-    guarded_wake_event_ = BacklightWakeBreadcrumbs::Event::None;
+    bool driver_attempted = false;
     const bool wake_succeeded = setOnWithGateHeld(
         true,
         wake_event,
-        switch_decision.elapsed_ms,
-        switch_decision.active_operations,
-        switch_decision.forced_by_timeout);
-    if (wake_event != BacklightWakeBreadcrumbs::Event::None) {
-        BacklightWakeBreadcrumbs::markCommandReturned();
-    }
+        &driver_attempted);
+    guarded_wake_wait_exceeded_ = false;
+    guarded_wake_started_ms_ = 0;
 
-    if (wake_succeeded) {
+    if (driver_attempted) {
+        BacklightWakeBreadcrumbs::markCommandReturnedPendingSettle(
+            wake_succeeded
+                ? BacklightWakeBreadcrumbs::CommandResult::Succeeded
+                : BacklightWakeBreadcrumbs::CommandResult::Failed);
+        BacklightWakeBreadcrumbs::markGuardSettleBegin();
         const uint32_t switched_ms = millis();
         WakePowerGuard::beginSettle(switched_ms,
                                     Config::BACKLIGHT_WAKE_SETTLE_MS);
+        guarded_wake_settle_pending_ = true;
+        guarded_wake_settle_succeeded_ = wake_succeeded;
         block_input_until_ms_ = switched_ms + Config::BACKLIGHT_WAKE_BLOCK_MS;
         lvgl_port_block_touch_read(Config::BACKLIGHT_WAKE_BLOCK_MS);
         consumeInput();
-        pending_wake_event_ = BacklightWakeBreadcrumbs::Event::None;
-    } else {
-        WakePowerGuard::cancel();
         pending_wake_event_ =
-            pending_command_.active() && pending_command_.targetOn()
+            !wake_succeeded && pending_command_.active() &&
+                    pending_command_.targetOn()
                 ? wake_event
                 : BacklightWakeBreadcrumbs::Event::None;
+    } else {
+        BacklightWakeBreadcrumbs::markCommandReturned(
+            wake_succeeded
+                ? BacklightWakeBreadcrumbs::CommandResult::Succeeded
+                : BacklightWakeBreadcrumbs::CommandResult::Failed);
+        WakePowerGuard::cancel();
+        pending_wake_event_ =
+            !wake_succeeded && pending_command_.active() &&
+                    pending_command_.targetOn()
+                ? wake_event
+                : BacklightWakeBreadcrumbs::Event::None;
+        if (wake_succeeded) {
+            BacklightWakeBreadcrumbs::markCompleted();
+        }
     }
 
-    if (wake_event != BacklightWakeBreadcrumbs::Event::None) {
-        BacklightWakeBreadcrumbs::markCompleted();
-    }
+    guarded_wake_event_ = BacklightWakeBreadcrumbs::Event::None;
     return true;
 }
 
-void BacklightManager::cancelGuardedWake() {
+void BacklightManager::finalizeGuardedWake(uint32_t now_ms) {
+    if (!guarded_wake_settle_pending_ ||
+        !WakePowerGuard::beginRenderWait(now_ms)) {
+        return;
+    }
+
+    BacklightWakeBreadcrumbs::markGuardSettleReturned();
+    if (backlight_on_) {
+        // A successful CH422G write can physically enable the display even if
+        // the later touch-probe synchronization fails. Keep background work
+        // closed through the first post-wake render whenever the actual load
+        // is on, while preserving the full command result for diagnostics.
+        guarded_wake_render_pending_ = true;
+        guarded_wake_render_command_succeeded_ =
+            guarded_wake_settle_succeeded_;
+        guarded_wake_render_armed_ = false;
+    } else {
+        BacklightWakeBreadcrumbs::markFailed();
+        (void)WakePowerGuard::completeRenderWait();
+    }
+    guarded_wake_settle_pending_ = false;
+    guarded_wake_settle_succeeded_ = false;
+}
+
+void BacklightManager::armWakeCompletionAfterRender() {
+    if (!guarded_wake_render_pending_ || guarded_wake_render_armed_) {
+        return;
+    }
+    lvgl_port_diagnostics_t diagnostics{};
+    if (!lvgl_port_get_diagnostics(&diagnostics)) {
+        return;
+    }
+    guarded_wake_render_handler_baseline_ = diagnostics.timer_handler_count;
+    guarded_wake_render_armed_ = true;
+}
+
+bool BacklightManager::completeWakeAfterRender() {
+    RuntimeSnapshotPublishGuard snapshot_guard(*this);
+    if (!guarded_wake_render_pending_ || !guarded_wake_render_armed_) {
+        return false;
+    }
+    lvgl_port_diagnostics_t diagnostics{};
+    if (!lvgl_port_get_diagnostics(&diagnostics) ||
+        diagnostics.timer_handler_count ==
+            guarded_wake_render_handler_baseline_) {
+        return false;
+    }
+    // UiController calls this while holding the LVGL mutex. A changed handler
+    // counter plus ownership of the mutex proves that the first post-wake
+    // lv_timer_handler (including any synchronous flush) returned cleanly.
+    if (guarded_wake_render_command_succeeded_) {
+        BacklightWakeBreadcrumbs::markCompleted();
+    } else {
+        BacklightWakeBreadcrumbs::markFailed();
+    }
+    guarded_wake_render_pending_ = false;
+    guarded_wake_render_command_succeeded_ = false;
+    guarded_wake_render_armed_ = false;
+    guarded_wake_render_handler_baseline_ = 0;
+    // Keep background admission closed until UiController has published this
+    // final actual/pending/target tuple to both runtime snapshots. Otherwise
+    // Core 0 can resume from RenderWait and retain one stale OFF state.
+    guarded_wake_release_pending_ = true;
+    guarded_wake_release_requires_cancel_ = false;
+    guarded_wake_release_permitted_ = true;
+    return true;
+}
+
+bool BacklightManager::releaseWakeAfterRuntimePublish() {
+    if (!guarded_wake_release_pending_ ||
+        !guarded_wake_release_permitted_) {
+        return false;
+    }
+    if (guarded_wake_release_requires_cancel_) {
+        WakePowerGuard::cancel();
+    } else {
+        if (!WakePowerGuard::completeRenderWait()) {
+            return false;
+        }
+    }
+    guarded_wake_release_pending_ = false;
+    guarded_wake_release_requires_cancel_ = false;
+    guarded_wake_release_permitted_ = false;
+    return true;
+}
+
+void BacklightManager::cancelGuardedWake(bool defer_guard_release) {
+    if (guarded_wake_settle_pending_) {
+        // Once the CH422G write was attempted, the settle interval is a safety
+        // boundary. Callers may defer their state change, but cannot reopen
+        // background work early.
+        return;
+    }
+    if (guarded_wake_pending_) {
+        BacklightWakeBreadcrumbs::markAborted();
+    } else if (guarded_wake_render_pending_) {
+        if (guarded_wake_render_command_succeeded_) {
+            BacklightWakeBreadcrumbs::markAborted();
+        } else {
+            BacklightWakeBreadcrumbs::markFailed();
+        }
+    }
     guarded_wake_pending_ = false;
+    guarded_wake_wait_exceeded_ = false;
+    guarded_wake_render_pending_ = false;
+    guarded_wake_render_command_succeeded_ = false;
+    guarded_wake_render_armed_ = false;
+    guarded_wake_release_pending_ = defer_guard_release;
+    guarded_wake_release_requires_cancel_ = defer_guard_release;
+    // Suppressed recovery must explicitly prove the OFF outcome and pending
+    // drain before the public release step is allowed to cancel FailClosed.
+    guarded_wake_release_permitted_ = false;
+    guarded_wake_render_handler_baseline_ = 0;
+    guarded_wake_started_ms_ = 0;
     guarded_wake_event_ = BacklightWakeBreadcrumbs::Event::None;
-    WakePowerGuard::cancel();
+    pending_wake_event_ = BacklightWakeBreadcrumbs::Event::None;
+    if (!defer_guard_release) {
+        WakePowerGuard::cancel();
+    }
+}
+
+BacklightStatePolicy::SuppressedAbortOffOutcome
+BacklightManager::abortWakeAfterWriterQuiescence(
+    bool defer_guard_release,
+    bool turn_backlight_off) {
+    using OffOutcome = BacklightStatePolicy::SuppressedAbortOffOutcome;
+    OffOutcome off_outcome = OffOutcome::NotRequested;
+    if (guarded_wake_settle_pending_) {
+        // A failed display runtime cannot acknowledge the first post-wake
+        // render. Still honour the electrical settle interval before opening
+        // background admission, then terminate the retained trace explicitly.
+        while (!WakePowerGuard::settleReady(millis())) {
+            delay(1);
+        }
+        BacklightWakeBreadcrumbs::markGuardSettleReturned();
+        if (guarded_wake_settle_succeeded_) {
+            BacklightWakeBreadcrumbs::markAborted();
+        } else {
+            BacklightWakeBreadcrumbs::markFailed();
+        }
+        guarded_wake_settle_pending_ = false;
+        guarded_wake_settle_succeeded_ = false;
+    }
+    if (WakePowerGuard::phase(millis()) == WakePowerGuard::Phase::Switching) {
+        // This phase is not expected here because UiController owns the whole
+        // synchronous switch. If a future caller changes that ownership,
+        // preserve a conservative settle window before touching CH422G again.
+        delay(Config::BACKLIGHT_WAKE_SETTLE_MS);
+        BacklightWakeBreadcrumbs::markAborted();
+    }
+    if (turn_backlight_off) {
+        if (panel_backlight_ != nullptr) {
+            const bool off_succeeded = panel_backlight_->off();
+            if (off_succeeded) {
+                backlight_on_ = false;
+                off_outcome = OffOutcome::OffConfirmed;
+            } else {
+                off_outcome = OffOutcome::DriverFailed;
+                ++command_failure_count_;
+                LOGE("Backlight",
+                     "failed to turn backlight off while isolating unavailable LVGL");
+            }
+        } else {
+            off_outcome = OffOutcome::DriverUnavailable;
+            ++command_failure_count_;
+            LOGE("Backlight",
+                 "cannot confirm backlight off without an attached driver");
+        }
+    }
+    cancelGuardedWake(defer_guard_release);
+    return off_outcome;
 }
 
 bool BacklightManager::setOnWithGateHeld(
     bool on,
     BacklightWakeBreadcrumbs::Event trace_event,
-    uint32_t pre_quiet_elapsed_ms,
-    uint32_t pre_quiet_active_operations,
-    bool pre_quiet_forced_by_timeout) {
-    const bool trace_wake = trace_event != BacklightWakeBreadcrumbs::Event::None;
-    const auto sample_bus = []() {
-        const I2cBusRecovery::LineState lines = I2cBusRecovery::sample(
-            static_cast<gpio_num_t>(Config::I2C_SDA_PIN),
-            static_cast<gpio_num_t>(Config::I2C_SCL_PIN));
-        return BacklightWakeBreadcrumbs::LineState{
-            true,
-            lines.sda_high,
-            lines.scl_high,
-        };
-    };
-
-    if (trace_wake) {
-        BacklightWakeBreadcrumbs::beginWake(
-            trace_event,
-            millis(),
-            static_cast<uint32_t>(time(nullptr)),
-            on,
-            backlight_on_,
-            sample_bus(),
-            pre_quiet_elapsed_ms,
-            pre_quiet_active_operations,
-            pre_quiet_forced_by_timeout);
+    bool *driver_attempted) {
+    if (driver_attempted) {
+        *driver_attempted = false;
     }
+    const bool trace_wake = trace_event != BacklightWakeBreadcrumbs::Event::None;
 
     if (!panel_backlight_) {
         if (trace_wake) {
             BacklightWakeBreadcrumbs::markDriverCallBegin();
-            BacklightWakeBreadcrumbs::markDriverCallReturned(false, false, 0, sample_bus());
+            BacklightWakeBreadcrumbs::markDriverCallReturned(
+                false, true, 0, sample_shared_i2c_lines());
         }
         LOGE("Backlight", "cannot turn backlight %s: driver unavailable", on ? "on" : "off");
         return false;
@@ -263,12 +578,14 @@ bool BacklightManager::setOnWithGateHeld(
         const bool cancelled_retry = pending_command_.active();
         if (trace_wake) {
             BacklightWakeBreadcrumbs::markDriverCallBegin();
-            BacklightWakeBreadcrumbs::markDriverCallReturned(true, true, 0, sample_bus());
+            BacklightWakeBreadcrumbs::markDriverCallReturned(
+                true, true, 0, sample_shared_i2c_lines());
             BacklightWakeBreadcrumbs::markWakeProbeUpdateBegin();
         }
         const bool wake_probe_updated = lvgl_port_set_wake_touch_probe(!on);
         if (trace_wake) {
-            BacklightWakeBreadcrumbs::markWakeProbeUpdateReturned(sample_bus());
+            BacklightWakeBreadcrumbs::markWakeProbeUpdateReturned(
+                sample_shared_i2c_lines());
         }
         if (!wake_probe_updated) {
             ++command_failure_count_;
@@ -292,6 +609,19 @@ bool BacklightManager::setOnWithGateHeld(
     }
 
     const bool previous_on = backlight_on_;
+    // beginSwitch() is the admission barrier: it can enter Switching only after
+    // observing zero admitted activity. A racing tryAcquireActivity() may
+    // provisionally increment the counter, but its second phase check rejects
+    // that lease before any work begins. Rechecking the counter here would turn
+    // that harmless provisional increment into a false wake failure.
+    if (!previous_on && on &&
+        WakePowerGuard::phase(millis()) != WakePowerGuard::Phase::Switching) {
+        ++command_failure_count_;
+        pending_command_.recordFailure(on, millis());
+        LOGE("Backlight",
+             "blocked unsafe OFF-to-ON transition outside an idle pre-quiet guard");
+        return false;
+    }
     const BacklightStatePolicy::WakeProbePlan wake_probe_plan =
         BacklightStatePolicy::planWakeProbe(previous_on, on);
     if (wake_probe_plan.mask_before_driver) {
@@ -303,6 +633,10 @@ bool BacklightManager::setOnWithGateHeld(
             BacklightWakeBreadcrumbs::markTouchIrqMaskReturned();
         }
         if (!touch_irq_masked) {
+            if (trace_wake) {
+                BacklightWakeBreadcrumbs::markDriverCallReturned(
+                    false, true, 0, sample_shared_i2c_lines());
+            }
             ++command_failure_count_;
             pending_command_.recordFailure(on, millis());
             const uint32_t retry_delay_ms = BacklightStatePolicy::retryDelayMs(
@@ -318,17 +652,21 @@ bool BacklightManager::setOnWithGateHeld(
     if (trace_wake) {
         BacklightWakeBreadcrumbs::markDriverCallBegin();
     }
+    if (driver_attempted) {
+        *driver_attempted = true;
+    }
     const uint32_t driver_started_us = micros();
     const bool driver_succeeded = on ? panel_backlight_->on() : panel_backlight_->off();
     const uint32_t driver_duration_us = micros() - driver_started_us;
     if (trace_wake) {
         BacklightWakeBreadcrumbs::markDriverCallReturned(
-            driver_succeeded, false, driver_duration_us, sample_bus());
+            driver_succeeded, false, driver_duration_us,
+            sample_shared_i2c_lines());
     }
     const BacklightStatePolicy::Transition transition =
         BacklightStatePolicy::resolve(previous_on, on, driver_succeeded);
     if (BacklightStatePolicy::needsPostDriverSettle(
-            previous_on, on, driver_succeeded)) {
+            previous_on, on, true)) {
         if (trace_wake) {
             BacklightWakeBreadcrumbs::markPowerSettleBegin();
         }
@@ -347,7 +685,8 @@ bool BacklightManager::setOnWithGateHeld(
     const bool wake_probe_updated =
         lvgl_port_set_wake_touch_probe(transition.wake_probe_enabled);
     if (trace_wake) {
-        BacklightWakeBreadcrumbs::markWakeProbeUpdateReturned(sample_bus());
+        BacklightWakeBreadcrumbs::markWakeProbeUpdateReturned(
+            sample_shared_i2c_lines());
     }
 
     if (!transition.command_succeeded || !wake_probe_updated) {
@@ -381,14 +720,28 @@ bool BacklightManager::setOnWithGateHeld(
 }
 
 void BacklightManager::disableSharedBus() {
-    cancelGuardedWake();
     if (!runtime_gate_.disable()) {
         return;
     }
+    // Only close admission here. The LVGL task may still be finishing a
+    // callback which already owns the runtime gate, so touching the guarded
+    // wake or pending-command fields at this point would race that writer.
+    // waitForSharedBusIdle() performs finalization after the caller has
+    // quiesced LVGL and every admitted operation has released its lease.
     LOGW("Backlight", "shared I2C bus closing; new backlight commands disabled");
 }
 
 bool BacklightManager::waitForSharedBusIdle(uint32_t timeout_ms) {
+    if (!waitForSharedBusWriterIdle(timeout_ms)) {
+        return false;
+    }
+    return finalizeDisabledSharedBus(false, false);
+}
+
+bool BacklightManager::waitForSharedBusWriterIdle(uint32_t timeout_ms) {
+    if (runtime_gate_.available()) {
+        return false;
+    }
     const uint32_t start_ms = millis();
     uint32_t now_ms = start_ms;
     while (!runtime_gate_.idle() &&
@@ -397,14 +750,38 @@ bool BacklightManager::waitForSharedBusIdle(uint32_t timeout_ms) {
         now_ms = millis();
     }
 
-    if (!BacklightStatePolicy::clearPendingAfterDrain(runtime_gate_,
-                                                      pending_command_)) {
+    if (!runtime_gate_.idle()) {
         return false;
+    }
+    return true;
+}
+
+bool BacklightManager::prepareSuppressedLvglAbortAfterDrain() {
+    return finalizeDisabledSharedBus(true, true);
+}
+
+bool BacklightManager::finalizeDisabledSharedBus(
+    bool defer_guard_release,
+    bool turn_backlight_off) {
+    if (runtime_gate_.available() || !runtime_gate_.idle()) {
+        return false;
+    }
+    RuntimeSnapshotPublishGuard snapshot_guard(*this);
+    const BacklightStatePolicy::SuppressedAbortOffOutcome off_outcome =
+        abortWakeAfterWriterQuiescence(
+            defer_guard_release, turn_backlight_off);
+    const bool pending_cleared = BacklightStatePolicy::clearPendingAfterDrain(
+        runtime_gate_, pending_command_);
+    const bool release_permitted =
+        BacklightStatePolicy::mayReleaseAfterSuppressedAbort(
+            off_outcome, pending_cleared);
+    if (defer_guard_release) {
+        guarded_wake_release_permitted_ = release_permitted;
     }
     block_input_until_ms_ = 0;
     lvgl_port_set_wake_touch_probe(false);
     LOGW("Backlight", "shared I2C bus offline; backlight operations drained");
-    return true;
+    return release_permitted;
 }
 
 void BacklightManager::storeSchedulePrefs() {
@@ -487,10 +864,14 @@ void BacklightManager::refreshSchedule() {
     if (!bus_access) {
         return;
     }
+    RuntimeSnapshotPublishGuard snapshot_guard(*this);
     refreshScheduleWithGateHeld();
 }
 
 void BacklightManager::refreshScheduleWithGateHeld(bool trace_clock_transition) {
+    if (guarded_wake_settle_pending_ || guarded_wake_render_pending_) {
+        return;
+    }
     if (schedule_enabled_ && schedule_boot_grace_until_ms_ != 0) {
         if (static_cast<int32_t>(millis() - schedule_boot_grace_until_ms_) < 0) {
             return;
@@ -508,28 +889,19 @@ void BacklightManager::refreshScheduleWithGateHeld(bool trace_clock_transition) 
         }
     }
     if (active != schedule_active_) {
-        const bool schedule_wake = BacklightWakeBreadcrumbs::shouldTraceScheduleWake(
-            trace_clock_transition, schedule_active_, active);
+        (void)trace_clock_transition;
         schedule_active_ = active;
-        const BacklightWakeBreadcrumbs::Event wake_event = schedule_wake
-            ? BacklightWakeBreadcrumbs::Event::ScheduleWake
-            : BacklightWakeBreadcrumbs::Event::None;
         if (!active && !backlight_on_) {
-            requestGuardedWake(wake_event, millis());
+            // A schedule-related OFF-to-ON transition always uses the same
+            // guarded path, including a manual schedule edit or disable.
+            requestGuardedWake(
+                BacklightWakeBreadcrumbs::Event::ScheduleWake, millis());
             return;
         }
         if (active) {
             cancelGuardedWake();
         }
-        const bool command_succeeded = setOnWithGateHeld(!active, wake_event);
-        if (schedule_wake) {
-            BacklightWakeBreadcrumbs::markCommandReturned();
-            BacklightWakeBreadcrumbs::markCompleted();
-            pending_wake_event_ =
-                !command_succeeded && pending_command_.active() && pending_command_.targetOn()
-                    ? wake_event
-                    : BacklightWakeBreadcrumbs::Event::None;
-        }
+        (void)setOnWithGateHeld(!active);
     }
 }
 
@@ -602,14 +974,27 @@ void BacklightManager::consumeInput() {
 
 void BacklightManager::poll(bool lvgl_ready) {
     auto bus_access = runtime_gate_.acquire();
-    if (!bus_access || !panel_backlight_ || !lvgl_ready) {
+    if (!bus_access || !panel_backlight_) {
+        return;
+    }
+    RuntimeSnapshotPublishGuard snapshot_guard(*this);
+    const uint32_t now_ms = millis();
+    finalizeGuardedWake(now_ms);
+    if (guarded_wake_settle_pending_ || guarded_wake_render_pending_ ||
+        !lvgl_ready) {
+        return;
+    }
+    if (guarded_wake_pending_) {
+        // PreQuiet is intentionally owner-only. Once a guarded wake exists,
+        // do not sample LVGL inactivity, refresh schedules, consume input or
+        // retry unrelated commands before evaluating the quiet deadline.
+        (void)processGuardedWake(now_ms);
         return;
     }
     lv_disp_t *disp = lv_disp_get_default();
     if (!disp) {
         return;
     }
-    uint32_t now_ms = millis();
     uint32_t inactive_ms = lv_disp_get_inactive_time(disp);
     const bool input_activity =
         BacklightStatePolicy::inputActivitySince(last_inactive_ms_, inactive_ms);
@@ -631,14 +1016,54 @@ void BacklightManager::poll(bool lvgl_ready) {
 
     if (pending_command_.ready(now_ms)) {
         const bool retry_target_on = pending_command_.targetOn();
-        const BacklightWakeBreadcrumbs::Event retry_event = retry_target_on
-            ? pending_wake_event_
-            : BacklightWakeBreadcrumbs::Event::None;
-        if (retry_event != BacklightWakeBreadcrumbs::Event::None) {
-            requestGuardedWake(retry_event, now_ms);
+        if (retry_target_on && !backlight_on_) {
+            if (pending_wake_event_ != BacklightWakeBreadcrumbs::Event::None) {
+                requestGuardedWake(pending_wake_event_, now_ms);
+            } else {
+                // This should be unreachable once every OFF-to-ON caller uses
+                // requestGuardedWake(). Back off instead of bypassing safety.
+                pending_command_.recordFailure(true, now_ms);
+                LOGE("Backlight",
+                     "ON retry has no guarded wake source; retry deferred");
+            }
         } else {
             const bool was_on = backlight_on_;
-            const bool retry_succeeded = setOnWithGateHeld(retry_target_on);
+            const BacklightWakeBreadcrumbs::Event recovery_event =
+                retry_target_on && backlight_on_
+                    ? pending_wake_event_
+                    : BacklightWakeBreadcrumbs::Event::None;
+            const bool trace_probe_recovery =
+                recovery_event != BacklightWakeBreadcrumbs::Event::None;
+            if (trace_probe_recovery) {
+                // A previous driver attempt may have physically enabled the
+                // backlight while touch-probe synchronization failed. Record
+                // this later probe-only retry as a distinct attempt so the
+                // retained status reflects a successful recovery.
+                BacklightWakeBreadcrumbs::beginWake(
+                    recovery_event,
+                    now_ms,
+                    static_cast<uint32_t>(time(nullptr)),
+                    true,
+                    true,
+                    sample_shared_i2c_lines());
+            }
+            const bool retry_succeeded = setOnWithGateHeld(
+                retry_target_on,
+                trace_probe_recovery
+                    ? recovery_event
+                    : BacklightWakeBreadcrumbs::Event::None);
+            if (trace_probe_recovery) {
+                BacklightWakeBreadcrumbs::markCommandReturned(
+                    retry_succeeded
+                        ? BacklightWakeBreadcrumbs::CommandResult::Succeeded
+                        : BacklightWakeBreadcrumbs::CommandResult::Failed);
+                if (retry_succeeded) {
+                    BacklightWakeBreadcrumbs::markCompleted();
+                }
+            }
+            if (retry_succeeded) {
+                pending_wake_event_ = BacklightWakeBreadcrumbs::Event::None;
+            }
             if (retry_succeeded && retry_target_on && !was_on) {
                 block_input_until_ms_ = now_ms + Config::BACKLIGHT_WAKE_BLOCK_MS;
                 lvgl_port_block_touch_read(Config::BACKLIGHT_WAKE_BLOCK_MS);
@@ -652,9 +1077,16 @@ void BacklightManager::poll(bool lvgl_ready) {
         const BacklightWakeBreadcrumbs::Event wake_event =
             BacklightWakeBreadcrumbs::selectDarkWakeEvent(
                 wake_touch, alarm_wake_requested);
-        if (wake_event != BacklightWakeBreadcrumbs::Event::None &&
-            !pending_command_.active()) {
-            requestGuardedWake(wake_event, now_ms);
+        if (wake_event != BacklightWakeBreadcrumbs::Event::None) {
+            if (pending_command_.active() && pending_command_.targetOn() &&
+                !pending_command_.ready(now_ms)) {
+                if (wake_event_priority(wake_event) >
+                    wake_event_priority(pending_wake_event_)) {
+                    pending_wake_event_ = wake_event;
+                }
+            } else {
+                requestGuardedWake(wake_event, now_ms);
+            }
         }
         if (processGuardedWake(now_ms)) {
             return;

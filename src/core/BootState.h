@@ -9,6 +9,14 @@
 #include <esp_system.h>
 #include <stdint.h>
 
+// This storage is intentionally declared before the three legacy BootState
+// RTC_NOINIT words in BootState.cpp. The toolchain emits those input sections
+// in reverse declaration order, which keeps the deployed 7c3f8e6 addresses at
+// 0x50000280/84/88 and appends this storage at 0x5000028c.
+constexpr uint32_t BOOT_BACKLIGHT_WAKE_EVIDENCE_WORDS = 10;
+extern uint32_t
+    boot_backlight_wake_evidence_words[BOOT_BACKLIGHT_WAKE_EVIDENCE_WORDS];
+
 extern uint32_t boot_count;
 extern uint32_t safe_boot_stage;
 extern esp_reset_reason_t boot_reset_reason;

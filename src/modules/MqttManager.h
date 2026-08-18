@@ -15,6 +15,7 @@
 #include <mqtt_client.h>
 #include "config/AppConfig.h"
 #include "config/AppData.h"
+#include "core/MqttCommandIngressQueue.h"
 #include "core/MqttRuntimeState.h"
 #include "modules/MqttRuntime.h"
 
@@ -111,6 +112,7 @@ private:
     bool subscribeTopic(const char *topic);
     bool connectClient();
     void handleEvent(esp_mqtt_event_handle_t event);
+    void processIncomingCommands();
     void resetLiveness(bool tracking, uint32_t now_ms = 0);
     void consumeLivenessAck(uint32_t now_ms);
     void pauseLivenessWatchdog(uint32_t now_ms);
@@ -207,9 +209,7 @@ private:
     uint32_t mqtt_liveness_last_publish_ms_ = 0;
     uint32_t mqtt_liveness_last_ack_ms_ = 0;
     std::atomic<bool> mqtt_system_time_valid_{false};
-    // MQTT_EVENT_DATA may arrive in chunks; these buffers belong only to the esp-mqtt event task.
-    String mqtt_event_topic_;
-    String mqtt_event_payload_;
+    MqttCommandIngressQueue mqtt_command_ingress_;
     String mqtt_ca_cert_;
     String mqtt_active_ca_cert_;
     String mqtt_active_common_name_;

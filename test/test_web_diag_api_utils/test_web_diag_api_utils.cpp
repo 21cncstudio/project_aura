@@ -94,12 +94,16 @@ void test_web_diag_api_utils_fill_json_populates_network_errors_and_stream() {
     payload.boot.previous_backlight_trace_event = "schedule_wake";
     payload.boot.previous_backlight_trace_stage = "driver_call_begin";
     payload.boot.previous_backlight_trace_driver_result = "unknown";
+    payload.boot.previous_backlight_trace_command_result = "failed";
     payload.boot.previous_backlight_trace_sequence = 7;
     payload.boot.previous_backlight_trace_uptime_ms = 20142000;
     payload.boot.previous_backlight_trace_epoch_s = 1786597200;
     payload.boot.previous_backlight_trace_pre_quiet_elapsed_ms = 500;
     payload.boot.previous_backlight_trace_pre_quiet_active_operations = 2;
+    payload.boot.previous_backlight_trace_pre_quiet_wait_exceeded = true;
+    payload.boot.previous_backlight_trace_pre_quiet_wait_exceeded_active_operations = 3;
     payload.boot.previous_backlight_trace_pre_quiet_forced_by_timeout = true;
+    payload.boot.previous_backlight_trace_retention_uncertain = true;
     payload.boot.previous_backlight_trace_expected_network_manager_addr = 0x3fca1000;
     payload.boot.previous_backlight_trace_post_backlight_network_manager_addr = 0x3fca1000;
     payload.boot.previous_backlight_trace_pre_render_network_manager_addr = 0;
@@ -144,12 +148,16 @@ void test_web_diag_api_utils_fill_json_populates_network_errors_and_stream() {
     TEST_ASSERT_FALSE(doc["boot"]["lvgl_ready"].as<bool>());
     TEST_ASSERT_EQUAL_STRING("active",
                              doc["boot"]["previous_backlight_trace_status"].as<const char *>());
+    TEST_ASSERT_TRUE(
+        doc["boot"]["previous_backlight_trace_retention_uncertain"].as<bool>());
     TEST_ASSERT_EQUAL_STRING("schedule_wake",
                              doc["boot"]["previous_backlight_trace"]["event"].as<const char *>());
     TEST_ASSERT_EQUAL_STRING("driver_call_begin",
                              doc["boot"]["previous_backlight_trace"]["stage"].as<const char *>());
     TEST_ASSERT_EQUAL_STRING("unknown",
                              doc["boot"]["previous_backlight_trace"]["driver_result"].as<const char *>());
+    TEST_ASSERT_EQUAL_STRING("failed",
+                             doc["boot"]["previous_backlight_trace"]["command_result"].as<const char *>());
     TEST_ASSERT_EQUAL_UINT32(7,
                              doc["boot"]["previous_backlight_trace"]["sequence"].as<uint32_t>());
     TEST_ASSERT_EQUAL_UINT32(20142000,
@@ -165,7 +173,15 @@ void test_web_diag_api_utils_fill_json_populates_network_errors_and_stream() {
         2,
         doc["boot"]["previous_backlight_trace"]["pre_quiet_active_operations"].as<uint32_t>());
     TEST_ASSERT_TRUE(
+        doc["boot"]["previous_backlight_trace"]["pre_quiet_wait_exceeded"].as<bool>());
+    TEST_ASSERT_EQUAL_UINT32(
+        3,
+        doc["boot"]["previous_backlight_trace"]
+           ["pre_quiet_wait_exceeded_active_operations"].as<uint32_t>());
+    TEST_ASSERT_TRUE(
         doc["boot"]["previous_backlight_trace"]["pre_quiet_forced_by_timeout"].as<bool>());
+    TEST_ASSERT_TRUE(
+        doc["boot"]["previous_backlight_trace"]["retention_uncertain"].as<bool>());
     TEST_ASSERT_EQUAL_UINT32(
         0x3fca1000,
         doc["boot"]["previous_backlight_trace"]["expected_network_manager_addr"].as<uint32_t>());
@@ -217,6 +233,24 @@ void test_web_diag_api_utils_marks_missing_backlight_trace_null() {
     TEST_ASSERT_NULL(strstr(json.c_str(), "magic"));
 }
 
+void test_web_diag_api_utils_keeps_uncertainty_without_trace_details() {
+    WebDiagApiUtils::Payload payload{};
+    payload.boot.previous_backlight_trace_status = "corrupt";
+    payload.boot.previous_backlight_trace_valid = false;
+    payload.boot.previous_backlight_trace_retention_uncertain = true;
+
+    ArduinoJson::JsonDocument doc;
+    WebDiagApiUtils::fillJson(
+        doc.to<ArduinoJson::JsonObject>(), payload, nullptr, 0, 0);
+
+    TEST_ASSERT_EQUAL_STRING(
+        "corrupt",
+        doc["boot"]["previous_backlight_trace_status"].as<const char *>());
+    TEST_ASSERT_TRUE(
+        doc["boot"]["previous_backlight_trace_retention_uncertain"].as<bool>());
+    TEST_ASSERT_TRUE(doc["boot"]["previous_backlight_trace"].isNull());
+}
+
 void test_web_diag_api_utils_marks_unrun_expander_probe_details_null() {
     WebDiagApiUtils::Payload payload{};
     payload.boot.expander_probe_status = "not_run";
@@ -257,5 +291,6 @@ int main(int, char **) {
     RUN_TEST(test_web_diag_api_utils_fill_json_populates_network_errors_and_stream);
     RUN_TEST(test_web_diag_api_utils_marks_unrun_expander_probe_details_null);
     RUN_TEST(test_web_diag_api_utils_marks_missing_backlight_trace_null);
+    RUN_TEST(test_web_diag_api_utils_keeps_uncertainty_without_trace_details);
     return UNITY_END();
 }

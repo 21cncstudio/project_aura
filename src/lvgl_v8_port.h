@@ -179,6 +179,15 @@ bool lvgl_port_request_pause(void);
 bool lvgl_port_is_paused(void);
 
 /**
+ * @brief Return whether the display task entered its terminal fail-stop.
+ *
+ * The acknowledgement is published immediately before the task suspends
+ * itself and guarantees that it will not mutate LVGL or touch state again in
+ * this boot.
+ */
+bool lvgl_port_display_task_fail_stopped(void);
+
+/**
  * @brief Resume LVGL task and tick timer.
  *
  * @return true if success, otherwise false
@@ -293,12 +302,21 @@ bool lvgl_port_complete_touch_hard_recovery(bool recovered,
 void lvgl_port_disable_touch_i2c(void);
 
 /**
- * @brief Bounded drain and state cleanup after touch I2C is disabled.
+ * @brief Wait for touch-I2C users admitted before disable to drain.
  *
- * @param timeout_ms Maximum time to wait for an already admitted callback.
- * @return true when the gate became idle and touch state was finalized.
+ * This function has no touch-policy or interrupt side effects. The touch gate
+ * must already be disabled.
  */
-bool lvgl_port_finalize_touch_i2c_disable(uint32_t timeout_ms);
+bool lvgl_port_wait_touch_i2c_idle(uint32_t timeout_ms);
+
+/**
+ * @brief Finalize disabled touch state after drain and LVGL serialization.
+ *
+ * The caller must hold the LVGL mutex (or otherwise prove the LVGL task is
+ * paused) so plain cached input and interrupt-policy state cannot race a late
+ * handler.
+ */
+bool lvgl_port_finalize_touch_i2c_disable_after_drain(void);
 
 /**
  * @brief Enable/disable wake-touch probe mode.

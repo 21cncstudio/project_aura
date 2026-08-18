@@ -155,6 +155,8 @@ void test_web_settings_utils_fill_settings_json_prefers_snapshot_then_config_the
     snapshot.night_mode = true;
     snapshot.night_mode_locked = true;
     snapshot.backlight_on = false;
+    snapshot.backlight_transition_pending = true;
+    snapshot.backlight_target_on = true;
     snapshot.ntp_enabled = false;
     snapshot.units_c = false;
     snapshot.time_format_24h = false;
@@ -167,6 +169,8 @@ void test_web_settings_utils_fill_settings_json_prefers_snapshot_then_config_the
     TEST_ASSERT_TRUE(snapshot_doc["night_mode"].as<bool>());
     TEST_ASSERT_TRUE(snapshot_doc["night_mode_locked"].as<bool>());
     TEST_ASSERT_FALSE(snapshot_doc["backlight_on"].as<bool>());
+    TEST_ASSERT_TRUE(snapshot_doc["backlight_transition_pending"].as<bool>());
+    TEST_ASSERT_TRUE(snapshot_doc["backlight_target_on"].as<bool>());
     TEST_ASSERT_FALSE(snapshot_doc["ntp_enabled"].as<bool>());
     TEST_ASSERT_FALSE(snapshot_doc["units_c"].as<bool>());
     TEST_ASSERT_FALSE(snapshot_doc["time_format_24h"].as<bool>());
@@ -188,6 +192,8 @@ void test_web_settings_utils_fill_settings_json_prefers_snapshot_then_config_the
     TEST_ASSERT_FALSE(cfg_doc["night_mode"].as<bool>());
     TEST_ASSERT_TRUE(cfg_doc["night_mode_locked"].as<bool>());
     TEST_ASSERT_TRUE(cfg_doc["backlight_on"].isNull());
+    TEST_ASSERT_TRUE(cfg_doc["backlight_transition_pending"].isNull());
+    TEST_ASSERT_TRUE(cfg_doc["backlight_target_on"].isNull());
     TEST_ASSERT_TRUE(cfg_doc["ntp_enabled"].as<bool>());
     TEST_ASSERT_FALSE(cfg_doc["time_format_24h"].as<bool>());
     TEST_ASSERT_EQUAL_STRING("time.local", cfg_doc["ntp_server"].as<const char *>());
@@ -196,6 +202,8 @@ void test_web_settings_utils_fill_settings_json_prefers_snapshot_then_config_the
     ArduinoJson::JsonDocument empty_doc;
     WebSettingsUtils::fillSettingsJson(empty_doc.to<ArduinoJson::JsonObject>(), nullptr, nullptr);
     TEST_ASSERT_TRUE(empty_doc["night_mode"].isNull());
+    TEST_ASSERT_TRUE(empty_doc["backlight_transition_pending"].isNull());
+    TEST_ASSERT_TRUE(empty_doc["backlight_target_on"].isNull());
     TEST_ASSERT_TRUE(empty_doc["ntp_enabled"].isNull());
     TEST_ASSERT_TRUE(empty_doc["time_format_24h"].isNull());
     TEST_ASSERT_TRUE(empty_doc["ntp_server"].isNull());

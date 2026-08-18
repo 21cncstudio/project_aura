@@ -52,18 +52,24 @@ void test_web_settings_api_utils_fill_update_success_json_embeds_applied_snapsho
     snapshot.night_mode = true;
     snapshot.night_mode_locked = false;
     snapshot.backlight_on = true;
+    snapshot.backlight_transition_pending = true;
+    snapshot.backlight_target_on = false;
     snapshot.units_c = false;
     snapshot.temp_offset = 1.25f;
     snapshot.hum_offset = -2.5f;
     snapshot.display_name = "Aura";
 
     ArduinoJson::JsonDocument doc;
-    WebSettingsApiUtils::fillUpdateSuccessJson(doc.to<ArduinoJson::JsonObject>(), snapshot, true);
+    WebSettingsApiUtils::fillUpdateSuccessJson(
+        doc.to<ArduinoJson::JsonObject>(), snapshot, true, true);
 
     TEST_ASSERT_TRUE(doc["success"].as<bool>());
     TEST_ASSERT_TRUE(doc["restart"].as<bool>());
+    TEST_ASSERT_TRUE(doc["pending"].as<bool>());
     TEST_ASSERT_TRUE(doc["settings"]["night_mode"].as<bool>());
     TEST_ASSERT_TRUE(doc["settings"]["backlight_on"].as<bool>());
+    TEST_ASSERT_TRUE(doc["settings"]["backlight_transition_pending"].as<bool>());
+    TEST_ASSERT_FALSE(doc["settings"]["backlight_target_on"].as<bool>());
     TEST_ASSERT_FALSE(doc["settings"]["units_c"].as<bool>());
     TEST_ASSERT_EQUAL_STRING("Aura", doc["settings"]["display_name"].as<const char *>());
 }

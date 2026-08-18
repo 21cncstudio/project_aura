@@ -15,6 +15,8 @@ public:
         bool night_mode = false;
         bool night_mode_locked = false;
         bool backlight_on = false;
+        bool backlight_transition_pending = false;
+        bool backlight_target_on = false;
         bool ntp_enabled = true;
         bool ntp_active = false;
         bool ntp_syncing = false;
@@ -52,6 +54,15 @@ public:
         bool has_display_name = false;
         String display_name;
         bool restart_requested = false;
+    };
+
+    struct ApplyResult {
+        bool success = false;
+        uint16_t status_code = 503;
+        String error_message;
+        bool restart_requested = false;
+        bool pending = false;
+        Snapshot snapshot;
     };
 
     struct ThemeUpdate {

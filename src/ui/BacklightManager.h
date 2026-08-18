@@ -5,6 +5,7 @@
 // Purchase a Commercial License: see COMMERCIAL_LICENSE_SUMMARY.md
 
 #pragma once
+#include <atomic>
 #include <Arduino.h>
 #include "config/AppConfig.h"
 #include "core/BacklightWakeBreadcrumbs.h"
@@ -20,16 +21,50 @@ class StorageManager;
 
 class BacklightManager {
 public:
+    enum class RequestStatus : uint8_t {
+        Applied = 0,
+        Queued,
+        Rejected,
+    };
+
+    struct RequestResult {
+        RequestStatus status = RequestStatus::Rejected;
+        bool actual_on = false;
+        bool target_on = false;
+
+        bool accepted() const { return status != RequestStatus::Rejected; }
+        bool pending() const { return status == RequestStatus::Queued; }
+    };
+
+    struct RuntimeSnapshot {
+        bool actual_on = true;
+        bool transition_pending = false;
+        bool target_on = true;
+        bool wake_critical_section_pending = false;
+    };
+
     void loadFromPrefs(StorageManager &storage);
     void attachBacklight(esp_panel::drivers::Backlight *backlight);
     void poll(bool lvgl_ready);
     void updateUi();
     void savePrefs(StorageManager &storage);
 
-    bool setOn(bool on);
+    RequestResult requestState(
+        bool on,
+        BacklightWakeBreadcrumbs::Event source,
+        uint32_t now_ms);
+    void armWakeCompletionAfterRender();
+    bool completeWakeAfterRender();
+    bool releaseWakeAfterRuntimePublish();
     void disableSharedBus();
+    bool waitForSharedBusWriterIdle(uint32_t timeout_ms);
+    bool prepareSuppressedLvglAbortAfterDrain();
     bool waitForSharedBusIdle(uint32_t timeout_ms);
-    bool isOn() const { return backlight_on_; }
+    RuntimeSnapshot runtimeSnapshot() const;
+    bool isOn() const { return runtimeSnapshot().actual_on; }
+    bool isTransitionPending() const;
+    bool isWakeCriticalSectionPending() const;
+    bool targetOn() const;
     uint32_t commandFailureCount() const { return command_failure_count_; }
 
     void setTimeoutMs(uint32_t timeout_ms);
@@ -56,19 +91,47 @@ private:
         bool on,
         BacklightWakeBreadcrumbs::Event trace_event =
             BacklightWakeBreadcrumbs::Event::None,
-        uint32_t pre_quiet_elapsed_ms = 0,
-        uint32_t pre_quiet_active_operations = 0,
-        bool pre_quiet_forced_by_timeout = false);
+        bool *driver_attempted = nullptr);
     void storeSchedulePrefs();
     void refreshSchedule();
     void refreshScheduleWithGateHeld(bool trace_clock_transition = false);
-    void requestGuardedWake(BacklightWakeBreadcrumbs::Event event, uint32_t now_ms);
+    bool requestGuardedWake(BacklightWakeBreadcrumbs::Event event, uint32_t now_ms);
     bool processGuardedWake(uint32_t now_ms);
-    void cancelGuardedWake();
+    void finalizeGuardedWake(uint32_t now_ms);
+    void cancelGuardedWake(bool defer_guard_release = false);
+    BacklightStatePolicy::SuppressedAbortOffOutcome
+    abortWakeAfterWriterQuiescence(bool defer_guard_release,
+                                   bool turn_backlight_off);
+    bool finalizeDisabledSharedBus(bool defer_guard_release,
+                                   bool turn_backlight_off);
     void consumeInput();
+    bool isTransitionPendingInternal() const;
+    bool targetOnInternal() const;
+    void publishRuntimeSnapshot();
+
+    class RuntimeSnapshotPublishGuard {
+    public:
+        explicit RuntimeSnapshotPublishGuard(BacklightManager &owner)
+            : owner_(owner) {}
+        ~RuntimeSnapshotPublishGuard() { owner_.publishRuntimeSnapshot(); }
+
+        RuntimeSnapshotPublishGuard(const RuntimeSnapshotPublishGuard &) = delete;
+        RuntimeSnapshotPublishGuard &operator=(
+            const RuntimeSnapshotPublishGuard &) = delete;
+
+    private:
+        BacklightManager &owner_;
+    };
+
+    static constexpr uint8_t RUNTIME_ACTUAL_ON_BIT = 1U << 0;
+    static constexpr uint8_t RUNTIME_TRANSITION_PENDING_BIT = 1U << 1;
+    static constexpr uint8_t RUNTIME_TARGET_ON_BIT = 1U << 2;
+    static constexpr uint8_t RUNTIME_WAKE_CRITICAL_BIT = 1U << 3;
 
     esp_panel::drivers::Backlight *panel_backlight_ = nullptr;
     bool backlight_on_ = true;
+    std::atomic<uint8_t> runtime_snapshot_bits_{
+        RUNTIME_ACTUAL_ON_BIT | RUNTIME_TARGET_ON_BIT};
     uint32_t command_failure_count_ = 0;
     BacklightStatePolicy::PendingCommand pending_command_;
     BacklightStatePolicy::RuntimeGate runtime_gate_;
@@ -82,6 +145,17 @@ private:
     BacklightWakeBreadcrumbs::Event guarded_wake_event_ =
         BacklightWakeBreadcrumbs::Event::None;
     bool guarded_wake_pending_ = false;
+    bool guarded_wake_wait_exceeded_ = false;
+    bool guarded_wake_settle_pending_ = false;
+    bool guarded_wake_settle_succeeded_ = false;
+    bool guarded_wake_render_pending_ = false;
+    bool guarded_wake_render_command_succeeded_ = false;
+    bool guarded_wake_render_armed_ = false;
+    bool guarded_wake_release_pending_ = false;
+    bool guarded_wake_release_requires_cancel_ = false;
+    bool guarded_wake_release_permitted_ = false;
+    uint32_t guarded_wake_render_handler_baseline_ = 0;
+    uint32_t guarded_wake_started_ms_ = 0;
     int sleep_hour_ = 23;
     int sleep_minute_ = 0;
     int wake_hour_ = 6;

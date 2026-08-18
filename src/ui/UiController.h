@@ -190,6 +190,10 @@ private:
     void update_mqtt_ui();
     void update_status_icons();
     void update_ui();
+    void pollBacklightWithLvglLockHeld();
+    void renderUiWithLvglLockHeld(uint32_t now);
+    bool publishFinalBacklightRuntimeAndRelease();
+    bool quiesceLvglAndAbortBacklightWake();
     void refreshConnectivitySnapshot();
     void syncConnectivityRuntime();
     void publishWebUiSnapshot();
@@ -960,6 +964,7 @@ private:
     float &hum_offset;
 
     bool data_dirty = true;
+    bool last_web_backlight_request_pending_ = false;
     bool lvgl_ready = false;
     static constexpr size_t kScreenSlotCount = 16; // screen ids are 1..15
     bool screen_events_bound_[kScreenSlotCount] = {};

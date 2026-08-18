@@ -206,7 +206,7 @@ void disable_runtime_shared_i2c_owners() {
 
 bool drain_runtime_shared_i2c_owners() {
     const bool touch_idle =
-        lvgl_port_finalize_touch_i2c_disable(SHARED_I2C_OWNER_DRAIN_TIMEOUT_MS);
+        lvgl_port_wait_touch_i2c_idle(SHARED_I2C_OWNER_DRAIN_TIMEOUT_MS);
     const bool rtc_idle =
         timeManager.finalizeSharedI2cRuntimeDisable(SHARED_I2C_OWNER_DRAIN_TIMEOUT_MS);
     const bool backlight_idle =
@@ -432,7 +432,9 @@ void setup()
 
     StorageManager::BootAction boot_action = AppInit::handleBootState();
     const bool auto_recovery_boot = boot_any_auto_recovery_boot();
-    BacklightWakeBreadcrumbs::initializeAtBoot(boot_board_cold_start);
+    BacklightWakeBreadcrumbs::initializeAtBoot(
+        boot_board_cold_start,
+        boot_reset_reason == ESP_RST_BROWNOUT);
     BootDiagnostics::state = BootDiagnostics::Snapshot{};
     BootDiagnostics::state.reset_reason = boot_reset_reason;
     BootDiagnostics::state.auto_recovery_boot = auto_recovery_boot;
@@ -446,17 +448,20 @@ void setup()
             previous_backlight_trace.status == BacklightWakeBreadcrumbs::CaptureStatus::Active;
         if (incomplete) {
             LOGW("BacklightTrace",
-                 "previous boot trace incomplete: event=%s stage=%s seq=%lu uptime=%lu ms epoch=%lu prequiet=%lu ms active=%lu forced=%s driver=%s duration=%lu us target=%s previous=%s lines(before=%s/%u%u after_driver=%s/%u%u after_probe=%s/%u%u)",
+                 "previous boot trace incomplete: event=%s stage=%s seq=%lu uptime=%lu ms epoch=%lu prequiet=%lu ms wait_exceeded=%s wait_active=%lu command=%s driver=%s duration=%lu us retention_uncertain=%s target=%s previous=%s lines(before=%s/%u%u after_driver=%s/%u%u after_probe=%s/%u%u)",
                  BacklightWakeBreadcrumbs::eventText(trace.event),
                  BacklightWakeBreadcrumbs::stageText(trace.stage),
                  static_cast<unsigned long>(trace.sequence),
                  static_cast<unsigned long>(trace.uptime_ms),
                  static_cast<unsigned long>(trace.epoch_s),
                  static_cast<unsigned long>(trace.pre_quiet_elapsed_ms),
-                 static_cast<unsigned long>(trace.pre_quiet_active_operations),
-                 trace.pre_quiet_forced_by_timeout ? "yes" : "no",
+                 trace.pre_quiet_wait_exceeded ? "yes" : "no",
+                 static_cast<unsigned long>(
+                     trace.pre_quiet_wait_exceeded_active_operations),
+                 BacklightWakeBreadcrumbs::commandResultText(trace.command_result),
                  BacklightWakeBreadcrumbs::driverResultText(trace.driver_result),
                  static_cast<unsigned long>(trace.driver_duration_us),
+                 previous_backlight_trace.retention_uncertain ? "yes" : "no",
                  trace.target_on ? "on" : "off",
                  trace.previous_on ? "on" : "off",
                  trace.before.valid ? "valid" : "invalid",
@@ -469,15 +474,29 @@ void setup()
                  trace.after_wake_probe.sda_high ? 1u : 0u,
                  trace.after_wake_probe.scl_high ? 1u : 0u);
         } else {
-            LOGI("BacklightTrace",
-                 "previous boot trace completed: event=%s seq=%lu prequiet=%lu ms active=%lu forced=%s driver=%s duration=%lu us",
-                 BacklightWakeBreadcrumbs::eventText(trace.event),
-                 static_cast<unsigned long>(trace.sequence),
-                 static_cast<unsigned long>(trace.pre_quiet_elapsed_ms),
-                 static_cast<unsigned long>(trace.pre_quiet_active_operations),
-                 trace.pre_quiet_forced_by_timeout ? "yes" : "no",
-                 BacklightWakeBreadcrumbs::driverResultText(trace.driver_result),
-                 static_cast<unsigned long>(trace.driver_duration_us));
+            const Logger::Level trace_level =
+                previous_backlight_trace.status !=
+                        BacklightWakeBreadcrumbs::CaptureStatus::Completed ||
+                    previous_backlight_trace.retention_uncertain
+                    ? Logger::Warn
+                    : Logger::Info;
+            Logger::log(
+                trace_level,
+                "BacklightTrace",
+                "previous boot trace: status=%s event=%s stage=%s seq=%lu prequiet=%lu ms wait_exceeded=%s wait_active=%lu command=%s driver=%s duration=%lu us retention_uncertain=%s",
+                BacklightWakeBreadcrumbs::statusText(
+                    previous_backlight_trace.status),
+                BacklightWakeBreadcrumbs::eventText(trace.event),
+                BacklightWakeBreadcrumbs::stageText(trace.stage),
+                static_cast<unsigned long>(trace.sequence),
+                static_cast<unsigned long>(trace.pre_quiet_elapsed_ms),
+                trace.pre_quiet_wait_exceeded ? "yes" : "no",
+                static_cast<unsigned long>(
+                    trace.pre_quiet_wait_exceeded_active_operations),
+                BacklightWakeBreadcrumbs::commandResultText(trace.command_result),
+                BacklightWakeBreadcrumbs::driverResultText(trace.driver_result),
+                static_cast<unsigned long>(trace.driver_duration_us),
+                previous_backlight_trace.retention_uncertain ? "yes" : "no");
         }
     } else if (previous_backlight_trace.status ==
                BacklightWakeBreadcrumbs::CaptureStatus::Corrupt) {
@@ -795,6 +814,18 @@ void loop()
     const uint32_t background_now = millis();
     const bool wake_background_paused =
         WakePowerGuard::backgroundPaused(background_now);
+    if (wake_background_paused) {
+        // During PreQuiet/Settle only the UI owner may advance the guarded
+        // backlight transition. RenderWait deliberately lets that same owner
+        // perform the first post-wake render while every background producer
+        // remains closed. Do not update snapshots, storage, OTA state or
+        // diagnostics here: even short owner-side work would otherwise count
+        // against a quiet interval that has already started.
+        uiController.poll(background_now);
+        Watchdog::kick();
+        delay(1);
+        return;
+    }
     if (!wake_background_paused) {
         poll_runtime_i2c_recovery(background_now);
     }
@@ -844,13 +875,17 @@ void loop()
         fanControl.poll(now, &currentData, sensorManager.isWarmupActive(), displayThresholds.snapshot());
     }
     const FanControl::Snapshot fan_snapshot = fanControl.snapshot();
+    const BacklightManager::RuntimeSnapshot backlight_snapshot =
+        backlightManager.runtimeSnapshot();
     webRuntimeState.update(currentData, sensorManager.isWarmupActive(), fanControl);
     mqttRuntimeState.update(currentData,
                             fan_snapshot,
                             sensorManager.isWarmupActive(),
                             night_mode,
                             alert_blink_enabled,
-                            backlightManager.isOn(),
+                            backlight_snapshot.actual_on,
+                            backlight_snapshot.transition_pending,
+                            backlight_snapshot.target_on,
                             nightModeManager.isAutoEnabled());
     if (!wake_background_paused && !network_plane_running) {
         mqttManager.poll(mqttRuntimeState);

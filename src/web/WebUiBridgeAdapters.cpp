@@ -14,6 +14,8 @@ WebSettingsUtils::SettingsSnapshot captureSettingsSnapshot(const WebUiBridge::Sn
     result.night_mode = snapshot.night_mode;
     result.night_mode_locked = snapshot.night_mode_locked;
     result.backlight_on = snapshot.backlight_on;
+    result.backlight_transition_pending = snapshot.backlight_transition_pending;
+    result.backlight_target_on = snapshot.backlight_target_on;
     result.ntp_enabled = snapshot.ntp_enabled;
     result.units_c = snapshot.units_c;
     result.time_format_24h = snapshot.time_format_24h;

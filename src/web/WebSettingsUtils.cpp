@@ -53,6 +53,8 @@ void fill_unavailable(ArduinoJson::JsonObject settings) {
     settings["night_mode"] = nullptr;
     settings["night_mode_locked"] = nullptr;
     settings["backlight_on"] = nullptr;
+    settings["backlight_transition_pending"] = nullptr;
+    settings["backlight_target_on"] = nullptr;
     settings["ntp_enabled"] = nullptr;
     settings["units_c"] = nullptr;
     settings["time_format_24h"] = nullptr;
@@ -68,6 +70,8 @@ void fill_from_snapshot(ArduinoJson::JsonObject settings, const SettingsSnapshot
     settings["night_mode"] = snapshot.night_mode;
     settings["night_mode_locked"] = snapshot.night_mode_locked;
     settings["backlight_on"] = snapshot.backlight_on;
+    settings["backlight_transition_pending"] = snapshot.backlight_transition_pending;
+    settings["backlight_target_on"] = snapshot.backlight_target_on;
     settings["ntp_enabled"] = snapshot.ntp_enabled;
     settings["units_c"] = snapshot.units_c;
     settings["time_format_24h"] = snapshot.time_format_24h;
@@ -83,6 +87,8 @@ void fill_from_config(ArduinoJson::JsonObject settings, const Config::StoredConf
     settings["night_mode"] = cfg.night_mode;
     settings["night_mode_locked"] = cfg.auto_night_enabled;
     settings["backlight_on"] = nullptr;
+    settings["backlight_transition_pending"] = nullptr;
+    settings["backlight_target_on"] = nullptr;
     settings["ntp_enabled"] = cfg.ntp_enabled;
     settings["units_c"] = cfg.units_c;
     settings["time_format_24h"] = cfg.time_format_24h;

@@ -122,6 +122,8 @@ void handleDiagData(WebHandlerContext &context,
     payload.boot.previous_backlight_trace_status =
         BacklightWakeBreadcrumbs::statusText(previous_trace.status);
     payload.boot.previous_backlight_trace_valid = previous_trace.has_trace;
+    payload.boot.previous_backlight_trace_retention_uncertain =
+        previous_trace.retention_uncertain;
     if (previous_trace.has_trace) {
         const BacklightWakeBreadcrumbs::Trace &trace = previous_trace.trace;
         payload.boot.previous_backlight_trace_event =
@@ -130,6 +132,8 @@ void handleDiagData(WebHandlerContext &context,
             BacklightWakeBreadcrumbs::stageText(trace.stage);
         payload.boot.previous_backlight_trace_driver_result =
             BacklightWakeBreadcrumbs::driverResultText(trace.driver_result);
+        payload.boot.previous_backlight_trace_command_result =
+            BacklightWakeBreadcrumbs::commandResultText(trace.command_result);
         payload.boot.previous_backlight_trace_sequence = trace.sequence;
         payload.boot.previous_backlight_trace_uptime_ms = trace.uptime_ms;
         payload.boot.previous_backlight_trace_epoch_s = trace.epoch_s;
@@ -138,6 +142,10 @@ void handleDiagData(WebHandlerContext &context,
             trace.pre_quiet_elapsed_ms;
         payload.boot.previous_backlight_trace_pre_quiet_active_operations =
             trace.pre_quiet_active_operations;
+        payload.boot.previous_backlight_trace_pre_quiet_wait_exceeded =
+            trace.pre_quiet_wait_exceeded;
+        payload.boot.previous_backlight_trace_pre_quiet_wait_exceeded_active_operations =
+            trace.pre_quiet_wait_exceeded_active_operations;
         payload.boot.previous_backlight_trace_pre_quiet_forced_by_timeout =
             trace.pre_quiet_forced_by_timeout;
         payload.boot.previous_backlight_trace_expected_network_manager_addr =

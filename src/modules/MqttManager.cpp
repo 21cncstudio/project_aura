@@ -14,6 +14,7 @@
 #include <WiFi.h>
 #include <esp_event.h>
 #include "core/Logger.h"
+#include "core/WakePowerGuard.h"
 #include "core/MqttEventQueue.h"
 #include "core/SystemEventPolicy.h"
 #include "core/WifiPowerSaveGuard.h"
@@ -115,15 +116,6 @@ int connect_timeout_ms_for_attempts(uint32_t failed_attempts) {
 
 uint16_t default_mqtt_port(bool tls_enabled) {
     return tls_enabled ? Config::MQTT_TLS_DEFAULT_PORT : Config::MQTT_DEFAULT_PORT;
-}
-
-void append_buffer_to_string(String &out, const char *data, size_t length) {
-    if (!data || length == 0) {
-        return;
-    }
-    for (size_t i = 0; i < length; ++i) {
-        out += data[i];
-    }
 }
 
 void build_state_topic(char *out, size_t out_size, const String &base) {
@@ -396,8 +388,7 @@ void MqttManager::destroyClient() {
     mqtt_connecting_ = false;
     mqtt_connected_ = false;
     mqtt_manual_stop_ = false;
-    mqtt_event_topic_.clear();
-    mqtt_event_payload_.clear();
+    mqtt_command_ingress_.reset();
     mqtt_active_ca_cert_ = "";
     mqtt_active_common_name_ = "";
 }
@@ -1185,6 +1176,8 @@ void MqttManager::publishState(const MqttRuntimeSnapshot &runtime) {
         runtime.night_mode,
         runtime.alert_blink,
         runtime.backlight_on,
+        runtime.backlight_transition_pending,
+        runtime.backlight_target_on,
         pressure_altitude_set,
         pressure_altitude_m);
     if (payload_len == 0) {
@@ -1512,6 +1505,31 @@ void MqttManager::handleIncomingMessage(const char *topic, const uint8_t *payloa
     }
 }
 
+void MqttManager::processIncomingCommands() {
+    WakePowerGuard::Activity activity =
+        WakePowerGuard::tryAcquireActivity(millis());
+    if (!activity) {
+        return;
+    }
+
+    const uint32_t dropped = mqtt_command_ingress_.takeDroppedCount();
+    if (dropped > 0) {
+        LOGW("MQTT",
+             "dropped %lu oversized, malformed or queued command message(s)",
+             static_cast<unsigned long>(dropped));
+    }
+
+    MqttCommandIngressQueue::Message message{};
+    for (size_t processed = 0;
+         processed < MqttCommandIngressQueue::kQueueCapacity &&
+         mqtt_command_ingress_.pop(message);
+         ++processed) {
+        handleIncomingMessage(message.topic,
+                              message.payload,
+                              message.payload_length);
+    }
+}
+
 void MqttManager::handleEvent(esp_mqtt_event_handle_t event) {
     if (!event) {
         return;
@@ -1564,22 +1582,28 @@ void MqttManager::handleEvent(esp_mqtt_event_handle_t event) {
             break;
         }
         case MQTT_EVENT_DATA: {
-            if (event->current_data_offset == 0) {
-                mqtt_event_topic_.clear();
-                mqtt_event_payload_.clear();
-                mqtt_event_topic_.reserve(event->topic_len > 0 ? static_cast<size_t>(event->topic_len) : 0);
-                mqtt_event_payload_.reserve(event->total_data_len > 0 ? static_cast<size_t>(event->total_data_len) : static_cast<size_t>(event->data_len));
-                append_buffer_to_string(mqtt_event_topic_, event->topic, static_cast<size_t>(event->topic_len));
-            }
-            append_buffer_to_string(mqtt_event_payload_, event->data, static_cast<size_t>(event->data_len));
-            const int received_end = event->current_data_offset + event->data_len;
-            if (event->total_data_len <= 0 || received_end >= event->total_data_len) {
-                handleIncomingMessage(mqtt_event_topic_.c_str(),
-                                      reinterpret_cast<const uint8_t *>(mqtt_event_payload_.c_str()),
-                                      mqtt_event_payload_.length());
-                mqtt_event_topic_.clear();
-                mqtt_event_payload_.clear();
-            }
+            const size_t topic_length = event->topic_len > 0
+                                            ? static_cast<size_t>(event->topic_len)
+                                            : 0;
+            const size_t payload_length = event->data_len > 0
+                                              ? static_cast<size_t>(event->data_len)
+                                              : 0;
+            const size_t total_payload_length = event->total_data_len > 0
+                                                    ? static_cast<size_t>(event->total_data_len)
+                                                    : payload_length;
+            const size_t payload_offset = event->current_data_offset > 0
+                                              ? static_cast<size_t>(event->current_data_offset)
+                                              : 0;
+            // The ESP MQTT task only performs a bounded copy here. Parsing,
+            // String work and command publication are deferred to poll() under
+            // a WakePowerGuard activity lease.
+            (void)mqtt_command_ingress_.pushFragment(
+                event->topic,
+                topic_length,
+                reinterpret_cast<const uint8_t *>(event->data),
+                payload_length,
+                total_payload_length,
+                payload_offset);
             break;
         }
         default:
@@ -1635,6 +1659,7 @@ void MqttManager::updateOtaQuiesceState() {
 }
 
 void MqttManager::poll(MqttRuntimeState &runtime_state) {
+    processIncomingCommands();
     auto note_connect_failure = [&](int rc) {
         if (mqtt_connect_attempts_ < UINT32_MAX) {
             mqtt_connect_attempts_++;
@@ -1700,6 +1725,13 @@ void MqttManager::poll(MqttRuntimeState &runtime_state) {
         destroyClient();
     }
 
+    // Consume the publish flag before taking the snapshot. If the UI stores a
+    // newer state concurrently, we either publish that newer snapshot now or
+    // leave its request pending for the next poll. Taking the snapshot first
+    // could consume a later request while publishing stale actual/target data.
+    if (runtime_state.consumePublishRequest()) {
+        mqtt_publish_requested_ = true;
+    }
     const MqttRuntimeSnapshot runtime = runtime_state.snapshot();
     if (runtime.auto_night_enabled != auto_night_enabled_) {
         lockCommandContext();
@@ -1707,10 +1739,6 @@ void MqttManager::poll(MqttRuntimeState &runtime_state) {
         unlockCommandContext();
         publishNightModeAvailability();
     }
-    if (runtime_state.consumePublishRequest()) {
-        mqtt_publish_requested_ = true;
-    }
-
     updateOtaQuiesceState();
 
     if (!mqtt_enabled_) {

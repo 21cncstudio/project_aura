@@ -38,11 +38,39 @@ void test_successful_off_transition_enables_wake_probe() {
     TEST_ASSERT_TRUE(result.wake_probe_enabled);
 }
 
-void test_post_driver_settle_only_follows_successful_dark_wake() {
+void test_command_route_guards_every_real_dark_on_transition() {
+    TEST_ASSERT_EQUAL(BacklightStatePolicy::CommandRoute::GuardedOn,
+                      BacklightStatePolicy::route(false, true));
+    TEST_ASSERT_EQUAL(BacklightStatePolicy::CommandRoute::ImmediateOff,
+                      BacklightStatePolicy::route(true, false));
+    TEST_ASSERT_EQUAL(BacklightStatePolicy::CommandRoute::Noop,
+                      BacklightStatePolicy::route(false, false));
+    TEST_ASSERT_EQUAL(BacklightStatePolicy::CommandRoute::Noop,
+                      BacklightStatePolicy::route(true, true));
+}
+
+void test_post_driver_settle_follows_every_attempted_dark_wake() {
     TEST_ASSERT_TRUE(BacklightStatePolicy::needsPostDriverSettle(false, true, true));
     TEST_ASSERT_FALSE(BacklightStatePolicy::needsPostDriverSettle(false, true, false));
     TEST_ASSERT_FALSE(BacklightStatePolicy::needsPostDriverSettle(true, true, true));
     TEST_ASSERT_FALSE(BacklightStatePolicy::needsPostDriverSettle(true, false, true));
+}
+
+void test_suppressed_abort_release_requires_confirmed_off_and_pending_drain() {
+    using Outcome = BacklightStatePolicy::SuppressedAbortOffOutcome;
+
+    TEST_ASSERT_TRUE(BacklightStatePolicy::mayReleaseAfterSuppressedAbort(
+        Outcome::NotRequested, true));
+    TEST_ASSERT_TRUE(BacklightStatePolicy::mayReleaseAfterSuppressedAbort(
+        Outcome::OffConfirmed, true));
+    TEST_ASSERT_FALSE(BacklightStatePolicy::mayReleaseAfterSuppressedAbort(
+        Outcome::DriverUnavailable, true));
+    TEST_ASSERT_FALSE(BacklightStatePolicy::mayReleaseAfterSuppressedAbort(
+        Outcome::DriverFailed, true));
+    TEST_ASSERT_FALSE(BacklightStatePolicy::mayReleaseAfterSuppressedAbort(
+        Outcome::NotRequested, false));
+    TEST_ASSERT_FALSE(BacklightStatePolicy::mayReleaseAfterSuppressedAbort(
+        Outcome::OffConfirmed, false));
 }
 
 void test_wake_probe_plan_masks_every_real_driver_transition() {
@@ -215,7 +243,9 @@ int main(int, char **) {
     RUN_TEST(test_failed_on_transition_keeps_off_state_and_wake_probe);
     RUN_TEST(test_failed_off_transition_keeps_on_state_without_wake_probe);
     RUN_TEST(test_successful_off_transition_enables_wake_probe);
-    RUN_TEST(test_post_driver_settle_only_follows_successful_dark_wake);
+    RUN_TEST(test_command_route_guards_every_real_dark_on_transition);
+    RUN_TEST(test_post_driver_settle_follows_every_attempted_dark_wake);
+    RUN_TEST(test_suppressed_abort_release_requires_confirmed_off_and_pending_drain);
     RUN_TEST(test_wake_probe_plan_masks_every_real_driver_transition);
     RUN_TEST(test_wake_probe_plan_leaves_noop_for_state_synchronization);
     RUN_TEST(test_retry_delay_uses_bounded_exponential_backoff);

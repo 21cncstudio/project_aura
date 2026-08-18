@@ -28,6 +28,7 @@ ParseResult parseUpdateRequestBody(const String &body,
 
 void fillUpdateSuccessJson(ArduinoJson::JsonObject root,
                            const WebSettingsUtils::SettingsSnapshot &snapshot,
-                           bool restart_requested);
+                           bool restart_requested,
+                           bool pending);
 
 } // namespace WebSettingsApiUtils

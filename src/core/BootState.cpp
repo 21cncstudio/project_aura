@@ -7,6 +7,9 @@
 #include "core/BootState.h"
 #include <esp_attr.h>
 
+RTC_NOINIT_ATTR uint32_t
+    boot_backlight_wake_evidence_words[BOOT_BACKLIGHT_WAKE_EVIDENCE_WORDS];
+
 namespace {
 
 constexpr uint32_t BOOT_UI_AUTO_RECOVERY_MAGIC = 0xA11A0F5Au;

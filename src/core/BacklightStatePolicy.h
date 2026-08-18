@@ -11,10 +11,41 @@
 
 namespace BacklightStatePolicy {
 
+enum class CommandRoute : uint8_t {
+    Noop = 0,
+    ImmediateOff,
+    GuardedOn,
+};
+
+enum class SuppressedAbortOffOutcome : uint8_t {
+    NotRequested = 0,
+    OffConfirmed,
+    DriverUnavailable,
+    DriverFailed,
+};
+
+inline constexpr bool mayReleaseAfterSuppressedAbort(
+    SuppressedAbortOffOutcome off_outcome,
+    bool pending_cleared) {
+    if (!pending_cleared) {
+        return false;
+    }
+    return off_outcome == SuppressedAbortOffOutcome::NotRequested ||
+           off_outcome == SuppressedAbortOffOutcome::OffConfirmed;
+}
+
+inline CommandRoute route(bool current_on, bool requested_on) {
+    if (current_on == requested_on) {
+        return CommandRoute::Noop;
+    }
+    return requested_on ? CommandRoute::GuardedOn
+                        : CommandRoute::ImmediateOff;
+}
+
 inline bool needsPostDriverSettle(bool previous_on,
                                   bool requested_on,
-                                  bool driver_succeeded) {
-    return !previous_on && requested_on && driver_succeeded;
+                                  bool driver_attempted) {
+    return !previous_on && requested_on && driver_attempted;
 }
 
 struct Transition {

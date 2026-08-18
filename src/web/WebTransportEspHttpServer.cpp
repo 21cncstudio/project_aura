@@ -19,6 +19,7 @@
 #include <lwip/sockets.h>
 
 #include "core/Logger.h"
+#include "core/WakePowerGuard.h"
 #include "core/Watchdog.h"
 #include "web/WebServerLimits.h"
 
@@ -29,6 +30,25 @@ constexpr uint16_t kHttpServerSendWaitTimeoutS = 30;
 constexpr uint16_t kHttpServerMaxOpenSockets = 10;
 constexpr uint32_t kMultipartReadIdleTimeoutMs = 90UL * 1000UL;
 constexpr uint32_t kDrainRecvTimeoutMs = 200;
+constexpr uint32_t kWakeActivityAdmissionTimeoutMs = 3000;
+
+WakePowerGuard::Activity wait_for_web_activity_admission(
+    bool &wait_exceeded) {
+    const uint32_t started_ms = millis();
+    wait_exceeded = false;
+    while (true) {
+        WakePowerGuard::Activity activity =
+            WakePowerGuard::tryAcquireActivity(millis());
+        if (activity) {
+            return activity;
+        }
+        if (static_cast<uint32_t>(millis() - started_ms) >=
+            kWakeActivityAdmissionTimeoutMs) {
+            wait_exceeded = true;
+        }
+        delay(1);
+    }
+}
 
 enum class RequestBodyReadResult : uint8_t {
     Ok,
@@ -103,6 +123,7 @@ namespace {
 String status_line_for_code(int status_code) {
     switch (status_code) {
         case 200: return "200 OK";
+        case 202: return "202 Accepted";
         case 204: return "204 No Content";
         case 302: return "302 Found";
         case 400: return "400 Bad Request";
@@ -1132,6 +1153,17 @@ static esp_err_t esp_route_dispatch(httpd_req_t *req) {
         return ESP_FAIL;
     }
 
+    bool wake_wait_exceeded = false;
+    WakePowerGuard::Activity wake_activity =
+        wait_for_web_activity_admission(wake_wait_exceeded);
+    if (!wake_activity || wake_wait_exceeded) {
+        // Even the timeout response is sent only after acquiring an activity
+        // lease. It therefore cannot overlap the protected CH422G switch.
+        send_request_error_and_close(
+            req, "503 Service Unavailable", "Display wake in progress");
+        return ESP_OK;
+    }
+
     if (!route->backend->prepareRequest(*route, req)) {
         route->backend->resetRequest();
         return ESP_OK;
@@ -1145,6 +1177,15 @@ static esp_err_t esp_route_dispatch(httpd_req_t *req) {
 static esp_err_t esp_not_found_dispatch(httpd_req_t *req, httpd_err_code_t) {
     if (!req || !req->handle) {
         return ESP_FAIL;
+    }
+
+    bool wake_wait_exceeded = false;
+    WakePowerGuard::Activity wake_activity =
+        wait_for_web_activity_admission(wake_wait_exceeded);
+    if (!wake_activity || wake_wait_exceeded) {
+        send_request_error_and_close(
+            req, "503 Service Unavailable", "Display wake in progress");
+        return ESP_OK;
     }
 
     auto *backend =

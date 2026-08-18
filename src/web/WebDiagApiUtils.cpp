@@ -74,12 +74,15 @@ void fillJson(ArduinoJson::JsonObject root,
     boot["board_failure"] = payload.boot.board_failure;
     boot["lvgl_ready"] = payload.boot.lvgl_ready;
     boot["previous_backlight_trace_status"] = payload.boot.previous_backlight_trace_status;
+    boot["previous_backlight_trace_retention_uncertain"] =
+        payload.boot.previous_backlight_trace_retention_uncertain;
     if (payload.boot.previous_backlight_trace_valid) {
         ArduinoJson::JsonObject trace =
             boot["previous_backlight_trace"].to<ArduinoJson::JsonObject>();
         trace["event"] = payload.boot.previous_backlight_trace_event;
         trace["stage"] = payload.boot.previous_backlight_trace_stage;
         trace["driver_result"] = payload.boot.previous_backlight_trace_driver_result;
+        trace["command_result"] = payload.boot.previous_backlight_trace_command_result;
         trace["sequence"] = payload.boot.previous_backlight_trace_sequence;
         trace["uptime_ms"] = payload.boot.previous_backlight_trace_uptime_ms;
         trace["epoch_s"] = payload.boot.previous_backlight_trace_epoch_s;
@@ -88,8 +91,14 @@ void fillJson(ArduinoJson::JsonObject root,
             payload.boot.previous_backlight_trace_pre_quiet_elapsed_ms;
         trace["pre_quiet_active_operations"] =
             payload.boot.previous_backlight_trace_pre_quiet_active_operations;
+        trace["pre_quiet_wait_exceeded"] =
+            payload.boot.previous_backlight_trace_pre_quiet_wait_exceeded;
+        trace["pre_quiet_wait_exceeded_active_operations"] =
+            payload.boot.previous_backlight_trace_pre_quiet_wait_exceeded_active_operations;
         trace["pre_quiet_forced_by_timeout"] =
             payload.boot.previous_backlight_trace_pre_quiet_forced_by_timeout;
+        trace["retention_uncertain"] =
+            payload.boot.previous_backlight_trace_retention_uncertain;
         trace["expected_network_manager_addr"] =
             payload.boot.previous_backlight_trace_expected_network_manager_addr;
         trace["post_backlight_network_manager_addr"] =

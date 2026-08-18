@@ -18,6 +18,8 @@ void MqttRuntimeState::update(const SensorData &data,
                               bool night_mode,
                               bool alert_blink,
                               bool backlight_on,
+                              bool backlight_transition_pending,
+                              bool backlight_target_on,
                               bool auto_night_enabled) {
     lock();
     snapshot_.data = data;
@@ -26,6 +28,9 @@ void MqttRuntimeState::update(const SensorData &data,
     snapshot_.night_mode = night_mode;
     snapshot_.alert_blink = alert_blink;
     snapshot_.backlight_on = backlight_on;
+    snapshot_.backlight_transition_pending =
+        backlight_transition_pending;
+    snapshot_.backlight_target_on = backlight_target_on;
     snapshot_.auto_night_enabled = auto_night_enabled;
     unlock();
 

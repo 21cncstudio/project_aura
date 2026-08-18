@@ -49,6 +49,8 @@ void test_web_state_api_utils_fill_json_populates_sensor_network_and_settings_fi
     payload.settings.night_mode = true;
     payload.settings.night_mode_locked = false;
     payload.settings.backlight_on = true;
+    payload.settings.backlight_transition_pending = true;
+    payload.settings.backlight_target_on = false;
     payload.settings.ntp_enabled = true;
     payload.settings.units_c = true;
     payload.settings.temp_offset = 0.5f;
@@ -112,6 +114,8 @@ void test_web_state_api_utils_fill_json_populates_sensor_network_and_settings_fi
     TEST_ASSERT_EQUAL_STRING("ok", doc["system"]["ntp_status"].as<const char *>());
     TEST_ASSERT_EQUAL_UINT32(120000, doc["system"]["ntp_last_sync_ms"].as<uint32_t>());
     TEST_ASSERT_TRUE(doc["settings"]["night_mode"].as<bool>());
+    TEST_ASSERT_TRUE(doc["settings"]["backlight_transition_pending"].as<bool>());
+    TEST_ASSERT_FALSE(doc["settings"]["backlight_target_on"].as<bool>());
     TEST_ASSERT_TRUE(doc["settings"]["ntp_enabled"].as<bool>());
     TEST_ASSERT_EQUAL_STRING("router.local", doc["settings"]["ntp_server"].as<const char *>());
     TEST_ASSERT_EQUAL_STRING("Aura", doc["settings"]["display_name"].as<const char *>());
@@ -152,6 +156,8 @@ void test_web_state_api_utils_fill_json_sets_nulls_when_values_are_unavailable()
     TEST_ASSERT_EQUAL_STRING("off", doc["system"]["ntp_status"].as<const char *>());
     TEST_ASSERT_TRUE(doc["system"]["ntp_last_sync_ms"].isNull());
     TEST_ASSERT_TRUE(doc["settings"]["night_mode"].isNull());
+    TEST_ASSERT_TRUE(doc["settings"]["backlight_transition_pending"].isNull());
+    TEST_ASSERT_TRUE(doc["settings"]["backlight_target_on"].isNull());
     TEST_ASSERT_TRUE(doc["settings"]["ntp_enabled"].isNull());
     TEST_ASSERT_TRUE(doc["settings"]["ntp_server"].isNull());
     TEST_ASSERT_EQUAL_STRING("Aura-AP", doc["network"]["wifi_ssid"].as<const char *>());

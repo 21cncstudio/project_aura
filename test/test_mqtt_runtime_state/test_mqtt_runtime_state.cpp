@@ -15,10 +15,14 @@ void test_request_publish_is_released_only_after_update() {
 
     SensorData data{};
     FanStateSnapshot fan{};
-    state.update(data, fan, false, true, false, true, false);
+    state.update(data, fan, false, true, false, true, true, true, false);
 
     TEST_ASSERT_TRUE(state.consumePublishRequest());
     TEST_ASSERT_FALSE(state.consumePublishRequest());
+    const MqttRuntimeSnapshot snapshot = state.snapshot();
+    TEST_ASSERT_TRUE(snapshot.backlight_on);
+    TEST_ASSERT_TRUE(snapshot.backlight_transition_pending);
+    TEST_ASSERT_TRUE(snapshot.backlight_target_on);
 }
 
 void test_multiple_publish_requests_collapse_until_next_update() {
@@ -30,7 +34,7 @@ void test_multiple_publish_requests_collapse_until_next_update() {
 
     SensorData data{};
     FanStateSnapshot fan{};
-    state.update(data, fan, false, false, false, false, false);
+    state.update(data, fan, false, false, false, false, false, false, false);
 
     TEST_ASSERT_TRUE(state.consumePublishRequest());
     TEST_ASSERT_FALSE(state.consumePublishRequest());

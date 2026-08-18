@@ -10,12 +10,15 @@ namespace WakePowerGuard {
 enum class Phase : uint8_t {
     Idle = 0,
     PreQuiet,
+    Switching,
     Settle,
+    RenderWait,
+    FailClosed,
 };
 
 struct SwitchDecision {
     bool ready = false;
-    bool forced_by_timeout = false;
+    bool wait_exceeded = false;
     uint32_t elapsed_ms = 0;
     uint32_t active_operations = 0;
 };
@@ -40,21 +43,35 @@ private:
     bool acquired_ = false;
 };
 
-// Starts a cross-core quiet window. Only the UI/backlight owner transitions
-// PreQuiet to Settle; readers merely stop admitting new background activity.
+// Starts a cross-core quiet window. Only the UI/backlight owner advances the
+// guarded phases; readers merely stop admitting new background activity.
 bool request(uint32_t now_ms);
 
-// A normal wake waits for both a short quiet interval and all tracked work to
-// drain. The maximum bound keeps wake latency deterministic if an operation is
-// already blocked in a transport owned outside Project Aura.
+// A wake waits for both a short quiet interval and all tracked work to drain.
+// wait_warning_ms is diagnostic only: exceeding it never permits a switch
+// while tracked work is still active.
 bool readyToSwitch(uint32_t now_ms,
                    uint32_t min_quiet_ms,
-                   uint32_t max_wait_ms);
+                   uint32_t wait_warning_ms);
 SwitchDecision evaluateSwitch(uint32_t now_ms,
                               uint32_t min_quiet_ms,
-                              uint32_t max_wait_ms);
+                              uint32_t wait_warning_ms);
 
+// Claims the non-expiring hardware-switch phase after evaluateSwitch() reports
+// ready. Background admission stays closed through settle and the first
+// post-wake render, until completeRenderWait() or cancel().
+bool beginSwitch();
 void beginSettle(uint32_t now_ms, uint32_t settle_ms);
+bool settleReady(uint32_t now_ms);
+// Only the UI/backlight owner may publish RenderWait after the settle deadline.
+// This prevents the LVGL task from rendering before the owner records the
+// command result and arms its completion baseline under the LVGL mutex.
+bool beginRenderWait(uint32_t now_ms);
+bool completeRenderWait();
+// Permanently close admission for an unrecoverable owner failure. Existing
+// Switching/Settle/RenderWait phases are preserved; Idle or PreQuiet becomes
+// FailClosed until an explicit cancel after safe terminalization.
+void latchFailClosed();
 void cancel();
 
 bool backgroundPaused(uint32_t now_ms);

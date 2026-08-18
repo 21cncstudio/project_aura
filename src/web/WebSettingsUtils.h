@@ -19,6 +19,8 @@ struct SettingsSnapshot {
     bool night_mode = false;
     bool night_mode_locked = false;
     bool backlight_on = false;
+    bool backlight_transition_pending = false;
+    bool backlight_target_on = false;
     bool ntp_enabled = true;
     bool units_c = true;
     bool time_format_24h = true;

@@ -87,12 +87,13 @@ void handleUpdate(WebHandlerContext &context,
     WebSettingsApiUtils::fillUpdateSuccessJson(
         response_doc.to<ArduinoJson::JsonObject>(),
         applied_snapshot,
-        apply_result.restart_requested);
+        apply_result.restart_requested,
+        apply_result.pending);
 
     String json;
     serializeJson(response_doc, json);
     WebResponseUtils::sendNoStoreHeaders(server);
-    server.send(200, "application/json", json);
+    server.send(apply_result.status_code, "application/json", json);
 
     if (apply_result.restart_requested) {
         restart_controller.schedule(millis(), deferred_restart_delay_ms);

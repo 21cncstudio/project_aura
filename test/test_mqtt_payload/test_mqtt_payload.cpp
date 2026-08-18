@@ -91,6 +91,31 @@ void test_state_payload_buffer_builder_matches_string_payload() {
     TEST_ASSERT_EQUAL_STRING(string_payload.c_str(), payload);
 }
 
+void test_state_payload_distinguishes_actual_pending_and_target_backlight() {
+    SensorData data{};
+    FanStateSnapshot fan{};
+    char payload[Config::MQTT_BUFFER_SIZE] = {};
+
+    const size_t written = MqttPayloadBuilder::buildStatePayload(
+        payload,
+        sizeof(payload),
+        data,
+        fan,
+        false,
+        false,
+        false,
+        false,
+        true,
+        true,
+        false,
+        0);
+
+    TEST_ASSERT_GREATER_THAN_UINT32(0, static_cast<uint32_t>(written));
+    assert_contains(payload, "\"backlight\":\"OFF\"");
+    assert_contains(payload, "\"backlight_transition_pending\":\"ON\"");
+    assert_contains(payload, "\"backlight_target_on\":\"ON\"");
+}
+
 void test_state_payload_pressure_defaults_to_absolute_without_altitude() {
     SensorData data{};
     data.pressure_valid = true;
@@ -416,6 +441,7 @@ int main(int, char **) {
     RUN_TEST(test_state_payload_includes_pm05_pm1_pm4_and_co_null_without_sensor);
     RUN_TEST(test_state_payload_includes_co_when_sensor_present_and_valid);
     RUN_TEST(test_state_payload_buffer_builder_matches_string_payload);
+    RUN_TEST(test_state_payload_distinguishes_actual_pending_and_target_backlight);
     RUN_TEST(test_state_payload_pressure_defaults_to_absolute_without_altitude);
     RUN_TEST(test_state_payload_pressure_uses_msl_and_keeps_absolute_field);
     RUN_TEST(test_state_payload_includes_aqi_when_computable);

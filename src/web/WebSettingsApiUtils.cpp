@@ -50,9 +50,11 @@ ParseResult parseUpdateRequestBody(const String &body,
 
 void fillUpdateSuccessJson(ArduinoJson::JsonObject root,
                            const WebSettingsUtils::SettingsSnapshot &snapshot,
-                           bool restart_requested) {
+                           bool restart_requested,
+                           bool pending) {
     root["success"] = true;
     root["restart"] = restart_requested;
+    root["pending"] = pending;
     ArduinoJson::JsonObject settings = root["settings"].to<ArduinoJson::JsonObject>();
     WebSettingsUtils::fillSettingsJson(settings, &snapshot, nullptr);
 }

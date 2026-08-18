@@ -31,6 +31,145 @@ void test_cold_boot_rejects_retained_trace() {
                           static_cast<int>(bootSnapshot().status));
 }
 
+void test_brownout_marker_survives_unacknowledged_warm_restart() {
+    beginPreQuietWake(
+        Event::AlarmWake, 150, 1787000000, true, false, {true, true, true});
+    markPreQuietWaitExceeded(500, 2);
+
+    initializeAtBoot(true, true);
+
+    TEST_ASSERT_TRUE(bootSnapshot().has_trace);
+    TEST_ASSERT_TRUE(bootSnapshot().retention_uncertain);
+    TEST_ASSERT_EQUAL_INT(static_cast<int>(CaptureStatus::Active),
+                          static_cast<int>(bootSnapshot().status));
+    TEST_ASSERT_EQUAL_INT(static_cast<int>(Stage::PreQuietWaitExceeded),
+                          static_cast<int>(bootSnapshot().trace.stage));
+    TEST_ASSERT_TRUE(bootSnapshot().trace.pre_quiet_wait_exceeded);
+    TEST_ASSERT_EQUAL_UINT32(
+        2, bootSnapshot().trace.pre_quiet_wait_exceeded_active_operations);
+
+    // This is an ordinary warm restart, with no external recovery flag.
+    initializeAtBoot(false);
+    TEST_ASSERT_TRUE(bootSnapshot().has_trace);
+    TEST_ASSERT_TRUE(bootSnapshot().retention_uncertain);
+    TEST_ASSERT_EQUAL_INT(static_cast<int>(CaptureStatus::Active),
+                          static_cast<int>(bootSnapshot().status));
+}
+
+void test_acknowledge_clears_brownout_marker() {
+    beginWake(Event::AlarmWake, 150, 1787000000, true, false,
+              {true, true, true});
+    markDriverCallBegin();
+
+    initializeAtBoot(true, true);
+    initializeAtBoot(false);
+    TEST_ASSERT_TRUE(bootSnapshot().retention_uncertain);
+
+    acknowledgeBootSnapshot();
+    initializeAtBoot(false);
+    TEST_ASSERT_EQUAL_INT(static_cast<int>(CaptureStatus::Empty),
+                          static_cast<int>(bootSnapshot().status));
+    TEST_ASSERT_FALSE(bootSnapshot().retention_uncertain);
+}
+
+void test_true_cold_reset_clears_brownout_marker() {
+    beginWake(Event::AlarmWake, 150, 1787000000, true, false,
+              {true, true, true});
+    markDriverCallBegin();
+
+    initializeAtBoot(true, true);
+    TEST_ASSERT_TRUE(bootSnapshot().retention_uncertain);
+
+    initializeAtBoot(true);
+    TEST_ASSERT_EQUAL_INT(static_cast<int>(CaptureStatus::PowerLost),
+                          static_cast<int>(bootSnapshot().status));
+    TEST_ASSERT_FALSE(bootSnapshot().has_trace);
+    TEST_ASSERT_FALSE(bootSnapshot().retention_uncertain);
+
+    initializeAtBoot(false);
+    TEST_ASSERT_EQUAL_INT(static_cast<int>(CaptureStatus::Empty),
+                          static_cast<int>(bootSnapshot().status));
+    TEST_ASSERT_FALSE(bootSnapshot().retention_uncertain);
+}
+
+void test_brownout_style_boot_reports_corrupt_retained_storage() {
+    test::corruptRetained();
+
+    initializeAtBoot(true, true);
+
+    TEST_ASSERT_FALSE(bootSnapshot().has_trace);
+    TEST_ASSERT_TRUE(bootSnapshot().retention_uncertain);
+    TEST_ASSERT_EQUAL_INT(static_cast<int>(CaptureStatus::Corrupt),
+                          static_cast<int>(bootSnapshot().status));
+    initializeAtBoot(false);
+    TEST_ASSERT_TRUE(bootSnapshot().retention_uncertain);
+    TEST_ASSERT_EQUAL_INT(static_cast<int>(CaptureStatus::Corrupt),
+                          static_cast<int>(bootSnapshot().status));
+    acknowledgeBootSnapshot();
+    initializeAtBoot(false);
+    TEST_ASSERT_EQUAL_INT(static_cast<int>(CaptureStatus::Empty),
+                          static_cast<int>(bootSnapshot().status));
+}
+
+void test_brownout_torn_first_write_is_reported_as_corrupt() {
+    test::seedValidEmptyWithCorruptSibling();
+
+    initializeAtBoot(true, true);
+
+    TEST_ASSERT_FALSE(bootSnapshot().has_trace);
+    TEST_ASSERT_TRUE(bootSnapshot().retention_uncertain);
+    TEST_ASSERT_EQUAL_INT(static_cast<int>(CaptureStatus::Corrupt),
+                          static_cast<int>(bootSnapshot().status));
+
+    initializeAtBoot(false);
+    TEST_ASSERT_TRUE(bootSnapshot().retention_uncertain);
+    TEST_ASSERT_EQUAL_INT(static_cast<int>(CaptureStatus::Corrupt),
+                          static_cast<int>(bootSnapshot().status));
+}
+
+void test_brownout_terminal_fallback_with_corrupt_sibling_keeps_details() {
+    test::seedTerminalWithCorruptSibling();
+
+    initializeAtBoot(true, true);
+
+    TEST_ASSERT_EQUAL_INT(static_cast<int>(CaptureStatus::Corrupt),
+                          static_cast<int>(bootSnapshot().status));
+    TEST_ASSERT_TRUE(bootSnapshot().has_trace);
+    TEST_ASSERT_TRUE(bootSnapshot().retention_uncertain);
+    TEST_ASSERT_EQUAL_INT(static_cast<int>(Event::TouchWake),
+                          static_cast<int>(bootSnapshot().trace.event));
+    TEST_ASSERT_EQUAL_INT(static_cast<int>(Stage::Completed),
+                          static_cast<int>(bootSnapshot().trace.stage));
+    TEST_ASSERT_EQUAL_INT(static_cast<int>(CommandResult::Succeeded),
+                          static_cast<int>(bootSnapshot().trace.command_result));
+
+    initializeAtBoot(false);
+    TEST_ASSERT_EQUAL_INT(static_cast<int>(CaptureStatus::Corrupt),
+                          static_cast<int>(bootSnapshot().status));
+    TEST_ASSERT_TRUE(bootSnapshot().has_trace);
+    TEST_ASSERT_TRUE(bootSnapshot().retention_uncertain);
+    TEST_ASSERT_EQUAL_INT(static_cast<int>(Stage::Completed),
+                          static_cast<int>(bootSnapshot().trace.stage));
+}
+
+void test_torn_latest_marker_preserves_uncertainty_conservatively() {
+    beginWake(Event::TouchWake, 180, 1787000200, true, false,
+              {true, true, true});
+    markDriverCallBegin();
+
+    initializeAtBoot(true, true);
+    initializeAtBoot(true, true);
+    test::corruptLatestEvidenceMarker();
+    initializeAtBoot(false);
+
+    TEST_ASSERT_TRUE(bootSnapshot().has_trace);
+    TEST_ASSERT_TRUE(bootSnapshot().retention_uncertain);
+    TEST_ASSERT_EQUAL_INT(static_cast<int>(CaptureStatus::Corrupt),
+                          static_cast<int>(bootSnapshot().status));
+    TEST_ASSERT_EQUAL_INT(static_cast<int>(Stage::DriverCallBegin),
+                          static_cast<int>(bootSnapshot().trace.stage));
+}
+
 void test_warm_boot_preserves_last_incomplete_stage_and_context() {
     beginWake(Event::ScheduleWake, 200, 1786617600, true, false, {true, true, false});
     markDriverCallBegin();
@@ -70,22 +209,22 @@ void test_warm_boot_isolates_pre_driver_touch_irq_mask() {
 }
 
 void test_completed_trace_retains_result_duration_and_lines() {
-    beginWake(Event::ScheduleWake,
-              300,
-              1786617600,
-              true,
-              false,
-              {true, true, true},
-              500,
-              3,
-              true);
+    beginPreQuietWake(Event::ScheduleWake,
+                      300,
+                      1786617600,
+                      true,
+                      false,
+                      {true, true, true});
+    markPreQuietReady(500, {true, true, true});
     markDriverCallBegin();
     markDriverCallReturned(true, false, 912, {true, false, true});
     markWakeProbeUpdateBegin();
     markWakeProbeUpdateReturned({true, true, true});
     markLvglActivityBegin();
     markLvglActivityReturned();
-    markCommandReturned();
+    markCommandReturned(CommandResult::Succeeded);
+    markGuardSettleBegin();
+    markGuardSettleReturned();
     markCompleted();
 
     initializeAtBoot(false);
@@ -97,15 +236,202 @@ void test_completed_trace_retains_result_duration_and_lines() {
                           static_cast<int>(snapshot.trace.stage));
     TEST_ASSERT_EQUAL_INT(static_cast<int>(DriverResult::Succeeded),
                           static_cast<int>(snapshot.trace.driver_result));
+    TEST_ASSERT_EQUAL_INT(static_cast<int>(CommandResult::Succeeded),
+                          static_cast<int>(snapshot.trace.command_result));
     TEST_ASSERT_EQUAL_UINT32(912, snapshot.trace.driver_duration_us);
     TEST_ASSERT_EQUAL_UINT32(500, snapshot.trace.pre_quiet_elapsed_ms);
-    TEST_ASSERT_EQUAL_UINT32(3, snapshot.trace.pre_quiet_active_operations);
-    TEST_ASSERT_TRUE(snapshot.trace.pre_quiet_forced_by_timeout);
+    TEST_ASSERT_EQUAL_UINT32(0, snapshot.trace.pre_quiet_active_operations);
+    TEST_ASSERT_FALSE(snapshot.trace.pre_quiet_wait_exceeded);
+    TEST_ASSERT_FALSE(snapshot.trace.pre_quiet_forced_by_timeout);
     TEST_ASSERT_TRUE(snapshot.trace.after_driver.valid);
     TEST_ASSERT_FALSE(snapshot.trace.after_driver.sda_high);
     TEST_ASSERT_TRUE(snapshot.trace.after_driver.scl_high);
     TEST_ASSERT_TRUE(snapshot.trace.after_wake_probe.sda_high);
     TEST_ASSERT_TRUE(snapshot.trace.after_wake_probe.scl_high);
+}
+
+void test_prequiet_trace_covers_wait_threshold_and_event_promotion() {
+    beginPreQuietWake(
+        Event::ScheduleWake, 310, 1787000100, true, false, {true, false, true});
+
+    initializeAtBoot(false);
+    TEST_ASSERT_EQUAL_INT(static_cast<int>(Stage::PreQuietBegin),
+                          static_cast<int>(bootSnapshot().trace.stage));
+    TEST_ASSERT_EQUAL_UINT32(310, bootSnapshot().trace.uptime_ms);
+
+    markPreQuietWaitExceeded(500, 3);
+    markPreQuietWaitExceeded(700, 1);
+    updateWakeEvent(Event::AlarmWake);
+    markPreQuietReady(825, {true, true, true});
+    initializeAtBoot(false);
+
+    const Trace &trace = bootSnapshot().trace;
+    TEST_ASSERT_EQUAL_INT(static_cast<int>(Stage::PreQuietReady),
+                          static_cast<int>(trace.stage));
+    TEST_ASSERT_EQUAL_INT(static_cast<int>(Event::AlarmWake),
+                          static_cast<int>(trace.event));
+    TEST_ASSERT_EQUAL_UINT32(825, trace.pre_quiet_elapsed_ms);
+    TEST_ASSERT_TRUE(trace.pre_quiet_wait_exceeded);
+    TEST_ASSERT_EQUAL_UINT32(3, trace.pre_quiet_active_operations);
+    TEST_ASSERT_EQUAL_UINT32(
+        3, trace.pre_quiet_wait_exceeded_active_operations);
+    TEST_ASSERT_FALSE(trace.pre_quiet_forced_by_timeout);
+    TEST_ASSERT_TRUE(trace.before.valid);
+    TEST_ASSERT_TRUE(trace.before.sda_high);
+    TEST_ASSERT_TRUE(trace.before.scl_high);
+}
+
+void test_failed_command_is_terminal_and_cannot_be_marked_completed() {
+    beginWake(Event::TouchWake, 320, 1787000200, true, false, {true, true, true});
+    markDriverCallBegin();
+    markDriverCallReturned(true, false, 100, {true, true, true});
+    markCommandReturned(CommandResult::Failed);
+    markGuardSettleBegin();
+    markCompleted();
+    markDriverCallBegin();
+    markDriverCallReturned(false, false, 999, {true, false, false});
+    markWakeProbeUpdateReturned({true, false, false});
+
+    initializeAtBoot(false);
+
+    TEST_ASSERT_EQUAL_INT(static_cast<int>(CaptureStatus::Failed),
+                          static_cast<int>(bootSnapshot().status));
+    TEST_ASSERT_EQUAL_INT(static_cast<int>(Stage::Failed),
+                          static_cast<int>(bootSnapshot().trace.stage));
+    TEST_ASSERT_EQUAL_INT(static_cast<int>(CommandResult::Failed),
+                          static_cast<int>(bootSnapshot().trace.command_result));
+    TEST_ASSERT_EQUAL_INT(static_cast<int>(DriverResult::Succeeded),
+                          static_cast<int>(bootSnapshot().trace.driver_result));
+    TEST_ASSERT_EQUAL_UINT32(100, bootSnapshot().trace.driver_duration_us);
+}
+
+void test_aborted_command_is_a_distinct_terminal_result() {
+    beginPreQuietWake(
+        Event::AlarmWake, 330, 1787000300, true, false, {true, true, true});
+    markAborted();
+    markCompleted();
+
+    initializeAtBoot(false);
+
+    TEST_ASSERT_EQUAL_INT(static_cast<int>(CaptureStatus::Aborted),
+                          static_cast<int>(bootSnapshot().status));
+    TEST_ASSERT_EQUAL_INT(static_cast<int>(Stage::Aborted),
+                          static_cast<int>(bootSnapshot().trace.stage));
+    TEST_ASSERT_EQUAL_INT(static_cast<int>(CommandResult::Aborted),
+                          static_cast<int>(bootSnapshot().trace.command_result));
+}
+
+void test_completed_requires_explicit_command_success() {
+    beginWake(Event::ScheduleWake, 340, 1787000400, true, false, {true, true, true});
+    markCompleted();
+
+    initializeAtBoot(false);
+
+    TEST_ASSERT_EQUAL_INT(static_cast<int>(CaptureStatus::Active),
+                          static_cast<int>(bootSnapshot().status));
+    TEST_ASSERT_EQUAL_INT(static_cast<int>(Stage::Request),
+                          static_cast<int>(bootSnapshot().trace.stage));
+    TEST_ASSERT_EQUAL_INT(static_cast<int>(CommandResult::Unknown),
+                          static_cast<int>(bootSnapshot().trace.command_result));
+}
+
+void test_completed_requires_returned_guard_settle_or_legacy_command_stage() {
+    beginWake(Event::TouchWake, 345, 1787000450, true, false,
+              {true, true, true});
+    markCommandReturnedPendingSettle(CommandResult::Succeeded);
+    markGuardSettleBegin();
+    markCompleted();
+
+    initializeAtBoot(false);
+
+    TEST_ASSERT_EQUAL_INT(static_cast<int>(CaptureStatus::Active),
+                          static_cast<int>(bootSnapshot().status));
+    TEST_ASSERT_EQUAL_INT(static_cast<int>(Stage::GuardSettleBegin),
+                          static_cast<int>(bootSnapshot().trace.stage));
+}
+
+void test_guard_settle_stage_survives_reset_before_completion() {
+    beginWake(Event::TouchWake, 350, 1787000500, true, false, {true, true, true});
+    markCommandReturned(CommandResult::Succeeded);
+    markGuardSettleBegin();
+
+    initializeAtBoot(false);
+
+    TEST_ASSERT_EQUAL_INT(static_cast<int>(CaptureStatus::Active),
+                          static_cast<int>(bootSnapshot().status));
+    TEST_ASSERT_EQUAL_INT(static_cast<int>(Stage::GuardSettleBegin),
+                          static_cast<int>(bootSnapshot().trace.stage));
+    TEST_ASSERT_EQUAL_INT(static_cast<int>(CommandResult::Succeeded),
+                          static_cast<int>(bootSnapshot().trace.command_result));
+}
+
+void test_failed_driver_attempt_stays_incomplete_until_guard_settle_returns() {
+    beginWake(Event::MqttWake, 360, 1787000600, true, false, {true, true, true});
+    markDriverCallBegin();
+    markDriverCallReturned(false, false, 140, {true, true, true});
+    markCommandReturnedPendingSettle(CommandResult::Failed);
+    markGuardSettleBegin();
+    markFailed();
+
+    initializeAtBoot(false);
+
+    TEST_ASSERT_EQUAL_INT(static_cast<int>(CaptureStatus::Active),
+                          static_cast<int>(bootSnapshot().status));
+    TEST_ASSERT_EQUAL_INT(static_cast<int>(Stage::GuardSettleBegin),
+                          static_cast<int>(bootSnapshot().trace.stage));
+    TEST_ASSERT_EQUAL_INT(static_cast<int>(CommandResult::Failed),
+                          static_cast<int>(bootSnapshot().trace.command_result));
+    TEST_ASSERT_EQUAL_INT(static_cast<int>(DriverResult::Failed),
+                          static_cast<int>(bootSnapshot().trace.driver_result));
+
+    markGuardSettleReturned();
+    initializeAtBoot(false);
+    TEST_ASSERT_EQUAL_INT(static_cast<int>(CaptureStatus::Active),
+                          static_cast<int>(bootSnapshot().status));
+    TEST_ASSERT_EQUAL_INT(static_cast<int>(Stage::GuardSettleReturned),
+                          static_cast<int>(bootSnapshot().trace.stage));
+    TEST_ASSERT_EQUAL_INT(static_cast<int>(CommandResult::Failed),
+                          static_cast<int>(bootSnapshot().trace.command_result));
+
+    markCompleted();
+    markFailed();
+    initializeAtBoot(false);
+    TEST_ASSERT_EQUAL_INT(static_cast<int>(CaptureStatus::Failed),
+                          static_cast<int>(bootSnapshot().status));
+    TEST_ASSERT_EQUAL_INT(static_cast<int>(Stage::Failed),
+                          static_cast<int>(bootSnapshot().trace.stage));
+}
+
+void test_legacy_v2_completed_record_remains_decodable() {
+    test::seedLegacyV2CompletedTrace();
+
+    initializeAtBoot(false);
+
+    const BootSnapshot &snapshot = bootSnapshot();
+    TEST_ASSERT_TRUE(snapshot.has_trace);
+    TEST_ASSERT_FALSE(snapshot.retention_uncertain);
+    TEST_ASSERT_EQUAL_INT(static_cast<int>(CaptureStatus::Completed),
+                          static_cast<int>(snapshot.status));
+    TEST_ASSERT_EQUAL_INT(static_cast<int>(CommandResult::Unknown),
+                          static_cast<int>(snapshot.trace.command_result));
+    TEST_ASSERT_TRUE(snapshot.trace.pre_quiet_forced_by_timeout);
+    TEST_ASSERT_FALSE(snapshot.trace.pre_quiet_wait_exceeded);
+    TEST_ASSERT_EQUAL_UINT32(3, snapshot.trace.pre_quiet_active_operations);
+    TEST_ASSERT_EQUAL_UINT32(60, test::retainedRecordSize());
+}
+
+void test_legacy_v2_ignores_uninitialized_marker_storage() {
+    test::seedLegacyV2CompletedTrace();
+    test::corruptEvidenceStorage();
+
+    initializeAtBoot(false);
+
+    TEST_ASSERT_TRUE(bootSnapshot().has_trace);
+    TEST_ASSERT_FALSE(bootSnapshot().retention_uncertain);
+    TEST_ASSERT_EQUAL_INT(static_cast<int>(CaptureStatus::Completed),
+                          static_cast<int>(bootSnapshot().status));
+    TEST_ASSERT_EQUAL_INT(static_cast<int>(Stage::Completed),
+                          static_cast<int>(bootSnapshot().trace.stage));
 }
 
 void test_acknowledge_hides_retained_trace_but_keeps_boot_copy() {
@@ -140,6 +466,9 @@ void test_corrupt_latest_slot_falls_back_to_previous_valid_stage() {
     initializeAtBoot(false);
 
     TEST_ASSERT_TRUE(bootSnapshot().has_trace);
+    TEST_ASSERT_TRUE(bootSnapshot().retention_uncertain);
+    TEST_ASSERT_EQUAL_INT(static_cast<int>(CaptureStatus::Corrupt),
+                          static_cast<int>(bootSnapshot().status));
     TEST_ASSERT_EQUAL_INT(static_cast<int>(Stage::Request),
                           static_cast<int>(bootSnapshot().trace.stage));
 }
@@ -175,9 +504,13 @@ void test_enum_text_is_stable() {
     TEST_ASSERT_EQUAL_STRING("power_lost", statusText(CaptureStatus::PowerLost));
     TEST_ASSERT_EQUAL_STRING("active", statusText(CaptureStatus::Active));
     TEST_ASSERT_EQUAL_STRING("completed", statusText(CaptureStatus::Completed));
+    TEST_ASSERT_EQUAL_STRING("failed", statusText(CaptureStatus::Failed));
+    TEST_ASSERT_EQUAL_STRING("aborted", statusText(CaptureStatus::Aborted));
     TEST_ASSERT_EQUAL_STRING("schedule_wake", eventText(Event::ScheduleWake));
     TEST_ASSERT_EQUAL_STRING("touch_wake", eventText(Event::TouchWake));
     TEST_ASSERT_EQUAL_STRING("alarm_wake", eventText(Event::AlarmWake));
+    TEST_ASSERT_EQUAL_STRING("web_wake", eventText(Event::WebWake));
+    TEST_ASSERT_EQUAL_STRING("mqtt_wake", eventText(Event::MqttWake));
     TEST_ASSERT_EQUAL_STRING("driver_call_begin", stageText(Stage::DriverCallBegin));
     TEST_ASSERT_EQUAL_STRING("touch_irq_mask_begin",
                              stageText(Stage::TouchIrqMaskBegin));
@@ -187,9 +520,21 @@ void test_enum_text_is_stable() {
                              stageText(Stage::PowerSettleBegin));
     TEST_ASSERT_EQUAL_STRING("power_settle_returned",
                              stageText(Stage::PowerSettleReturned));
+    TEST_ASSERT_EQUAL_STRING("pre_quiet_begin",
+                             stageText(Stage::PreQuietBegin));
+    TEST_ASSERT_EQUAL_STRING("pre_quiet_wait_exceeded",
+                             stageText(Stage::PreQuietWaitExceeded));
+    TEST_ASSERT_EQUAL_STRING("pre_quiet_ready",
+                             stageText(Stage::PreQuietReady));
+    TEST_ASSERT_EQUAL_STRING("guard_settle_begin",
+                             stageText(Stage::GuardSettleBegin));
+    TEST_ASSERT_EQUAL_STRING("guard_settle_returned",
+                             stageText(Stage::GuardSettleReturned));
     TEST_ASSERT_EQUAL_STRING("wake_probe_update_returned",
                              stageText(Stage::WakeProbeUpdateReturned));
     TEST_ASSERT_EQUAL_STRING("succeeded", driverResultText(DriverResult::Succeeded));
+    TEST_ASSERT_EQUAL_STRING("failed", commandResultText(CommandResult::Failed));
+    TEST_ASSERT_EQUAL_STRING("aborted", commandResultText(CommandResult::Aborted));
 }
 
 void assert_event_advances_through_all_stages(Event event) {
@@ -204,7 +549,9 @@ void assert_event_advances_through_all_stages(Event event) {
     markWakeProbeUpdateReturned({true, true, true});
     markLvglActivityBegin();
     markLvglActivityReturned();
-    markCommandReturned();
+    markCommandReturned(CommandResult::Succeeded);
+    markGuardSettleBegin();
+    markGuardSettleReturned();
     markCompleted();
     initializeAtBoot(false);
 
@@ -216,10 +563,14 @@ void assert_event_advances_through_all_stages(Event event) {
                           static_cast<int>(bootSnapshot().trace.stage));
 }
 
-void test_touch_and_alarm_wakes_advance_through_all_stages() {
+void test_all_wake_sources_advance_through_all_stages() {
     assert_event_advances_through_all_stages(Event::TouchWake);
     test::resetRetained();
     assert_event_advances_through_all_stages(Event::AlarmWake);
+    test::resetRetained();
+    assert_event_advances_through_all_stages(Event::WebWake);
+    test::resetRetained();
+    assert_event_advances_through_all_stages(Event::MqttWake);
 }
 
 void test_warm_boot_preserves_incomplete_power_settle() {
@@ -249,6 +600,7 @@ void test_dark_wake_source_prefers_alarm_over_touch() {
 
 void test_ui_context_checkpoints_survive_warm_boot() {
     beginWake(Event::TouchWake, 800, 1786617800, true, false, {true, true, true});
+    markCommandReturned(CommandResult::Succeeded);
     markCompleted();
     markUiPostBacklightContext(0x3fca1000, 0x3fca1000, 0x3fcc2000);
     markUiPreRenderContext(0x3fca1000, 0x00000000, 0x3fcc2000);
@@ -279,16 +631,32 @@ int main(int, char **) {
     UNITY_BEGIN();
     RUN_TEST(test_empty_warm_boot_has_no_trace);
     RUN_TEST(test_cold_boot_rejects_retained_trace);
+    RUN_TEST(test_brownout_marker_survives_unacknowledged_warm_restart);
+    RUN_TEST(test_acknowledge_clears_brownout_marker);
+    RUN_TEST(test_true_cold_reset_clears_brownout_marker);
+    RUN_TEST(test_brownout_style_boot_reports_corrupt_retained_storage);
+    RUN_TEST(test_brownout_torn_first_write_is_reported_as_corrupt);
+    RUN_TEST(test_brownout_terminal_fallback_with_corrupt_sibling_keeps_details);
+    RUN_TEST(test_torn_latest_marker_preserves_uncertainty_conservatively);
     RUN_TEST(test_warm_boot_preserves_last_incomplete_stage_and_context);
     RUN_TEST(test_warm_boot_isolates_pre_driver_touch_irq_mask);
     RUN_TEST(test_completed_trace_retains_result_duration_and_lines);
+    RUN_TEST(test_prequiet_trace_covers_wait_threshold_and_event_promotion);
+    RUN_TEST(test_failed_command_is_terminal_and_cannot_be_marked_completed);
+    RUN_TEST(test_aborted_command_is_a_distinct_terminal_result);
+    RUN_TEST(test_completed_requires_explicit_command_success);
+    RUN_TEST(test_completed_requires_returned_guard_settle_or_legacy_command_stage);
+    RUN_TEST(test_guard_settle_stage_survives_reset_before_completion);
+    RUN_TEST(test_failed_driver_attempt_stays_incomplete_until_guard_settle_returns);
+    RUN_TEST(test_legacy_v2_completed_record_remains_decodable);
+    RUN_TEST(test_legacy_v2_ignores_uninitialized_marker_storage);
     RUN_TEST(test_acknowledge_hides_retained_trace_but_keeps_boot_copy);
     RUN_TEST(test_corrupt_nonempty_storage_is_rejected);
     RUN_TEST(test_corrupt_latest_slot_falls_back_to_previous_valid_stage);
     RUN_TEST(test_acknowledge_does_not_clear_a_newer_runtime_trace);
     RUN_TEST(test_new_operation_increments_sequence);
     RUN_TEST(test_enum_text_is_stable);
-    RUN_TEST(test_touch_and_alarm_wakes_advance_through_all_stages);
+    RUN_TEST(test_all_wake_sources_advance_through_all_stages);
     RUN_TEST(test_warm_boot_preserves_incomplete_power_settle);
     RUN_TEST(test_dark_wake_source_prefers_alarm_over_touch);
     RUN_TEST(test_ui_context_checkpoints_survive_warm_boot);

@@ -2803,9 +2803,14 @@ function applySettingsToUI(apiSettings, force, toggleOverrideKey) {
     settings.nightMode = apiSettings.night_mode;
   }
   if (typeof apiSettings.night_mode_locked === 'boolean') settings.nightModeLocked = apiSettings.night_mode_locked;
-  if (typeof apiSettings.backlight_on === 'boolean' &&
+  const backlightDisplayValue =
+    apiSettings.backlight_transition_pending === true &&
+    typeof apiSettings.backlight_target_on === 'boolean'
+      ? apiSettings.backlight_target_on
+      : apiSettings.backlight_on;
+  if (typeof backlightDisplayValue === 'boolean' &&
       shouldApplyToggleFromApi('backlight_on', toggleOverrideKey)) {
-    settings.backlight = apiSettings.backlight_on;
+    settings.backlight = backlightDisplayValue;
   }
   if (!(timeSyncDirty && !force)) {
     if (typeof apiSettings.ntp_enabled === 'boolean') settings.ntpEnabled = apiSettings.ntp_enabled;

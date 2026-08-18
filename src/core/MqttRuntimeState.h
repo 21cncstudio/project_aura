@@ -25,6 +25,8 @@ struct MqttRuntimeSnapshot {
     bool night_mode = false;
     bool alert_blink = false;
     bool backlight_on = false;
+    bool backlight_transition_pending = false;
+    bool backlight_target_on = false;
     bool auto_night_enabled = false;
 };
 
@@ -60,6 +62,8 @@ public:
                 bool night_mode,
                 bool alert_blink,
                 bool backlight_on,
+                bool backlight_transition_pending,
+                bool backlight_target_on,
                 bool auto_night_enabled);
     MqttRuntimeSnapshot snapshot() const;
 

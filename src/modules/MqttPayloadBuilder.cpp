@@ -603,6 +603,32 @@ size_t buildStatePayload(char *out,
                          bool backlight_on,
                          bool pressure_altitude_set,
                          int16_t pressure_altitude_m) {
+    return buildStatePayload(out,
+                             out_size,
+                             data,
+                             fan,
+                             gas_warmup,
+                             night_mode,
+                             alert_blink,
+                             backlight_on,
+                             false,
+                             backlight_on,
+                             pressure_altitude_set,
+                             pressure_altitude_m);
+}
+
+size_t buildStatePayload(char *out,
+                         size_t out_size,
+                         const SensorData &data,
+                         const FanStateSnapshot &fan,
+                         bool gas_warmup,
+                         bool night_mode,
+                         bool alert_blink,
+                         bool backlight_on,
+                         bool backlight_transition_pending,
+                         bool backlight_target_on,
+                         bool pressure_altitude_set,
+                         int16_t pressure_altitude_m) {
     BufferWriter payload(out, out_size);
     if (!payload.appendf("{")) {
         return 0;
@@ -764,6 +790,8 @@ size_t buildStatePayload(char *out,
         !add_cstr("air_status", air_status_text(aqi)) ||
         !add_cstr("main_issue", main_issue_text(aqi)) ||
         !add_bool("backlight", backlight_on) ||
+        !add_bool("backlight_transition_pending", backlight_transition_pending) ||
+        !add_bool("backlight_target_on", backlight_target_on) ||
         !payload.appendf("}")) {
         return 0;
     }
