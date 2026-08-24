@@ -616,6 +616,9 @@ bool StorageManager::saveBlobAtomic(const char *path, const void *data, size_t l
     if (!path || !data) {
         return false;
     }
+    if (g_force_save_failure) {
+        return false;
+    }
     const uint8_t *bytes = reinterpret_cast<const uint8_t *>(data);
     const std::string tmp = std::string(path) + ".tmp";
     g_blob_store[tmp] = std::vector<uint8_t>(bytes, bytes + len);

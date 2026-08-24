@@ -713,6 +713,9 @@ void loop()
             // DAC transaction, so it cannot strand the I2C driver mutex.
             lvgl_port_prepare_restart();
             quiesce_network_for_restart();
+            if (!pressureHistory.flush(storage)) {
+                LOGW("Restart", "pressure history flush failed; previous snapshot preserved");
+            }
             dailyExtremaHistory.flush();
             if (!sdCardManager.end()) {
                 LOGW("Restart", "SD card did not unmount cleanly before restart");

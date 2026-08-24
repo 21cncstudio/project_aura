@@ -51,7 +51,7 @@ void PressureHistory::reset(SensorData &data, StorageManager &storage, bool clea
     count_ = 0;
     epoch_ = 0;
     restored_ = false;
-    restore_wait_started_ms_ = 0;
+    replacement_save_pending_ = false;
     memset(history_, 0, sizeof(history_));
     data.pressure_delta_3h_valid = false;
     data.pressure_delta_24h_valid = false;
@@ -105,28 +105,32 @@ void PressureHistory::load(StorageManager &storage, SensorData &data) {
         return;
     }
 
-    uint32_t now_epoch = 0;
-    if (getNowEpoch(now_epoch) && isStale(now_epoch)) {
-        LOGW("PressureHistory", "stored history stale, reset");
+    if (count_ == 0) {
+        LOGW("PressureHistory", "stored history is empty, reset");
         reset(data, storage, true);
         return;
     }
+
+    // load() runs before TimeManager initializes RTC/NTP. Never make a
+    // destructive age decision from the process clock here; quarantine the
+    // restored samples until update() can reconcile them against valid time.
     last_sample_ms_ = millis() - Config::PRESSURE_HISTORY_STEP_MS;
-    restore_wait_started_ms_ = millis();
     restored_ = true;
     Logger::log(Logger::Info, "PressureHistory",
-                "restored count=%d idx=%d epoch=%u",
+                "restored count=%d idx=%d epoch=%u; awaiting valid time",
                 count_, index_, epoch_);
 }
 
-void PressureHistory::saveIfDue(StorageManager &storage, uint32_t now_ms) {
+bool PressureHistory::saveIfDue(StorageManager &storage,
+                                uint32_t now_ms,
+                                bool force) {
     if (count_ == 0) {
-        return;
+        return true;
     }
-    if (now_ms - last_save_ms_ < Config::PRESSURE_HISTORY_SAVE_MS) {
-        return;
+    if (!force && !replacement_save_pending_ &&
+        now_ms - last_save_ms_ < Config::PRESSURE_HISTORY_SAVE_MS) {
+        return true;
     }
-    last_save_ms_ = now_ms;
     PressureHistoryBlob blob = {};
     blob.magic = kPressureHistoryMagic;
     blob.version = kPressureHistoryVersion;
@@ -134,7 +138,22 @@ void PressureHistory::saveIfDue(StorageManager &storage, uint32_t now_ms) {
     blob.index = static_cast<uint16_t>(index_);
     blob.count = static_cast<uint16_t>(count_);
     memcpy(blob.history, history_, sizeof(history_));
-    storage.saveBlobAtomic(StorageManager::kPressurePath, &blob, sizeof(blob));
+    if (!storage.saveBlobAtomic(StorageManager::kPressurePath, &blob, sizeof(blob))) {
+        LOGW("PressureHistory", "atomic history save failed; previous blob preserved");
+        return false;
+    }
+    last_save_ms_ = now_ms;
+    replacement_save_pending_ = false;
+    return true;
+}
+
+bool PressureHistory::flush(StorageManager &storage) {
+    if (restored_) {
+        // A quarantined restored generation has not changed in RAM, so the
+        // existing atomic blob is already the safest snapshot to retain.
+        return true;
+    }
+    return saveIfDue(storage, millis(), true);
 }
 
 void PressureHistory::append(float pressure, SensorData &data) {
@@ -178,24 +197,25 @@ void PressureHistory::update(float pressure, SensorData &data, StorageManager &s
     uint32_t now_ms = millis();
     uint32_t now_epoch = 0;
     bool time_valid = getNowEpoch(now_epoch);
+    bool temporal_reset = false;
     if (restored_ && !time_valid) {
         data.pressure_delta_3h_valid = false;
         data.pressure_delta_24h_valid = false;
-        if (now_ms - restore_wait_started_ms_ <
-            Config::PRESSURE_HISTORY_RESTORE_TIME_WAIT_MS) {
-            return;
-        }
-        Logger::log(Logger::Warn,
-                    "PressureHistory",
-                    "time unavailable after %ums, reset restored history",
-                    static_cast<unsigned>(Config::PRESSURE_HISTORY_RESTORE_TIME_WAIT_MS));
-        reset(data, storage, true);
-        last_sample_ms_ = now_ms - Config::PRESSURE_HISTORY_STEP_MS;
+        // The saved epoch is the only trustworthy way to reconcile restored
+        // samples. Keep the blob quarantined instead of deleting or
+        // overwriting it while RTC/NTP is unavailable. Once time becomes
+        // valid, the normal gap rules below decide whether to resume, fill, or
+        // reset the history.
+        return;
     }
     if (time_valid) {
         if (isStale(now_epoch)) {
             LOGW("PressureHistory", "history stale, reset");
-            reset(data, storage, true);
+            // Keep the old atomic snapshot until the first sample of the new
+            // generation has been committed successfully.
+            reset(data, storage, false);
+            replacement_save_pending_ = true;
+            temporal_reset = true;
             last_sample_ms_ = now_ms - Config::PRESSURE_HISTORY_STEP_MS;
         }
     }
@@ -206,7 +226,9 @@ void PressureHistory::update(float pressure, SensorData &data, StorageManager &s
             Logger::log(Logger::Warn, "PressureHistory",
                         "gap %us, reset",
                         static_cast<unsigned>(gap_s));
-            reset(data, storage, true);
+            reset(data, storage, false);
+            replacement_save_pending_ = true;
+            temporal_reset = true;
             last_sample_ms_ = now_ms - Config::PRESSURE_HISTORY_STEP_MS;
         } else if (gap_s >= Config::PRESSURE_HISTORY_FILL_SHORT_S) {
             Logger::log(Logger::Info, "PressureHistory",
@@ -248,5 +270,5 @@ void PressureHistory::update(float pressure, SensorData &data, StorageManager &s
     epoch_ = time_valid ? now_epoch : 0;
     restored_ = false;
 
-    saveIfDue(storage, now_ms);
+    saveIfDue(storage, now_ms, temporal_reset);
 }
