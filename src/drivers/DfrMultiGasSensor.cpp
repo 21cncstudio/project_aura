@@ -12,6 +12,10 @@
 
 #include "config/AppConfig.h"
 #include "core/Logger.h"
+#ifndef UNIT_TEST
+#include "core/I2cBusRecovery.h"
+#include <esp_err.h>
+#endif
 
 namespace {
 
@@ -35,14 +39,13 @@ bool DfrMultiGasSensor::begin() {
     last_retry_ms_ = 0;
     fail_cooldown_active_ = false;
     fail_cooldown_started_ms_ = 0;
-    cooldown_recover_fail_count_ = 0;
+    cooldown_probe_fail_count_ = 0;
     start_attempts_ = 0;
     absent_retry_count_ = 0;
     absent_retry_active_ = false;
     absent_retry_exhausted_ = false;
     start_retry_exhausted_logged_ = false;
     last_read_failure_reason_ = FailureReason::None;
-    last_passive_failure_reason_ = FailureReason::None;
     return true;
 }
 
@@ -88,9 +91,8 @@ bool DfrMultiGasSensor::start() {
         warned_type_mismatch_ = false;
         fail_cooldown_active_ = false;
         fail_cooldown_started_ms_ = 0;
-        cooldown_recover_fail_count_ = 0;
+        cooldown_probe_fail_count_ = 0;
         last_read_failure_reason_ = FailureReason::None;
-        last_passive_failure_reason_ = FailureReason::None;
         return false;
     }
 
@@ -113,17 +115,32 @@ bool DfrMultiGasSensor::start() {
         warned_type_mismatch_ = false;
         fail_cooldown_active_ = false;
         fail_cooldown_started_ms_ = 0;
-        cooldown_recover_fail_count_ = 0;
+        cooldown_probe_fail_count_ = 0;
         last_read_failure_reason_ = FailureReason::None;
-        last_passive_failure_reason_ = FailureReason::None;
     }
 
-    FailureReason passive_failure = FailureReason::None;
-    if (!setPassiveMode(&passive_failure)) {
-        last_passive_failure_reason_ = passive_failure;
-        LOGW(config_.log_tag, "failed to set passive mode (%s), sensor may fail subsequent reads",
-             failureReasonLabel(passive_failure));
+    // Probe only through the normal read path. Communication-mode mutation is
+    // intentionally excluded from boot and runtime recovery because DFRobot
+    // requires a real sensor power cycle after changing modes. Do not publish
+    // this probe: warmup and regular polling still own data validity.
+    float startup_ppm = 0.0f;
+    uint8_t startup_gas_type = 0;
+    uint8_t startup_decimals = 1;
+    FailureReason startup_read_failure = FailureReason::None;
+    if (readGasConcentration(startup_ppm,
+                             startup_gas_type,
+                             startup_decimals,
+                             startup_read_failure)) {
+        last_read_failure_reason_ = FailureReason::None;
+        LOGI(config_.log_tag,
+             "read-only startup probe confirmed; mode write skipped");
+        return true;
     }
+
+    last_read_failure_reason_ = startup_read_failure;
+    LOGW(config_.log_tag,
+         "read-only startup probe failed (%s); communication mode unchanged",
+         failureReasonLabel(startup_read_failure));
     return true;
 }
 
@@ -155,29 +172,25 @@ void DfrMultiGasSensor::poll() {
 
         fail_cooldown_active_ = false;
         fail_cooldown_started_ms_ = 0;
-        FailureReason passive_failure = FailureReason::None;
-        if (!setPassiveMode(&passive_failure)) {
-            last_passive_failure_reason_ = passive_failure;
-            if (cooldown_recover_fail_count_ < UINT8_MAX) {
-                ++cooldown_recover_fail_count_;
+        if (!pingAddress()) {
+            if (cooldown_probe_fail_count_ < UINT8_MAX) {
+                ++cooldown_probe_fail_count_;
             }
-            if (cooldown_recover_fail_count_ >= Config::DFR_GAS_MAX_COOLDOWN_RECOVERY_FAILS) {
-                const bool address_still_present = pingAddress();
-                if (address_still_present || isInStartupFaultGrace(now)) {
+            if (cooldown_probe_fail_count_ >=
+                Config::DFR_GAS_MAX_COOLDOWN_RECOVERY_FAILS) {
+                if (isInStartupFaultGrace(now)) {
                     LOGW(config_.log_tag,
-                         "cooldown recovery failed %u times (%s), keeping sensor present",
-                         static_cast<unsigned>(cooldown_recover_fail_count_),
-                         failureReasonLabel(passive_failure));
-                    cooldown_recover_fail_count_ = 0;
+                         "cooldown address probe failed %u times during startup grace, keeping sensor present",
+                         static_cast<unsigned>(cooldown_probe_fail_count_));
+                    cooldown_probe_fail_count_ = 0;
                     fail_cooldown_active_ = true;
                     fail_cooldown_started_ms_ = now;
                     last_poll_ms_ = now;
                     return;
                 } else {
                     LOGW(config_.log_tag,
-                         "cooldown recovery failed %u times (%s), marking sensor not present",
-                         static_cast<unsigned>(cooldown_recover_fail_count_),
-                         failureReasonLabel(passive_failure));
+                         "cooldown address probe failed %u times, marking sensor not present",
+                         static_cast<unsigned>(cooldown_probe_fail_count_));
                     present_ = false;
                     data_valid_ = false;
                     ppm_ = 0.0f;
@@ -189,26 +202,26 @@ void DfrMultiGasSensor::poll() {
                     warned_type_mismatch_ = false;
                     fail_cooldown_active_ = false;
                     fail_cooldown_started_ms_ = 0;
-                    cooldown_recover_fail_count_ = 0;
+                    cooldown_probe_fail_count_ = 0;
                     last_retry_ms_ = now;
                 }
                 return;
             }
             fail_cooldown_active_ = true;
             fail_cooldown_started_ms_ = now;
-            LOGW(config_.log_tag, "cooldown elapsed, passive mode restore failed (%s, %u/%u)",
-                 failureReasonLabel(passive_failure),
-                 static_cast<unsigned>(cooldown_recover_fail_count_),
+            LOGW(config_.log_tag,
+                 "cooldown elapsed, address probe failed (%u/%u); no mode write attempted",
+                 static_cast<unsigned>(cooldown_probe_fail_count_),
                  static_cast<unsigned>(Config::DFR_GAS_MAX_COOLDOWN_RECOVERY_FAILS));
             return;
         }
 
-        cooldown_recover_fail_count_ = 0;
+        cooldown_probe_fail_count_ = 0;
         fail_count_ = 0;
-        last_passive_failure_reason_ = FailureReason::None;
         warned_type_mismatch_ = false;
         last_poll_ms_ = now;
-        LOGI(config_.log_tag, "cooldown elapsed, passive mode restored");
+        LOGI(config_.log_tag,
+             "cooldown elapsed, address acknowledged; resuming read-only polling");
         return;
     }
 
@@ -235,7 +248,7 @@ void DfrMultiGasSensor::poll() {
             data_valid_ = false;
             fail_cooldown_active_ = true;
             fail_cooldown_started_ms_ = now;
-            cooldown_recover_fail_count_ = 0;
+            cooldown_probe_fail_count_ = 0;
             LOGW(config_.log_tag, "read failed %u times (%s), entering cooldown %lu ms",
                  static_cast<unsigned>(fail_count_),
                  failureReasonLabel(read_failure),
@@ -244,7 +257,7 @@ void DfrMultiGasSensor::poll() {
         return;
     }
 
-    cooldown_recover_fail_count_ = 0;
+    cooldown_probe_fail_count_ = 0;
     fail_count_ = 0;
     last_read_failure_reason_ = FailureReason::None;
     last_data_ms_ = now;
@@ -372,8 +385,29 @@ bool DfrMultiGasSensor::isGasTypeAccepted(uint8_t gas_type_raw) const {
 }
 
 bool DfrMultiGasSensor::pingAddress() {
+#ifndef UNIT_TEST
+    const I2cBusRecovery::LineState lines_before =
+        I2cBusRecovery::sample(
+            static_cast<gpio_num_t>(Config::I2C_SDA_PIN),
+            static_cast<gpio_num_t>(Config::I2C_SCL_PIN));
+#endif
     i2c_cmd_handle_t cmd = i2c_cmd_link_create();
     if (!cmd) {
+#ifndef UNIT_TEST
+        const I2cBusRecovery::LineState lines_after =
+            I2cBusRecovery::sample(
+                static_cast<gpio_num_t>(Config::I2C_SDA_PIN),
+                static_cast<gpio_num_t>(Config::I2C_SCL_PIN));
+        LOGW(config_.log_tag,
+             "addr=0x%02X stage=address-probe err=%d(%s) lines before=%u/%u after=%u/%u",
+             static_cast<unsigned>(config_.address),
+             static_cast<int>(ESP_ERR_NO_MEM),
+             esp_err_to_name(ESP_ERR_NO_MEM),
+             lines_before.sda_high ? 1U : 0U,
+             lines_before.scl_high ? 1U : 0U,
+             lines_after.sda_high ? 1U : 0U,
+             lines_after.scl_high ? 1U : 0U);
+#endif
         return false;
     }
 
@@ -386,37 +420,24 @@ bool DfrMultiGasSensor::pingAddress() {
         pdMS_TO_TICKS(Config::DFR_GAS_I2C_TIMEOUT_MS)
     );
     i2c_cmd_link_delete(cmd);
+#ifndef UNIT_TEST
+    const I2cBusRecovery::LineState lines_after =
+        I2cBusRecovery::sample(
+            static_cast<gpio_num_t>(Config::I2C_SDA_PIN),
+            static_cast<gpio_num_t>(Config::I2C_SCL_PIN));
+    if (err != ESP_OK) {
+        LOGW(config_.log_tag,
+             "addr=0x%02X stage=address-probe err=%d(%s) lines before=%u/%u after=%u/%u",
+             static_cast<unsigned>(config_.address),
+             static_cast<int>(err),
+             esp_err_to_name(err),
+             lines_before.sda_high ? 1U : 0U,
+             lines_before.scl_high ? 1U : 0U,
+             lines_after.sda_high ? 1U : 0U,
+             lines_after.scl_high ? 1U : 0U);
+    }
+#endif
     return err == ESP_OK;
-}
-
-bool DfrMultiGasSensor::setPassiveMode(FailureReason *failure_reason) {
-    if (failure_reason) {
-        *failure_reason = FailureReason::None;
-    }
-    uint8_t tx[kFrameLen] = {0};
-    buildFrame(Config::DFR_GAS_CMD_CHANGE_MODE, Config::DFR_GAS_MODE_PASSIVE, 0, 0, 0, 0, tx);
-
-    uint8_t rx[kFrameLen] = {0};
-    if (!transact(tx, rx, failure_reason)) {
-        return false;
-    }
-    if (rx[0] != 0xFF || rx[1] != Config::DFR_GAS_CMD_CHANGE_MODE) {
-        if (failure_reason) {
-            *failure_reason = FailureReason::BadHeader;
-        }
-        return false;
-    }
-    // Some DFR firmware revisions sum bytes 1..6 instead of the documented 1..7.
-    if (rx[8] != checksum7(rx) && rx[8] != checksum6(rx)) {
-        if (failure_reason) {
-            *failure_reason = FailureReason::BadChecksum;
-        }
-        return false;
-    }
-    if (rx[2] != 0x01 && failure_reason) {
-        *failure_reason = FailureReason::CommandRejected;
-    }
-    return rx[2] == 0x01;
 }
 
 bool DfrMultiGasSensor::readGasConcentration(float &ppm,
@@ -469,6 +490,12 @@ bool DfrMultiGasSensor::transact(const uint8_t *tx_frame,
     tx[0] = 0x00;
     memcpy(&tx[1], tx_frame, kFrameLen);
 
+#ifndef UNIT_TEST
+    const I2cBusRecovery::LineState lines_before_write =
+        I2cBusRecovery::sample(
+            static_cast<gpio_num_t>(Config::I2C_SDA_PIN),
+            static_cast<gpio_num_t>(Config::I2C_SCL_PIN));
+#endif
     esp_err_t err = i2c_master_write_to_device(
         Config::I2C_PORT,
         config_.address,
@@ -476,7 +503,24 @@ bool DfrMultiGasSensor::transact(const uint8_t *tx_frame,
         sizeof(tx),
         pdMS_TO_TICKS(Config::DFR_GAS_I2C_TIMEOUT_MS)
     );
+#ifndef UNIT_TEST
+    const I2cBusRecovery::LineState lines_after_write =
+        I2cBusRecovery::sample(
+            static_cast<gpio_num_t>(Config::I2C_SDA_PIN),
+            static_cast<gpio_num_t>(Config::I2C_SCL_PIN));
+#endif
     if (err != ESP_OK) {
+#ifndef UNIT_TEST
+        LOGW(config_.log_tag,
+             "cmd=0x%02X stage=write err=%d(%s) lines before=%u/%u after=%u/%u",
+             static_cast<unsigned>(tx_frame[2]),
+             static_cast<int>(err),
+             esp_err_to_name(err),
+             lines_before_write.sda_high ? 1U : 0U,
+             lines_before_write.scl_high ? 1U : 0U,
+             lines_after_write.sda_high ? 1U : 0U,
+             lines_after_write.scl_high ? 1U : 0U);
+#endif
         if (failure_reason) {
             *failure_reason = FailureReason::I2cWrite;
         }
@@ -485,6 +529,12 @@ bool DfrMultiGasSensor::transact(const uint8_t *tx_frame,
 
     delay(Config::DFR_GAS_CMD_DELAY_MS);
 
+#ifndef UNIT_TEST
+    const I2cBusRecovery::LineState lines_before_read =
+        I2cBusRecovery::sample(
+            static_cast<gpio_num_t>(Config::I2C_SDA_PIN),
+            static_cast<gpio_num_t>(Config::I2C_SCL_PIN));
+#endif
     uint8_t reg = 0x00;
     err = i2c_master_write_read_device(
         Config::I2C_PORT,
@@ -495,6 +545,27 @@ bool DfrMultiGasSensor::transact(const uint8_t *tx_frame,
         kFrameLen,
         pdMS_TO_TICKS(Config::DFR_GAS_I2C_TIMEOUT_MS)
     );
+#ifndef UNIT_TEST
+    const I2cBusRecovery::LineState lines_after_read =
+        I2cBusRecovery::sample(
+            static_cast<gpio_num_t>(Config::I2C_SDA_PIN),
+            static_cast<gpio_num_t>(Config::I2C_SCL_PIN));
+    if (err != ESP_OK) {
+        LOGW(config_.log_tag,
+             "cmd=0x%02X stage=read-back err=%d(%s) lines before=%u/%u after_write=%u/%u before_read=%u/%u after=%u/%u",
+             static_cast<unsigned>(tx_frame[2]),
+             static_cast<int>(err),
+             esp_err_to_name(err),
+             lines_before_write.sda_high ? 1U : 0U,
+             lines_before_write.scl_high ? 1U : 0U,
+             lines_after_write.sda_high ? 1U : 0U,
+             lines_after_write.scl_high ? 1U : 0U,
+             lines_before_read.sda_high ? 1U : 0U,
+             lines_before_read.scl_high ? 1U : 0U,
+             lines_after_read.sda_high ? 1U : 0U,
+             lines_after_read.scl_high ? 1U : 0U);
+    }
+#endif
     if (err != ESP_OK && failure_reason) {
         *failure_reason = FailureReason::I2cRead;
     }
@@ -518,8 +589,6 @@ const char *DfrMultiGasSensor::failureReasonLabel(FailureReason reason) {
             return "bad checksum";
         case FailureReason::BadDecimals:
             return "bad decimals";
-        case FailureReason::CommandRejected:
-            return "command rejected";
         case FailureReason::None:
         default:
             return "unknown";

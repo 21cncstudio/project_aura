@@ -62,6 +62,16 @@ static bool recentContainsMessagePrefix(const char *prefix) {
     return false;
 }
 
+void test_sensor_manager_initializes_both_dfr_drivers() {
+    StorageManager storage;
+    storage.begin();
+
+    SensorManager manager;
+    manager.begin(storage, 0.0f, 0.0f);
+    TEST_ASSERT_TRUE(Sen0466::state().begin_called);
+    TEST_ASSERT_TRUE(DfrOptionalGasSensor::state().begin_called);
+}
+
 void test_sensor_manager_poll_updates_data() {
     setMillis(Config::PRESSURE_HISTORY_STEP_MS);
 
@@ -1374,6 +1384,7 @@ void test_sensor_manager_late_probes_are_serialized_round_robin() {
 
 int main(int, char **) {
     UNITY_BEGIN();
+    RUN_TEST(test_sensor_manager_initializes_both_dfr_drivers);
     RUN_TEST(test_sensor_manager_poll_updates_data);
     RUN_TEST(test_sensor_manager_warmup_change);
     RUN_TEST(test_sensor_manager_stale_preserves_other_sensor_data);

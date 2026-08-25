@@ -25,6 +25,7 @@ struct DeviceState {
     std::array<bool, 256> write_fail{};
     std::unordered_set<uint16_t> failing_cmds;
     std::unordered_map<uint16_t, std::vector<uint8_t>> cmd_reads;
+    std::unordered_map<uint16_t, uint32_t> sensor_cmd_counts;
     uint16_t read_wrap_last_reg = 0xFF;
     uint16_t last_sensor_cmd = 0;
     bool has_last_sensor_cmd = false;
@@ -41,6 +42,12 @@ DeviceState &device(uint8_t addr) {
 void noteTransaction() {
     ++g_transaction_count;
     advanceMillis(g_command_advance_ms);
+}
+
+void noteSensorCommand(DeviceState &state, uint16_t command) {
+    state.last_sensor_cmd = command;
+    state.has_last_sensor_cmd = true;
+    ++state.sensor_cmd_counts[command];
 }
 
 } // namespace
@@ -115,6 +122,12 @@ uint32_t transactionCount() {
     return g_transaction_count;
 }
 
+uint32_t sensorCommandCount(uint8_t addr, uint16_t cmd) {
+    const DeviceState &state = device(addr);
+    const auto it = state.sensor_cmd_counts.find(cmd);
+    return it == state.sensor_cmd_counts.end() ? 0U : it->second;
+}
+
 } // namespace I2cMock
 
 i2c_cmd_handle_t i2c_cmd_link_create() {
@@ -167,8 +180,7 @@ esp_err_t i2c_master_cmd_begin(i2c_port_t, i2c_cmd_handle_t cmd, TickType_t) {
     if (cmd->payload.size() >= 2) {
         const uint16_t sensor_cmd =
             (static_cast<uint16_t>(cmd->payload[0]) << 8) | cmd->payload[1];
-        device(cmd->addr).last_sensor_cmd = sensor_cmd;
-        device(cmd->addr).has_last_sensor_cmd = true;
+        noteSensorCommand(device(cmd->addr), sensor_cmd);
         if (device(cmd->addr).failing_cmds.count(sensor_cmd) != 0) {
             return ESP_FAIL;
         }
@@ -227,20 +239,24 @@ esp_err_t i2c_master_write_to_device(i2c_port_t,
                                      size_t write_size,
                                      TickType_t) {
     noteTransaction();
-    if (!device(addr).present || !write_buffer || write_size == 0) {
+    if (!write_buffer || write_size == 0) {
         return ESP_FAIL;
     }
     const uint8_t reg = write_buffer[0];
+    if (write_size >= 4 && write_buffer[0] == 0x00 && write_buffer[1] == 0xFF &&
+        write_buffer[2] == 0x01) {
+        // Count command attempts before emulating NACK/write failure so safety
+        // tests cannot pass merely because a hazardous write was rejected.
+        noteSensorCommand(device(addr), write_buffer[3]);
+    }
+    if (!device(addr).present) {
+        return ESP_FAIL;
+    }
     if (device(addr).write_fail[reg]) {
         return ESP_FAIL;
     }
     if (write_size == 1) {
         return ESP_OK;
-    }
-    if (write_size >= 4 && write_buffer[0] == 0x00 && write_buffer[1] == 0xFF &&
-        write_buffer[2] == 0x01) {
-        device(addr).last_sensor_cmd = write_buffer[3];
-        device(addr).has_last_sensor_cmd = true;
     }
     for (size_t i = 1; i < write_size; ++i) {
         device(addr).regs[static_cast<uint8_t>(reg + i - 1)] = write_buffer[i];
