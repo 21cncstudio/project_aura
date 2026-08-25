@@ -1114,6 +1114,9 @@ void EspHttpServerBackend::begin() {
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.server_port = port_;
     config.stack_size = 12288;
+    // Keep HTTP handlers on the network core instead of allowing an
+    // unpinned/FPU-using server task to settle on the Arduino/LVGL core.
+    config.core_id = 0;
     config.max_open_sockets = kHttpServerMaxOpenSockets;
     config.lru_purge_enable = true;
     config.max_uri_handlers = WebServerLimits::kHttpServerMaxUriHandlers;
