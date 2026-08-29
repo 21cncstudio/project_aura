@@ -57,6 +57,10 @@
 #include "ui/NightModeManager.h"
 #include "lvgl_v8_port.h"
 
+// Daily-history restore reaches storage code while other loop frames are
+// active. Keep explicit headroom above Arduino's 8 KiB default.
+SET_LOOP_TASK_STACK_SIZE(12U * 1024U);
+
 namespace {
 
 using namespace Config;
@@ -417,6 +421,8 @@ void setup()
     Logger::setSerialOutputEnabled(Config::LOG_SERIAL_OUTPUT);
     Logger::setSensorsSerialOutputEnabled(Config::LOG_SERIAL_SENSORS_OUTPUT);
     OtaRollback::logCurrentAppState();
+    LOGI("Main", "Arduino loop task stack size: %u bytes",
+         static_cast<unsigned>(getArduinoLoopTaskStackSize()));
 
     // Log IPC task stack size to verify CONFIG_IPC_TASK_STACK_SIZE is applied
     #ifdef CONFIG_ESP_IPC_TASK_STACK_SIZE

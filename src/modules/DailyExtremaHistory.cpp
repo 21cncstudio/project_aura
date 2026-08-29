@@ -7,6 +7,8 @@
 #include "modules/DailyExtremaHistory.h"
 
 #include <math.h>
+#include <memory>
+#include <new>
 #include <stddef.h>
 #include <stdio.h>
 #include <string.h>
@@ -17,6 +19,7 @@
 #ifndef UNIT_TEST
 #include <freertos/FreeRTOS.h>
 #include <freertos/semphr.h>
+#include <freertos/task.h>
 #endif
 
 namespace {
@@ -472,13 +475,24 @@ void DailyExtremaHistory::removeOldestPendingDay() {
 }
 
 bool DailyExtremaHistory::restoreStoredState(uint32_t current_day_key) {
-    restored_ = true;
+    restored_ = false;
     if (!storage_ || !storage_->isReady()) {
+        restored_ = true;
         return true;
     }
 
-    PersistedSnapshot snapshot_a{};
-    PersistedSnapshot snapshot_b{};
+    // Two PersistedSnapshot values consume roughly 6 KiB. Keeping both in a
+    // loop-task frame can overflow the default Arduino stack while LittleFS is
+    // active, so use one contiguous heap scratch allocation.
+    std::unique_ptr<PersistedSnapshot[]> snapshots(
+        new (std::nothrow) PersistedSnapshot[2]{});
+    if (!snapshots) {
+        last_write_ok_ = false;
+        LOGE("DailyHistory", "snapshot restore scratch allocation failed");
+        return false;
+    }
+    PersistedSnapshot &snapshot_a = snapshots[0];
+    PersistedSnapshot &snapshot_b = snapshots[1];
     const bool valid_a = readSnapshotFile(kStatePathA, snapshot_a);
     const bool valid_b = readSnapshotFile(kStatePathB, snapshot_b);
     const PersistedSnapshot *selected = nullptr;
@@ -525,12 +539,21 @@ bool DailyExtremaHistory::restoreStoredState(uint32_t current_day_key) {
         enqueuePendingDay(state_);
         resetForDay(current_day_key);
     }
+    restored_ = true;
+#ifndef UNIT_TEST
+    const UBaseType_t stack_free_units = uxTaskGetStackHighWaterMark(nullptr);
+    const uint32_t stack_free_bytes =
+        static_cast<uint32_t>(stack_free_units) * sizeof(StackType_t);
+    LOGI("DailyHistory",
+         "calling task stack minimum free after restore: %u bytes",
+         static_cast<unsigned>(stack_free_bytes));
+#endif
     return true;
 }
 
 bool DailyExtremaHistory::ensureDay(uint32_t day_key) {
-    if (!restored_) {
-        restoreStoredState(day_key);
+    if (!restored_ && !restoreStoredState(day_key)) {
+        return false;
     }
 
     if (state_.day_key == 0) {
