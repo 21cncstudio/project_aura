@@ -14,6 +14,7 @@
 #include "BoardInitCallbacks.h"
 #include "config/AppConfig.h"
 #include "core/BoardInitPolicy.h"
+#include "core/BoardInitTaskLifecycle.h"
 #include "core/BootState.h"
 #include "core/Ch422gReadyProbe.h"
 #include "core/Logger.h"
@@ -55,59 +56,128 @@ struct BeginContext {
     Board *board = nullptr;
     TaskHandle_t waiter = nullptr;
     std::atomic<bool> success{false};
+    BoardInitTaskLifecycle::Lifecycle lifecycle;
 };
 
-BeginContext g_begin_context;
-TaskHandle_t g_begin_task = nullptr;
 std::atomic<uint8_t> g_stage{static_cast<uint8_t>(Stage::Bus)};
 
-void boardBeginTask(void *) {
+[[noreturn]] void parkBoardBeginTaskUntilDeleted() {
+    for (;;) {
+        (void)ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+    }
+}
+
+void boardBeginTask(void *argument) {
+    auto *context = static_cast<BeginContext *>(argument);
+    if (context == nullptr) {
+        LOGE("Main", "board_init task started without context");
+        parkBoardBeginTaskUntilDeleted();
+    }
+
     LOGI("Main", "[Core %d] Starting board->begin()...", xPortGetCoreID());
-    const bool success = g_begin_context.board != nullptr && g_begin_context.board->begin();
-    g_begin_context.success.store(success, std::memory_order_release);
+    const bool success = context->board != nullptr && context->board->begin();
+    context->success.store(success, std::memory_order_relaxed);
     if (!success) {
         LOGE("Main", "Board begin failed at stage=%s", stageText(static_cast<Stage>(g_stage.load())));
     }
-    xTaskNotifyGive(g_begin_context.waiter);
 
-    // Parent owns the task lifetime. This acknowledgement removes the race
-    // between timeout deletion and child self-deletion.
+    // Completion and timeout compete for ownership with one CAS. If timeout
+    // won, the parent is already responsible for deleting this task; do not
+    // notify it or touch the stack-owned context again.
+    if (!context->lifecycle.childPublishCompletion()) {
+        parkBoardBeginTaskUntilDeleted();
+    }
+
+    xTaskNotifyGive(context->waiter);
+
+    // The parent acknowledges the completion notification before allowing the
+    // child to publish DeleteReady. The second notification proves that the
+    // child no longer accesses the stack-owned context, so it cannot leak into
+    // a later attempt or race parent deletion.
     (void)ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
-    vTaskDelete(nullptr);
+    if (context->lifecycle.childPublishDeleteReady()) {
+        xTaskNotifyGive(context->waiter);
+    }
+    parkBoardBeginTaskUntilDeleted();
 }
 
 BeginResult runBoardBeginOnce(Board *board) {
+    BeginContext context;
+    TaskHandle_t begin_task = nullptr;
+
+    // No board-init notification is allowed to survive a completed attempt.
+    // Clear a defensive pre-existing count before creating this attempt's
+    // child; the two-phase delete-ready handshake consumes both notifications
+    // generated below before returning.
     (void)ulTaskNotifyTake(pdTRUE, 0);
-    g_begin_context.board = board;
-    g_begin_context.waiter = xTaskGetCurrentTaskHandle();
-    g_begin_context.success.store(false, std::memory_order_relaxed);
-    g_begin_task = nullptr;
+    context.board = board;
+    context.waiter = xTaskGetCurrentTaskHandle();
 
     const BaseType_t created = xTaskCreatePinnedToCore(
         boardBeginTask,
         "board_init",
         8192,
-        nullptr,
+        &context,
         1,
-        &g_begin_task,
+        &begin_task,
         kBoardInitCore);
-    if (created != pdPASS || g_begin_task == nullptr) {
+    if (created != pdPASS || begin_task == nullptr) {
         LOGE("Main", "Failed to create board_init task");
-        g_begin_task = nullptr;
         return BeginResult::TaskCreateFailed;
     }
 
-    const uint32_t notified = ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(kBeginTimeoutMs));
+    uint32_t notified =
+        ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(kBeginTimeoutMs));
     if (notified == 0) {
-        LOGE("Main", "board->begin() timeout at stage=%s", stageText(static_cast<Stage>(g_stage.load())));
-        vTaskDelete(g_begin_task);
-        g_begin_task = nullptr;
-        return BeginResult::Timeout;
+        const BoardInitTaskLifecycle::TimeoutClaim timeout_claim =
+            context.lifecycle.parentClaimTimeout();
+        if (timeout_claim ==
+            BoardInitTaskLifecycle::TimeoutClaim::CancelOwned) {
+            LOGE("Main",
+                 "board->begin() timeout at stage=%s",
+                 stageText(static_cast<Stage>(g_stage.load())));
+            vTaskDelete(begin_task);
+            return BeginResult::Timeout;
+        }
+
+        if (timeout_claim !=
+            BoardInitTaskLifecycle::TimeoutClaim::CompletionOwned) {
+            LOGE("Main", "Invalid board_init timeout ownership state");
+            for (;;) {
+                vTaskDelay(portMAX_DELAY);
+            }
+        }
+
+        // The child completed exactly on the timeout boundary and won the CAS
+        // before publishing its notification. Wait for that notification and
+        // classify the real result instead of reporting a false timeout.
+        notified = ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
     }
 
-    const bool success = g_begin_context.success.load(std::memory_order_acquire);
-    xTaskNotifyGive(g_begin_task);
-    g_begin_task = nullptr;
+    if (notified == 0 ||
+        !context.lifecycle.parentAcknowledgeCompletion()) {
+        LOGE("Main", "Invalid board_init completion handshake");
+        // The lifecycle invariant makes this branch unreachable. Do not let
+        // the stack-owned context escape while the child could still use it.
+        for (;;) {
+            vTaskDelay(portMAX_DELAY);
+        }
+    }
+
+    const bool success = context.success.load(std::memory_order_acquire);
+    xTaskNotifyGive(begin_task);
+    (void)ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+
+    if (!context.lifecycle.parentOwnsDeletion() ||
+        context.lifecycle.state() !=
+            BoardInitTaskLifecycle::State::DeleteReady) {
+        LOGE("Main", "Invalid board_init delete-ready handshake");
+        for (;;) {
+            vTaskDelay(portMAX_DELAY);
+        }
+    }
+
+    vTaskDelete(begin_task);
     return success ? BeginResult::Success : BeginResult::Failed;
 }
 
