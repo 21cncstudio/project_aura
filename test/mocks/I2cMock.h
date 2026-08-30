@@ -17,6 +17,7 @@ void setReadFailure(uint8_t addr, uint8_t reg, bool fail);
 void setReadFailureOnCall(uint8_t addr, uint8_t reg, uint32_t call_number);
 void setWriteFailure(uint8_t addr, uint8_t reg, bool fail);
 uint8_t getRegister(uint8_t addr, uint8_t reg);
+uint32_t addressOnlyProbeCount(uint8_t addr);
 uint32_t transactionCount();
 uint32_t sensorCommandCount(uint8_t addr, uint16_t cmd);
 

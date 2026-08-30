@@ -18,6 +18,7 @@ namespace {
 
 struct DeviceState {
     bool present = false;
+    uint32_t address_only_probe_count = 0;
     std::array<uint8_t, 256> regs{};
     std::array<bool, 256> read_fail{};
     std::array<uint32_t, 256> read_call_count{};
@@ -118,6 +119,10 @@ uint8_t getRegister(uint8_t addr, uint8_t reg) {
     return device(addr).regs[reg];
 }
 
+uint32_t addressOnlyProbeCount(uint8_t addr) {
+    return device(addr).address_only_probe_count;
+}
+
 uint32_t transactionCount() {
     return g_transaction_count;
 }
@@ -173,6 +178,9 @@ esp_err_t i2c_master_cmd_begin(i2c_port_t, i2c_cmd_handle_t cmd, TickType_t) {
     noteTransaction();
     if (!cmd || !cmd->has_address) {
         return ESP_ERR_INVALID_ARG;
+    }
+    if (cmd->payload.empty()) {
+        ++device(cmd->addr).address_only_probe_count;
     }
     if (!device(cmd->addr).present) {
         return ESP_FAIL;
