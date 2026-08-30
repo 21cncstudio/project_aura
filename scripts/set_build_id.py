@@ -71,7 +71,7 @@ profile_config = {
     },
     "7_dual_i2c_scl6": {
         "is_7_inch": 1,
-        "build_id_suffix": "7_dual_i2c_scl6",
+        "build_id_suffix": "7-dual-i2c-scl6",
         "hardware_target": "aura-aq-7-v1",
     },
 }.get(hardware_profile)

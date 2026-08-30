@@ -16,7 +16,7 @@ function Get-AuraHardwareContract {
         Environment = "project_aura_7"
         HardwareTarget = "aura-aq-7-v1"
         HardwareProfile = "7_dual_i2c_scl6"
-        BuildIdSuffix = "7_dual_i2c_scl6"
+        BuildIdSuffix = "7-dual-i2c-scl6"
         ArtifactSlug = "7"
       }
     }
@@ -45,7 +45,11 @@ function Get-AuraEffectiveVersion {
   if (Test-AuraStableVersion -Version $Version) {
     return $Version
   }
-  return "{0}-{1}" -f $Version, $BuildId
+  $effectiveVersion = "{0}-{1}" -f $Version, $BuildId
+  if ($effectiveVersion -notmatch '^\d+\.\d+\.\d+(?:-[0-9A-Za-z]+(?:[.-][0-9A-Za-z]+)*)?$') {
+    throw "Invalid effective release version: $effectiveVersion. Build ID must use safe prerelease characters."
+  }
+  return $effectiveVersion
 }
 
 function Assert-AuraReleaseChannelVersion {

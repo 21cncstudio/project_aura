@@ -127,7 +127,7 @@ class BuildIdScriptTests(unittest.TestCase):
                 temp_root / "build-seven",
                 profile="7_dual_i2c_scl6",
                 target="aura-aq-7-v1",
-                suffix="7_dual_i2c_scl6",
+                suffix="7-dual-i2c-scl6",
                 environment="project_aura_7",
             )
             self.assertIn('APP_HARDWARE_TARGET "aura-aq-7-v1"', header)
@@ -139,7 +139,7 @@ class BuildIdScriptTests(unittest.TestCase):
                     temp_root / "build-invalid",
                     profile="7_dual_i2c_scl6",
                     target="aura-aq-v1",
-                    suffix="7_dual_i2c_scl6",
+                    suffix="7-dual-i2c-scl6",
                     environment="project_aura_7",
                 )
 

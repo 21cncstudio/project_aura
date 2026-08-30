@@ -25,7 +25,7 @@ export const HARDWARE_IDENTITIES = Object.freeze({
   project_aura_7: Object.freeze({
     hardwareTarget: "aura-aq-7-v1",
     hardwareProfile: "7_dual_i2c_scl6",
-    buildIdSuffix: "7_dual_i2c_scl6",
+    buildIdSuffix: "7-dual-i2c-scl6",
     artifactSlug: "7",
     displayName: "Aura AQ 7-inch",
   }),
@@ -69,9 +69,8 @@ export function validateGeneratedBuildId({ buildId, commit, environment }) {
 
 export function effectiveReleaseVersion(version, buildId) {
   const validated = validateVersion(version);
-  return /^\d+(?:\.\d+)+$/.test(validated)
-    ? validated
-    : `${validated}-${buildId}`;
+  if (/^\d+(?:\.\d+)+$/.test(validated)) return validated;
+  return validateVersion(`${validated}-${buildId}`);
 }
 
 export function stableJson(value) {

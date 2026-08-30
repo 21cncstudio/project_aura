@@ -76,7 +76,7 @@ test("signature payload matches the Aura Link v2 canonical field set", () => {
     chip_family: "ESP32-S3",
     modes: ["update", "full"],
     compatibility: { flash_size_bytes: FLASH_SIZE_BYTES, hardware_profile: "7_dual_i2c_scl6" },
-    provenance: { build_id: "aaaaaaa-7_dual_i2c_scl6", commit: "a".repeat(40) },
+    provenance: { build_id: "aaaaaaa-7-dual-i2c-scl6", commit: "a".repeat(40) },
     signature: { schema: SIGNATURE_SCHEMA, algorithm: "ed25519", key_id: "test", value: "ignored" },
     assets: [{
       file_name: "firmware.bin",
@@ -113,15 +113,15 @@ test("hardware identity and generated build ID are strict pairs", () => {
   );
   assert.equal(
     validateGeneratedBuildId({
-      buildId: "0123456-7_dual_i2c_scl6",
+      buildId: "0123456-7-dual-i2c-scl6",
       commit: "0123456789abcdef0123456789abcdef01234567",
       environment: "project_aura_7",
     }),
-    "0123456-7_dual_i2c_scl6",
+    "0123456-7-dual-i2c-scl6",
   );
   assert.throws(() =>
     validateGeneratedBuildId({
-      buildId: "0123456-7_dual_i2c_scl6-dirty",
+      buildId: "0123456-7-dual-i2c-scl6-dirty",
       commit: "0123456789abcdef0123456789abcdef01234567",
       environment: "project_aura_7",
     }),
@@ -131,9 +131,10 @@ test("hardware identity and generated build ID are strict pairs", () => {
 test("effective release versions keep Stable fixed and bind prereleases to build identity", () => {
   assert.equal(effectiveReleaseVersion("1.1.6", "0123456"), "1.1.6");
   assert.equal(
-    effectiveReleaseVersion("1.1.6-beta", "0123456-7_dual_i2c_scl6"),
-    "1.1.6-beta-0123456-7_dual_i2c_scl6",
+    effectiveReleaseVersion("1.1.6-beta", "0123456-7-dual-i2c-scl6"),
+    "1.1.6-beta-0123456-7-dual-i2c-scl6",
   );
+  assert.throws(() => effectiveReleaseVersion("1.1.6-beta", "0123456_bad"));
 });
 
 test("invalid versions and overlapping layouts are rejected", () => {

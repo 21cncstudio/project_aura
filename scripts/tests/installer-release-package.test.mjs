@@ -42,7 +42,7 @@ function identityArgs(target = "4_3") {
         "--environment", "project_aura_7",
         "--hardware-profile", "7_dual_i2c_scl6",
         "--hardware-target", "aura-aq-7-v1",
-        "--build-id", "0123456-7_dual_i2c_scl6",
+        "--build-id", "0123456-7-dual-i2c-scl6",
       ]
     : [
         "--environment", "project_aura",
@@ -83,7 +83,7 @@ async function fixture({ target = "4_3", version = "1.1.6" } = {}) {
   const seven = target === "7";
   const hardwareTarget = seven ? "aura-aq-7-v1" : "aura-aq-v1";
   const hardwareProfile = seven ? "7_dual_i2c_scl6" : "4_3";
-  const buildId = seven ? "0123456-7_dual_i2c_scl6" : "0123456";
+  const buildId = seven ? "0123456-7-dual-i2c-scl6" : "0123456";
   const manifestIdentity = {
     version: effectiveReleaseVersion(version, buildId),
     hardware_target: hardwareTarget,
@@ -228,7 +228,7 @@ test("package CLI creates an isolated 7-inch identity and rejects cross-pairs", 
     const release = JSON.parse(await readFile(join(value.staging, "release.json"), "utf8"));
     assert.equal(release.hardware_target, "aura-aq-7-v1");
     assert.equal(release.compatibility.hardware_profile, "7_dual_i2c_scl6");
-    assert.equal(release.version, "1.1.6-beta-0123456-7_dual_i2c_scl6");
+    assert.equal(release.version, "1.1.6-beta-0123456-7-dual-i2c-scl6");
 
     await rm(value.staging, { recursive: true, force: true });
     const invalid = spawnSync(process.execPath, [
@@ -241,7 +241,7 @@ test("package CLI creates an isolated 7-inch identity and rejects cross-pairs", 
       "--environment", "project_aura_7",
       "--hardware-profile", "7_dual_i2c_scl6",
       "--hardware-target", "aura-aq-v1",
-      "--build-id", "0123456-7_dual_i2c_scl6",
+      "--build-id", "0123456-7-dual-i2c-scl6",
       "--key-id", value.keyId,
       "--private-key", value.privateKeyPath,
       "--notes", value.notes,

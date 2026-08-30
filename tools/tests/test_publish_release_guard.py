@@ -317,7 +317,7 @@ class PublishReleaseGuardTests(unittest.TestCase):
             create_release_directory(
                 assets,
                 target="aura-aq-7-v1",
-                build_id="0123456-7_dual_i2c_scl6",
+                build_id="0123456-7-dual-i2c-scl6",
             )
             result = invoke_publisher(assets, "-HardwareTarget", "aura-aq-7-v1")
             self.assertNotEqual(result.returncode, 0)
@@ -329,7 +329,7 @@ class PublishReleaseGuardTests(unittest.TestCase):
             create_release_directory(
                 assets,
                 target="aura-aq-7-v1",
-                build_id="0123456-7_dual_i2c_scl6",
+                build_id="0123456-7-dual-i2c-scl6",
             )
             result = invoke_publisher(assets)
             self.assertNotEqual(result.returncode, 0)

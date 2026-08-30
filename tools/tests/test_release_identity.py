@@ -123,7 +123,7 @@ class ReleaseIdentityScriptTests(unittest.TestCase):
         target: str = "aura-aq-v1",
         build_id: str | None = None,
     ) -> None:
-        suffix = "-7_dual_i2c_scl6" if environment == "project_aura_7" else ""
+        suffix = "-7-dual-i2c-scl6" if environment == "project_aura_7" else ""
         path.write_text(
             json.dumps(
                 {
@@ -270,6 +270,14 @@ class ReleaseIdentityScriptTests(unittest.TestCase):
         )
         self.assertNotEqual(invalid_beta.returncode, 0)
         self.assertIn("Beta releases require", invalid_beta.stderr)
+
+        invalid_effective_version = run_powershell(
+            f". {ps_quote(SCRIPT_PATH)}; try {{ "
+            "Get-AuraEffectiveVersion -Version '1.1.6-beta' -BuildId '0123456_bad' "
+            "} catch { [Console]::Error.WriteLine($_.Exception.Message); exit 1 }"
+        )
+        self.assertNotEqual(invalid_effective_version.returncode, 0)
+        self.assertIn("Invalid effective release version", invalid_effective_version.stderr)
 
     def test_post_build_stamp_detects_changed_binary(self):
         with tempfile.TemporaryDirectory() as temp_dir:
