@@ -10,6 +10,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "core/OtaImageIdentity.h"
 #include "web/OtaDeferredRestart.h"
 #include "web/OtaPhysicalConfirm.h"
 #include "web/WebContext.h"
@@ -23,6 +24,7 @@ struct Runtime {
     WebOtaState &ota_state;
     OtaDeferredRestart::Controller &restart_controller;
     std::atomic<uint32_t> &upload_confirm_id;
+    OtaImageIdentity::PrefixValidator &image_validator;
     uint32_t deferred_restart_delay_ms = 0;
     uint32_t (*upload_timeout_ms)(size_t image_size_bytes) = nullptr;
     void (*disable_wifi_power_save_for_upload)() = nullptr;
@@ -31,7 +33,7 @@ struct Runtime {
     void (*cancel_preflight_ui)(uint32_t confirm_id) = nullptr;
     void (*set_ui_screen)(WebUiBridge::FirmwareUpdateScreenMode mode,
                           uint32_t confirm_id) = nullptr;
-    void (*set_error)(const String &error) = nullptr;
+    void (*set_error)(const String &error, const char *error_code) = nullptr;
     bool (*try_begin_upload)() = nullptr;
     void (*end_upload)() = nullptr;
     OtaPhysicalConfirm::PrepareDecision (*prepare_physical_confirm)(size_t image_size_bytes,

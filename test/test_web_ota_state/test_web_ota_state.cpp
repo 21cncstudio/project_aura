@@ -143,6 +143,23 @@ void test_web_ota_state_new_upload_supersedes_expired_terminal_result() {
     TEST_ASSERT_FALSE(snapshot.hasError());
 }
 
+void test_web_ota_state_preserves_first_error_code_and_clears_it_on_retry() {
+    WebOtaState state;
+    state.beginUpload(100);
+    state.setErrorOnce("Wrong model", 150, "HARDWARE_TARGET_MISMATCH");
+    state.setErrorOnce("Upload interrupted", 160);
+    TEST_ASSERT_EQUAL_STRING("Wrong model", state.snapshot().error.c_str());
+    TEST_ASSERT_EQUAL_STRING("HARDWARE_TARGET_MISMATCH", state.snapshot().error_code.c_str());
+    TEST_ASSERT_EQUAL_UINT32(0, state.snapshot().written_size);
+    TEST_ASSERT_FALSE(state.snapshot().reboot_pending);
+
+    state.clearBusy();
+    state.beginUpload(200);
+    TEST_ASSERT_TRUE(state.snapshot().error_code.empty());
+    state.setErrorOnce("Ordinary failure", 220);
+    TEST_ASSERT_TRUE(state.snapshot().error_code.empty());
+}
+
 int main(int, char **) {
     UNITY_BEGIN();
     RUN_TEST(test_web_ota_state_begin_upload_resets_previous_state);
@@ -152,5 +169,6 @@ int main(int, char **) {
     RUN_TEST(test_web_ota_state_total_timeout_expires_from_upload_start);
     RUN_TEST(test_web_ota_state_terminal_result_expires_after_ttl);
     RUN_TEST(test_web_ota_state_new_upload_supersedes_expired_terminal_result);
+    RUN_TEST(test_web_ota_state_preserves_first_error_code_and_clears_it_on_retry);
     return UNITY_END();
 }

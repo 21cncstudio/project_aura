@@ -10,6 +10,14 @@
 
 class WebUiBridge {
 public:
+    enum class FirmwareUpdateScreenMode : uint8_t {
+        Hidden = 0,
+        ConfirmPending,
+        ConfirmAllowed,
+        ConfirmDenied,
+        Installing,
+    };
+
     struct Snapshot {
         bool available = false;
         bool night_mode = false;

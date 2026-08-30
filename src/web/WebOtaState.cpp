@@ -50,6 +50,7 @@ void WebOtaState::reset() {
     slot_size_ = 0;
     written_size_ = 0;
     error_ = "";
+    error_code_ = "";
     upload_start_ms_ = 0;
     first_chunk_ms_ = 0;
     last_chunk_ms_ = 0;
@@ -173,9 +174,10 @@ void WebOtaState::markRebootPending() {
     reboot_pending_ = true;
 }
 
-void WebOtaState::setErrorOnce(const String &error, uint32_t now_ms) {
+void WebOtaState::setErrorOnce(const String &error, uint32_t now_ms, const char *error_code) {
     if (error_.length() == 0) {
         error_ = error;
+        error_code_ = error_code ? error_code : "";
     }
     success_ = false;
     reboot_pending_ = false;
@@ -199,6 +201,7 @@ WebOtaSnapshot WebOtaState::snapshot() const {
     snapshot.slot_size = slot_size_;
     snapshot.written_size = written_size_;
     snapshot.error = error_;
+    snapshot.error_code = error_code_;
     snapshot.upload_start_ms = upload_start_ms_;
     snapshot.first_chunk_ms = first_chunk_ms_;
     snapshot.last_chunk_ms = last_chunk_ms_;

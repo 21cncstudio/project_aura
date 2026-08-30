@@ -23,6 +23,7 @@ struct WebOtaSnapshot {
     size_t slot_size = 0;
     size_t written_size = 0;
     String error;
+    String error_code;
     uint32_t upload_start_ms = 0;
     uint32_t first_chunk_ms = 0;
     uint32_t last_chunk_ms = 0;
@@ -70,7 +71,7 @@ public:
     void markFinalizeDuration(uint32_t finalize_ms);
     void markSuccess(uint32_t now_ms);
     void markRebootPending();
-    void setErrorOnce(const String &error, uint32_t now_ms);
+    void setErrorOnce(const String &error, uint32_t now_ms, const char *error_code = nullptr);
     void clearBusy();
     WebOtaSnapshot snapshot() const;
 
@@ -90,6 +91,7 @@ private:
     size_t slot_size_ = 0;
     size_t written_size_ = 0;
     String error_;
+    String error_code_;
     uint32_t upload_start_ms_ = 0;
     uint32_t first_chunk_ms_ = 0;
     uint32_t last_chunk_ms_ = 0;

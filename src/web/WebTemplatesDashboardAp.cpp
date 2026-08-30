@@ -746,11 +746,12 @@ const char kDashboardPageTemplateAp[] PROGMEM = R"HTML_DASH_AP(
             <div id="otaPrecheck" class="ota-precheck warn">Waiting for device state before OTA.</div>
             <div class="text-field-row">
               <label class="text-field-lbl" for="otaFile">Firmware file (.bin)</label>
-              <input class="file-input" type="file" id="otaFile" accept=".bin,application/octet-stream" />
+              <input class="file-input" type="file" id="otaFile" accept=".bin,application/octet-stream" aria-describedby="otaFileHint otaStatus" />
             </div>
+            <div class="ota-status" id="otaFileHint">Use the OTA .bin for this Aura model. Firmware for another model will be rejected.</div>
             <button class="btn" type="button" id="otaUploadBtn">Upload firmware</button>
             <div class="progress-track"><div class="progress-fill" id="otaProgress"></div></div>
-            <div class="ota-status" id="otaStatus">No upload in progress.</div>
+            <div class="ota-status" id="otaStatus" role="status" aria-live="polite" aria-atomic="true">No upload in progress.</div>
           </div>
         </div>
         <div class="sg">
@@ -2534,12 +2535,18 @@ function scheduleOtaRecoveryProbe(delayMs) {
           const otaStatus = typeof ota.status === 'string' ? ota.status : '';
           if (otaStatus === 'failed') {
             stopOtaRecoveryWatcher();
+            otaUploadInFlight = false;
+            otaAwaitingPhysicalConfirm = false;
             otaAwaitingDeviceOutcome = false;
             otaRestartPending = false;
             otaReconnectGraceUntilMs = 0;
             const uploadBtn = document.getElementById('otaUploadBtn');
+            const fileInput = document.getElementById('otaFile');
+            const progressEl = document.getElementById('otaProgress');
             const statusEl = document.getElementById('otaStatus');
             if (uploadBtn) uploadBtn.disabled = false;
+            if (fileInput) fileInput.disabled = false;
+            if (progressEl) progressEl.style.width = '0%';
             if (statusEl) {
               statusEl.textContent = ota.error || 'OTA failed.';
               statusEl.className = 'ota-status err';
@@ -3110,13 +3117,23 @@ function initTimeSyncUI() {
 // OTA upload
 // ─────────────────────────────────────────────
 function initOtaUI() {
-  document.getElementById('otaUploadBtn').addEventListener('click', async () => {
+  const fileInput = document.getElementById('otaFile');
+  const statusEl = document.getElementById('otaStatus');
+  const progressEl = document.getElementById('otaProgress');
+  const uploadBtn = document.getElementById('otaUploadBtn');
+
+  fileInput.addEventListener('change', () => {
     if (otaUploadInFlight || otaAwaitingDeviceOutcome || otaRestartPending) return;
-    const fileInput = document.getElementById('otaFile');
+    progressEl.style.width = '0%';
+    statusEl.textContent = fileInput.files && fileInput.files.length
+      ? 'Firmware selected. The device will check compatibility before installing.'
+      : 'No upload in progress.';
+    statusEl.className = 'ota-status';
+  });
+
+  uploadBtn.addEventListener('click', async () => {
+    if (otaUploadInFlight || otaAwaitingDeviceOutcome || otaRestartPending) return;
     const file = fileInput.files && fileInput.files[0];
-    const statusEl = document.getElementById('otaStatus');
-    const progressEl = document.getElementById('otaProgress');
-    const uploadBtn = document.getElementById('otaUploadBtn');
 
     if (!file) {
       statusEl.textContent = 'Select a firmware file first.';
@@ -3157,6 +3174,7 @@ function initOtaUI() {
     otaAwaitingPhysicalConfirm = false;
     uploadBtn.disabled = true;
     fileInput.disabled = true;
+    progressEl.style.width = '0%';
     statusEl.textContent = 'Preparing device for upload...';
     statusEl.className = 'ota-status';
     let prepareCfg = null;
@@ -3227,6 +3245,7 @@ function initOtaUI() {
       stopOtaRecoveryWatcher();
       uploadBtn.disabled = false;
       fileInput.disabled = false;
+      progressEl.style.width = '0%';
       statusEl.textContent = message;
       statusEl.className = 'ota-status ' + (cls || 'err');
       updateNetStatusBanner();
@@ -3283,6 +3302,7 @@ function initOtaUI() {
     };
 
     xhr.upload.onprogress = ev => {
+      if (uploadSettled) return;
       if (ev.lengthComputable && ev.total > 0) {
         const pct = Math.min(100, Math.round((ev.loaded / ev.total) * 100));
         progressEl.style.width = pct + '%';
@@ -3294,6 +3314,7 @@ function initOtaUI() {
       }
     };
     xhr.upload.onload = () => {
+      if (uploadSettled) return;
       uploadTimeouts.noteUploadComplete();
       announceResponseWait();
     };

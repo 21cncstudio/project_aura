@@ -43,7 +43,8 @@ Result buildUpdateResult(bool has_upload,
                          size_t slot_size,
                          bool size_known,
                          size_t expected_size,
-                         const String &error);
+                         const String &error,
+                         const String &error_code = "");
 
 uint32_t responseWaitTimeoutMs(uint32_t upload_timeout_ms);
 

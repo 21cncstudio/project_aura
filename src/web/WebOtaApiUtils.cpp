@@ -28,6 +28,19 @@ void classify_failure(Result &result, bool has_upload) {
         }
     }
 
+    // These codes are set by the device's BIN validator, not inferred from
+    // English text ("mismatch" and "missing" also have older size/file meanings).
+    if (result.error_code == "HARDWARE_TARGET_MISMATCH") {
+        result.status_code = 409;
+        return;
+    }
+    if (result.error_code == "HARDWARE_TARGET_MISSING" ||
+        result.error_code == "HARDWARE_METADATA_UNSUPPORTED" ||
+        result.error_code == "INVALID_FIRMWARE") {
+        result.status_code = 400;
+        return;
+    }
+
     if (!has_upload || error_contains(result.error, "missing")) {
         result.status_code = 400;
         result.error_code = "MISSING_FILE";
@@ -108,7 +121,8 @@ Result buildUpdateResult(bool has_upload,
                          size_t slot_size,
                          bool size_known,
                          size_t expected_size,
-                         const String &error) {
+                         const String &error,
+                         const String &error_code) {
     Result result{};
     result.success = success;
     result.rebooting = success;
@@ -124,6 +138,7 @@ Result buildUpdateResult(bool has_upload,
     }
 
     result.error = error;
+    result.error_code = error_code;
     classify_failure(result, has_upload);
     return result;
 }

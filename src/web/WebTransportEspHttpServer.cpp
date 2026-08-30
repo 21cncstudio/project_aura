@@ -982,10 +982,17 @@ bool EspHttpServerBackend::prepareRequest(RouteRegistration &route, void *raw_re
                         request_->setUpload(write);
                         route.upload_handler();
                         uploaded_size += size;
-                        return true;
+                        return !request_->uploadRejected();
                     },
                     final_boundary);
 
+                if (request_->uploadRejected()) {
+                    // A prefix/identity rejection is terminal. Preserve its
+                    // reason and reach the route's final response + cleanup
+                    // without reading the rest of the rejected file.
+                    request_->setPendingBodyBytes(reader.remainingBytesOnSocket());
+                    return true;
+                }
                 if (!stream_ok) {
                     request_->setPendingBodyBytes(reader.remainingBytesOnSocket());
                     WebUpload aborted{};

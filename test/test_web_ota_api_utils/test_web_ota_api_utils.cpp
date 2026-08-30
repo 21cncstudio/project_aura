@@ -153,6 +153,24 @@ void test_web_ota_api_utils_build_prepare_result_reports_unavailable_state() {
     TEST_ASSERT_EQUAL_STRING("OTA prepare unavailable", result.error.c_str());
 }
 
+void test_web_ota_api_utils_model_codes_are_not_inferred_from_error_text() {
+    const char *codes[] = {"HARDWARE_TARGET_MISMATCH", "HARDWARE_TARGET_MISSING",
+                           "HARDWARE_METADATA_UNSUPPORTED", "INVALID_FIRMWARE"};
+    for (size_t i = 0; i < sizeof(codes) / sizeof(codes[0]); ++i) {
+        const WebOtaApiUtils::Result result = WebOtaApiUtils::buildUpdateResult(
+            true, false, 0, 6553600, true, 4000000,
+            "Model mismatch or missing metadata, not a file-size error", codes[i]);
+        TEST_ASSERT_EQUAL_INT(i == 0 ? 409 : 400, result.status_code);
+        TEST_ASSERT_EQUAL_STRING(codes[i], result.error_code.c_str());
+        ArduinoJson::JsonDocument doc;
+        WebOtaApiUtils::fillUpdateJson(doc.to<ArduinoJson::JsonObject>(), result);
+        TEST_ASSERT_FALSE(doc["success"].as<bool>());
+        TEST_ASSERT_FALSE(doc["rebooting"].as<bool>());
+        TEST_ASSERT_EQUAL_UINT32(0, doc["written"].as<uint32_t>());
+        TEST_ASSERT_EQUAL_STRING(codes[i], doc["error_code"].as<const char *>());
+    }
+}
+
 int main(int, char **) {
     UNITY_BEGIN();
     RUN_TEST(test_web_ota_api_utils_build_update_result_reports_success_payload);
@@ -162,6 +180,7 @@ int main(int, char **) {
     RUN_TEST(test_web_ota_api_utils_build_update_result_reports_interrupt_with_specific_code);
     RUN_TEST(test_web_ota_api_utils_build_update_result_reports_client_disconnect_separately);
     RUN_TEST(test_web_ota_api_utils_build_update_result_reports_total_deadline_as_timeout);
+    RUN_TEST(test_web_ota_api_utils_model_codes_are_not_inferred_from_error_text);
     RUN_TEST(test_web_ota_api_utils_build_prepare_result_reports_success_payload);
     RUN_TEST(test_web_ota_api_utils_build_prepare_result_rejects_oversized_image);
     RUN_TEST(test_web_ota_api_utils_build_prepare_result_reports_invalid_size);

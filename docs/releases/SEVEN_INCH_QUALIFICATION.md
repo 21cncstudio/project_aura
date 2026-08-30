@@ -17,10 +17,14 @@ closed until this record is completed and reviewed.
 - ESP32 internal sensor-bus pull-ups: disabled
 - USB/logging: native USB CDC on Type_C2
 
-## Prepared exact-source candidate
+## Historical cleanup candidate
 
-Software evidence only; neither binary in this section has been physically
-flashed or qualified.
+The following is the historical `fac6e30` software-evidence snapshot, not the
+latest candidate to flash. Its recorded checks do not qualify the later panel
+sampling, optional-alert, or [built-in OTA guard](../OTA_HARDWARE_TARGET_GUARD.md)
+changes. Select and record a fresh exact-source artifact before the next
+physical qualification. At the time of this snapshot neither binary below had
+been physically flashed or qualified.
 
 7-inch candidate:
 
@@ -69,6 +73,9 @@ The controlled test series must include:
    headless shutdown.
 5. A normally closed long-run capture with the chosen full sensor set.
 6. At least one exact-artifact 4.3-inch regression check.
+7. On guarded firmware, built-in web OTA rejects the opposite model and an
+   unlabelled legacy BIN with zero written bytes, no OTA restart, a readable
+   inline error, and a working subsequent matching-file update on both models.
 
 Physical OFF/ON, upload reset, EN/RTS reset, software restart, and serial-open
 effects must be logged as separate event classes. A USB gap alone is not proof

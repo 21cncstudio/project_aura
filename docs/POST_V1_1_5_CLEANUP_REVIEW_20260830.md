@@ -2,12 +2,19 @@
 
 Date: 2026-08-30
 
+This is the historical `fac6e30` cleanup/build/package snapshot, not the latest
+flash candidate. Later commits `0b68e92` (panel sampling), `35001ed` (optional
+sensor UI alerts), and the [built-in OTA hardware guard](OTA_HARDWARE_TARGET_GUARD.md)
+supersede its next-test artifact selection. Hashes, package acceptance, and
+physical-validation statements below apply only to the named historical
+artifacts; they are not evidence for newer BINs or a public release approval.
+
 ## Status
 
 The source cleanup, production firmware split, and target-aware producer are
 complete on the local branch `codex/dual-profile-release`.
 
-Current reviewed firmware commit:
+Reviewed firmware commit in this snapshot:
 
 ```text
 fac6e307b3d8df35db891b56f7022dbf89000d79

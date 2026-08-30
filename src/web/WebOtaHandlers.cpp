@@ -10,7 +10,10 @@
 #include <WiFi.h>
 #include <ArduinoJson.h>
 #include <esp_ota_ops.h>
+#include <stdio.h>
+#include <string.h>
 
+#include "core/AppVersion.h"
 #include "core/Logger.h"
 #include "core/OtaRollback.h"
 #include "web/WebOtaApiUtils.h"
@@ -230,20 +233,26 @@ String ota_error_prefixed(const char *prefix) {
     return error;
 }
 
+String ota_size_text(size_t value) {
+    char text[24];
+    snprintf(text, sizeof(text), "%zu", value);
+    return String(text);
+}
+
 String ota_abort_error_message(const WebOtaSnapshot &ota,
                                WebUploadAbortReason abort_reason,
                                uint32_t now_ms,
                                bool client_connected) {
     if (abort_reason == WebUploadAbortReason::TotalTimeout) {
         String error = "Upload timed out after total deadline of ";
-        error += String(ota.totalDurationMs(now_ms));
+        error += ota_size_text(ota.totalDurationMs(now_ms));
         error += " ms";
         return error;
     }
 
     if (abort_reason == WebUploadAbortReason::IdleTimeout) {
         String error = "Upload timed out after ";
-        error += String(ota.lastChunkAgeMs(now_ms));
+        error += ota_size_text(ota.lastChunkAgeMs(now_ms));
         error += " ms without data";
         return error;
     }
@@ -264,7 +273,7 @@ String ota_abort_error_message(const WebOtaSnapshot &ota,
     const uint32_t idle_ms = ota.lastChunkAgeMs(now_ms);
     if (idle_ms > 0) {
         String error = client_connected ? "Upload timed out after " : "Upload interrupted after ";
-        error += String(idle_ms);
+        error += ota_size_text(idle_ms);
         error += " ms without data";
         return error;
     }
@@ -295,11 +304,82 @@ void abort_update_if_running() {
     }
 }
 
-void fail_upload(WebOtaHandlers::Runtime &runtime, const String &error) {
+void fail_upload(WebOtaHandlers::Runtime &runtime, const String &error,
+                 const char *error_code = nullptr) {
     abort_update_if_running();
     if (runtime.set_error) {
-        runtime.set_error(error);
+        runtime.set_error(error, error_code);
+    } else {
+        runtime.ota_state.setErrorOnce(error, millis(), error_code);
     }
+}
+
+const char *hardware_model_name(const char *target) {
+    if (target && strcmp(target, OtaImageIdentity::kTarget43) == 0) {
+        return "Aura AQ 4.3\"";
+    }
+    if (target && strcmp(target, OtaImageIdentity::kTarget7) == 0) {
+        return "Aura AQ 7\"";
+    }
+    return "an unknown Aura AQ model";
+}
+
+void reject_image_identity(WebOtaHandlers::Runtime &runtime, WebRequest &server) {
+    const OtaImageIdentity::Status status = runtime.image_validator.status();
+    const char *error_code = "INVALID_FIRMWARE";
+    String error;
+    switch (status) {
+        case OtaImageIdentity::Status::TargetMismatch:
+            error_code = "HARDWARE_TARGET_MISMATCH";
+            error = "This firmware is for ";
+            error += hardware_model_name(runtime.image_validator.target());
+            error += ". This device is ";
+            error += hardware_model_name(AppVersion::hardwareTarget());
+            error += ". Select firmware for this device.";
+            break;
+        case OtaImageIdentity::Status::MissingMetadata:
+            error_code = "HARDWARE_TARGET_MISSING";
+            error = "This BIN has no Aura AQ model label. OTA cannot verify compatibility. "
+                    "Select a current firmware BIN for this device.";
+            break;
+        case OtaImageIdentity::Status::UnsupportedMetadata:
+            error_code = "HARDWARE_METADATA_UNSUPPORTED";
+            error = "This BIN uses unsupported Aura AQ model metadata. "
+                    "Select a compatible firmware BIN for this device.";
+            break;
+        case OtaImageIdentity::Status::InvalidTarget:
+            error = "The Aura AQ model label is unknown or invalid. "
+                    "OTA cannot verify compatibility. Select firmware for this device.";
+            break;
+        case OtaImageIdentity::Status::Truncated:
+            error = "Firmware header is incomplete. "
+                    "Select an intact Aura AQ firmware BIN for this device.";
+            break;
+        default:
+            error = "Invalid firmware BIN header. Select an Aura AQ application BIN "
+                    "for this device, not a merged USB image.";
+            break;
+    }
+    // This path is reachable only before Update.begin(), never after writing.
+    error += " Nothing was written; the device was not restarted.";
+    fail_upload(runtime, error, error_code);
+    server.rejectUpload();
+    LOGW("OTA", "image rejected before flash: code=%s expected=%s image=%s",
+         error_code, AppVersion::hardwareTarget(), runtime.image_validator.target());
+}
+
+bool write_image_bytes(WebOtaHandlers::Runtime &runtime, uint8_t *bytes, size_t size) {
+    if (size == 0) {
+        return true;
+    }
+    const size_t written = Update.write(bytes, size);
+    runtime.ota_state.addWritten(written);
+    if (written != size) {
+        fail_upload(runtime, ota_error_prefixed("Update write failed"));
+        LOGE("OTA", "%s", runtime.ota_state.snapshot().error.c_str());
+        return false;
+    }
+    return true;
 }
 
 const char *upload_confirm_error_message(OtaPhysicalConfirm::ConsumeStatus status) {
@@ -538,6 +618,7 @@ void handleUpload(Runtime &runtime, bool ota_busy) {
         }
         const uint32_t start_ms = millis();
         runtime.ota_state.beginUpload(start_ms);
+        runtime.image_validator.reset(AppVersion::hardwareTarget(), expected_size);
         if (runtime.disable_wifi_power_save_for_upload) {
             runtime.disable_wifi_power_save_for_upload();
         }
@@ -566,28 +647,22 @@ void handleUpload(Runtime &runtime, bool ota_busy) {
         runtime.ota_state.setSlotSize(target_partition->size);
         runtime.ota_state.setExpectedSize(size_known, expected_size);
         const WebOtaSnapshot ota = runtime.ota_state.snapshot();
-        if (ota.size_known) {
-            if (ota.expected_size > ota.slot_size) {
-                fail_upload(runtime,
-                            String("Firmware too large for OTA slot: ") +
-                                String(ota.expected_size) + " > " + String(ota.slot_size));
-                LOGW("OTA", "reject oversized image: %u > %u",
-                     static_cast<unsigned>(ota.expected_size),
-                     static_cast<unsigned>(ota.slot_size));
-                return;
-            }
-            if (!Update.begin(ota.expected_size, U_FLASH)) {
-                fail_upload(runtime, ota_error_prefixed("Update begin failed"));
-                LOGE("OTA", "%s", runtime.ota_state.snapshot().error.c_str());
-                return;
-            }
-        } else {
-            if (!Update.begin(ota.slot_size, U_FLASH)) {
-                fail_upload(runtime, ota_error_prefixed("Update begin failed"));
-                LOGE("OTA", "%s", runtime.ota_state.snapshot().error.c_str());
-                return;
-            }
+        if (ota.expected_size > ota.slot_size) {
+            fail_upload(runtime,
+                        String("Firmware too large for OTA slot: ") +
+                            ota_size_text(ota.expected_size) + " > " + ota_size_text(ota.slot_size));
+            LOGW("OTA", "reject oversized image: %u > %u",
+                 static_cast<unsigned>(ota.expected_size),
+                 static_cast<unsigned>(ota.slot_size));
+            server.rejectUpload();
+            return;
         }
+        if (runtime.image_validator.status() != OtaImageIdentity::Status::NeedMore) {
+            reject_image_identity(runtime, server);
+            return;
+        }
+        // Start carries only multipart headers. Do not touch flash until the
+        // streamed BIN prefix has established a compatible embedded model.
 
         if (ota.start_rssi_valid) {
             LOGI("OTA", "upload started (session=%u, slot=%u, expected=%u, known=%s, timeout=%u ms, rssi=%d dBm)",
@@ -629,27 +704,59 @@ void handleUpload(Runtime &runtime, bool ota_busy) {
             LOGW("OTA", "upload exceeded total timeout during transfer");
             return;
         }
+        const WebOtaSnapshot before_chunk = runtime.ota_state.snapshot();
+        // Count received bytes, including the prefix held in RAM. Counting only
+        // written bytes would undercount before the compatibility gate opens.
+        if (upload.currentSize > before_chunk.slot_size ||
+            before_chunk.chunk_sum_size > before_chunk.slot_size - upload.currentSize) {
+            fail_upload(runtime, "Firmware too large for OTA slot");
+            LOGW("OTA", "upload exceeded slot size");
+            server.rejectUpload();
+            return;
+        }
+        if (upload.currentSize > before_chunk.expected_size ||
+            before_chunk.chunk_sum_size > before_chunk.expected_size - upload.currentSize) {
+            fail_upload(runtime, "Firmware size mismatch: received more bytes than declared");
+            LOGW("OTA", "upload exceeded declared image size");
+            server.rejectUpload();
+            return;
+        }
         if (runtime.ota_state.noteChunk(upload.currentSize, now_ms)) {
             const WebOtaSnapshot chunk_ota = runtime.ota_state.snapshot();
             LOGI("OTA", "first chunk received after %u ms (size=%u bytes)",
                  static_cast<unsigned>(chunk_ota.firstChunkDelayMs()),
                  static_cast<unsigned>(upload.currentSize));
         }
-        if (runtime.ota_state.wouldExceedSlot(upload.currentSize)) {
-            const WebOtaSnapshot overflow_ota = runtime.ota_state.snapshot();
-            fail_upload(runtime,
-                        String("Firmware too large for OTA slot: ") +
-                            String(overflow_ota.written_size + upload.currentSize) +
-                            " > " + String(overflow_ota.slot_size));
-            LOGW("OTA", "upload exceeded slot size");
-            return;
+        size_t prefix_bytes = 0;
+        if (runtime.image_validator.status() != OtaImageIdentity::Status::Compatible) {
+            prefix_bytes = runtime.image_validator.append(upload.buf, upload.currentSize);
+            if (runtime.image_validator.status() == OtaImageIdentity::Status::NeedMore) {
+                return;
+            }
+            if (runtime.image_validator.status() != OtaImageIdentity::Status::Compatible) {
+                reject_image_identity(runtime, server);
+                return;
+            }
+            if (!Update.begin(before_chunk.expected_size, U_FLASH)) {
+                fail_upload(runtime, ota_error_prefixed("Update begin failed"));
+                LOGE("OTA", "%s", runtime.ota_state.snapshot().error.c_str());
+                server.rejectUpload();
+                return;
+            }
+            LOGI("OTA", "embedded hardware target accepted: %s",
+                 runtime.image_validator.target());
+            // Arduino Update takes mutable input, but only copies these bytes.
+            if (!write_image_bytes(runtime,
+                                   const_cast<uint8_t *>(runtime.image_validator.data()),
+                                   runtime.image_validator.size())) {
+                server.rejectUpload();
+                return;
+            }
         }
-        if (Update.write(upload.buf, upload.currentSize) != upload.currentSize) {
-            fail_upload(runtime, ota_error_prefixed("Update write failed"));
-            LOGE("OTA", "%s", runtime.ota_state.snapshot().error.c_str());
-            return;
+        if (!write_image_bytes(runtime, upload.buf + prefix_bytes,
+                               upload.currentSize - prefix_bytes)) {
+            server.rejectUpload();
         }
-        runtime.ota_state.addWritten(upload.currentSize);
         return;
     }
 
@@ -669,10 +776,14 @@ void handleUpload(Runtime &runtime, bool ota_busy) {
             LOGW("OTA", "upload exceeded total timeout before finalize");
             return;
         }
+        if (runtime.image_validator.finish() != OtaImageIdentity::Status::Compatible) {
+            reject_image_identity(runtime, server);
+            return;
+        }
         if (!runtime.ota_state.writtenMatchesExpected()) {
             fail_upload(runtime,
                         String("Firmware size mismatch: expected ") +
-                            String(ota.expected_size) + ", got " + String(ota.written_size));
+                            ota_size_text(ota.expected_size) + ", got " + ota_size_text(ota.written_size));
             LOGW("OTA", "size mismatch");
             return;
         }
@@ -750,7 +861,8 @@ void handleUpdate(Runtime &runtime, bool ota_busy) {
                                           ota.slot_size,
                                           ota.size_known,
                                           ota.expected_size,
-                                          ota.error);
+                                          ota.error,
+                                          ota.error_code);
 
     ArduinoJson::JsonDocument doc;
     WebOtaApiUtils::fillUpdateJson(doc.to<ArduinoJson::JsonObject>(), result);
