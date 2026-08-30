@@ -104,15 +104,22 @@ namespace Config {
     constexpr bool PANEL_CH422G_STARTUP_PREFLIGHT_ENABLED = false;
     constexpr bool PANEL_PREINIT_BUS_RECOVERY_ENABLED = false;
 
-    // Touch-offline, sampled stuck lines, and startup failures remain health
-    // and diagnostic signals, but do not authorize CH422G hard recovery,
-    // shared-bus shutdown, or restart through these paths. The guarded UI
-    // display-sync/stall policy is separate and remains unchanged pending a
-    // dedicated product decision.
+    // Touch-offline and startup failures remain health and diagnostic signals,
+    // but do not authorize CH422G hard recovery, shared-bus shutdown, or
+    // restart through these paths. Raw GPIO samples taken while normal panel
+    // owners are active are not proof of a stuck bus: they can land inside a
+    // valid I2C transaction. Keep them unqualified until a future monitor can
+    // close owner admission, drain the fault domain, and sample a quiet window.
+    // The guarded UI display-sync/stall policy is separate and remains
+    // unchanged pending a dedicated product decision.
     constexpr bool PANEL_RUNTIME_GT911_HARD_RECOVERY_ENABLED = false;
     constexpr bool PANEL_RUNTIME_TOUCH_AUTO_RESTART_ENABLED = false;
+    constexpr bool PANEL_RUNTIME_STUCK_LINE_CONFIRMATION_QUALIFIED = false;
     constexpr bool PANEL_RUNTIME_STUCK_BUS_AUTO_RECOVERY_ENABLED = false;
     constexpr bool PANEL_STARTUP_AUTO_RESTART_ENABLED = false;
+    static_assert(!PANEL_RUNTIME_STUCK_BUS_AUTO_RECOVERY_ENABLED ||
+                      PANEL_RUNTIME_STUCK_LINE_CONFIRMATION_QUALIFIED,
+                  "Stuck-bus recovery requires owner-qualified line confirmation");
     constexpr uint8_t LOG_LEVEL = 3; // 0=error, 1=warn, 2=info, 3=debug
     constexpr bool LOG_SERIAL_OUTPUT = true;
     constexpr bool LOG_SERIAL_SENSORS_OUTPUT = false;

@@ -3,6 +3,7 @@
 #include "I2cMock.h"
 #include "config/AppConfig.h"
 #include "core/Ch422gReadyProbe.h"
+#include "core/RuntimeI2cRecoveryPolicy.h"
 #include "core/SensorI2cBus.h"
 
 void setUp() {
@@ -92,6 +93,31 @@ void test_sensor_host_install_failure_is_reported() {
 #endif
 }
 
+void test_production_profile_does_not_treat_raw_panel_samples_as_faults() {
+    RuntimeI2cRecoveryPolicy::State state;
+    TEST_ASSERT_FALSE(Config::PANEL_RUNTIME_STUCK_LINE_CONFIRMATION_QUALIFIED);
+
+    for (uint8_t sample = 0;
+         sample < RuntimeI2cRecoveryPolicy::STUCK_LINE_SAMPLE_LIMIT + 2U;
+         ++sample) {
+        const RuntimeI2cRecoveryPolicy::Decision decision = state.poll(
+            static_cast<uint32_t>(sample) *
+                RuntimeI2cRecoveryPolicy::SAMPLE_INTERVAL_MS,
+            Config::PANEL_RUNTIME_STUCK_LINE_CONFIRMATION_QUALIFIED,
+            false,
+            false,
+            false,
+            true);
+        TEST_ASSERT_EQUAL_INT(
+            static_cast<int>(RuntimeI2cRecoveryPolicy::Decision::None),
+            static_cast<int>(decision));
+    }
+
+    TEST_ASSERT_EQUAL_UINT8(0, state.stuckLineSamples());
+    TEST_ASSERT_FALSE(state.sharedBusFaultConfirmed());
+    TEST_ASSERT_FALSE(state.handled());
+}
+
 int main(int, char **) {
     UNITY_BEGIN();
     RUN_TEST(test_panel_bus_remains_on_vendor_i2c0);
@@ -99,5 +125,6 @@ int main(int, char **) {
     RUN_TEST(test_sensor_host_initialization_matches_hardware_profile);
     RUN_TEST(test_sensor_host_configuration_failure_stops_before_install);
     RUN_TEST(test_sensor_host_install_failure_is_reported);
+    RUN_TEST(test_production_profile_does_not_treat_raw_panel_samples_as_faults);
     return UNITY_END();
 }

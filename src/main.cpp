@@ -440,6 +440,7 @@ void poll_runtime_i2c_recovery(uint32_t now_ms) {
 
     const RuntimeI2cRecoveryPolicy::Decision decision =
         runtime_i2c_recovery_policy.poll(now_ms,
+                                         Config::PANEL_RUNTIME_STUCK_LINE_CONFIRMATION_QUALIFIED,
                                          lines.idle(),
                                          actionable_touch_offline,
                                          boot_any_auto_recovery_boot(),
