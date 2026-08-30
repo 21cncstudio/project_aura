@@ -10,8 +10,8 @@ local branch `codex/post-115-cleanup`.
 Current reviewed firmware commit:
 
 ```text
-b44b7a6f72068e222e9a2c6ec0254eb8a0c71995
-Add production 7-inch hardware profile
+989b323785fba0b05c930ed95d234136c64902e4
+Harden build and native test identities
 ```
 
 This is not a release approval. The firmware source and both production builds
@@ -26,17 +26,18 @@ The cleanup did not copy the dirty COM7 diagnostic tree. It was reconstructed
 as a narrow commit chain on top of the current `origin/main`:
 
 ```text
-v1.1.5             8535723beddc696d974df94ea16111a5881f525a
-origin/main        da92fcce310924ec43f7be4378dee5ced0f40c48
-diagnostic beta    7437b2c782cc3e38e63e909f8ef29e30303facb4
-clean review HEAD  b44b7a6f72068e222e9a2c6ec0254eb8a0c71995
+v1.1.5              8535723beddc696d974df94ea16111a5881f525a
+origin/main         da92fcce310924ec43f7be4378dee5ced0f40c48
+diagnostic beta     7437b2c782cc3e38e63e909f8ef29e30303facb4
+clean firmware HEAD 989b323785fba0b05c930ed95d234136c64902e4
 ```
 
 Audited ranges:
 
 - `v1.1.5..origin/main`: 85 commits.
 - `origin/main..7437b2c`: 28 later diagnostic and recovery commits.
-- `origin/main..b44b7a6`: 16 clean commits.
+- `origin/main..989b323`: exactly 19 local commits: 18 implementation commits
+  plus the first audit-document commit.
 
 The three largest mixed commits were not transferred or reverted wholesale:
 
@@ -46,7 +47,7 @@ The three largest mixed commits were not transferred or reverted wholesale:
 | `bee515b` | 93 | 8278 | 550 | Rework only independently justified parts |
 | `51f07ec` | 86 | 11907 | 733 | Reject wholesale; replace only the proven 7-inch CH422G behavior |
 
-## Clean commit chain
+## Clean implementation chain
 
 | Clean commit | Result |
 | --- | --- |
@@ -66,9 +67,12 @@ The three largest mixed commits were not transferred or reverted wholesale:
 | `5375b52` | Disable unproven automatic panel recovery actions |
 | `3fd2a88` | Add explicit hardware-profile build identities |
 | `b44b7a6` | Add the production 7-inch dual-I2C profile |
+| `43c5f85` | Require the sensor host for OTA and Last Known Good validation |
+| `989b323` | Harden build identity and native-launcher self-tests |
 
 Each fix is independently reviewable. None of these commits imports Aura Link
-or Aura Hub code.
+or Aura Hub code. The audit-only `437c4e5` commit is intentionally omitted from
+the implementation table.
 
 ## Audit of v1.1.5 through origin/main
 
@@ -186,8 +190,9 @@ check also rejects future external-sensor drivers that use panel-I2C constants.
 
 ## Frequency and panel decisions
 
-The panel bus remains at 100 kHz. This value predates the COM7 experiments in
-the Project Aura configuration, so it is not leftover diagnostic throttling.
+The panel bus remains at 100 kHz. Direct comparison of `v1.1.5`, `origin/main`,
+and the current custom-board configuration confirms the same value, so it is
+not leftover diagnostic throttling.
 The pinned Waveshare library can use a 400 kHz panel bus, but there is no
 current product need or controlled physical validation that justifies changing
 the stable Project Aura baseline during this cleanup.
@@ -197,7 +202,8 @@ SDA44/SCL6 route. Its internal ESP32 pull-ups remain disabled because the
 attached modules provide external 3.3 V pull-ups.
 
 The display PCLK remains 16 MHz. That is vendor-equivalent for the selected
-7-inch panel and was not reduced to the rejected 14 MHz experiment.
+7-inch panel, matches `v1.1.5`, and was not reduced to the rejected 14 MHz
+experiment.
 
 ## CH422G scope
 
@@ -239,15 +245,58 @@ The 7-inch profile treats panel I2C0 and sensor I2C1 as separate fault domains:
   to be idle.
 - On 4.3-inch hardware the same operation remains fail-closed across the shared
   panel and sensor owners.
+- OTA validation and Last Known Good promotion require the sensor I2C host to
+  be ready. This checks host installation only: absence or NACK of any
+  individual optional RTC, sensor, or DAC does not invalidate the image.
+
+## Final holistic review follow-up
+
+Three confirmed review findings were fixed after the first audit document:
+
+1. A 7-inch boot with a failed I2C1 driver installation could previously
+   confirm OTA and accumulate Last Known Good dwell through a healthy display.
+   `43c5f85` adds the sensor-host structural gate to both decisions. The 4.3-inch
+   result is unchanged because its sensor readiness follows the panel host.
+2. The canonical launcher had grown from six to nine environments, while its
+   Python self-test and `TESTING.md` still expected six. `989b323` updates the
+   inventory checks and documents all topology and CH422G suites.
+3. Build identity ignored untracked files. An untracked source or header could
+   therefore participate in a binary whose ID still looked commit-clean.
+   `989b323` now includes untracked files in dirty detection and has an
+   integration regression test.
+
+The GPIO43/R107 source comment was also narrowed to the physical evidence:
+the old route failed under combined load, while R107 remains the leading
+electrical explanation rather than an independently proven cause.
+
+Independent final passes found no additional P0-P2 regressions in the cleaned
+commit range after these fixes.
+
+## Known pre-v1.1.5 concurrency debt
+
+The review reconfirmed one real baseline issue outside the audited regression
+range: `StorageManager::config()` exposes mutable references while config reads,
+mutations, and persistence can run on different tasks/cores. This behavior was
+already present in `v1.1.5`; `origin/main..989b323` did not add or materially
+strengthen that failure path.
+
+The LKG mutex serializes durable writes and promotion of the already persisted
+config bytes. It does not make arbitrary `config()` access thread-safe, and the
+code must not be described that way. A correct repair needs a snapshot API for
+readers and a locked transaction API covering mutation, persistence, rollback,
+and WiFi/MQTT certificate sidecars. Locking only `saveConfig()` or only a few
+setters would leave unsafe references and create a false guarantee, so that API
+migration is deliberately a separate focused task rather than a partial change
+in this hardware cleanup.
 
 ## Build and automated test evidence
 
-Both production environments were rebuilt from clean commit `b44b7a6`:
+Both production environments were rebuilt from clean commit `989b323`:
 
 | Environment | Build ID | RAM | Flash | Firmware SHA-256 |
 | --- | --- | ---: | ---: | --- |
-| `project_aura` | `b44b7a6` | 157860 / 327680 | 4297230 / 6553600 | `98A400D4634C20B805935C8CDEF066563C86ACBC613C17C3CBD6D21333CAD7D3` |
-| `project_aura_7` | `b44b7a6-7_dual_i2c_scl6` | 157956 / 327680 | 4291598 / 6553600 | `B0A8AA65351000D5163BECA1CF6798E4867B62FB89C0994E975C7DEC3167360D` |
+| `project_aura` | `989b323` | 157860 / 327680 | 4297262 / 6553600 | `4EAD3820F17041846E3C0417FA1766240322DBE5F029E82EDF497D7D09E7FFAD` |
+| `project_aura_7` | `989b323-7_dual_i2c_scl6` | 157956 / 327680 | 4291630 / 6553600 | `0FB4C0FD2A2CE3EB8497C8A94AE03FEB2C94E5E269DC0132792F360993F558EF` |
 
 Both builds passed:
 
@@ -260,12 +309,14 @@ Both builds passed:
 The post-commit canonical native matrix passed 816 of 816 cases:
 
 ```text
-.pio/native-tests/reports/20260830T044301Z-d8f84407/launcher.json
+.pio/native-tests/reports/20260830T052619Z-ce8100aa/launcher.json
 status=PASSED
 ```
 
 The total includes the main 740-case suite plus dedicated SFA30, SFA40, DFR,
 GP8403, 4.3 topology, 7-inch topology, CH422G reset, and startup-policy suites.
+All 35 Python tooling self-tests also passed, including launcher inventory and
+untracked-build-input identity coverage.
 
 `git diff --check` and `git diff --cached --check` were clean before the
 firmware commit. The worktree was clean after the post-commit builds and tests.
@@ -303,7 +354,7 @@ useful evidence, not a completed release qualification. The original handoff
 requested a longer soak and repeat exact-normal-image cold boots.
 
 The dirty diagnostic binaries and their logs prove hardware observations only.
-They do not prove that the clean `b44b7a6` binaries were physically flashed.
+They do not prove that the clean `989b323` binaries were physically flashed.
 
 Remaining physical validation gaps:
 
