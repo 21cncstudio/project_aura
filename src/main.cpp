@@ -11,6 +11,7 @@
 #include "config/AppData.h"
 
 #include "core/AppInit.h"
+#include "core/AppVersion.h"
 #include "core/BoardInit.h"
 #include "core/BoardRecoveryPolicy.h"
 #include "core/BacklightWakeBreadcrumbs.h"
@@ -482,6 +483,8 @@ void setup()
     Logger::begin(Serial, static_cast<Logger::Level>(Config::LOG_LEVEL));
     Logger::setSerialOutputEnabled(Config::LOG_SERIAL_OUTPUT);
     Logger::setSensorsSerialOutputEnabled(Config::LOG_SERIAL_SENSORS_OUTPUT);
+    LOGI("Main", "hardware_profile=%s build_id=%s",
+         AppVersion::hardwareProfile(), AppVersion::buildId());
     OtaRollback::logCurrentAppState();
     LOGI("Main", "Arduino loop task stack size: %u bytes",
          static_cast<unsigned>(getArduinoLoopTaskStackSize()));

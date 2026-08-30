@@ -83,7 +83,7 @@ size_t copyRecentFromBuffer(const Logger::RecentEntry *buffer,
 }
 }
 
-HardwareSerial *Logger::serial_ = &Serial;
+Print *Logger::output_ = &Serial;
 Logger::Level Logger::level_ = Logger::Info;
 bool Logger::serial_output_enabled_ = true;
 bool Logger::sensors_serial_output_enabled_ = true;
@@ -95,8 +95,8 @@ size_t Logger::recent_alert_head_ = 0;
 size_t Logger::recent_alert_count_ = 0;
 uint32_t Logger::recent_alert_seq_ = 0;
 
-void Logger::begin(HardwareSerial &serial, Level level) {
-    serial_ = &serial;
+void Logger::begin(Print &output, Level level) {
+    output_ = &output;
     level_ = level;
 }
 
@@ -154,22 +154,22 @@ void Logger::vlog(Level level, const char *tag, const char *fmt, va_list args) {
     char buffer[kLogBufferSize];
     vsnprintf(buffer, sizeof(buffer), fmt, args);
 
-    bool print_to_serial = (serial_ && serial_output_enabled_);
+    bool print_to_serial = (output_ && serial_output_enabled_);
     if (print_to_serial && !sensors_serial_output_enabled_ && tag && strcmp(tag, "Sensors") == 0) {
         print_to_serial = false;
     }
 
     if (print_to_serial) {
-        serial_->print('[');
-        serial_->print(levelName(level));
-        serial_->print(']');
+        output_->print('[');
+        output_->print(levelName(level));
+        output_->print(']');
         if (tag && tag[0] != '\0') {
-            serial_->print('[');
-            serial_->print(tag);
-            serial_->print(']');
+            output_->print('[');
+            output_->print(tag);
+            output_->print(']');
         }
-        serial_->print(' ');
-        serial_->println(buffer);
+        output_->print(' ');
+        output_->println(buffer);
     }
 
     storeRecent(level, tag, buffer);

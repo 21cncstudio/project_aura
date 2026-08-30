@@ -11,6 +11,7 @@ namespace AppVersion {
 bool isStableRelease();
 const char *shortVersion();
 const char *buildId();
+const char *hardwareProfile();
 const char *fullVersion();
 
 } // namespace AppVersion

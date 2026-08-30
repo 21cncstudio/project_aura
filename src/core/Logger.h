@@ -27,7 +27,7 @@ public:
         char message[192] = {0};
     };
 
-    static void begin(HardwareSerial &serial = Serial, Level level = Info);
+    static void begin(Print &output = Serial, Level level = Info);
     static void setLevel(Level level);
     static Level level();
     static void setSerialOutputEnabled(bool enabled);
@@ -48,7 +48,7 @@ private:
     static void vlog(Level level, const char *tag, const char *fmt, va_list args);
     static void storeRecent(Level level, const char *tag, const char *message);
 
-    static HardwareSerial *serial_;
+    static Print *output_;
     static Level level_;
     static bool serial_output_enabled_;
     static bool sensors_serial_output_enabled_;
