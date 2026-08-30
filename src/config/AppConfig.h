@@ -49,6 +49,52 @@ namespace Config {
     constexpr uint32_t I2C_FREQ_HZ = 100000;
     constexpr uint32_t I2C_TIMEOUT_MS = 50;
 
+    // The Waveshare panel keeps its vendor I2C0 wiring on both hardware
+    // profiles. The 7-inch Aura profile moves only the external sensor chain
+    // to I2C1: SDA is H3 EX_RXD/GPIO44 and SCL is J8 Sensor AD/GPIO6. GPIO43
+    // must stay disconnected because the H3 EX_TXD path contains R107 (499
+    // ohms), which was shown to overload the sensor bus with the GP8403 fitted.
+#ifndef AURA_HARDWARE_PROFILE_7
+#define AURA_HARDWARE_PROFILE_7 0
+#endif
+#if AURA_HARDWARE_PROFILE_7 != 0 && AURA_HARDWARE_PROFILE_7 != 1
+#error "AURA_HARDWARE_PROFILE_7 must be 0 or 1"
+#endif
+#if AURA_HARDWARE_PROFILE_7
+    constexpr bool SENSOR_I2C_SEPARATE = true;
+    constexpr i2c_port_t SENSOR_I2C_PORT = I2C_NUM_1;
+    constexpr uint8_t SENSOR_I2C_SDA_PIN = 44;
+    constexpr uint8_t SENSOR_I2C_SCL_PIN = 6;
+    constexpr bool SENSOR_I2C_INTERNAL_PULLUPS = false;
+#else
+    constexpr bool SENSOR_I2C_SEPARATE = false;
+    constexpr i2c_port_t SENSOR_I2C_PORT = I2C_PORT;
+    constexpr uint8_t SENSOR_I2C_SDA_PIN = I2C_SDA_PIN;
+    constexpr uint8_t SENSOR_I2C_SCL_PIN = I2C_SCL_PIN;
+    constexpr bool SENSOR_I2C_INTERNAL_PULLUPS = true;
+#endif
+    constexpr uint32_t SENSOR_I2C_FREQ_HZ = 100000;
+    constexpr uint32_t SENSOR_I2C_TIMEOUT_MS = I2C_TIMEOUT_MS;
+    static_assert(I2C_PORT == I2C_NUM_0,
+                  "Panel I2C must remain on the vendor I2C0 host");
+    static_assert(I2C_SDA_PIN == 8 && I2C_SCL_PIN == 9,
+                  "Panel I2C must remain on GPIO8/GPIO9");
+#if AURA_HARDWARE_PROFILE_7
+    static_assert(SENSOR_I2C_PORT == I2C_NUM_1,
+                  "The 7-inch sensor bus must use I2C1");
+    static_assert(SENSOR_I2C_SDA_PIN == 44 && SENSOR_I2C_SCL_PIN == 6,
+                  "The 7-inch sensor bus must use GPIO44/GPIO6");
+    static_assert(SENSOR_I2C_SDA_PIN != I2C_SDA_PIN &&
+                      SENSOR_I2C_SDA_PIN != I2C_SCL_PIN &&
+                      SENSOR_I2C_SCL_PIN != I2C_SDA_PIN &&
+                      SENSOR_I2C_SCL_PIN != I2C_SCL_PIN,
+                  "Panel and sensor buses must not share pins");
+    static_assert(!SENSOR_I2C_INTERNAL_PULLUPS,
+                  "The 7-inch sensor chain provides its own pull-ups");
+#endif
+    static_assert(SENSOR_I2C_FREQ_HZ == 100000,
+                  "Validated sensor I2C frequency is 100 kHz");
+
     // Keep production startup on the vendor-owned panel path. Earlier COM7
     // experiments added an extra CH422G host/write sequence and GPIO clock
     // recovery before Board::begin(); neither action stabilized the physical

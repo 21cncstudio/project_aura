@@ -25,6 +25,9 @@ DEFAULT_INVOCATIONS = (
     ("native_test_sfa40_driver", ("test_sfa40_driver",)),
     ("native_test_dfr_optional_gas_driver", ("test_dfr_optional_gas_driver",)),
     ("native_test_gp8403_driver", ("test_gp8403_driver",)),
+    ("native_test_i2c_4_3_profile", ("test_i2c_topology", "test_sensor_i2c_routing")),
+    ("native_test_i2c_7_profile", ("test_i2c_topology", "test_sensor_i2c_routing")),
+    ("native_test_ch422g_7_profile", ("test_ch422g_7_reset",)),
     ("native_test_startup_probe_policy", ("test_startup_probe_policy",)),
 )
 RUNTIME_DLLS = ("libgcc_s_seh-1.dll", "libstdc++-6.dll", "libwinpthread-1.dll")

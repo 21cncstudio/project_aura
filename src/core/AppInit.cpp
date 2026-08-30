@@ -181,38 +181,51 @@ void AppInit::initManagersAndConfig(Context &ctx, StorageManager::BootAction boo
     ctx.connectivityRuntime.update(ctx.networkManager, ctx.mqttManager);
 }
 
-bool AppInit::initBoardAndPeripherals(Context &ctx, esp_panel::board::Board *board) {
+bool AppInit::initBoardAndPeripherals(Context &ctx,
+                                      esp_panel::board::Board *board,
+                                      bool sensor_i2c_ready) {
     ctx.pressureHistory.load(ctx.storage, ctx.currentData);
     ctx.chartsHistory.load(ctx.storage);
-    if (board == nullptr) {
-        LOGE("Main", "Board unavailable, skip display/backlight/touch init");
-        ctx.webRuntimeState.update(ctx.currentData, false, ctx.fanControl);
-        ctx.chartsRuntimeState.update(ctx.chartsHistory);
-        return false;
-    }
-    ctx.backlightManager.attachBacklight(board->getBacklight());
-    ctx.timeManager.initRtc();
-    ctx.mqttManager.setSystemTimeValid(ctx.timeManager.isSystemTimeValid());
-    ctx.uiController.apply_auto_night_now();
 
-    BootHelpers::logGt911Address();
-    ctx.sensorManager.begin(ctx.storage, ctx.temp_offset, ctx.hum_offset);
-    ctx.fanControl.begin(ctx.storage.config().dac_auto_mode,
-                         ctx.storage.config().dac_auto_armed);
-    String dac_auto_json;
-    if (ctx.storage.loadText(StorageManager::kDacAutoPath, dac_auto_json)) {
-        DacAutoConfig dac_auto;
-        if (DacAutoConfigJson::deserialize(dac_auto_json, dac_auto)) {
-            ctx.fanControl.setAutoConfig(dac_auto);
-            LOGI("Main", "Loaded DAC auto config");
-        } else {
-            LOGW("Main", "DAC auto config parse failed, using defaults");
+    if (board != nullptr) {
+        ctx.backlightManager.attachBacklight(board->getBacklight());
+    } else {
+        LOGE("Main", "Board unavailable, skip display/backlight/touch init");
+    }
+
+    if (sensor_i2c_ready) {
+        ctx.timeManager.initRtc();
+        ctx.mqttManager.setSystemTimeValid(ctx.timeManager.isSystemTimeValid());
+    }
+
+    if (board != nullptr) {
+        ctx.uiController.apply_auto_night_now();
+        BootHelpers::logGt911Address();
+    }
+
+    if (sensor_i2c_ready) {
+        ctx.sensorManager.begin(ctx.storage, ctx.temp_offset, ctx.hum_offset);
+        ctx.fanControl.begin(ctx.storage.config().dac_auto_mode,
+                             ctx.storage.config().dac_auto_armed);
+        String dac_auto_json;
+        if (ctx.storage.loadText(StorageManager::kDacAutoPath, dac_auto_json)) {
+            DacAutoConfig dac_auto;
+            if (DacAutoConfigJson::deserialize(dac_auto_json, dac_auto)) {
+                ctx.fanControl.setAutoConfig(dac_auto);
+                LOGI("Main", "Loaded DAC auto config");
+            } else {
+                LOGW("Main", "DAC auto config parse failed, using defaults");
+            }
         }
+    } else {
+        ctx.timeManager.disableSharedI2cRuntime();
+        ctx.sensorManager.disableSharedI2c();
+        LOGW("Main", "Sensor/RTC/DAC startup skipped: sensor I2C unavailable");
     }
     ctx.webRuntimeState.update(ctx.currentData, ctx.sensorManager.isWarmupActive(), ctx.fanControl);
     ctx.chartsRuntimeState.update(ctx.chartsHistory);
 
-    return true;
+    return board != nullptr;
 }
 
 AppInit::LvglInitResult AppInit::initLvglAndUi(Context &ctx, esp_panel::board::Board *board) {

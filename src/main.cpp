@@ -30,6 +30,8 @@
 #include "core/RuntimeI2cRecoveryPolicy.h"
 #include "core/RuntimeReadinessPolicy.h"
 #include "core/SafeRestart.h"
+#include "core/SensorI2cBus.h"
+#include "core/I2cFaultDomainPolicy.h"
 #include "core/SharedI2cShutdownPolicy.h"
 #include "core/I2cBusRecovery.h"
 #include "core/LastGoodHealthPolicy.h"
@@ -156,7 +158,8 @@ bool ota_pause_wait_warned = false;
 bool ota_resume_pending = false;
 bool network_plane_running = false;
 bool board_ready = false;
-bool i2c_runtime_ready = false;
+bool panel_i2c_ready = false;
+bool sensor_i2c_ready = false;
 bool lvgl_ready = false;
 bool operational_ready = false;
 bool restart_task_ready = false;
@@ -176,7 +179,7 @@ void observe_last_good_health(uint32_t now_ms, bool force_transient_pause) {
     LastGoodHealthPolicy::Inputs inputs = {};
     inputs.board_ready = board_ready;
     inputs.lvgl_ready = lvgl_ready && uiController.isLvglReady();
-    inputs.display_bus_ready = i2c_runtime_ready;
+    inputs.display_bus_ready = panel_i2c_ready;
     inputs.critical_runtime_fault =
         runtime_i2c_recovery_policy.sharedBusFaultConfirmed() ||
         wake_fail_closed;
@@ -239,41 +242,76 @@ bool quiesce_lvgl_for_shared_i2c(const char *operation) {
     return true;
 }
 
-void disable_runtime_shared_i2c_owners() {
-    // Close every independent runtime entry point before waiting for LVGL.
-    // The touch gate is first so no new input callback can be generated while
-    // the remaining owners drain an already admitted bounded transaction.
-    i2c_runtime_ready = false;
+void disable_runtime_panel_i2c_owners() {
+    panel_i2c_ready = false;
     lvgl_port_disable_touch_i2c();
-    timeManager.disableSharedI2cRuntime();
     backlightManager.disableSharedBus();
+}
+
+void disable_runtime_sensor_i2c_owners() {
+    sensor_i2c_ready = false;
+    timeManager.disableSharedI2cRuntime();
     sensorManager.disableSharedI2c();
 }
 
-bool drain_runtime_shared_i2c_owners() {
+bool drain_runtime_panel_i2c_owners() {
     const bool touch_idle =
         lvgl_port_wait_touch_i2c_idle(SHARED_I2C_OWNER_DRAIN_TIMEOUT_MS);
-    const bool rtc_idle =
-        timeManager.finalizeSharedI2cRuntimeDisable(SHARED_I2C_OWNER_DRAIN_TIMEOUT_MS);
     const bool backlight_idle =
         backlightManager.waitForSharedBusIdle(SHARED_I2C_OWNER_DRAIN_TIMEOUT_MS);
+    if (!touch_idle || !backlight_idle) {
+        LOGE("I2C",
+             "panel-bus owner drain timed out (touch=%s backlight=%s)",
+             touch_idle ? "idle" : "busy",
+             backlight_idle ? "idle" : "busy");
+        return false;
+    }
+    return true;
+}
+
+bool drain_runtime_sensor_i2c_owners() {
+    const bool rtc_idle =
+        timeManager.finalizeSharedI2cRuntimeDisable(SHARED_I2C_OWNER_DRAIN_TIMEOUT_MS);
     const bool sensors_idle =
         sensorManager.waitForSharedI2cIdle(SHARED_I2C_SENSOR_DRAIN_TIMEOUT_MS);
-    if (!touch_idle || !rtc_idle || !backlight_idle || !sensors_idle) {
+    if (!rtc_idle || !sensors_idle) {
         LOGE("I2C",
-             "shared-bus owner drain timed out (touch=%s rtc=%s backlight=%s sensors=%s)",
-             touch_idle ? "idle" : "busy",
+             "sensor-bus owner drain timed out (rtc=%s sensors=%s)",
              rtc_idle ? "idle" : "busy",
-             backlight_idle ? "idle" : "busy",
              sensors_idle ? "idle" : "busy");
         return false;
     }
     return true;
 }
 
-bool wait_for_shared_i2c_release_before_restart() {
-    const gpio_num_t sda = static_cast<gpio_num_t>(I2C_SDA_PIN);
-    const gpio_num_t scl = static_cast<gpio_num_t>(I2C_SCL_PIN);
+void disable_runtime_panel_fault_domain() {
+    disable_runtime_panel_i2c_owners();
+    if (I2cFaultDomainPolicy::panelFailureDisablesSensorDomain(
+            Config::SENSOR_I2C_SEPARATE)) {
+        disable_runtime_sensor_i2c_owners();
+    }
+}
+
+bool drain_runtime_panel_fault_domain() {
+    const bool panel_idle = drain_runtime_panel_i2c_owners();
+    const bool sensor_idle =
+        I2cFaultDomainPolicy::panelFailureDisablesSensorDomain(
+            Config::SENSOR_I2C_SEPARATE)
+            ? drain_runtime_sensor_i2c_owners()
+            : true;
+    return panel_idle && sensor_idle;
+}
+
+void disable_runtime_shared_i2c_owners() {
+    // Controlled shutdown closes both physical domains. On the 4.3-inch
+    // profile the calls still converge on the one shared controller.
+    disable_runtime_panel_i2c_owners();
+    disable_runtime_sensor_i2c_owners();
+}
+
+bool wait_for_i2c_idle_window(const char *domain,
+                              gpio_num_t sda,
+                              gpio_num_t scl) {
     const uint32_t started_ms = millis();
     uint32_t idle_started_ms = 0U;
     bool idle_window_active = false;
@@ -290,7 +328,8 @@ bool wait_for_shared_i2c_release_before_restart() {
             if (static_cast<uint32_t>(millis() - idle_started_ms) >=
                 RESTART_I2C_STABLE_IDLE_MS) {
                 LOGI("Restart",
-                     "shared I2C released before restart (stable=%lu ms wait=%lu ms)",
+                     "%s I2C idle before storage teardown (stable=%lu ms wait=%lu ms)",
+                     domain,
                      static_cast<unsigned long>(RESTART_I2C_STABLE_IDLE_MS),
                      static_cast<unsigned long>(millis() - started_ms));
                 return true;
@@ -303,7 +342,8 @@ bool wait_for_shared_i2c_release_before_restart() {
 
     lines = I2cBusRecovery::sample(sda, scl);
     LOGE("Restart",
-         "shared I2C did not release before restart (SDA=%u SCL=%u wait=%lu ms)",
+         "%s I2C has no idle window before storage teardown (SDA=%u SCL=%u wait=%lu ms)",
+         domain,
          lines.sda_high ? 1U : 0U,
          lines.scl_high ? 1U : 0U,
          static_cast<unsigned long>(millis() - started_ms));
@@ -364,7 +404,7 @@ bool try_runtime_gt911_recovery() {
 }
 
 void poll_runtime_i2c_recovery(uint32_t now_ms) {
-    if (!i2c_runtime_ready ||
+    if (!panel_i2c_ready ||
         static_cast<uint32_t>(now_ms - boot_start_ms) < RUNTIME_I2C_MONITOR_START_MS) {
         return;
     }
@@ -403,22 +443,23 @@ void poll_runtime_i2c_recovery(uint32_t now_ms) {
                                          boot_any_auto_recovery_boot(),
                                          restart_task_ready);
     if (runtime_i2c_recovery_policy.sharedBusFaultConfirmed() &&
-        i2c_runtime_ready &&
+        panel_i2c_ready &&
         Config::PANEL_RUNTIME_STUCK_BUS_AUTO_RECOVERY_ENABLED) {
-        disable_runtime_shared_i2c_owners();
+        disable_runtime_panel_fault_domain();
 
         // Quiesce both restart and suppressed paths immediately. A controlled
         // restart can be deferred by an active OTA upload, so leaving LVGL
         // running here would otherwise reopen touch and direct UI I2C paths.
         const bool lvgl_quiesced =
             quiesce_lvgl_for_shared_i2c("runtime shared-I2C shutdown");
-        const bool owners_drained = drain_runtime_shared_i2c_owners();
+        const bool owners_drained = drain_runtime_panel_fault_domain();
 
         // A suppressed recovery has no later restart shutdown path. Make one
         // bounded best-effort attempt to clear retained DAC output, but only
         // after every gated runtime shared-I2C owner has drained. CH422G SD
         // card-select writes are startup/teardown-only and cannot run here.
-        if (decision != RuntimeI2cRecoveryPolicy::Decision::Restart) {
+        if (decision != RuntimeI2cRecoveryPolicy::Decision::Restart &&
+            !Config::SENSOR_I2C_SEPARATE) {
             const SharedI2cShutdownPolicy::SafeOutputDecision safe_output_decision =
                 SharedI2cShutdownPolicy::decideSafeOutput(lvgl_quiesced,
                                                           owners_drained);
@@ -587,7 +628,12 @@ void setup()
     auto *board = board_result.board;
     runtime_board = board;
     board_ready = board_result.ready();
-    i2c_runtime_ready = board_ready;
+    panel_i2c_ready = board_ready;
+    const SensorI2cBus::Result sensor_bus_result = SensorI2cBus::begin();
+    sensor_i2c_ready = I2cFaultDomainPolicy::sensorRuntimeReady(
+        Config::SENSOR_I2C_SEPARATE,
+        panel_i2c_ready,
+        sensor_bus_result.ready());
     BootDiagnostics::state.i2c_status = board_result.last_recovery.status;
     BootDiagnostics::state.sda_high = board_result.last_recovery.after.sda_high;
     BootDiagnostics::state.scl_high = board_result.last_recovery.after.scl_high;
@@ -621,7 +667,7 @@ void setup()
         LOGE("Main",
              "Board unavailable after %u rounds; continuing startup in headless mode",
              static_cast<unsigned>(board_result.rounds));
-        LOGW("Main", "Runtime I2C polling suppressed: board/I2C unavailable");
+        LOGW("Main", "Panel I2C runtime suppressed: board unavailable");
     } else if (boot_board_auto_recovery_reboot) {
         LOGI("Main", "Board recovered after automatic restart");
     }
@@ -657,13 +703,13 @@ void setup()
     };
 
     AppInit::initManagersAndConfig(init_ctx, boot_action);
-    AppInit::initBoardAndPeripherals(init_ctx, board);
-    if (!i2c_runtime_ready) {
-        // Board initialization is the only path that opens these managers.
-        // Keep headless management services available without allowing a web
-        // or UI callback to probe a bus which never became operational.
-        disable_runtime_shared_i2c_owners();
-        (void)drain_runtime_shared_i2c_owners();
+    AppInit::initBoardAndPeripherals(init_ctx, board, sensor_i2c_ready);
+    if (!panel_i2c_ready) {
+        // On 7-inch hardware, a failed panel must not take the independent
+        // RTC/sensor/DAC domain offline. The 4.3-inch profile still closes all
+        // owners because they share the panel controller.
+        disable_runtime_panel_fault_domain();
+        (void)drain_runtime_panel_fault_domain();
     }
     sdCardManager.begin(board);
     dailyExtremaHistory.begin(sdCardManager, temp_units_c);
@@ -757,20 +803,34 @@ void loop()
             disable_runtime_shared_i2c_owners();
             const bool lvgl_quiesced =
                 quiesce_lvgl_for_shared_i2c("DAC safe write for restart");
-            const bool owners_drained = drain_runtime_shared_i2c_owners();
-            if (owners_drained) {
+            const bool panel_owners_drained = drain_runtime_panel_i2c_owners();
+            const bool sensor_owners_drained = drain_runtime_sensor_i2c_owners();
+            // On 7-inch hardware, panel traffic cannot overlap the independent
+            // sensor host. The shared 4.3-inch profile still requires every
+            // panel and sensor owner to be idle before another transaction.
+            const bool sensor_bus_exclusive =
+                I2cFaultDomainPolicy::sensorBusExclusiveForShutdown(
+                    Config::SENSOR_I2C_SEPARATE,
+                    panel_owners_drained,
+                    sensor_owners_drained);
+            if (sensor_bus_exclusive) {
                 if (!sensorManager.stopHchoForRestart()) {
                     LOGW("Restart", "active HCHO measurement did not stop cleanly");
                 }
             } else {
-                LOGW("Restart", "active HCHO stop skipped: shared-I2C owners still active");
+                LOGW("Restart", "active HCHO stop skipped: sensor-bus owners still active");
             }
+            const bool safe_output_lvgl_quiesced =
+                I2cFaultDomainPolicy::lvglPauseSatisfiedForSensorOutput(
+                    Config::SENSOR_I2C_SEPARATE,
+                    lvgl_quiesced);
             const SharedI2cShutdownPolicy::SafeOutputDecision safe_output_decision =
-                SharedI2cShutdownPolicy::decideSafeOutput(lvgl_quiesced,
-                                                          owners_drained);
+                SharedI2cShutdownPolicy::decideSafeOutput(
+                    safe_output_lvgl_quiesced,
+                    sensor_bus_exclusive);
             if (!SharedI2cShutdownPolicy::shouldAttemptSafeOutput(
                     safe_output_decision)) {
-                LOGE("Restart", "DAC safe output skipped: shared-I2C owners still active");
+                LOGE("Restart", "DAC safe output skipped: sensor bus is not exclusive");
             } else {
                 if (SharedI2cShutdownPolicy::shouldWarnUnconfirmedLvglPause(
                         safe_output_decision)) {
@@ -781,7 +841,16 @@ void loop()
                     LOGW("Restart", "DAC safe output could not be confirmed before restart");
                 }
             }
-            (void)wait_for_shared_i2c_release_before_restart();
+            if (Config::SENSOR_I2C_SEPARATE) {
+                (void)wait_for_i2c_idle_window(
+                    "sensor",
+                    static_cast<gpio_num_t>(Config::SENSOR_I2C_SDA_PIN),
+                    static_cast<gpio_num_t>(Config::SENSOR_I2C_SCL_PIN));
+            }
+            (void)wait_for_i2c_idle_window(
+                "panel",
+                static_cast<gpio_num_t>(Config::I2C_SDA_PIN),
+                static_cast<gpio_num_t>(Config::I2C_SCL_PIN));
             // This remains safe after a failed or only partially completed
             // lvgl_port_init(). Forced suspension is last, after the bounded
             // DAC transaction, so it cannot strand the I2C driver mutex.
@@ -808,7 +877,7 @@ void loop()
     // resume that restarts touch traffic.
     const bool lvgl_runtime_available =
         RuntimeReadinessPolicy::canManageLvglRuntime(
-            i2c_runtime_ready, lvgl_ready, uiController.isLvglReady());
+            panel_i2c_ready, lvgl_ready, uiController.isLvglReady());
     const uint32_t loop_now = millis();
     if (ota_busy && !ota_window_active) {
         ota_window_active = true;
@@ -912,7 +981,7 @@ void loop()
 
     bool system_time_trusted = timeManager.isSystemTimeTrusted();
     SensorManager::PollResult sensor_poll{};
-    if (!wake_background_paused && i2c_runtime_ready) {
+    if (!wake_background_paused && sensor_i2c_ready) {
         sensor_poll = sensorManager.poll(currentData,
                                          storage,
                                          pressureHistory,
@@ -949,7 +1018,7 @@ void loop()
         }
     }
     if (!wake_background_paused) {
-        TimeManager::PollResult time_poll = timeManager.poll(now, i2c_runtime_ready);
+        TimeManager::PollResult time_poll = timeManager.poll(now, sensor_i2c_ready);
         mqttManager.setSystemTimeValid(timeManager.isSystemTimeValid());
         uiController.onTimePoll(time_poll);
     }
@@ -963,7 +1032,7 @@ void loop()
     if (!wake_background_paused) {
         dailyExtremaHistory.poll(now);
     }
-    if (!wake_background_paused && i2c_runtime_ready) {
+    if (!wake_background_paused && sensor_i2c_ready) {
         fanControl.poll(now, &currentData, sensorManager.isWarmupActive(), displayThresholds.snapshot());
     }
     const FanControl::Snapshot fan_snapshot = fanControl.snapshot();

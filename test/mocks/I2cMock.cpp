@@ -35,13 +35,26 @@ struct DeviceState {
 std::array<DeviceState, 256> g_devices{};
 uint32_t g_command_advance_ms = 0;
 uint32_t g_transaction_count = 0;
+std::array<uint32_t, 2> g_port_transaction_counts{};
+i2c_port_t g_last_transaction_port = -1;
+uint32_t g_parameter_config_count = 0;
+uint32_t g_driver_install_count = 0;
+i2c_port_t g_configured_port = -1;
+i2c_port_t g_installed_port = -1;
+i2c_config_t g_configured_config{};
+esp_err_t g_parameter_config_result = ESP_OK;
+esp_err_t g_driver_install_result = ESP_OK;
 
 DeviceState &device(uint8_t addr) {
     return g_devices[addr];
 }
 
-void noteTransaction() {
+void noteTransaction(i2c_port_t port) {
     ++g_transaction_count;
+    g_last_transaction_port = port;
+    if (port >= 0 && static_cast<size_t>(port) < g_port_transaction_counts.size()) {
+        ++g_port_transaction_counts[static_cast<size_t>(port)];
+    }
     advanceMillis(g_command_advance_ms);
 }
 
@@ -59,6 +72,15 @@ void reset() {
     g_devices = {};
     g_command_advance_ms = 0;
     g_transaction_count = 0;
+    g_port_transaction_counts = {};
+    g_last_transaction_port = -1;
+    g_parameter_config_count = 0;
+    g_driver_install_count = 0;
+    g_configured_port = -1;
+    g_installed_port = -1;
+    g_configured_config = {};
+    g_parameter_config_result = ESP_OK;
+    g_driver_install_result = ESP_OK;
 }
 
 void setDevicePresent(uint8_t addr, bool present) {
@@ -115,6 +137,14 @@ void setWriteFailure(uint8_t addr, uint8_t reg, bool fail) {
     device(addr).write_fail[reg] = fail;
 }
 
+void setParameterConfigResult(esp_err_t result) {
+    g_parameter_config_result = result;
+}
+
+void setDriverInstallResult(esp_err_t result) {
+    g_driver_install_result = result;
+}
+
 uint8_t getRegister(uint8_t addr, uint8_t reg) {
     return device(addr).regs[reg];
 }
@@ -125,6 +155,37 @@ uint32_t addressOnlyProbeCount(uint8_t addr) {
 
 uint32_t transactionCount() {
     return g_transaction_count;
+}
+
+uint32_t transactionCount(i2c_port_t port) {
+    if (port < 0 || static_cast<size_t>(port) >= g_port_transaction_counts.size()) {
+        return 0;
+    }
+    return g_port_transaction_counts[static_cast<size_t>(port)];
+}
+
+i2c_port_t lastTransactionPort() {
+    return g_last_transaction_port;
+}
+
+uint32_t parameterConfigCount() {
+    return g_parameter_config_count;
+}
+
+uint32_t driverInstallCount() {
+    return g_driver_install_count;
+}
+
+i2c_port_t configuredPort() {
+    return g_configured_port;
+}
+
+i2c_port_t installedPort() {
+    return g_installed_port;
+}
+
+const i2c_config_t &configuredConfig() {
+    return g_configured_config;
 }
 
 uint32_t sensorCommandCount(uint8_t addr, uint16_t cmd) {
@@ -174,8 +235,28 @@ esp_err_t i2c_master_write(i2c_cmd_handle_t cmd, const uint8_t *data, size_t dat
     return ESP_OK;
 }
 
-esp_err_t i2c_master_cmd_begin(i2c_port_t, i2c_cmd_handle_t cmd, TickType_t) {
-    noteTransaction();
+esp_err_t i2c_param_config(i2c_port_t port, const i2c_config_t *config) {
+    ++g_parameter_config_count;
+    g_configured_port = port;
+    if (!config) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    g_configured_config = *config;
+    return g_parameter_config_result;
+}
+
+esp_err_t i2c_driver_install(i2c_port_t port,
+                             i2c_mode_t,
+                             size_t,
+                             size_t,
+                             int) {
+    ++g_driver_install_count;
+    g_installed_port = port;
+    return g_driver_install_result;
+}
+
+esp_err_t i2c_master_cmd_begin(i2c_port_t port, i2c_cmd_handle_t cmd, TickType_t) {
+    noteTransaction(port);
     if (!cmd || !cmd->has_address) {
         return ESP_ERR_INVALID_ARG;
     }
@@ -196,14 +277,14 @@ esp_err_t i2c_master_cmd_begin(i2c_port_t, i2c_cmd_handle_t cmd, TickType_t) {
     return ESP_OK;
 }
 
-esp_err_t i2c_master_write_read_device(i2c_port_t,
+esp_err_t i2c_master_write_read_device(i2c_port_t port,
                                        uint8_t addr,
                                        const uint8_t *write_buffer,
                                        size_t write_size,
                                        uint8_t *read_buffer,
                                        size_t read_size,
                                        TickType_t) {
-    noteTransaction();
+    noteTransaction(port);
     if (!device(addr).present || !write_buffer || write_size == 0 ||
         !read_buffer || read_size == 0) {
         return ESP_FAIL;
@@ -241,12 +322,12 @@ esp_err_t i2c_master_write_read_device(i2c_port_t,
     return ESP_OK;
 }
 
-esp_err_t i2c_master_write_to_device(i2c_port_t,
+esp_err_t i2c_master_write_to_device(i2c_port_t port,
                                      uint8_t addr,
                                      const uint8_t *write_buffer,
                                      size_t write_size,
                                      TickType_t) {
-    noteTransaction();
+    noteTransaction(port);
     if (!write_buffer || write_size == 0) {
         return ESP_FAIL;
     }
@@ -272,12 +353,12 @@ esp_err_t i2c_master_write_to_device(i2c_port_t,
     return ESP_OK;
 }
 
-esp_err_t i2c_master_read_from_device(i2c_port_t,
+esp_err_t i2c_master_read_from_device(i2c_port_t port,
                                       uint8_t addr,
                                       uint8_t *read_buffer,
                                       size_t read_size,
                                       TickType_t) {
-    noteTransaction();
+    noteTransaction(port);
     if (!device(addr).present || !read_buffer || read_size == 0) {
         return ESP_FAIL;
     }

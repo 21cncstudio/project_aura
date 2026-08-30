@@ -76,13 +76,13 @@ bool Bmp580::detect(uint8_t addr) {
     uint8_t reg = Config::BMP580_REG_CHIP_ID;
     uint8_t value = 0;
     esp_err_t err = i2c_master_write_read_device(
-        Config::I2C_PORT,
+        Config::SENSOR_I2C_PORT,
         addr,
         &reg,
         1,
         &value,
         1,
-        pdMS_TO_TICKS(Config::I2C_TIMEOUT_MS)
+        pdMS_TO_TICKS(Config::SENSOR_I2C_TIMEOUT_MS)
     );
     if (err != ESP_OK) {
         return false;
@@ -104,24 +104,24 @@ bool Bmp580::detect(uint8_t addr) {
 bool Bmp580::writeU8(uint8_t reg, uint8_t value) {
     uint8_t data[2] = { reg, value };
     esp_err_t err = i2c_master_write_to_device(
-        Config::I2C_PORT,
+        Config::SENSOR_I2C_PORT,
         addr_,
         data,
         sizeof(data),
-        pdMS_TO_TICKS(Config::I2C_TIMEOUT_MS)
+        pdMS_TO_TICKS(Config::SENSOR_I2C_TIMEOUT_MS)
     );
     return err == ESP_OK;
 }
 
 bool Bmp580::readBytes(uint8_t reg, uint8_t *buf, size_t len) {
     esp_err_t err = i2c_master_write_read_device(
-        Config::I2C_PORT,
+        Config::SENSOR_I2C_PORT,
         addr_,
         &reg,
         1,
         buf,
         len,
-        pdMS_TO_TICKS(Config::I2C_TIMEOUT_MS)
+        pdMS_TO_TICKS(Config::SENSOR_I2C_TIMEOUT_MS)
     );
     return err == ESP_OK;
 }

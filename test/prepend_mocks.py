@@ -8,6 +8,8 @@ prefer_real_headers = env["PIOENV"] == "native_test_sfa40_driver"
 prefer_real_headers = prefer_real_headers or env["PIOENV"] == "native_test_sfa30_driver"
 prefer_real_headers = prefer_real_headers or env["PIOENV"] == "native_test_dfr_optional_gas_driver"
 prefer_real_headers = prefer_real_headers or env["PIOENV"] == "native_test_gp8403_driver"
+prefer_real_headers = prefer_real_headers or env["PIOENV"] == "native_test_i2c_4_3_profile"
+prefer_real_headers = prefer_real_headers or env["PIOENV"] == "native_test_i2c_7_profile"
 
 # Most native tests rely on mock headers shadowing src/, but dedicated driver
 # tests need the real driver headers while still seeing shared Arduino/I2C

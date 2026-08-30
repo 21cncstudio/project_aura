@@ -74,7 +74,9 @@ struct LvglInitResult {
 
 StorageManager::BootAction handleBootState();
 void initManagersAndConfig(Context &ctx, StorageManager::BootAction boot_action);
-bool initBoardAndPeripherals(Context &ctx, esp_panel::board::Board *board);
+bool initBoardAndPeripherals(Context &ctx,
+                             esp_panel::board::Board *board,
+                             bool sensor_i2c_ready);
 LvglInitResult initLvglAndUi(Context &ctx, esp_panel::board::Board *board);
 void pollDeferredRuntime();
 

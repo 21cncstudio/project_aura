@@ -389,16 +389,16 @@ bool DfrMultiGasSensor::pingAddress() {
 #ifndef UNIT_TEST
     const I2cBusRecovery::LineState lines_before =
         I2cBusRecovery::sample(
-            static_cast<gpio_num_t>(Config::I2C_SDA_PIN),
-            static_cast<gpio_num_t>(Config::I2C_SCL_PIN));
+            static_cast<gpio_num_t>(Config::SENSOR_I2C_SDA_PIN),
+            static_cast<gpio_num_t>(Config::SENSOR_I2C_SCL_PIN));
 #endif
     i2c_cmd_handle_t cmd = i2c_cmd_link_create();
     if (!cmd) {
 #ifndef UNIT_TEST
         const I2cBusRecovery::LineState lines_after =
             I2cBusRecovery::sample(
-                static_cast<gpio_num_t>(Config::I2C_SDA_PIN),
-                static_cast<gpio_num_t>(Config::I2C_SCL_PIN));
+                static_cast<gpio_num_t>(Config::SENSOR_I2C_SDA_PIN),
+                static_cast<gpio_num_t>(Config::SENSOR_I2C_SCL_PIN));
         LOGW(config_.log_tag,
              "addr=0x%02X stage=address-probe err=%d(%s) lines before=%u/%u after=%u/%u",
              static_cast<unsigned>(config_.address),
@@ -416,7 +416,7 @@ bool DfrMultiGasSensor::pingAddress() {
     i2c_master_write_byte(cmd, (config_.address << 1) | I2C_MASTER_WRITE, true);
     i2c_master_stop(cmd);
     esp_err_t err = i2c_master_cmd_begin(
-        Config::I2C_PORT,
+        Config::SENSOR_I2C_PORT,
         cmd,
         pdMS_TO_TICKS(Config::DFR_GAS_I2C_TIMEOUT_MS)
     );
@@ -424,8 +424,8 @@ bool DfrMultiGasSensor::pingAddress() {
 #ifndef UNIT_TEST
     const I2cBusRecovery::LineState lines_after =
         I2cBusRecovery::sample(
-            static_cast<gpio_num_t>(Config::I2C_SDA_PIN),
-            static_cast<gpio_num_t>(Config::I2C_SCL_PIN));
+            static_cast<gpio_num_t>(Config::SENSOR_I2C_SDA_PIN),
+            static_cast<gpio_num_t>(Config::SENSOR_I2C_SCL_PIN));
     if (err != ESP_OK) {
         const bool expected_optional_absence =
             DfrGasProbeLogPolicy::isExpectedOptionalAbsence({
@@ -509,11 +509,11 @@ bool DfrMultiGasSensor::transact(const uint8_t *tx_frame,
 #ifndef UNIT_TEST
     const I2cBusRecovery::LineState lines_before_write =
         I2cBusRecovery::sample(
-            static_cast<gpio_num_t>(Config::I2C_SDA_PIN),
-            static_cast<gpio_num_t>(Config::I2C_SCL_PIN));
+            static_cast<gpio_num_t>(Config::SENSOR_I2C_SDA_PIN),
+            static_cast<gpio_num_t>(Config::SENSOR_I2C_SCL_PIN));
 #endif
     esp_err_t err = i2c_master_write_to_device(
-        Config::I2C_PORT,
+        Config::SENSOR_I2C_PORT,
         config_.address,
         tx,
         sizeof(tx),
@@ -522,8 +522,8 @@ bool DfrMultiGasSensor::transact(const uint8_t *tx_frame,
 #ifndef UNIT_TEST
     const I2cBusRecovery::LineState lines_after_write =
         I2cBusRecovery::sample(
-            static_cast<gpio_num_t>(Config::I2C_SDA_PIN),
-            static_cast<gpio_num_t>(Config::I2C_SCL_PIN));
+            static_cast<gpio_num_t>(Config::SENSOR_I2C_SDA_PIN),
+            static_cast<gpio_num_t>(Config::SENSOR_I2C_SCL_PIN));
 #endif
     if (err != ESP_OK) {
 #ifndef UNIT_TEST
@@ -548,12 +548,12 @@ bool DfrMultiGasSensor::transact(const uint8_t *tx_frame,
 #ifndef UNIT_TEST
     const I2cBusRecovery::LineState lines_before_read =
         I2cBusRecovery::sample(
-            static_cast<gpio_num_t>(Config::I2C_SDA_PIN),
-            static_cast<gpio_num_t>(Config::I2C_SCL_PIN));
+            static_cast<gpio_num_t>(Config::SENSOR_I2C_SDA_PIN),
+            static_cast<gpio_num_t>(Config::SENSOR_I2C_SCL_PIN));
 #endif
     uint8_t reg = 0x00;
     err = i2c_master_write_read_device(
-        Config::I2C_PORT,
+        Config::SENSOR_I2C_PORT,
         config_.address,
         &reg,
         1,
@@ -564,8 +564,8 @@ bool DfrMultiGasSensor::transact(const uint8_t *tx_frame,
 #ifndef UNIT_TEST
     const I2cBusRecovery::LineState lines_after_read =
         I2cBusRecovery::sample(
-            static_cast<gpio_num_t>(Config::I2C_SDA_PIN),
-            static_cast<gpio_num_t>(Config::I2C_SCL_PIN));
+            static_cast<gpio_num_t>(Config::SENSOR_I2C_SDA_PIN),
+            static_cast<gpio_num_t>(Config::SENSOR_I2C_SCL_PIN));
     if (err != ESP_OK) {
         LOGW(config_.log_tag,
              "cmd=0x%02X stage=read-back err=%d(%s) lines before=%u/%u after_write=%u/%u before_read=%u/%u after=%u/%u",
