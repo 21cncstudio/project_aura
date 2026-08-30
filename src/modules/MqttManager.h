@@ -97,7 +97,7 @@ private:
     void refreshHostBuffer();
     void setupClient();
     void stopClient();
-    void destroyClient();
+    bool destroyClient();
     bool prepareBrokerEndpoint(BrokerEndpoint &endpoint);
     void applyBrokerEndpoint(const BrokerEndpoint &endpoint);
     bool connectTransport(const char *client_id, const char *will_topic);
