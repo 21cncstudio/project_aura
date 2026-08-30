@@ -14,7 +14,13 @@ constexpr uint8_t kWriteOcAddress = 0x23;
 constexpr uint8_t kWriteSetAddress = 0x24;
 constexpr uint8_t kWriteIoAddress = 0x38;
 constexpr uint8_t kWriteOcSafeValue = 0x0F;
+#if defined(AURA_HARDWARE_PROFILE_7) && AURA_HARDWARE_PROFILE_7
+// EXIO5 is USB_SEL on the 7-inch board. It must remain low so native Type_C2
+// stays selected even if this normally disabled diagnostic is enabled later.
+constexpr uint8_t kWriteIoSafeValue = 0xD1;
+#else
 constexpr uint8_t kWriteIoSafeValue = 0xFF;
+#endif
 constexpr uint8_t kWriteSetOutputValue = 0x01;
 
 enum class Status : uint8_t {

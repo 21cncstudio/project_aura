@@ -88,9 +88,9 @@ Result waitWithOps(i2c_port_t port,
             return result;
         }
 
-        // Preload the eight EXIO latches first. These pins carry LCD_VDD_EN,
-        // reset and backlight, so writing all-high is safe whether IO_OE is
-        // still disabled after POR or a previous timed-out enable took effect.
+        // Preload the eight EXIO latches first. The value is profile-specific:
+        // the 7-inch board must keep USB_SEL low for native Type_C2, while the
+        // legacy 4.3-inch diagnostic retains its original all-high image.
         bool sequence_ok =
             write_step(Phase::PrimeIo, kWriteIoAddress, kWriteIoSafeValue) &&
             write_step(Phase::EnableOutputs, kWriteSetAddress, kWriteSetOutputValue);
