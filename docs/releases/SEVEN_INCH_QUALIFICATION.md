@@ -17,14 +17,19 @@ closed until this record is completed and reviewed.
 - ESP32 internal sensor-bus pull-ups: disabled
 - USB/logging: native USB CDC on Type_C2
 
+The [shared native-USB profile policy](../USB_CONSOLE_PROFILES.md) preserves
+this 7-inch baseline and model identity. Its staged migration requires the
+4.3-inch basic check to pass before changing the 7-inch device or capture.
+
 ## Historical cleanup candidate
 
 The following is the historical `fac6e30` software-evidence snapshot, not the
 latest candidate to flash. Its recorded checks do not qualify the later panel
-sampling, optional-alert, or [built-in OTA guard](../OTA_HARDWARE_TARGET_GUARD.md)
-changes. Select and record a fresh exact-source artifact before the next
-physical qualification. At the time of this snapshot neither binary below had
-been physically flashed or qualified.
+sampling, optional-alert, [built-in OTA guard](../OTA_HARDWARE_TARGET_GUARD.md),
+or [shared native-USB](../USB_CONSOLE_PROFILES.md) changes. Select and record a
+fresh exact-source artifact before the next physical qualification. At the
+time of this snapshot neither binary below had been physically flashed or
+qualified.
 
 7-inch candidate:
 
@@ -76,6 +81,8 @@ The controlled test series must include:
 7. On guarded firmware, built-in web OTA rejects the opposite model and an
    unlabelled legacy BIN with zero written bytes, no OTA restart, a readable
    inline error, and a working subsequent matching-file update on both models.
+8. Native USB reflash/reset and port re-enumeration checks, plus a separate
+   physical cold boot with serial monitors closed and auto-connect disabled.
 
 Physical OFF/ON, upload reset, EN/RTS reset, software restart, and serial-open
 effects must be logged as separate event classes. A USB gap alone is not proof

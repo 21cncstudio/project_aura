@@ -33,8 +33,9 @@ void test_sensor_topology_matches_hardware_profile() {
     TEST_ASSERT_EQUAL_INT(Config::I2C_PORT, Config::SENSOR_I2C_PORT);
     TEST_ASSERT_EQUAL_UINT8(Config::I2C_SDA_PIN, Config::SENSOR_I2C_SDA_PIN);
     TEST_ASSERT_EQUAL_UINT8(Config::I2C_SCL_PIN, Config::SENSOR_I2C_SCL_PIN);
-    TEST_ASSERT_EQUAL_HEX8(0xFFU, Ch422gReadyProbe::kWriteIoSafeValue);
+    TEST_ASSERT_EQUAL_HEX8(0xDFU, Ch422gReadyProbe::kWriteIoSafeValue);
 #endif
+    TEST_ASSERT_EQUAL_HEX8(0U, Ch422gReadyProbe::kWriteIoSafeValue & 0x20U);
     TEST_ASSERT_EQUAL_UINT32(100000U, Config::SENSOR_I2C_FREQ_HZ);
 }
 

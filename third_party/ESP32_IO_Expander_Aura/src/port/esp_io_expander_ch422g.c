@@ -17,6 +17,7 @@
 #include "esp_io_expander_ch422g.h"
 
 #include "esp_expander_utils.h"
+#include "Ch422gBoardPolicy.h"
 
 /* Timeout of each I2C communication */
 #define I2C_TIMEOUT_MS          (10)
@@ -39,7 +40,7 @@
 
 // *INDENT-OFF*
 #define REG_WR_OC_DEFAULT_VAL   (0x0FUL)
-#define REG_WR_IO_DEFAULT_VAL   (0xD1UL)
+#define REG_WR_IO_DEFAULT_VAL   (AURA_CH422G_INITIAL_IO_VALUE)
 #define REG_OUT_DEFAULT_VAL     ((REG_WR_OC_DEFAULT_VAL << 8) | REG_WR_IO_DEFAULT_VAL)
 #define REG_DIR_DEFAULT_VAL     (0xFFFUL)
 

@@ -88,9 +88,8 @@ Result waitWithOps(i2c_port_t port,
             return result;
         }
 
-        // Preload the eight EXIO latches first. The value is profile-specific:
-        // the 7-inch board must keep USB_SEL low for native Type_C2, while the
-        // legacy 4.3-inch diagnostic retains its original all-high image.
+        // Preload the eight EXIO latches first. Both profile-specific images
+        // keep USB_SEL low and match the CH422G driver's startup policy.
         bool sequence_ok =
             write_step(Phase::PrimeIo, kWriteIoAddress, kWriteIoSafeValue) &&
             write_step(Phase::EnableOutputs, kWriteSetAddress, kWriteSetOutputValue);

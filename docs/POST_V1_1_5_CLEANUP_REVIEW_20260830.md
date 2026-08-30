@@ -8,6 +8,9 @@ sensor UI alerts), and the [built-in OTA hardware guard](OTA_HARDWARE_TARGET_GUA
 supersede its next-test artifact selection. Hashes, package acceptance, and
 physical-validation statements below apply only to the named historical
 artifacts; they are not evidence for newer BINs or a public release approval.
+The current profile and CH422G sections below also reflect the later
+[native-USB migration](USB_CONSOLE_PROFILES.md); the `fac6e30` build and test
+records retain their historical UART/upstream 4.3-inch configuration.
 
 ## Status
 
@@ -190,19 +193,25 @@ topology and must not be smuggled into the profile implementation:
 - `7437b2c`: diagnostic read admission after a rejected restart, only together
   with a defined support-report endpoint.
 
-## Production hardware profiles
+## Production hardware profiles (current native-USB policy)
+
+These profile settings describe the native-USB source update. Select and
+record fresh exact-source artifacts for physical checks; the `fac6e30` hashes
+and test totals elsewhere in this document do not validate this update.
 
 | Property | 4.3-inch | 7-inch |
 | --- | --- | --- |
 | PlatformIO environment | `project_aura` | `project_aura_7` |
 | Hardware profile | `4_3` | `7_dual_i2c_scl6` |
-| USB/logging | Existing profile behavior | Native USB CDC on Type_C2 |
+| Hardware target | `aura-aq-v1` | `aura-aq-7-v1` |
+| USB/logging | Native USB CDC on the USB Type-C connector | Native USB CDC on Type_C2 |
 | Panel I2C host | I2C0 | I2C0 |
 | Panel SDA/SCL | GPIO8/GPIO9 | GPIO8/GPIO9 |
 | External sensors | Shared panel I2C0 | Separate I2C1 |
 | Sensor SDA/SCL | GPIO8/GPIO9 | GPIO44/GPIO6 |
 | Sensor pull-ups | Existing shared-bus behavior | ESP32 internal pulls disabled; module pulls used |
-| CH422G library | Official upstream v1.1.0 | Profile-only reviewed fork of upstream v1.1.0 |
+| CH422G library | Shared reviewed `ESP32_IO_Expander_Aura` fork of v1.1.0 | Same shared fork |
+| CH422G initial `WR_IO` | `0xDF`, only USB_SEL cleared from `0xFF` | `0xD1`, unchanged |
 | H3 EX_TXD/GPIO43 | Not repurposed | Must remain disconnected from sensor SCL |
 | J8 Sensor AD/GPIO6 | Available as original input | Used as sensor SCL; analog Sensor AD is unavailable |
 | SW1 | Existing product setup | UART2 while H3 EX_RXD carries SDA |
@@ -228,35 +237,37 @@ The display PCLK remains 16 MHz. That is vendor-equivalent for the selected
 7-inch panel, matches `v1.1.5`, and was not reduced to the rejected 14 MHz
 experiment.
 
-## CH422G scope
+## CH422G scope (current native-USB policy)
 
-The official CH422G implementation is untouched for 4.3-inch firmware. Only
-the 7-inch build links `third_party/ESP32_IO_Expander_7`.
+Both builds link `third_party/ESP32_IO_Expander_Aura`, renamed from the former
+7-inch-only vendor directory. This supersedes the historical `fac6e30` split
+between official upstream for 4.3-inch and the fork for 7-inch.
 
 The fork is based on upstream `ESP32_IO_Expander` v1.1.0 commit
-`e79a63876a1d8a834cf8ec8f8b698ff9d9374579`. All vendored runtime files were
-compared with upstream; the only semantic differences are:
+`e79a63876a1d8a834cf8ec8f8b698ff9d9374579`. The current policy is:
 
-1. Default `WR_IO` is `0xD1`, keeping `USB_SEL` low for native Type_C2.
+1. Default `WR_IO` is `0xDF` for 4.3-inch and the unchanged `0xD1` for 7-inch,
+   keeping `USB_SEL` low. The 4.3-inch value changes only bit 5 from `0xFF`.
 2. The output image is written before IO0-7 are enabled as outputs.
 
 Expected initial writes:
 
 ```text
 WR_OC  0x23 <- 0x0F
-WR_IO  0x38 <- 0xD1
+WR_IO  0x38 <- 0xDF (4.3-inch) or 0xD1 (7-inch)
 WR_SET 0x24 <- 0x01
 ```
 
 There are no retry loops, shadow-cache success claims, forced runtime writes,
-or automatic recovery additions in this fork. Native tests assert the exact
-order, reject `0xFF`, and verify that each failure stops without retry.
+or automatic recovery additions in this fork. The native test contract requires
+the exact profile image/order and a stop without retry on each failed write.
 
-At `fac6e30`, the normally disabled legacy `Ch422gReadyProbe` was also made
-profile-safe. Its 4.3-inch diagnostic image remains `0xFF`, while a 7-inch
-compilation uses `0xD1`; the 7-inch topology test explicitly rejects `0xFF`.
-Enabling that diagnostic later therefore cannot silently switch `USB_SEL` away
-from native Type_C2.
+The disabled legacy `Ch422gReadyProbe` now shares
+`include/Ch422gBoardPolicy.h` with the driver: `0xDF` for 4.3-inch and `0xD1`
+for 7-inch. CAN is unused; `Logger`, I2C routing/frequency, and the 7-inch
+LCD/touch/backlight startup levels are unchanged by this migration. The
+[USB transition checks](USB_CONSOLE_PROFILES.md) require a 4.3-inch basic pass
+before disturbing the existing 7-inch capture.
 
 ## I2C fault domains
 

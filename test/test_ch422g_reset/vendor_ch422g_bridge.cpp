@@ -19,6 +19,6 @@ esp_err_t aura_ch422g_test_read(i2c_port_t,
 
 #define i2c_master_write_to_device aura_ch422g_test_write
 #define i2c_master_read_from_device aura_ch422g_test_read
-#include "../../third_party/ESP32_IO_Expander_7/src/port/esp_io_expander_ch422g.c"
+#include "../../third_party/ESP32_IO_Expander_Aura/src/port/esp_io_expander_ch422g.c"
 #undef i2c_master_write_to_device
 #undef i2c_master_read_from_device

@@ -178,9 +178,9 @@ class NativeTestLauncherTests(unittest.TestCase):
         self.assertEqual("platformio", observed["platformio"])
         self.assertEqual("6.2.0", observed["platformio_version"])
 
-    def test_defaults_preserve_all_nine_official_invocations(self):
+    def test_defaults_preserve_all_ten_official_invocations(self):
         self.assertEqual(list(DEFAULT_INVOCATIONS), choose_invocations([], []))
-        self.assertEqual(9, len(DEFAULT_INVOCATIONS))
+        self.assertEqual(10, len(DEFAULT_INVOCATIONS))
         self.assertIn(
             ("native_test_gp8403_driver", ("test_gp8403_driver",)),
             DEFAULT_INVOCATIONS,
@@ -203,10 +203,14 @@ class NativeTestLauncherTests(unittest.TestCase):
             ),
             DEFAULT_INVOCATIONS,
         )
-        self.assertIn(
-            ("native_test_ch422g_7_profile", ("test_ch422g_7_reset",)),
-            DEFAULT_INVOCATIONS,
-        )
+        for profile in ("4_3", "7"):
+            with self.subTest(profile=profile):
+                invocation = (
+                    f"native_test_ch422g_{profile}_profile",
+                    ("test_ch422g_reset", "test_ch422g_ready_probe"),
+                )
+                self.assertIn(invocation, DEFAULT_INVOCATIONS)
+                self.assertEqual([invocation], choose_invocations([invocation[0]], []))
         self.assertEqual([("native_test", (self.suite,))], choose_invocations([], [self.suite]))
         self.assertEqual(
             [("native_test_sfa30_driver", ("test_sfa30_driver",))],
