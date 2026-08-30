@@ -51,6 +51,7 @@ void PressureHistory::reset(SensorData &data, StorageManager &storage, bool clea
     count_ = 0;
     epoch_ = 0;
     restored_ = false;
+    backward_time_hold_ = false;
     replacement_save_pending_ = false;
     memset(history_, 0, sizeof(history_));
     data.pressure_delta_3h_valid = false;
@@ -124,6 +125,9 @@ void PressureHistory::load(StorageManager &storage, SensorData &data) {
 bool PressureHistory::saveIfDue(StorageManager &storage,
                                 uint32_t now_ms,
                                 bool force) {
+    if (backward_time_hold_) {
+        return true;
+    }
     if (count_ == 0) {
         return true;
     }
@@ -148,6 +152,11 @@ bool PressureHistory::saveIfDue(StorageManager &storage,
 }
 
 bool PressureHistory::flush(StorageManager &storage) {
+    if (backward_time_hold_) {
+        // The latest sample is slightly ahead of the corrected wall clock.
+        // Keep the previous atomic generation untouched until time catches up.
+        return true;
+    }
     if (restored_) {
         // A quarantined restored generation has not changed in RAM, so the
         // existing atomic blob is already the safest snapshot to retain.
@@ -172,13 +181,24 @@ void PressureHistory::append(float pressure, SensorData &data) {
         LOGI("PressureHistory", "24h delta ready");
     }
 
+    recomputeDeltas(data);
+}
+
+void PressureHistory::recomputeDeltas(SensorData &data) const {
+    if (count_ <= 0) {
+        data.pressure_delta_3h_valid = false;
+        data.pressure_delta_24h_valid = false;
+        return;
+    }
+
     int latest_index = (index_ + Config::PRESSURE_HISTORY_24H_SAMPLES - 1) %
                        Config::PRESSURE_HISTORY_24H_SAMPLES;
+    const float latest_pressure = history_[latest_index];
     if (count_ > Config::PRESSURE_HISTORY_3H_STEPS) {
         int idx_3h = (latest_index + Config::PRESSURE_HISTORY_24H_SAMPLES -
                       Config::PRESSURE_HISTORY_3H_STEPS) %
                      Config::PRESSURE_HISTORY_24H_SAMPLES;
-        data.pressure_delta_3h = pressure - history_[idx_3h];
+        data.pressure_delta_3h = latest_pressure - history_[idx_3h];
         data.pressure_delta_3h_valid = true;
     } else {
         data.pressure_delta_3h_valid = false;
@@ -186,18 +206,28 @@ void PressureHistory::append(float pressure, SensorData &data) {
 
     if (count_ >= Config::PRESSURE_HISTORY_24H_SAMPLES) {
         int idx_24h = index_;
-        data.pressure_delta_24h = pressure - history_[idx_24h];
+        data.pressure_delta_24h = latest_pressure - history_[idx_24h];
         data.pressure_delta_24h_valid = true;
     } else {
         data.pressure_delta_24h_valid = false;
     }
 }
 
-void PressureHistory::update(float pressure, SensorData &data, StorageManager &storage) {
+void PressureHistory::update(float pressure,
+                             SensorData &data,
+                             StorageManager &storage,
+                             bool system_time_trusted) {
     uint32_t now_ms = millis();
     uint32_t now_epoch = 0;
-    bool time_valid = getNowEpoch(now_epoch);
+    const bool time_valid = system_time_trusted && getNowEpoch(now_epoch);
+    const uint32_t step_s = Config::PRESSURE_HISTORY_STEP_MS / 1000UL;
     bool temporal_reset = false;
+    if (backward_time_hold_ && !time_valid) {
+        // Keep the hold fail-closed if the trusted-time contract ever changes.
+        // Without trusted time we cannot prove the clock caught the saved epoch.
+        recomputeDeltas(data);
+        return;
+    }
     if (restored_ && !time_valid) {
         data.pressure_delta_3h_valid = false;
         data.pressure_delta_24h_valid = false;
@@ -208,6 +238,28 @@ void PressureHistory::update(float pressure, SensorData &data, StorageManager &s
         // reset the history.
         return;
     }
+
+    if (time_valid && epoch_ != 0 && now_epoch < epoch_) {
+        const uint32_t backward_s = epoch_ - now_epoch;
+        if (backward_s <= step_s) {
+            if (!backward_time_hold_) {
+                Logger::log(Logger::Warn,
+                            "PressureHistory",
+                            "clock moved backwards %us; holding history until catch-up",
+                            static_cast<unsigned>(backward_s));
+            }
+            backward_time_hold_ = true;
+            recomputeDeltas(data);
+            return;
+        }
+        // A larger backward jump remains a temporal generation change and is
+        // handled by the atomic replacement path below.
+        backward_time_hold_ = false;
+    } else if (time_valid && backward_time_hold_) {
+        backward_time_hold_ = false;
+        LOGI("PressureHistory", "clock caught up; history sampling resumed");
+    }
+
     if (time_valid) {
         if (isStale(now_epoch)) {
             LOGW("PressureHistory", "history stale, reset");
@@ -234,7 +286,6 @@ void PressureHistory::update(float pressure, SensorData &data, StorageManager &s
             Logger::log(Logger::Info, "PressureHistory",
                         "filling gap %us",
                         static_cast<unsigned>(gap_s));
-            uint32_t step_s = Config::PRESSURE_HISTORY_STEP_MS / 1000UL;
             uint32_t steps = gap_s / step_s;
             int latest_index = (index_ + Config::PRESSURE_HISTORY_24H_SAMPLES - 1) %
                                Config::PRESSURE_HISTORY_24H_SAMPLES;
@@ -250,10 +301,12 @@ void PressureHistory::update(float pressure, SensorData &data, StorageManager &s
             return;
         }
         restored_ = false;
+        // A short-gap reconciliation can return below without appending a new
+        // five-minute sample. Rebuild public deltas from the restored ring now.
+        recomputeDeltas(data);
     }
 
     if (time_valid) {
-        uint32_t step_s = Config::PRESSURE_HISTORY_STEP_MS / 1000UL;
         if (epoch_ != 0) {
             if (now_epoch - epoch_ < step_s) {
                 return;

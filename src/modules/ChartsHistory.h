@@ -42,7 +42,17 @@ public:
     };
 
     void load(StorageManager &storage);
-    void update(const SensorData &data, StorageManager &storage, bool gas_warmup);
+    void update(const SensorData &data,
+                StorageManager &storage,
+                bool gas_warmup,
+                bool system_time_trusted);
+#ifdef UNIT_TEST
+    void update(const SensorData &data,
+                StorageManager &storage,
+                bool gas_warmup) {
+        update(data, storage, gas_warmup, true);
+    }
+#endif
     void clear(StorageManager &storage);
 
     uint16_t count() const { return state_.count; }
@@ -97,5 +107,8 @@ private:
     uint32_t last_sample_ms_ = 0;
     uint32_t last_save_ms_ = 0;
     bool first_update_after_load_ = true;
+    bool restored_ = false;
+    bool backward_time_hold_ = false;
+    bool replacement_save_pending_ = false;
     PersistedState state_{};
 };

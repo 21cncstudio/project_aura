@@ -76,6 +76,8 @@ public:
                                      const char *unique_line_prefix,
                                      const char *header,
                                      const char *block) override;
+    bool removeDailyCsvRowsOnOrAfterAtomic(const char *path,
+                                            const char *cutoff_iso_day) override;
     bool readBinary(const char *path, void *out, size_t len, size_t &out_len) const override;
     bool writeBinaryAtomic(const char *path, const void *data, size_t len) override;
     bool removeFile(const char *path) override;

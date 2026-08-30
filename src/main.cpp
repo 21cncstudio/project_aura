@@ -839,11 +839,19 @@ void loop()
         poll_runtime_i2c_recovery(background_now);
     }
 
+    bool system_time_trusted = timeManager.isSystemTimeTrusted();
     SensorManager::PollResult sensor_poll{};
     if (!wake_background_paused && i2c_runtime_ready) {
-        sensor_poll = sensorManager.poll(currentData, storage, pressureHistory, co2_asc_enabled);
+        sensor_poll = sensorManager.poll(currentData,
+                                         storage,
+                                         pressureHistory,
+                                         co2_asc_enabled,
+                                         system_time_trusted);
         uiController.onSensorPoll(sensor_poll);
-        chartsHistory.update(currentData, storage, sensorManager.isWarmupActive());
+        chartsHistory.update(currentData,
+                             storage,
+                             sensorManager.isWarmupActive(),
+                             system_time_trusted);
     }
     chartsRuntimeState.update(chartsHistory);
     webRuntimeState.update(currentData, sensorManager.isWarmupActive(), fanControl);
@@ -874,8 +882,12 @@ void loop()
         mqttManager.setSystemTimeValid(timeManager.isSystemTimeValid());
         uiController.onTimePoll(time_poll);
     }
+    // RTC/NTP/manual reconciliation may establish trust during poll(). Daily
+    // history only updates on data changes, so do not defer this transition to
+    // a future sensor sample.
+    system_time_trusted = timeManager.isSystemTimeTrusted();
     if (sensor_poll.data_changed) {
-        dailyExtremaHistory.update(currentData, now);
+        dailyExtremaHistory.update(currentData, now, system_time_trusted);
     }
     if (!wake_background_paused) {
         dailyExtremaHistory.poll(now);

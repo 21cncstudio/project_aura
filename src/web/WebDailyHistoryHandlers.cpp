@@ -135,10 +135,7 @@ bool remove_if_exists(SdCardManager &sd_card, const char *path, bool &existed) {
     if (!sd_card.fileInfo(path, exists, size)) {
         return false;
     }
-    if (!exists) {
-        return true;
-    }
-    existed = true;
+    existed = exists;
     return sd_card.removeFile(path);
 }
 

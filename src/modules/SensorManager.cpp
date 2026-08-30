@@ -717,7 +717,8 @@ void SensorManager::begin(StorageManager &storage, float temp_offset, float hum_
 SensorManager::PollResult SensorManager::poll(SensorData &data,
                                               StorageManager &storage,
                                               PressureHistory &pressure_history,
-                                              bool co2_asc_enabled) {
+                                              bool co2_asc_enabled,
+                                              bool system_time_trusted) {
     PollResult result;
     if (!initialized_) {
         return result;
@@ -834,7 +835,8 @@ SensorManager::PollResult SensorManager::poll(SensorData &data,
         } else {
             data.pressure = pressure_hpa;
             data.pressure_valid = true;
-            pressure_history.update(pressure_hpa, data, storage);
+            pressure_history.update(
+                pressure_hpa, data, storage, system_time_trusted);
             sen66_.updatePressure(pressure_hpa);
         }
         result.data_changed = true;

@@ -223,6 +223,50 @@ void test_time_manager_init_rtc_handles_absent_rtc() {
     TEST_ASSERT_EQUAL_STRING("RTC", manager.rtcLabel());
 }
 
+void test_time_manager_plausible_process_epoch_is_not_boot_trusted() {
+    StorageManager storage;
+    storage.begin();
+    constexpr time_t plausible_epoch = 1776256496;
+    setNowEpoch(plausible_epoch);
+
+    TimeManager manager;
+    manager.begin(storage);
+
+    TEST_ASSERT_TRUE(manager.isSystemTimeValid());
+    TEST_ASSERT_FALSE(manager.isSystemTimeTrusted());
+
+    TEST_ASSERT_TRUE(manager.setLocalTime(2026, 4, 15, 12, 34));
+    TEST_ASSERT_TRUE(manager.isSystemTimeTrusted());
+    manager.begin(storage);
+    TEST_ASSERT_TRUE(manager.isSystemTimeValid());
+    TEST_ASSERT_FALSE(manager.isSystemTimeTrusted());
+}
+
+void test_time_manager_validates_manual_calendar_before_trusting() {
+    StorageManager storage;
+    storage.begin();
+
+    TimeManager manager;
+    manager.begin(storage);
+    const uint32_t transactions_before = I2cMock::transactionCount();
+
+    TEST_ASSERT_FALSE(manager.setLocalTime(2019, 12, 31, 12, 0));
+    TEST_ASSERT_FALSE(manager.setLocalTime(2100, 1, 1, 12, 0));
+    TEST_ASSERT_FALSE(manager.setLocalTime(2026, 13, 1, 12, 0));
+    TEST_ASSERT_FALSE(manager.setLocalTime(2026, 4, 31, 12, 0));
+    TEST_ASSERT_FALSE(manager.setLocalTime(2023, 2, 29, 12, 0));
+    TEST_ASSERT_FALSE(manager.setLocalTime(2026, 4, 15, 24, 0));
+    TEST_ASSERT_FALSE(manager.setLocalTime(2026, 4, 15, 12, 60));
+    TEST_ASSERT_FALSE(manager.isSystemTimeValid());
+    TEST_ASSERT_FALSE(manager.isSystemTimeTrusted());
+    TEST_ASSERT_EQUAL_INT64(0, static_cast<long long>(mockNow()));
+    TEST_ASSERT_EQUAL_UINT32(transactions_before, I2cMock::transactionCount());
+
+    TEST_ASSERT_TRUE(manager.setLocalTime(2024, 2, 29, 12, 34));
+    TEST_ASSERT_TRUE(manager.isSystemTimeValid());
+    TEST_ASSERT_TRUE(manager.isSystemTimeTrusted());
+}
+
 void test_time_manager_init_rtc_selects_pcf8523() {
     seedPcf8523WithOldValidTime();
 
@@ -298,6 +342,7 @@ void test_time_manager_set_local_time_initializes_unset_rtc() {
     TEST_ASSERT_TRUE(manager.isRtcTimeUnset());
 
     TEST_ASSERT_TRUE(manager.setLocalTime(2026, 4, 15, 12, 34));
+    TEST_ASSERT_TRUE(manager.isSystemTimeTrusted());
     TEST_ASSERT_TRUE(manager.isRtcPresent());
     TEST_ASSERT_TRUE(manager.isRtcValid());
     TEST_ASSERT_FALSE(manager.isRtcLostPower());
@@ -452,6 +497,7 @@ void test_time_manager_init_rtc_sets_system_epoch_from_utc_time() {
     TEST_ASSERT_TRUE(manager.initRtc());
     TEST_ASSERT_TRUE(manager.isRtcPresent());
     TEST_ASSERT_TRUE(manager.isRtcValid());
+    TEST_ASSERT_TRUE(manager.isSystemTimeTrusted());
     TEST_ASSERT_EQUAL_INT64(1776256496LL, static_cast<long long>(mockNow()));
 }
 
@@ -728,13 +774,25 @@ void test_time_manager_deferred_all_read_failures_recover_in_runtime_poll() {
     TEST_ASSERT_FALSE(manager.isRtcValid());
     TEST_ASSERT_FALSE(manager.isRtcDetecting());
 
+    // A plausible process epoch has no boot-local provenance and must be
+    // replaced by the first valid RTC status read.
+    constexpr time_t plausible_untrusted_epoch = 1893456000;
+    constexpr time_t rtc_epoch = 1776256496;
+    setNowEpoch(plausible_untrusted_epoch);
+    TEST_ASSERT_TRUE(manager.isSystemTimeValid());
+    TEST_ASSERT_FALSE(manager.isSystemTimeTrusted());
+
     I2cMock::setReadFailure(Config::PCF8523_ADDR,
                             Config::PCF8523_REG_SECONDS,
                             false);
     advanceMillis(Config::RTC_STATUS_POLL_MS);
     const auto recovered = manager.poll(getMillis());
     TEST_ASSERT_TRUE(recovered.state_changed);
+    TEST_ASSERT_TRUE(recovered.time_updated);
     TEST_ASSERT_TRUE(manager.isRtcValid());
+    TEST_ASSERT_TRUE(manager.isSystemTimeTrusted());
+    TEST_ASSERT_EQUAL_INT64(static_cast<long long>(rtc_epoch),
+                            static_cast<long long>(mockNow()));
 }
 
 void test_time_manager_deferred_rtc_deadline_handles_millis_wraparound() {
@@ -756,7 +814,7 @@ void test_time_manager_deferred_rtc_deadline_handles_millis_wraparound() {
     TEST_ASSERT_FALSE(manager.isRtcDetecting());
 }
 
-void test_time_manager_deferred_rtc_does_not_overwrite_newer_system_time() {
+void test_time_manager_plausible_process_epoch_does_not_seed_deferred_rtc() {
     StorageManager storage;
     storage.begin();
     TimeManager manager;
@@ -769,18 +827,24 @@ void test_time_manager_deferred_rtc_does_not_overwrite_newer_system_time() {
         [&manager]() { return strcmp(manager.rtcLabel(), "PCF8523") == 0; });
     TEST_ASSERT_TRUE(manager.isRtcDetecting());
 
-    constexpr time_t trusted_epoch = 1776256496;
-    setNowEpoch(trusted_epoch);
+    constexpr time_t plausible_epoch = 1776256496;
+    setNowEpoch(plausible_epoch);
     const auto completed = pollDeferredUntil(
         manager,
         [&manager]() { return manager.isRtcInitialized(); });
 
     TEST_ASSERT_TRUE(completed.state_changed);
-    TEST_ASSERT_EQUAL_INT64(static_cast<long long>(trusted_epoch),
+    TEST_ASSERT_EQUAL_INT64(static_cast<long long>(plausible_epoch),
                             static_cast<long long>(mockNow()));
     TEST_ASSERT_TRUE(manager.isRtcInitialized());
-    TEST_ASSERT_TRUE(manager.isRtcValid());
+    TEST_ASSERT_FALSE(manager.isRtcValid());
+    TEST_ASSERT_FALSE(manager.isSystemTimeTrusted());
     TEST_ASSERT_FALSE(manager.isRtcDetecting());
+    TEST_ASSERT_EQUAL_UINT8(
+        toBcd(19),
+        I2cMock::getRegister(
+            Config::PCF8523_ADDR,
+            static_cast<uint8_t>(Config::PCF8523_REG_SECONDS + 6U)));
 }
 
 void test_time_manager_stops_missing_rtc_detection_after_five_attempts() {
@@ -897,6 +961,7 @@ void test_time_manager_keeps_ntp_polling_when_rtc_i2c_is_unavailable() {
     TEST_ASSERT_TRUE(result.state_changed);
     TEST_ASSERT_TRUE(result.time_updated);
     TEST_ASSERT_FALSE(manager.isNtpSyncing());
+    TEST_ASSERT_TRUE(manager.isSystemTimeTrusted());
     TEST_ASSERT_EQUAL_INT64(static_cast<long long>(trusted_epoch),
                             static_cast<long long>(mockNow()));
 
@@ -992,6 +1057,7 @@ void test_time_manager_permanent_runtime_gate_keeps_ntp_without_rtc_write() {
     TEST_ASSERT_TRUE(result.state_changed);
     TEST_ASSERT_TRUE(result.time_updated);
     TEST_ASSERT_FALSE(manager.isNtpSyncing());
+    TEST_ASSERT_TRUE(manager.isSystemTimeTrusted());
     TEST_ASSERT_EQUAL_INT64(static_cast<long long>(trusted_epoch),
                             static_cast<long long>(mockNow()));
 }
@@ -1051,6 +1117,7 @@ void test_time_manager_ntp_completion_defers_rtc_write_during_detection() {
         I2cMock::transactionCount() - before);
     TEST_ASSERT_TRUE(ntp_completed.time_updated);
     TEST_ASSERT_FALSE(manager.isNtpSyncing());
+    TEST_ASSERT_TRUE(manager.isSystemTimeTrusted());
     TEST_ASSERT_FALSE(manager.isRtcInitialized());
 
     pollDeferredUntil(
@@ -1130,6 +1197,8 @@ void test_time_manager_deferred_retry_deadline_uses_post_i2c_millis() {
 int main(int, char **) {
     UNITY_BEGIN();
     RUN_TEST(test_time_manager_init_rtc_handles_absent_rtc);
+    RUN_TEST(test_time_manager_plausible_process_epoch_is_not_boot_trusted);
+    RUN_TEST(test_time_manager_validates_manual_calendar_before_trusting);
     RUN_TEST(test_time_manager_init_rtc_selects_pcf8523);
     RUN_TEST(test_time_manager_init_rtc_marks_unset_pcf8523_as_time_unset_not_fault);
     RUN_TEST(test_time_manager_does_not_trust_plausible_rtc_time_after_power_loss);
@@ -1155,7 +1224,7 @@ int main(int, char **) {
     RUN_TEST(test_time_manager_deferred_unresolved_weak_ds_records_failure_and_retries);
     RUN_TEST(test_time_manager_deferred_all_read_failures_recover_in_runtime_poll);
     RUN_TEST(test_time_manager_deferred_rtc_deadline_handles_millis_wraparound);
-    RUN_TEST(test_time_manager_deferred_rtc_does_not_overwrite_newer_system_time);
+    RUN_TEST(test_time_manager_plausible_process_epoch_does_not_seed_deferred_rtc);
     RUN_TEST(test_time_manager_stops_missing_rtc_detection_after_five_attempts);
     RUN_TEST(test_time_manager_deferred_poll_performs_at_most_one_i2c_transaction);
     RUN_TEST(test_time_manager_ambiguous_pcf_fallback_requires_successful_read);

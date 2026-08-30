@@ -213,6 +213,10 @@ const char *TimeManager::rtcModeLabel(Config::RtcMode mode) {
 void TimeManager::begin(StorageManager &storage) {
     (void)shared_i2c_runtime_gate_.resetForBoot();
     storage_ = &storage;
+    // Trust is intentionally boot-local. `time()` may retain or acquire a
+    // plausible value before RTC/NTP validation, but that value must not drive
+    // destructive history reconciliation or seed a deferred RTC probe.
+    system_time_trusted_ = false;
     const auto &cfg = storage.config();
     ntp_enabled_pref_ = cfg.ntp_enabled;
     ntp_server_pref_ = trim_copy(cfg.ntp_server);
@@ -380,8 +384,11 @@ bool TimeManager::applyRtcInitState(const tm &utc_tm,
             }
         }
         rtc_valid_ = true;
-        setSystemTime(epoch);
-        return true;
+        if (setSystemTime(epoch)) {
+            system_time_trusted_ = true;
+            return true;
+        }
+        return false;
     }
     rtc_valid_ = false;
     return false;
@@ -547,8 +554,11 @@ bool TimeManager::applyDeferredRtcInitState() {
     }
     if (epoch > Config::TIME_VALID_EPOCH) {
         rtc_valid_ = true;
-        setSystemTime(epoch);
-        return true;
+        if (setSystemTime(epoch)) {
+            system_time_trusted_ = true;
+            return true;
+        }
+        return false;
     }
     rtc_valid_ = false;
     return false;
@@ -558,7 +568,9 @@ void TimeManager::prepareDeferredRtcFinish(PollResult &result) {
     // NTP or manual time can become valid while detection is in flight. Once
     // the RTC identity is confirmed, seed the RTC without replacing the newer
     // system clock. DS3231 writes are split into one transaction per poll.
-    if (rtc_deferred_begin_ok_ && isSystemTimeValid()) {
+    if (rtc_deferred_begin_ok_ &&
+        isSystemTimeTrusted() &&
+        isSystemTimeValid()) {
         const time_t epoch = nowEpoch();
         if (gmtimeInto(epoch, rtc_deferred_tm_)) {
             rtc_pending_write_ = true;
@@ -1028,6 +1040,14 @@ bool TimeManager::isManualLocked(uint32_t now_ms) const {
 }
 
 bool TimeManager::setLocalTime(int year, int month, int day, int hour, int minute) {
+    if (year < 2000 || year > 2099 ||
+        month < 1 || month > 12 ||
+        day < 1 || day > daysInMonth(year, month) ||
+        hour < 0 || hour > 23 ||
+        minute < 0 || minute > 59) {
+        return false;
+    }
+
     tm local_tm = {};
     local_tm.tm_year = year - 1900;
     local_tm.tm_mon = month - 1;
@@ -1037,12 +1057,22 @@ bool TimeManager::setLocalTime(int year, int month, int day, int hour, int minut
     local_tm.tm_sec = 0;
     local_tm.tm_isdst = -1;
     time_t epoch = mktime(&local_tm);
-    if (epoch == -1) {
+    if (epoch == -1 || epoch <= Config::TIME_VALID_EPOCH) {
+        return false;
+    }
+    tm normalized = {};
+    if (!localtimeInto(epoch, normalized) ||
+        normalized.tm_year != year - 1900 ||
+        normalized.tm_mon != month - 1 ||
+        normalized.tm_mday != day ||
+        normalized.tm_hour != hour ||
+        normalized.tm_min != minute) {
         return false;
     }
     if (!setSystemTime(epoch)) {
         return false;
     }
+    system_time_trusted_ = true;
     {
         RtcAccess access = shared_i2c_runtime_gate_.acquire();
         if (access) {
@@ -1148,12 +1178,17 @@ bool TimeManager::getLocalTime(tm &out) {
             if (rtcReadTime(utc_tm, osc_stop, time_valid, access)) {
                 noteRtcReadSuccess(false);
                 rtc_lost_power_ = osc_stop;
-                const time_t epoch = time_valid ? makeUtcEpoch(utc_tm) : static_cast<time_t>(-1);
+                const time_t epoch =
+                    time_valid ? makeUtcEpoch(utc_tm) : static_cast<time_t>(-1);
                 rtc_time_unset_ = rtcTimeLooksUnset(osc_stop);
-                rtc_valid_ = time_valid && !osc_stop && !rtc_time_unset_;
+                rtc_valid_ = time_valid &&
+                             epoch > Config::TIME_VALID_EPOCH &&
+                             !osc_stop &&
+                             !rtc_time_unset_;
                 if (rtc_valid_) {
                     if (setSystemTime(epoch)) {
                         now = epoch;
+                        system_time_trusted_ = true;
                     }
                 }
             } else {
@@ -1355,6 +1390,7 @@ TimeManager::PollResult TimeManager::ntpPoll(uint32_t now_ms,
                          local_tm.tm_min,
                          local_tm.tm_sec);
                 LOGI("Time", "NTP sync completed, local time=%s", buf);
+                system_time_trusted_ = true;
                 ntp_syncing_ = false;
                 ntp_err_ = false;
                 ntp_last_sync_ms_ = now_ms;
@@ -1428,7 +1464,12 @@ TimeManager::PollResult TimeManager::pollRtcStatus(
     if (rtcReadTime(utc_tm, osc_stop, time_valid, access)) {
         noteRtcReadSuccess(true);
         const bool rtc_time_unset = rtcTimeLooksUnset(osc_stop);
-        const bool rtc_valid = time_valid && !osc_stop && !rtc_time_unset;
+        const time_t rtc_epoch =
+            time_valid ? makeUtcEpoch(utc_tm) : static_cast<time_t>(-1);
+        const bool rtc_valid = time_valid &&
+                               rtc_epoch > Config::TIME_VALID_EPOCH &&
+                               !osc_stop &&
+                               !rtc_time_unset;
         if (rtc_lost_power_ != osc_stop ||
             rtc_valid_ != rtc_valid ||
             rtc_time_unset_ != rtc_time_unset) {
@@ -1438,6 +1479,11 @@ TimeManager::PollResult TimeManager::pollRtcStatus(
         rtc_valid_ = rtc_valid;
         rtc_time_unset_ = rtc_time_unset;
         rtc_present_ = true;
+        if (rtc_valid && !system_time_trusted_ && setSystemTime(rtc_epoch)) {
+            system_time_trusted_ = true;
+            result.time_updated = true;
+            LOGI("RTC", "trusted system time restored from runtime RTC read");
+        }
     } else if (noteRtcReadFailure(true)) {
         result.state_changed = true;
     }

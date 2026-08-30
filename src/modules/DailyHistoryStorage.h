@@ -33,6 +33,8 @@ public:
                                              const char *unique_line_prefix,
                                              const char *header,
                                              const char *block) = 0;
+    virtual bool removeDailyCsvRowsOnOrAfterAtomic(const char *path,
+                                                    const char *cutoff_iso_day) = 0;
     virtual bool readBinary(const char *path, void *out, size_t len, size_t &out_len) const = 0;
     virtual bool writeBinaryAtomic(const char *path, const void *data, size_t len) = 0;
     virtual bool removeFile(const char *path) = 0;
