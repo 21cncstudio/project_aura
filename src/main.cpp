@@ -526,8 +526,9 @@ void setup()
     Logger::begin(Serial, static_cast<Logger::Level>(Config::LOG_LEVEL));
     Logger::setSerialOutputEnabled(Config::LOG_SERIAL_OUTPUT);
     Logger::setSensorsSerialOutputEnabled(Config::LOG_SERIAL_SENSORS_OUTPUT);
-    LOGI("Main", "hardware_profile=%s build_id=%s",
-         AppVersion::hardwareProfile(), AppVersion::buildId());
+    LOGI("Main", "hardware_profile=%s hardware_target=%s build_id=%s",
+         AppVersion::hardwareProfile(), AppVersion::hardwareTarget(),
+         AppVersion::buildId());
     OtaRollback::logCurrentAppState();
     LOGI("Main", "Arduino loop task stack size: %u bytes",
          static_cast<unsigned>(getArduinoLoopTaskStackSize()));

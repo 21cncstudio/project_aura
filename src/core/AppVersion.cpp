@@ -22,6 +22,10 @@
 #define APP_HARDWARE_PROFILE "unknown"
 #endif
 
+#ifndef APP_HARDWARE_TARGET
+#define APP_HARDWARE_TARGET "unknown"
+#endif
+
 namespace {
 
 bool isNumeric(char c) {
@@ -62,6 +66,10 @@ const char *buildId() {
 
 const char *hardwareProfile() {
     return APP_HARDWARE_PROFILE;
+}
+
+const char *hardwareTarget() {
+    return APP_HARDWARE_TARGET;
 }
 
 const char *fullVersion() {
