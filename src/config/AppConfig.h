@@ -55,6 +55,9 @@ namespace Config {
     constexpr uint32_t SAFE_BOOT_STABLE_MS = 60UL * 1000UL;
     constexpr uint8_t SAFE_BOOT_MAX_REBOOTS = 5;
     constexpr uint32_t LAST_GOOD_COMMIT_DELAY_MS = 3UL * 60UL * 1000UL;
+    constexpr uint32_t LAST_GOOD_HEALTH_SAMPLE_MAX_GAP_MS = 5UL * 1000UL;
+    constexpr uint32_t LAST_GOOD_RETRY_INITIAL_DELAY_MS = 5UL * 1000UL;
+    constexpr uint32_t LAST_GOOD_RETRY_MAX_DELAY_MS = 5UL * 60UL * 1000UL;
 
     enum class Language : uint8_t {
         EN = 0,

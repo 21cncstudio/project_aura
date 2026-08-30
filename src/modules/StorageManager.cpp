@@ -39,7 +39,11 @@ int16_t clampPressureAltitudeM(int value) {
 
 #ifdef UNIT_TEST
 std::map<std::string, std::vector<uint8_t>> g_blob_store;
+std::map<std::string, Config::StoredConfig> g_config_records;
 bool g_force_save_failure = false;
+uint32_t g_last_good_commit_failures_remaining = 0;
+uint32_t g_last_good_commit_attempts = 0;
+bool g_preserve_test_persistence_for_next_begin = false;
 #endif
 
 #ifndef UNIT_TEST
@@ -206,27 +210,30 @@ void restoreText(StorageManager &storage, const char *path, const TextSnapshot &
 } // namespace
 
 void StorageManager::begin(BootAction action) {
+    const std::lock_guard<std::recursive_mutex> lock(persistence_mutex_);
     config_ = Config::StoredConfig{};
     lkg_pending_ = false;
-    lkg_start_ms_ = 0;
+    resetLastGoodHealthProof();
     mounted_ = false;
     config_loaded_ = false;
 #ifdef UNIT_TEST
-    g_force_save_failure = false;
-    g_blob_store.clear();
-    if (action == BootAction::SafeRollback) {
-        restoreLastGood();
-    } else if (action == BootAction::SafeFactoryReset) {
-        clearAll();
+    if (g_preserve_test_persistence_for_next_begin) {
+        g_preserve_test_persistence_for_next_begin = false;
+        g_force_save_failure = false;
+        g_last_good_commit_failures_remaining = 0;
+        g_last_good_commit_attempts = 0;
+    } else {
+        resetTestPersistence();
     }
     mounted_ = true;
-    config_loaded_ = true;
 #else
     if (!LittleFS.begin(true, "/littlefs", 10, "littlefs")) {
         LOGE("Storage", "LittleFS mount failed");
         return;
     }
     mounted_ = true;
+#endif
+
     if (action == BootAction::SafeRollback) {
         if (!restoreLastGood()) {
             LOGW("Storage", "last good config missing, factory reset");
@@ -238,12 +245,9 @@ void StorageManager::begin(BootAction action) {
         LOGW("Storage", "factory reset requested");
         clearAll();
     }
-    bool loaded = loadConfig();
-    if (loaded) {
-        lkg_pending_ = true;
-        lkg_start_ms_ = millis();
+    if (loadConfig()) {
+        startLastGoodCandidate();
     }
-#endif
 }
 
 const Config::StoredConfig &StorageManager::config() const {
@@ -255,6 +259,7 @@ Config::StoredConfig &StorageManager::config() {
 }
 
 bool StorageManager::saveConfig(bool force) {
+    const std::lock_guard<std::recursive_mutex> lock(persistence_mutex_);
     if (!force) {
         markDirty();
         return true;
@@ -263,29 +268,87 @@ bool StorageManager::saveConfig(bool force) {
 }
 
 void StorageManager::requestSave() {
+    const std::lock_guard<std::recursive_mutex> lock(persistence_mutex_);
     markDirty();
 }
 
+void StorageManager::observeLastGoodHealth(uint32_t now_ms,
+                                           OperationalHealth health) {
+    const std::lock_guard<std::recursive_mutex> lock(persistence_mutex_);
+    if (!lkg_pending_) {
+        return;
+    }
+
+    if (health == OperationalHealth::Unhealthy) {
+        resetLastGoodHealthProof();
+        return;
+    }
+    if (health == OperationalHealth::Unavailable) {
+        lkg_health_window_active_ = false;
+        return;
+    }
+
+    if (!lkg_health_window_active_) {
+        lkg_health_window_active_ = true;
+        lkg_last_health_sample_ms_ = now_ms;
+        return;
+    }
+
+    const uint32_t elapsed_ms =
+        static_cast<uint32_t>(now_ms - lkg_last_health_sample_ms_);
+    lkg_last_health_sample_ms_ = now_ms;
+    if (elapsed_ms > Config::LAST_GOOD_HEALTH_SAMPLE_MAX_GAP_MS) {
+        return;
+    }
+
+    const uint32_t remaining_ms =
+        Config::LAST_GOOD_COMMIT_DELAY_MS - lkg_healthy_accumulated_ms_;
+    if (elapsed_ms >= remaining_ms) {
+        lkg_healthy_accumulated_ms_ = Config::LAST_GOOD_COMMIT_DELAY_MS;
+    } else {
+        lkg_healthy_accumulated_ms_ += elapsed_ms;
+    }
+}
+
 void StorageManager::poll(uint32_t now_ms) {
-    if (!dirty_) {
-        if (lkg_pending_ &&
-            (now_ms - lkg_start_ms_) >= Config::LAST_GOOD_COMMIT_DELAY_MS) {
-            if (commitLastGood()) {
-                LOGI("Storage", "config committed as last known good");
-            } else {
-                LOGW("Storage", "last known good commit failed");
-            }
-            lkg_pending_ = false;
+    const std::lock_guard<std::recursive_mutex> lock(persistence_mutex_);
+    if (dirty_) {
+        if (static_cast<uint32_t>(now_ms - last_save_ms_) < debounce_ms_) {
+            return;
         }
+        if (!saveConfigInternal()) {
+            return;
+        }
+    }
+
+    if (!lkg_pending_ ||
+        !lkg_health_window_active_ ||
+        lkg_healthy_accumulated_ms_ < Config::LAST_GOOD_COMMIT_DELAY_MS ||
+        !lastGoodRetryReady(now_ms)) {
         return;
     }
-    if (now_ms - last_save_ms_ < debounce_ms_) {
+
+    if (commitLastGood()) {
+        LOGI("Storage", "config committed as last known good");
+        lkg_pending_ = false;
+        resetLastGoodHealthProof();
         return;
     }
-    saveConfigInternal();
+
+    LOGW("Storage", "last known good commit failed");
+    lkg_retry_started_ms_ = now_ms;
+    if (lkg_retry_delay_ms_ == 0) {
+        lkg_retry_delay_ms_ = Config::LAST_GOOD_RETRY_INITIAL_DELAY_MS;
+    } else if (lkg_retry_delay_ms_ >=
+               Config::LAST_GOOD_RETRY_MAX_DELAY_MS / 2U) {
+        lkg_retry_delay_ms_ = Config::LAST_GOOD_RETRY_MAX_DELAY_MS;
+    } else {
+        lkg_retry_delay_ms_ *= 2U;
+    }
 }
 
 void StorageManager::clearAll() {
+    const std::lock_guard<std::recursive_mutex> lock(persistence_mutex_);
 #ifndef UNIT_TEST
     removeBlob(kConfigPath);
     removeBlob(kLastGoodPath);
@@ -300,43 +363,51 @@ void StorageManager::clearAll() {
     removeBlob(kWifiEapClientKeyPath);
 #else
     g_blob_store.clear();
+    g_config_records.clear();
 #endif
     config_ = Config::StoredConfig{};
     dirty_ = false;
     last_save_ms_ = 0;
     lkg_pending_ = false;
-    lkg_start_ms_ = 0;
+    resetLastGoodHealthProof();
     config_loaded_ = false;
 }
 
 bool StorageManager::commitLastGood() {
+    const std::lock_guard<std::recursive_mutex> lock(persistence_mutex_);
 #ifndef UNIT_TEST
     if (!recoverFileAtomic(kConfigPath)) {
         return false;
     }
     return copyFileAtomic(kConfigPath, kLastGoodPath);
 #else
-    auto it = g_blob_store.find(kConfigPath);
-    if (it == g_blob_store.end()) {
+    ++g_last_good_commit_attempts;
+    if (g_last_good_commit_failures_remaining > 0) {
+        --g_last_good_commit_failures_remaining;
         return false;
     }
-    g_blob_store[kLastGoodPath] = it->second;
+    auto it = g_config_records.find(kConfigPath);
+    if (it == g_config_records.end()) {
+        return false;
+    }
+    g_config_records[kLastGoodPath] = it->second;
     return true;
 #endif
 }
 
 bool StorageManager::restoreLastGood() {
+    const std::lock_guard<std::recursive_mutex> lock(persistence_mutex_);
 #ifndef UNIT_TEST
     if (!recoverFileAtomic(kLastGoodPath)) {
         return false;
     }
     return copyFileAtomic(kLastGoodPath, kConfigPath);
 #else
-    auto it = g_blob_store.find(kLastGoodPath);
-    if (it == g_blob_store.end()) {
+    auto it = g_config_records.find(kLastGoodPath);
+    if (it == g_config_records.end()) {
         return false;
     }
-    g_blob_store[kConfigPath] = it->second;
+    g_config_records[kConfigPath] = it->second;
     return true;
 #endif
 }
@@ -860,6 +931,12 @@ bool StorageManager::loadConfig() {
     config_loaded_ = true;
     return true;
 #else
+    const auto it = g_config_records.find(kConfigPath);
+    if (it == g_config_records.end()) {
+        config_loaded_ = false;
+        return false;
+    }
+    config_ = it->second;
     config_loaded_ = true;
     return true;
 #endif
@@ -975,27 +1052,80 @@ bool StorageManager::saveConfigInternal() {
     config_loaded_ = true;
     last_save_ms_ = millis();
     dirty_ = false;
-    lkg_pending_ = true;
-    lkg_start_ms_ = last_save_ms_;
+    startLastGoodCandidate();
     return true;
 #else
     if (g_force_save_failure) {
         return false;
     }
+    g_config_records[kConfigPath] = config_;
     last_save_ms_ = millis();
     dirty_ = false;
-    lkg_pending_ = true;
-    lkg_start_ms_ = last_save_ms_;
+    config_loaded_ = true;
+    startLastGoodCandidate();
     return true;
 #endif
 }
 
 #ifdef UNIT_TEST
+void StorageManager::resetTestPersistence() {
+    g_blob_store.clear();
+    g_config_records.clear();
+    g_force_save_failure = false;
+    g_last_good_commit_failures_remaining = 0;
+    g_last_good_commit_attempts = 0;
+    g_preserve_test_persistence_for_next_begin = false;
+}
+
+void StorageManager::preserveTestPersistenceForNextBegin() {
+    g_preserve_test_persistence_for_next_begin = true;
+}
+
 void StorageManager::setTestForceSaveFailure(bool enabled) {
     g_force_save_failure = enabled;
+}
+
+void StorageManager::setTestLastGoodCommitFailureCount(uint32_t count) {
+    g_last_good_commit_failures_remaining = count;
+}
+
+uint32_t StorageManager::testLastGoodCommitAttemptCount() {
+    return g_last_good_commit_attempts;
+}
+
+bool StorageManager::getTestStoredConfig(const char *path,
+                                         Config::StoredConfig &out) {
+    if (!path) {
+        return false;
+    }
+    const auto it = g_config_records.find(path);
+    if (it == g_config_records.end()) {
+        return false;
+    }
+    out = it->second;
+    return true;
 }
 #endif
 
 void StorageManager::markDirty() {
     dirty_ = true;
+}
+
+void StorageManager::startLastGoodCandidate() {
+    lkg_pending_ = true;
+    resetLastGoodHealthProof();
+}
+
+void StorageManager::resetLastGoodHealthProof() {
+    lkg_health_window_active_ = false;
+    lkg_healthy_accumulated_ms_ = 0;
+    lkg_last_health_sample_ms_ = 0;
+    lkg_retry_started_ms_ = 0;
+    lkg_retry_delay_ms_ = 0;
+}
+
+bool StorageManager::lastGoodRetryReady(uint32_t now_ms) const {
+    return lkg_retry_delay_ms_ == 0 ||
+           static_cast<uint32_t>(now_ms - lkg_retry_started_ms_) >=
+               lkg_retry_delay_ms_;
 }

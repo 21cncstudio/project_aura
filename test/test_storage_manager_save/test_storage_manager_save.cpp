@@ -1,13 +1,49 @@
 #include <unity.h>
 
+#include "ArduinoMock.h"
 #include "modules/StorageManager.h"
 
+namespace {
+
+void saveCandidate(StorageManager &storage, const char *ssid) {
+    storage.config().wifi_ssid = ssid;
+    TEST_ASSERT_TRUE(storage.saveConfig(true));
+}
+
+void observeHealthy(StorageManager &storage, uint32_t now_ms) {
+    storage.observeLastGoodHealth(now_ms, OperationalHealth::Healthy);
+}
+
+void accumulateHealthy(StorageManager &storage,
+                       uint32_t &now_ms,
+                       uint32_t duration_ms) {
+    while (duration_ms > 0) {
+        const uint32_t step_ms =
+            duration_ms > Config::LAST_GOOD_HEALTH_SAMPLE_MAX_GAP_MS
+                ? Config::LAST_GOOD_HEALTH_SAMPLE_MAX_GAP_MS
+                : duration_ms;
+        now_ms += step_ms;
+        observeHealthy(storage, now_ms);
+        duration_ms -= step_ms;
+    }
+}
+
+bool loadStoredConfig(const char *path, Config::StoredConfig &out) {
+    return StorageManager::getTestStoredConfig(path, out);
+}
+
+} // namespace
+
 void setUp() {
+    setMillis(0);
+    StorageManager::resetTestPersistence();
     StorageManager::setTestForceSaveFailure(false);
+    StorageManager::setTestLastGoodCommitFailureCount(0);
 }
 
 void tearDown() {
     StorageManager::setTestForceSaveFailure(false);
+    StorageManager::setTestLastGoodCommitFailureCount(0);
 }
 
 void test_save_wifi_settings_preserves_spaces() {
@@ -198,6 +234,7 @@ void test_factory_reset_removes_mqtt_ca_certificate() {
     storage.begin();
     TEST_ASSERT_TRUE(storage.saveMqttCaCertificate("ca"));
 
+    StorageManager::preserveTestPersistenceForNextBegin();
     storage.begin(StorageManager::BootAction::SafeFactoryReset);
 
     String ca;
@@ -306,6 +343,439 @@ void test_new_save_supersedes_an_interrupted_backup() {
     TEST_ASSERT_FALSE(storage.blobExists("/retry.bin.bak"));
 }
 
+void test_dirty_config_saves_while_unhealthy_without_promoting_last_good() {
+    StorageManager storage;
+    storage.begin();
+    storage.config().wifi_ssid = "unhealthy-candidate";
+    storage.requestSave();
+    storage.observeLastGoodHealth(0, OperationalHealth::Unhealthy);
+
+    setMillis(999);
+    storage.poll(999);
+    Config::StoredConfig stored;
+    TEST_ASSERT_FALSE(loadStoredConfig(StorageManager::kConfigPath, stored));
+
+    setMillis(1000);
+    storage.poll(1000);
+    TEST_ASSERT_TRUE(loadStoredConfig(StorageManager::kConfigPath, stored));
+    TEST_ASSERT_EQUAL_STRING("unhealthy-candidate", stored.wifi_ssid.c_str());
+
+    storage.observeLastGoodHealth(
+        1000 + Config::LAST_GOOD_COMMIT_DELAY_MS,
+        OperationalHealth::Unhealthy);
+    storage.poll(1000 + Config::LAST_GOOD_COMMIT_DELAY_MS);
+    TEST_ASSERT_FALSE(loadStoredConfig(StorageManager::kLastGoodPath, stored));
+}
+
+void test_last_good_requires_exact_accumulated_healthy_dwell() {
+    StorageManager storage;
+    storage.begin();
+    saveCandidate(storage, "exact-dwell");
+
+    uint32_t now_ms = 100;
+    observeHealthy(storage, now_ms);
+    accumulateHealthy(
+        storage,
+        now_ms,
+        Config::LAST_GOOD_COMMIT_DELAY_MS - 1U);
+    storage.poll(now_ms);
+    Config::StoredConfig stored;
+    TEST_ASSERT_FALSE(loadStoredConfig(StorageManager::kLastGoodPath, stored));
+
+    accumulateHealthy(storage, now_ms, 1U);
+    storage.poll(now_ms);
+    TEST_ASSERT_TRUE(loadStoredConfig(StorageManager::kLastGoodPath, stored));
+    TEST_ASSERT_EQUAL_STRING("exact-dwell", stored.wifi_ssid.c_str());
+}
+
+void test_unhealthy_sample_resets_healthy_proof() {
+    StorageManager storage;
+    storage.begin();
+    saveCandidate(storage, "reset-proof");
+
+    uint32_t now_ms = 100;
+    observeHealthy(storage, now_ms);
+    accumulateHealthy(
+        storage,
+        now_ms,
+        Config::LAST_GOOD_COMMIT_DELAY_MS - 1U);
+    ++now_ms;
+    storage.observeLastGoodHealth(now_ms, OperationalHealth::Unhealthy);
+    observeHealthy(storage, now_ms);
+    accumulateHealthy(
+        storage,
+        now_ms,
+        Config::LAST_GOOD_COMMIT_DELAY_MS - 1U);
+    storage.poll(now_ms);
+    Config::StoredConfig stored;
+    TEST_ASSERT_FALSE(loadStoredConfig(StorageManager::kLastGoodPath, stored));
+
+    accumulateHealthy(storage, now_ms, 1U);
+    storage.poll(now_ms);
+    TEST_ASSERT_TRUE(loadStoredConfig(StorageManager::kLastGoodPath, stored));
+}
+
+void test_unavailable_pause_freezes_proof_and_excludes_pause_time() {
+    StorageManager storage;
+    storage.begin();
+    saveCandidate(storage, "paused-proof");
+
+    uint32_t now_ms = 100;
+    observeHealthy(storage, now_ms);
+    constexpr uint32_t first_healthy_ms = 60UL * 1000UL;
+    accumulateHealthy(storage, now_ms, first_healthy_ms);
+
+    now_ms += 30UL * 1000UL;
+    storage.observeLastGoodHealth(now_ms, OperationalHealth::Unavailable);
+    now_ms += 60UL * 1000UL;
+    observeHealthy(storage, now_ms);
+    accumulateHealthy(
+        storage,
+        now_ms,
+        Config::LAST_GOOD_COMMIT_DELAY_MS - first_healthy_ms - 1U);
+    storage.poll(now_ms);
+    Config::StoredConfig stored;
+    TEST_ASSERT_FALSE(loadStoredConfig(StorageManager::kLastGoodPath, stored));
+
+    accumulateHealthy(storage, now_ms, 1U);
+    storage.poll(now_ms);
+    TEST_ASSERT_TRUE(loadStoredConfig(StorageManager::kLastGoodPath, stored));
+}
+
+void test_health_sample_gap_boundary_counts_5000_but_excludes_5001() {
+    StorageManager storage;
+    storage.begin();
+    saveCandidate(storage, "gap-boundary");
+
+    uint32_t now_ms = 100;
+    observeHealthy(storage, now_ms);
+    accumulateHealthy(
+        storage,
+        now_ms,
+        Config::LAST_GOOD_HEALTH_SAMPLE_MAX_GAP_MS);
+    now_ms += Config::LAST_GOOD_HEALTH_SAMPLE_MAX_GAP_MS + 1U;
+    observeHealthy(storage, now_ms);
+
+    accumulateHealthy(
+        storage,
+        now_ms,
+        Config::LAST_GOOD_COMMIT_DELAY_MS -
+            Config::LAST_GOOD_HEALTH_SAMPLE_MAX_GAP_MS - 1U);
+    storage.poll(now_ms);
+    Config::StoredConfig stored;
+    TEST_ASSERT_FALSE(loadStoredConfig(StorageManager::kLastGoodPath, stored));
+
+    accumulateHealthy(storage, now_ms, 1U);
+    storage.poll(now_ms);
+    TEST_ASSERT_TRUE(loadStoredConfig(StorageManager::kLastGoodPath, stored));
+}
+
+void test_successful_new_save_restarts_health_proof() {
+    StorageManager storage;
+    storage.begin();
+    saveCandidate(storage, "candidate-a");
+
+    uint32_t now_ms = 100;
+    observeHealthy(storage, now_ms);
+    accumulateHealthy(
+        storage,
+        now_ms,
+        Config::LAST_GOOD_COMMIT_DELAY_MS - 1U);
+
+    setMillis(now_ms);
+    saveCandidate(storage, "candidate-b");
+    observeHealthy(storage, now_ms);
+    accumulateHealthy(
+        storage,
+        now_ms,
+        Config::LAST_GOOD_COMMIT_DELAY_MS - 1U);
+    storage.poll(now_ms);
+    Config::StoredConfig stored;
+    TEST_ASSERT_FALSE(loadStoredConfig(StorageManager::kLastGoodPath, stored));
+
+    accumulateHealthy(storage, now_ms, 1U);
+    storage.poll(now_ms);
+    TEST_ASSERT_TRUE(loadStoredConfig(StorageManager::kLastGoodPath, stored));
+    TEST_ASSERT_EQUAL_STRING("candidate-b", stored.wifi_ssid.c_str());
+}
+
+void test_failed_config_save_keeps_previous_candidate_and_proof() {
+    StorageManager storage;
+    storage.begin();
+    saveCandidate(storage, "durable-candidate");
+
+    uint32_t now_ms = 100;
+    observeHealthy(storage, now_ms);
+    accumulateHealthy(
+        storage,
+        now_ms,
+        Config::LAST_GOOD_COMMIT_DELAY_MS - 1U);
+
+    storage.config().wifi_ssid = "unsaved-change";
+    StorageManager::setTestForceSaveFailure(true);
+    TEST_ASSERT_FALSE(storage.saveConfig(true));
+    StorageManager::setTestForceSaveFailure(false);
+
+    accumulateHealthy(storage, now_ms, 1U);
+    storage.poll(now_ms);
+    Config::StoredConfig stored;
+    TEST_ASSERT_TRUE(loadStoredConfig(StorageManager::kLastGoodPath, stored));
+    TEST_ASSERT_EQUAL_STRING("durable-candidate", stored.wifi_ssid.c_str());
+}
+
+void test_unhealthy_candidate_does_not_replace_existing_last_good() {
+    StorageManager storage;
+    storage.begin();
+    saveCandidate(storage, "known-good");
+
+    uint32_t now_ms = 100;
+    observeHealthy(storage, now_ms);
+    accumulateHealthy(storage, now_ms, Config::LAST_GOOD_COMMIT_DELAY_MS);
+    storage.poll(now_ms);
+
+    setMillis(now_ms);
+    saveCandidate(storage, "unhealthy-new-config");
+    storage.observeLastGoodHealth(now_ms, OperationalHealth::Unhealthy);
+    now_ms += Config::LAST_GOOD_COMMIT_DELAY_MS;
+    storage.poll(now_ms);
+
+    Config::StoredConfig stored;
+    TEST_ASSERT_TRUE(loadStoredConfig(StorageManager::kLastGoodPath, stored));
+    TEST_ASSERT_EQUAL_STRING("known-good", stored.wifi_ssid.c_str());
+}
+
+void test_safe_rollback_loads_last_good_after_reboot() {
+    StorageManager first_boot;
+    first_boot.begin();
+    saveCandidate(first_boot, "known-good");
+
+    uint32_t now_ms = 100;
+    observeHealthy(first_boot, now_ms);
+    accumulateHealthy(first_boot, now_ms, Config::LAST_GOOD_COMMIT_DELAY_MS);
+    first_boot.poll(now_ms);
+
+    setMillis(now_ms);
+    saveCandidate(first_boot, "unproven-candidate");
+
+    StorageManager::preserveTestPersistenceForNextBegin();
+    StorageManager rollback_boot;
+    rollback_boot.begin(StorageManager::BootAction::SafeRollback);
+    TEST_ASSERT_TRUE(rollback_boot.isConfigLoaded());
+    TEST_ASSERT_EQUAL_STRING(
+        "known-good",
+        rollback_boot.config().wifi_ssid.c_str());
+
+    Config::StoredConfig stored;
+    TEST_ASSERT_TRUE(loadStoredConfig(StorageManager::kConfigPath, stored));
+    TEST_ASSERT_EQUAL_STRING("known-good", stored.wifi_ssid.c_str());
+}
+
+void test_normal_reboot_loads_current_config_and_requires_fresh_health_proof() {
+    StorageManager first_boot;
+    first_boot.begin();
+    saveCandidate(first_boot, "known-good");
+
+    uint32_t now_ms = 100;
+    observeHealthy(first_boot, now_ms);
+    accumulateHealthy(first_boot, now_ms, Config::LAST_GOOD_COMMIT_DELAY_MS);
+    first_boot.poll(now_ms);
+
+    setMillis(now_ms);
+    saveCandidate(first_boot, "current-candidate");
+    observeHealthy(first_boot, now_ms);
+    accumulateHealthy(
+        first_boot,
+        now_ms,
+        Config::LAST_GOOD_COMMIT_DELAY_MS - 1U);
+
+    StorageManager::preserveTestPersistenceForNextBegin();
+    StorageManager normal_boot;
+    normal_boot.begin(StorageManager::BootAction::Normal);
+    TEST_ASSERT_TRUE(normal_boot.isConfigLoaded());
+    TEST_ASSERT_EQUAL_STRING(
+        "current-candidate",
+        normal_boot.config().wifi_ssid.c_str());
+
+    Config::StoredConfig stored;
+    observeHealthy(normal_boot, now_ms);
+    normal_boot.poll(now_ms);
+    TEST_ASSERT_TRUE(loadStoredConfig(StorageManager::kLastGoodPath, stored));
+    TEST_ASSERT_EQUAL_STRING("known-good", stored.wifi_ssid.c_str());
+
+    accumulateHealthy(
+        normal_boot,
+        now_ms,
+        Config::LAST_GOOD_COMMIT_DELAY_MS - 1U);
+    normal_boot.poll(now_ms);
+    TEST_ASSERT_TRUE(loadStoredConfig(StorageManager::kLastGoodPath, stored));
+    TEST_ASSERT_EQUAL_STRING("known-good", stored.wifi_ssid.c_str());
+
+    accumulateHealthy(normal_boot, now_ms, 1U);
+    normal_boot.poll(now_ms);
+    TEST_ASSERT_TRUE(loadStoredConfig(StorageManager::kLastGoodPath, stored));
+    TEST_ASSERT_EQUAL_STRING("current-candidate", stored.wifi_ssid.c_str());
+}
+
+void test_failed_last_good_commit_retries_after_initial_backoff() {
+    StorageManager storage;
+    storage.begin();
+    saveCandidate(storage, "retry-candidate");
+
+    uint32_t now_ms = 100;
+    observeHealthy(storage, now_ms);
+    accumulateHealthy(storage, now_ms, Config::LAST_GOOD_COMMIT_DELAY_MS);
+    StorageManager::setTestLastGoodCommitFailureCount(1);
+    storage.poll(now_ms);
+    TEST_ASSERT_EQUAL_UINT32(1, StorageManager::testLastGoodCommitAttemptCount());
+
+    now_ms += Config::LAST_GOOD_RETRY_INITIAL_DELAY_MS - 1U;
+    observeHealthy(storage, now_ms);
+    storage.poll(now_ms);
+    TEST_ASSERT_EQUAL_UINT32(1, StorageManager::testLastGoodCommitAttemptCount());
+
+    ++now_ms;
+    observeHealthy(storage, now_ms);
+    storage.poll(now_ms);
+    TEST_ASSERT_EQUAL_UINT32(2, StorageManager::testLastGoodCommitAttemptCount());
+    Config::StoredConfig stored;
+    TEST_ASSERT_TRUE(loadStoredConfig(StorageManager::kLastGoodPath, stored));
+}
+
+void test_failed_promotion_preserves_previous_last_good_until_retry_succeeds() {
+    StorageManager storage;
+    storage.begin();
+    saveCandidate(storage, "known-good");
+
+    uint32_t now_ms = 100;
+    observeHealthy(storage, now_ms);
+    accumulateHealthy(storage, now_ms, Config::LAST_GOOD_COMMIT_DELAY_MS);
+    storage.poll(now_ms);
+
+    setMillis(now_ms);
+    saveCandidate(storage, "next-candidate");
+    observeHealthy(storage, now_ms);
+    accumulateHealthy(storage, now_ms, Config::LAST_GOOD_COMMIT_DELAY_MS);
+    StorageManager::setTestLastGoodCommitFailureCount(1);
+    storage.poll(now_ms);
+
+    Config::StoredConfig stored;
+    TEST_ASSERT_TRUE(loadStoredConfig(StorageManager::kLastGoodPath, stored));
+    TEST_ASSERT_EQUAL_STRING("known-good", stored.wifi_ssid.c_str());
+
+    now_ms += Config::LAST_GOOD_RETRY_INITIAL_DELAY_MS - 1U;
+    observeHealthy(storage, now_ms);
+    storage.poll(now_ms);
+    TEST_ASSERT_TRUE(loadStoredConfig(StorageManager::kLastGoodPath, stored));
+    TEST_ASSERT_EQUAL_STRING("known-good", stored.wifi_ssid.c_str());
+
+    ++now_ms;
+    observeHealthy(storage, now_ms);
+    storage.poll(now_ms);
+    TEST_ASSERT_TRUE(loadStoredConfig(StorageManager::kLastGoodPath, stored));
+    TEST_ASSERT_EQUAL_STRING("next-candidate", stored.wifi_ssid.c_str());
+}
+
+void test_last_good_retry_backoff_doubles_and_caps_at_five_minutes() {
+    StorageManager storage;
+    storage.begin();
+    saveCandidate(storage, "backoff-candidate");
+
+    uint32_t now_ms = 100;
+    observeHealthy(storage, now_ms);
+    accumulateHealthy(storage, now_ms, Config::LAST_GOOD_COMMIT_DELAY_MS);
+    StorageManager::setTestLastGoodCommitFailureCount(8);
+    storage.poll(now_ms);
+
+    const uint32_t retry_delays[] = {
+        5UL * 1000UL,
+        10UL * 1000UL,
+        20UL * 1000UL,
+        40UL * 1000UL,
+        80UL * 1000UL,
+        160UL * 1000UL,
+        300UL * 1000UL,
+        300UL * 1000UL,
+    };
+    uint32_t expected_attempts = 1;
+    for (uint32_t retry_delay_ms : retry_delays) {
+        now_ms += retry_delay_ms - 1U;
+        observeHealthy(storage, now_ms);
+        storage.poll(now_ms);
+        TEST_ASSERT_EQUAL_UINT32(
+            expected_attempts,
+            StorageManager::testLastGoodCommitAttemptCount());
+
+        ++now_ms;
+        observeHealthy(storage, now_ms);
+        storage.poll(now_ms);
+        ++expected_attempts;
+        TEST_ASSERT_EQUAL_UINT32(
+            expected_attempts,
+            StorageManager::testLastGoodCommitAttemptCount());
+    }
+
+    Config::StoredConfig stored;
+    TEST_ASSERT_TRUE(loadStoredConfig(StorageManager::kLastGoodPath, stored));
+}
+
+void test_unavailable_health_suppresses_ready_retry_until_healthy_again() {
+    StorageManager storage;
+    storage.begin();
+    saveCandidate(storage, "unavailable-retry");
+
+    uint32_t now_ms = 100;
+    observeHealthy(storage, now_ms);
+    accumulateHealthy(storage, now_ms, Config::LAST_GOOD_COMMIT_DELAY_MS);
+    StorageManager::setTestLastGoodCommitFailureCount(1);
+    storage.poll(now_ms);
+
+    now_ms += Config::LAST_GOOD_RETRY_INITIAL_DELAY_MS;
+    storage.observeLastGoodHealth(now_ms, OperationalHealth::Unavailable);
+    storage.poll(now_ms);
+    TEST_ASSERT_EQUAL_UINT32(1, StorageManager::testLastGoodCommitAttemptCount());
+
+    observeHealthy(storage, now_ms);
+    storage.poll(now_ms);
+    TEST_ASSERT_EQUAL_UINT32(2, StorageManager::testLastGoodCommitAttemptCount());
+}
+
+void test_healthy_dwell_is_rollover_safe() {
+    StorageManager storage;
+    storage.begin();
+    saveCandidate(storage, "rollover-dwell");
+
+    uint32_t now_ms = UINT32_MAX - Config::LAST_GOOD_COMMIT_DELAY_MS + 100U;
+    observeHealthy(storage, now_ms);
+    accumulateHealthy(storage, now_ms, Config::LAST_GOOD_COMMIT_DELAY_MS);
+    storage.poll(now_ms);
+
+    Config::StoredConfig stored;
+    TEST_ASSERT_TRUE(loadStoredConfig(StorageManager::kLastGoodPath, stored));
+}
+
+void test_last_good_retry_deadline_is_rollover_safe() {
+    StorageManager storage;
+    storage.begin();
+    saveCandidate(storage, "rollover-retry");
+
+    uint32_t now_ms =
+        UINT32_MAX - Config::LAST_GOOD_COMMIT_DELAY_MS - 1000U;
+    observeHealthy(storage, now_ms);
+    accumulateHealthy(storage, now_ms, Config::LAST_GOOD_COMMIT_DELAY_MS);
+    StorageManager::setTestLastGoodCommitFailureCount(1);
+    storage.poll(now_ms);
+
+    now_ms += Config::LAST_GOOD_RETRY_INITIAL_DELAY_MS - 1U;
+    observeHealthy(storage, now_ms);
+    storage.poll(now_ms);
+    TEST_ASSERT_EQUAL_UINT32(1, StorageManager::testLastGoodCommitAttemptCount());
+
+    ++now_ms;
+    observeHealthy(storage, now_ms);
+    storage.poll(now_ms);
+    TEST_ASSERT_EQUAL_UINT32(2, StorageManager::testLastGoodCommitAttemptCount());
+}
+
 int main(int, char **) {
     UNITY_BEGIN();
     RUN_TEST(test_save_wifi_settings_preserves_spaces);
@@ -325,5 +795,21 @@ int main(int, char **) {
     RUN_TEST(test_text_load_recovers_interrupted_atomic_replace);
     RUN_TEST(test_remove_blob_cleans_atomic_artifacts);
     RUN_TEST(test_new_save_supersedes_an_interrupted_backup);
+    RUN_TEST(test_dirty_config_saves_while_unhealthy_without_promoting_last_good);
+    RUN_TEST(test_last_good_requires_exact_accumulated_healthy_dwell);
+    RUN_TEST(test_unhealthy_sample_resets_healthy_proof);
+    RUN_TEST(test_unavailable_pause_freezes_proof_and_excludes_pause_time);
+    RUN_TEST(test_health_sample_gap_boundary_counts_5000_but_excludes_5001);
+    RUN_TEST(test_successful_new_save_restarts_health_proof);
+    RUN_TEST(test_failed_config_save_keeps_previous_candidate_and_proof);
+    RUN_TEST(test_unhealthy_candidate_does_not_replace_existing_last_good);
+    RUN_TEST(test_safe_rollback_loads_last_good_after_reboot);
+    RUN_TEST(test_normal_reboot_loads_current_config_and_requires_fresh_health_proof);
+    RUN_TEST(test_failed_last_good_commit_retries_after_initial_backoff);
+    RUN_TEST(test_failed_promotion_preserves_previous_last_good_until_retry_succeeds);
+    RUN_TEST(test_last_good_retry_backoff_doubles_and_caps_at_five_minutes);
+    RUN_TEST(test_unavailable_health_suppresses_ready_retry_until_healthy_again);
+    RUN_TEST(test_healthy_dwell_is_rollover_safe);
+    RUN_TEST(test_last_good_retry_deadline_is_rollover_safe);
     return UNITY_END();
 }

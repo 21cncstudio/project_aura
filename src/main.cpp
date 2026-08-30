@@ -31,6 +31,7 @@
 #include "core/SafeRestart.h"
 #include "core/SharedI2cShutdownPolicy.h"
 #include "core/I2cBusRecovery.h"
+#include "core/LastGoodHealthPolicy.h"
 #include "core/WebRuntimeState.h"
 #include "core/WakePowerGuard.h"
 #include "core/Watchdog.h"
@@ -163,6 +164,46 @@ bool restart_ota_deferral_logged = false;
 RuntimeI2cRecoveryPolicy::State runtime_i2c_recovery_policy;
 esp_panel::board::Board *runtime_board = nullptr;
 bool gt911_runtime_recovery_attempted = false;
+
+void observe_last_good_health(uint32_t now_ms, bool force_transient_pause) {
+    const WakePowerGuard::Phase wake_phase = WakePowerGuard::phase(now_ms);
+    const bool wake_fail_closed =
+        wake_phase == WakePowerGuard::Phase::FailClosed;
+    const bool wake_transient_pause =
+        wake_phase != WakePowerGuard::Phase::Idle && !wake_fail_closed;
+
+    LastGoodHealthPolicy::Inputs inputs = {};
+    inputs.board_ready = board_ready;
+    inputs.lvgl_ready = lvgl_ready && uiController.isLvglReady();
+    inputs.display_bus_ready = i2c_runtime_ready;
+    inputs.critical_runtime_fault =
+        runtime_i2c_recovery_policy.sharedBusFaultConfirmed() ||
+        wake_fail_closed;
+    inputs.recovery_or_restart_pending =
+        restart_request_pending ||
+        boot_ui_auto_recovery_restart_pending() ||
+        boot_board_auto_recovery_restart_pending();
+    inputs.transient_pause =
+        force_transient_pause ||
+        wake_transient_pause ||
+        WebHandlersIsOtaBusy() ||
+        ota_window_active ||
+        ota_resume_pending;
+
+    const bool can_sample_ui =
+        inputs.board_ready &&
+        inputs.lvgl_ready &&
+        inputs.display_bus_ready &&
+        !inputs.critical_runtime_fault &&
+        !inputs.recovery_or_restart_pending &&
+        !inputs.transient_pause;
+    inputs.ui_runtime_healthy =
+        can_sample_ui && uiController.isLvglRuntimeHealthy();
+
+    storage.observeLastGoodHealth(
+        now_ms,
+        LastGoodHealthPolicy::classify(inputs));
+}
 
 void quiesce_network_for_restart() {
     const wifi_mode_t wifi_mode = WiFi.getMode();
@@ -657,6 +698,8 @@ void loop()
     if (WebHandlersConsumeRestartRequest()) {
         restart_request_pending = true;
     }
+    const uint32_t health_entry_now = millis();
+    observe_last_good_health(health_entry_now, false);
     if (restart_request_pending) {
         // Upload admission and restart shutdown use one atomic gate. Whichever
         // side wins first excludes the other without a cross-task check/use gap.
@@ -775,6 +818,7 @@ void loop()
             lvgl_port_block_touch_read(Config::BACKLIGHT_WAKE_BLOCK_MS);
             LOGI("OTA", "LVGL resumed after OTA window");
         } else {
+            observe_last_good_health(loop_now, true);
             AppInit::pollDeferredRuntime();
             memoryMonitor.poll(loop_now);
             Watchdog::kick();
@@ -815,6 +859,7 @@ void loop()
         if (!ota_pause_requested) {
             uiController.poll(loop_now);
         }
+        observe_last_good_health(loop_now, true);
         Watchdog::kick();
         delay(1);
         return;
@@ -831,6 +876,7 @@ void loop()
         // diagnostics here: even short owner-side work would otherwise count
         // against a quiet interval that has already started.
         uiController.poll(background_now);
+        observe_last_good_health(background_now, true);
         Watchdog::kick();
         delay(1);
         return;
@@ -913,6 +959,9 @@ void loop()
         connectivityRuntime.update(networkManager, mqttManager);
     }
     if (!wake_background_paused) {
+        observe_last_good_health(
+            now,
+            false);
         storage.poll(now);
     }
     memoryMonitor.poll(now);
