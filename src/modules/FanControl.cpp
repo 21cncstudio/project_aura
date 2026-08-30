@@ -363,15 +363,24 @@ void FanControl::poll(uint32_t now_ms,
                 LOGI("FanControl", "DAC detected during startup retry %u/%u",
                      static_cast<unsigned>(startup_probe_.attempts()),
                      static_cast<unsigned>(StartupProbePolicy::kMaxAttempts));
-            } else if (startup_probe_.exhausted()) {
-                LOGW("FanControl",
-                     "DAC not detected after %u startup attempts; retries stopped until reboot",
-                     static_cast<unsigned>(StartupProbePolicy::kMaxAttempts));
             } else if (init_status == InitStatus::Fault) {
-                LOGD("FanControl", "DAC startup retry %u/%u failed: %s",
-                     static_cast<unsigned>(startup_probe_.attempts()),
-                     static_cast<unsigned>(StartupProbePolicy::kMaxAttempts),
-                     init_failure_reason ? init_failure_reason : "unknown");
+                if (startup_probe_.exhausted()) {
+                    LOGW("FanControl",
+                         "DAC init failed after %u startup attempts: %s; retries stopped until reboot",
+                         static_cast<unsigned>(StartupProbePolicy::kMaxAttempts),
+                         init_failure_reason ? init_failure_reason : "unknown");
+                } else {
+                    LOGD("FanControl", "DAC startup retry %u/%u failed: %s",
+                         static_cast<unsigned>(startup_probe_.attempts()),
+                         static_cast<unsigned>(StartupProbePolicy::kMaxAttempts),
+                         init_failure_reason ? init_failure_reason : "unknown");
+                }
+            } else if (startup_probe_.exhausted()) {
+                Logger::logWithoutAlert(
+                    Logger::Warn,
+                    "FanControl",
+                    "DAC not detected after %u startup attempts; retries stopped until reboot",
+                    static_cast<unsigned>(StartupProbePolicy::kMaxAttempts));
             }
         } else if (dac_ever_ready_ &&
                    now_ms - last_recover_attempt_ms_ >= Config::DAC_RECOVER_COOLDOWN_MS) {

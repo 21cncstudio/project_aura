@@ -17,6 +17,7 @@ struct DfrMultiGasSensorConfig {
     float max_ppm = 0.0f;
     const uint8_t *allowed_gas_types = nullptr;
     size_t allowed_gas_type_count = 0;
+    bool optional_installation = false;
 };
 
 class DfrMultiGasSensor {

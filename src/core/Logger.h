@@ -35,6 +35,10 @@ public:
     static void setSensorsSerialOutputEnabled(bool enabled);
     static bool sensorsSerialOutputEnabled();
     static void log(Level level, const char *tag, const char *fmt, ...);
+    // Preserve serial output, full recent diagnostics, and event mirroring,
+    // but omit an expected condition from the user-facing alert buffer.
+    // Error-level entries are always retained as alerts.
+    static void logWithoutAlert(Level level, const char *tag, const char *fmt, ...);
     static size_t copyRecent(RecentEntry *out, size_t max_entries);
     static size_t copyRecentAlerts(RecentEntry *out, size_t max_entries);
     static uint32_t latestRecentAlertSeq();
@@ -45,8 +49,15 @@ public:
 
 private:
     static const char *levelName(Level level);
-    static void vlog(Level level, const char *tag, const char *fmt, va_list args);
-    static void storeRecent(Level level, const char *tag, const char *message);
+    static void vlog(Level level,
+                     const char *tag,
+                     const char *fmt,
+                     va_list args,
+                     bool allow_alert);
+    static void storeRecent(Level level,
+                            const char *tag,
+                            const char *message,
+                            bool allow_alert);
 
     static Print *output_;
     static Level level_;

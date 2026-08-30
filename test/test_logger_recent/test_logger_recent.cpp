@@ -124,21 +124,58 @@ void test_alert_buffer_keeps_sen66_internal_faults() {
 }
 
 void test_alert_buffer_excludes_optional_absence_but_keeps_faults() {
-    Logger::log(Logger::Info, "Sensors", "SEN0466 CO not installed");
+    Logger::logWithoutAlert(
+        Logger::Warn,
+        "SEN0466",
+        "addr=0x74 stage=address-probe err=-1(ESP_FAIL) lines before=1/1 after=1/1");
     advanceMillis(1);
-    Logger::log(Logger::Info, "SEN0466", "not installed after 3 attempts, stop probing until reboot");
+    Logger::logWithoutAlert(
+        Logger::Warn,
+        "FanControl",
+        "DAC not detected after 5 startup attempts; retries stopped until reboot");
     advanceMillis(1);
-    Logger::log(Logger::Info, "FanControl", "DAC not installed");
+    TEST_ASSERT_EQUAL_UINT32(0, Logger::latestRecentAlertSeq());
+
+    Logger::log(Logger::Warn,
+                "SEN0466",
+                "addr=0x74 stage=address-probe err=263(ESP_ERR_TIMEOUT) lines before=1/1 after=0/1");
     advanceMillis(1);
     Logger::log(Logger::Warn, "FanControl", "DAC init failed: range write failed");
 
+    Logger::RecentEntry recent[4];
     Logger::RecentEntry alerts[4];
+    const size_t recent_count = Logger::copyRecent(recent, 4);
     const size_t alert_count = Logger::copyRecentAlerts(alerts, 4);
 
-    TEST_ASSERT_EQUAL_UINT32(1, alert_count);
+    TEST_ASSERT_EQUAL_UINT32(4, recent_count);
+    TEST_ASSERT_EQUAL(Logger::Warn, recent[0].level);
+    TEST_ASSERT_EQUAL_STRING("SEN0466", recent[0].tag);
+    TEST_ASSERT_EQUAL_STRING(
+        "addr=0x74 stage=address-probe err=-1(ESP_FAIL) lines before=1/1 after=1/1",
+        recent[0].message);
+    TEST_ASSERT_EQUAL(Logger::Warn, recent[1].level);
+    TEST_ASSERT_EQUAL_STRING("FanControl", recent[1].tag);
+    TEST_ASSERT_EQUAL_STRING(
+        "DAC not detected after 5 startup attempts; retries stopped until reboot",
+        recent[1].message);
+
+    TEST_ASSERT_EQUAL_UINT32(2, alert_count);
     TEST_ASSERT_EQUAL(Logger::Warn, alerts[0].level);
-    TEST_ASSERT_EQUAL_STRING("FanControl", alerts[0].tag);
-    TEST_ASSERT_EQUAL_STRING("DAC init failed: range write failed", alerts[0].message);
+    TEST_ASSERT_EQUAL_STRING("SEN0466", alerts[0].tag);
+    TEST_ASSERT_EQUAL(Logger::Warn, alerts[1].level);
+    TEST_ASSERT_EQUAL_STRING("FanControl", alerts[1].tag);
+    TEST_ASSERT_EQUAL_STRING("DAC init failed: range write failed", alerts[1].message);
+}
+
+void test_error_cannot_be_suppressed_from_alert_buffer() {
+    Logger::logWithoutAlert(Logger::Error, "I2C", "bus unavailable");
+
+    Logger::RecentEntry alerts[1];
+    const size_t alert_count = Logger::copyRecentAlerts(alerts, 1);
+    TEST_ASSERT_EQUAL_UINT32(1, alert_count);
+    TEST_ASSERT_EQUAL(Logger::Error, alerts[0].level);
+    TEST_ASSERT_EQUAL_STRING("I2C", alerts[0].tag);
+    TEST_ASSERT_EQUAL_STRING("bus unavailable", alerts[0].message);
 }
 
 int main(int, char **) {
@@ -150,6 +187,7 @@ int main(int, char **) {
     RUN_TEST(test_alert_buffer_preserves_hard_errors_during_soft_sensor_warn_churn);
     RUN_TEST(test_alert_buffer_keeps_sen66_internal_faults);
     RUN_TEST(test_alert_buffer_excludes_optional_absence_but_keeps_faults);
+    RUN_TEST(test_error_cannot_be_suppressed_from_alert_buffer);
     return UNITY_END();
 }
 

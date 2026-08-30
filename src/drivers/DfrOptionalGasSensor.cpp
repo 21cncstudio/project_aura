@@ -31,6 +31,7 @@ DfrOptionalGasSensor::DfrOptionalGasSensor()
           0.0f,
           kOptionalGasTypes,
           sizeof(kOptionalGasTypes) / sizeof(kOptionalGasTypes[0]),
+          true,
       }) {}
 
 void DfrOptionalGasSensor::poll() {

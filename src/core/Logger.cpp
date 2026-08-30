@@ -142,11 +142,22 @@ const char *Logger::levelName(Level level) {
 void Logger::log(Level level, const char *tag, const char *fmt, ...) {
     va_list args;
     va_start(args, fmt);
-    vlog(level, tag, fmt, args);
+    vlog(level, tag, fmt, args, true);
     va_end(args);
 }
 
-void Logger::vlog(Level level, const char *tag, const char *fmt, va_list args) {
+void Logger::logWithoutAlert(Level level, const char *tag, const char *fmt, ...) {
+    va_list args;
+    va_start(args, fmt);
+    vlog(level, tag, fmt, args, false);
+    va_end(args);
+}
+
+void Logger::vlog(Level level,
+                  const char *tag,
+                  const char *fmt,
+                  va_list args,
+                  bool allow_alert) {
     if (level > level_) {
         return;
     }
@@ -172,10 +183,13 @@ void Logger::vlog(Level level, const char *tag, const char *fmt, va_list args) {
         output_->println(buffer);
     }
 
-    storeRecent(level, tag, buffer);
+    storeRecent(level, tag, buffer, allow_alert);
 }
 
-void Logger::storeRecent(Level level, const char *tag, const char *message) {
+void Logger::storeRecent(Level level,
+                         const char *tag,
+                         const char *message,
+                         bool allow_alert) {
     uint32_t now_ms = 0;
 #if defined(ARDUINO)
     now_ms = millis();
@@ -212,7 +226,8 @@ void Logger::storeRecent(Level level, const char *tag, const char *message) {
         }
     }
 
-    if (SystemLogFilter::shouldStoreAlert(level, tag_buf, message_buf)) {
+    if ((allow_alert || level == Error) &&
+        SystemLogFilter::shouldStoreAlert(level, tag_buf, message_buf)) {
         uint32_t next_alert_seq = recent_alert_seq_ + 1;
         if (next_alert_seq == 0) {
             next_alert_seq = 1;

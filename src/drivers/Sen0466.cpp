@@ -16,4 +16,7 @@ Sen0466::Sen0466()
           Config::SEN0466_GAS_TYPE_CO,
           Config::SEN0466_CO_MIN_PPM,
           Config::SEN0466_CO_MAX_PPM,
+          nullptr,
+          0,
+          true,
       }) {}

@@ -427,19 +427,34 @@ bool DfrMultiGasSensor::pingAddress() {
             static_cast<gpio_num_t>(Config::SENSOR_I2C_SDA_PIN),
             static_cast<gpio_num_t>(Config::SENSOR_I2C_SCL_PIN));
     if (err != ESP_OK) {
-        const bool expected_optional_absence =
-            DfrGasProbeLogPolicy::isExpectedOptionalAbsence({
-                config_.allowed_gas_types != nullptr &&
-                    config_.allowed_gas_type_count > 0,
-                present_,
-                err == ESP_FAIL,
-                lines_before.idle(),
-                lines_after.idle(),
-            });
-        if (expected_optional_absence) {
+        const DfrGasProbeLogPolicy::ProbeFailure probe_failure{
+            config_.optional_installation,
+            present_,
+            err == ESP_FAIL,
+            lines_before.idle(),
+            lines_after.idle(),
+        };
+        const bool flexible_optional_slot =
+            config_.allowed_gas_types != nullptr &&
+            config_.allowed_gas_type_count > 0;
+        if (flexible_optional_slot &&
+            DfrGasProbeLogPolicy::isExpectedOptionalAbsence(probe_failure)) {
             LOGI(config_.log_tag,
                  "optional slot addr=0x%02X not acknowledged; treating as not installed",
                  static_cast<unsigned>(config_.address));
+        } else if (DfrGasProbeLogPolicy::isExpectedOptionalAbsenceAfterProbe(
+                       probe_failure)) {
+            Logger::logWithoutAlert(
+                Logger::Warn,
+                config_.log_tag,
+                "addr=0x%02X stage=address-probe err=%d(%s) lines before=%u/%u after=%u/%u",
+                static_cast<unsigned>(config_.address),
+                static_cast<int>(err),
+                esp_err_to_name(err),
+                lines_before.sda_high ? 1U : 0U,
+                lines_before.scl_high ? 1U : 0U,
+                lines_after.sda_high ? 1U : 0U,
+                lines_after.scl_high ? 1U : 0U);
         } else {
             LOGW(config_.log_tag,
                  "addr=0x%02X stage=address-probe err=%d(%s) lines before=%u/%u after=%u/%u",

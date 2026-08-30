@@ -57,10 +57,27 @@ void test_capture_pause_prevents_recursive_mqtt_feedback() {
     TEST_ASSERT_EQUAL_UINT32(0, MqttEventQueue::instance().size());
 }
 
+void test_alert_suppression_keeps_event_mirroring() {
+    Logger::logWithoutAlert(
+        Logger::Warn,
+        "FanControl",
+        "DAC not detected after 5 startup attempts; retries stopped until reboot");
+
+    TEST_ASSERT_EQUAL_UINT32(1, MqttEventQueue::instance().size());
+    Logger::RecentEntry entry{};
+    TEST_ASSERT_TRUE(MqttEventQueue::instance().pop(entry));
+    TEST_ASSERT_EQUAL(Logger::Warn, entry.level);
+    TEST_ASSERT_EQUAL_STRING("FanControl", entry.tag);
+    TEST_ASSERT_EQUAL_STRING(
+        "DAC not detected after 5 startup attempts; retries stopped until reboot",
+        entry.message);
+}
+
 int main(int, char **) {
     UNITY_BEGIN();
     RUN_TEST(test_logger_mirrors_only_web_dashboard_events_to_mqtt_queue);
     RUN_TEST(test_logger_mirroring_respects_recent_dedup_window);
     RUN_TEST(test_capture_pause_prevents_recursive_mqtt_feedback);
+    RUN_TEST(test_alert_suppression_keeps_event_mirroring);
     return UNITY_END();
 }
