@@ -178,15 +178,33 @@ class NativeTestLauncherTests(unittest.TestCase):
         self.assertEqual("platformio", observed["platformio"])
         self.assertEqual("6.2.0", observed["platformio_version"])
 
-    def test_defaults_preserve_all_six_official_invocations(self):
+    def test_defaults_preserve_all_nine_official_invocations(self):
         self.assertEqual(list(DEFAULT_INVOCATIONS), choose_invocations([], []))
-        self.assertEqual(6, len(DEFAULT_INVOCATIONS))
+        self.assertEqual(9, len(DEFAULT_INVOCATIONS))
         self.assertIn(
             ("native_test_gp8403_driver", ("test_gp8403_driver",)),
             DEFAULT_INVOCATIONS,
         )
         self.assertIn(
             ("native_test_startup_probe_policy", ("test_startup_probe_policy",)),
+            DEFAULT_INVOCATIONS,
+        )
+        self.assertIn(
+            (
+                "native_test_i2c_4_3_profile",
+                ("test_i2c_topology", "test_sensor_i2c_routing"),
+            ),
+            DEFAULT_INVOCATIONS,
+        )
+        self.assertIn(
+            (
+                "native_test_i2c_7_profile",
+                ("test_i2c_topology", "test_sensor_i2c_routing"),
+            ),
+            DEFAULT_INVOCATIONS,
+        )
+        self.assertIn(
+            ("native_test_ch422g_7_profile", ("test_ch422g_7_reset",)),
             DEFAULT_INVOCATIONS,
         )
         self.assertEqual([("native_test", (self.suite,))], choose_invocations([], [self.suite]))

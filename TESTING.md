@@ -13,8 +13,9 @@ Recommended entry point, from the repository root:
 .\scripts\run_tests.ps1
 ```
 
-The helper runs all six native Unity environments: the common suite, the four
-dedicated sensor-driver suites, and `native_test_startup_probe_policy`.
+The helper runs all nine native Unity environments: the common suite, four
+dedicated sensor-driver suites, the 4.3-inch and 7-inch I2C topology/routing
+suites, the 7-inch CH422G reset suite, and `native_test_startup_probe_policy`.
 It uses the canonical PlatformIO Python with isolated Python startup, records
 the observed Python/PlatformIO/compiler identity, and separates build caches by
 runtime and selected suites. It does not require one hard-coded Python or

@@ -28,7 +28,10 @@ def resolve_build_id():
 
     suffix = _project_option("custom_build_id_suffix")
     build_id = f"{short_sha}-{suffix}" if suffix else short_sha
-    dirty = _run_git(["status", "--porcelain", "--untracked-files=no"])
+    # Untracked source/header files can participate in a PlatformIO build just
+    # like tracked files. Include them so a physical-test artifact never looks
+    # commit-clean when its compiled inputs are not fully represented by HEAD.
+    dirty = _run_git(["status", "--porcelain"])
     if dirty:
         return f"{build_id}-dirty"
     return build_id
