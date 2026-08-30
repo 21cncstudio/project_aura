@@ -9,6 +9,7 @@ LastGoodHealthPolicy::Inputs healthyInputs() {
     inputs.board_ready = true;
     inputs.lvgl_ready = true;
     inputs.display_bus_ready = true;
+    inputs.sensor_bus_ready = true;
     inputs.ui_runtime_healthy = true;
     return inputs;
 }
@@ -46,6 +47,10 @@ void test_each_structural_gate_is_fail_closed() {
 
     inputs = healthyInputs();
     inputs.display_bus_ready = false;
+    assertUnhealthy(inputs);
+
+    inputs = healthyInputs();
+    inputs.sensor_bus_ready = false;
     assertUnhealthy(inputs);
 
     inputs = healthyInputs();

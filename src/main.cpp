@@ -180,6 +180,7 @@ void observe_last_good_health(uint32_t now_ms, bool force_transient_pause) {
     inputs.board_ready = board_ready;
     inputs.lvgl_ready = lvgl_ready && uiController.isLvglReady();
     inputs.display_bus_ready = panel_i2c_ready;
+    inputs.sensor_bus_ready = sensor_i2c_ready;
     inputs.critical_runtime_fault =
         runtime_i2c_recovery_policy.sharedBusFaultConfirmed() ||
         wake_fail_closed;
@@ -198,6 +199,7 @@ void observe_last_good_health(uint32_t now_ms, bool force_transient_pause) {
         inputs.board_ready &&
         inputs.lvgl_ready &&
         inputs.display_bus_ready &&
+        inputs.sensor_bus_ready &&
         !inputs.critical_runtime_fault &&
         !inputs.recovery_or_restart_pending &&
         !inputs.transient_pause;
@@ -783,9 +785,10 @@ void loop()
             restart_request_pending = false;
             restart_ota_deferral_logged = false;
             LOGI("OTA", "restarting now (main loop)");
-            // A controlled restart confirms OTA only after display and UI reached
-            // the operational state. Headless management access is intentionally
-            // insufficient to validate a display firmware image.
+            // A controlled restart confirms OTA only after the display, UI and
+            // required sensor host reached the operational state. Headless
+            // management access is intentionally insufficient to validate a
+            // hardware-profile firmware image.
             const bool auto_recovery_restart =
                 boot_ui_auto_recovery_restart_pending() ||
                 boot_board_auto_recovery_restart_pending();
@@ -793,10 +796,13 @@ void loop()
             if (auto_recovery_restart) {
                 LOGW("OTA", "rollback validation withheld: automatic recovery restart");
             } else if (RuntimeReadinessPolicy::canConfirmOta(
-                           board_ready, lvgl_ready, ui_runtime_healthy)) {
+                           board_ready,
+                           lvgl_ready,
+                           sensor_i2c_ready,
+                           ui_runtime_healthy)) {
                 OtaRollback::markValidIfPending("controlled_restart");
             } else {
-                LOGW("OTA", "rollback validation withheld: display runtime not operational");
+                LOGW("OTA", "rollback validation withheld: required runtime not operational");
             }
             // Stop LVGL between handler iterations so touch cannot overlap
             // the bounded DAC write on the shared I2C driver.
@@ -1011,10 +1017,13 @@ void loop()
                                boot_count,
                                safe_boot_stage)) {
         if (RuntimeReadinessPolicy::canConfirmOta(
-                board_ready, lvgl_ready, uiController.isLvglRuntimeHealthy())) {
+                board_ready,
+                lvgl_ready,
+                sensor_i2c_ready,
+                uiController.isLvglRuntimeHealthy())) {
             OtaRollback::markValidIfPending("stable_boot");
         } else {
-            LOGW("OTA", "rollback validation withheld: stable timer reached without healthy display runtime");
+            LOGW("OTA", "rollback validation withheld: stable timer reached without healthy required runtime");
         }
     }
     if (!wake_background_paused) {

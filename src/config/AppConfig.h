@@ -51,9 +51,10 @@ namespace Config {
 
     // The Waveshare panel keeps its vendor I2C0 wiring on both hardware
     // profiles. The 7-inch Aura profile moves only the external sensor chain
-    // to I2C1: SDA is H3 EX_RXD/GPIO44 and SCL is J8 Sensor AD/GPIO6. GPIO43
-    // must stay disconnected because the H3 EX_TXD path contains R107 (499
-    // ohms), which was shown to overload the sensor bus with the GP8403 fitted.
+    // to I2C1: SDA is H3 EX_RXD/GPIO44 and SCL is J8 Sensor AD/GPIO6. Keep
+    // GPIO43 disconnected: the old H3 EX_TXD SCL route failed under the
+    // combined sensor load. R107 (499 ohms) is the leading electrical
+    // explanation, but it was not isolated from the rest of that route.
 #ifndef AURA_HARDWARE_PROFILE_7
 #define AURA_HARDWARE_PROFILE_7 0
 #endif

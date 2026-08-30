@@ -11,6 +11,7 @@ struct Inputs {
     bool board_ready;
     bool lvgl_ready;
     bool display_bus_ready;
+    bool sensor_bus_ready;
     bool critical_runtime_fault;
     bool recovery_or_restart_pending;
     bool transient_pause;
@@ -21,6 +22,7 @@ inline OperationalHealth classify(const Inputs &inputs) {
     if (!inputs.board_ready ||
         !inputs.lvgl_ready ||
         !inputs.display_bus_ready ||
+        !inputs.sensor_bus_ready ||
         inputs.critical_runtime_fault ||
         inputs.recovery_or_restart_pending) {
         return OperationalHealth::Unhealthy;
