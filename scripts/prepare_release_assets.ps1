@@ -45,34 +45,6 @@ function Invoke-Platformio {
   }
 }
 
-function Get-PartitionOffset {
-  param(
-    [string]$CsvPath,
-    [string]$Name
-  )
-
-  if (-not (Test-Path $CsvPath)) {
-    return $null
-  }
-
-  $matches = @()
-  $lines = Get-Content $CsvPath | Where-Object { $_ -and $_ -notmatch "^\s*#" }
-  foreach ($line in $lines) {
-    $parts = $line.Split(",") | ForEach-Object { $_.Trim() }
-    if ($parts.Count -ge 4 -and $parts[0] -eq $Name) {
-      $matches += $parts[3]
-    }
-  }
-
-  if ($matches.Count -gt 1) {
-    throw "Partition table contains duplicate '$Name' entries: $CsvPath"
-  }
-  if ($matches.Count -eq 1) {
-    return $matches[0]
-  }
-  return $null
-}
-
 $root = Resolve-Path (Join-Path $PSScriptRoot "..")
 $platformioIni = Join-Path $root "platformio.ini"
 $buildDir = Join-Path $root (".pio\\build\\{0}" -f $Env)
@@ -145,7 +117,7 @@ if (-not (Test-Path -LiteralPath $partitionsCsv)) {
   throw "Selected environment partition file is missing: $partitionsCsv"
 }
 
-$app0Offset = Get-PartitionOffset -CsvPath $partitionsCsv -Name "app0"
+$app0Offset = Get-AuraPartitionOffset -CsvPath $partitionsCsv -Name "app0"
 if (-not $app0Offset) {
   throw "Partition table does not define app0: $partitionsCsv"
 }
@@ -154,8 +126,8 @@ $app0Offset = Assert-AuraCanonicalFlashOffset `
   -ExpectedValue 0x10000 `
   -PartitionName "app0"
 
-$littlefsOffset = Get-PartitionOffset -CsvPath $partitionsCsv -Name "littlefs"
-$spiffsOffset = Get-PartitionOffset -CsvPath $partitionsCsv -Name "spiffs"
+$littlefsOffset = Get-AuraPartitionOffset -CsvPath $partitionsCsv -Name "littlefs"
+$spiffsOffset = Get-AuraPartitionOffset -CsvPath $partitionsCsv -Name "spiffs"
 if ($littlefsOffset -and $spiffsOffset) {
   throw "Partition table defines both littlefs and spiffs; expected exactly one filesystem partition: $partitionsCsv"
 }
