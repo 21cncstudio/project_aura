@@ -6,6 +6,7 @@ param(
   [string]$OutputRoot = "release-assets",
   [string]$NodePath,
   [string]$RecoveryBinary,
+  [string]$RecoveryIdentityPath,
   [switch]$SkipBuild,
   [switch]$AllowDirty
 )
@@ -13,8 +14,13 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 Add-Type -AssemblyName System.Security
+. (Join-Path $PSScriptRoot "release_identity.ps1")
 
 $root = Resolve-Path (Join-Path $PSScriptRoot "..")
+if ($Channel -eq "recovery") {
+  throw "Recovery packaging is disabled until its binary is bound to a dedicated post-build artifact identity and physically qualified."
+}
+Assert-AuraReleaseChannelVersion -Channel $Channel -Version $Version
 $privatePath = Join-Path $KeyDirectory "installer-release-private-key.dpapi"
 $metadataPath = Join-Path $KeyDirectory "installer-release-key.json"
 $notesPath = Join-Path $root ("docs\releases\v{0}.md" -f $Version)
@@ -35,9 +41,16 @@ if (-not (Test-Path $node)) {
 
 Push-Location $root
 try {
+  if ($AllowDirty) {
+    throw "Signed release packages no longer support -AllowDirty. Commit every build input first."
+  }
   if (-not $AllowDirty) {
-    $dirty = (& git status --porcelain).Trim()
-    if ($dirty) {
+    $dirtyLines = @(& git status --porcelain)
+    $statusExitCode = $LASTEXITCODE
+    if ($statusExitCode -ne 0) {
+      throw "Could not inspect Git working tree state."
+    }
+    if (-not [string]::IsNullOrWhiteSpace(($dirtyLines -join "`n"))) {
       throw "Git working tree is dirty. Commit or stash changes before creating a signed release."
     }
   }
@@ -65,26 +78,32 @@ if (Test-Path $platformioIni) {
 }
 
 $metadata = Get-Content -Raw -LiteralPath $metadataPath | ConvertFrom-Json
-$sourceDir = Join-Path $root (Join-Path $OutputRoot ("v" + $Version))
-$bundleName = "aura-aq-v{0}-{1}.aura-release.zip" -f $Version, $Channel
-$bundlePath = Join-Path $sourceDir $bundleName
+$contract = Get-AuraHardwareContract -Environment $Env
+$releaseRoot = Join-Path $root (Join-Path $OutputRoot ("v" + $Version))
+$targetRoot = Join-Path $releaseRoot $contract.HardwareTarget
+$sourceDir = $targetRoot
 $stagingDir = Join-Path ([System.IO.Path]::GetTempPath()) ("aura-release-" + [guid]::NewGuid())
 $tempPrivate = Join-Path ([System.IO.Path]::GetTempPath()) ("aura-release-" + [guid]::NewGuid() + ".pem")
 
 try {
-  if ($Channel -eq "recovery") {
-    if (-not $RecoveryBinary -or -not (Test-Path -LiteralPath $RecoveryBinary)) {
-      throw "Recovery releases require -RecoveryBinary <path-to-signed-recovery.bin>."
-    }
-    New-Item -ItemType Directory -Force -Path $sourceDir | Out-Null
-    Copy-Item -Force -LiteralPath $RecoveryBinary -Destination (Join-Path $sourceDir "recovery.bin")
-  } else {
-    & powershell -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot "prepare_release_assets.ps1") `
-      -Env $Env -Version $Version -OutputRoot $OutputRoot -SkipWebInstallerSync -SkipBuild:$SkipBuild
-    if ($LASTEXITCODE -ne 0) {
-      throw "Firmware asset preparation failed."
-    }
+  $assetPreparation = @{
+    Env = $Env
+    Version = $Version
+    OutputRoot = $OutputRoot
+    SkipWebInstallerSync = $true
   }
+  if ($SkipBuild) {
+    $assetPreparation["SkipBuild"] = $true
+  }
+  & (Join-Path $PSScriptRoot "prepare_release_assets.ps1") @assetPreparation
+  $identity = Read-AuraBuildIdentity `
+    -IdentityPath (Join-Path $root (".pio\build\{0}\generated\build-identity.json" -f $Env)) `
+    -Environment $Env `
+    -RepositoryRoot $root
+
+  $effectiveVersion = Get-AuraEffectiveVersion -Version $Version -BuildId $identity.BuildId
+  $bundleName = "{0}-v{1}-{2}.aura-release.zip" -f $contract.HardwareTarget, $effectiveVersion, $Channel
+  $bundlePath = Join-Path $sourceDir $bundleName
 
   $protected = [Convert]::FromBase64String((Get-Content -Raw -LiteralPath $privatePath).Trim())
   $privateBytes = [System.Security.Cryptography.ProtectedData]::Unprotect(
@@ -100,6 +119,10 @@ try {
     --version $Version `
     --channel $Channel `
     --commit $commit `
+    --environment $identity.Environment `
+    --hardware-profile $identity.HardwareProfile `
+    --hardware-target $identity.HardwareTarget `
+    --build-id $identity.BuildId `
     --key-id $metadata.key_id `
     --private-key $tempPrivate `
     --notes $notesPath | Out-Null

@@ -1,12 +1,19 @@
-import { createPrivateKey, sign } from "node:crypto";
+import { createHash, createPrivateKey, createPublicKey, sign } from "node:crypto";
 import { copyFile, mkdir, readFile, writeFile } from "node:fs/promises";
-import { basename, join, resolve } from "node:path";
+import { join, resolve } from "node:path";
 import {
+  CANONICAL_RELEASE_LAYOUT,
   FLASH_SIZE_BYTES,
   PACKAGE_SCHEMA,
+  SIGNATURE_SCHEMA,
   describeAsset,
+  effectiveReleaseVersion,
   signatureBytes,
+  validateCanonicalReleaseManifests,
+  validateGeneratedBuildId,
   validateFlashLayout,
+  validateHardwareIdentity,
+  validateReleaseArtifactStamp,
   validateVersion,
 } from "./lib/installer-release.mjs";
 
@@ -23,17 +30,50 @@ function required(name) {
 
 const sourceDir = resolve(required("--source"));
 const stagingDir = resolve(required("--staging"));
-const version = validateVersion(required("--version"));
+const requestedVersion = validateVersion(required("--version"));
 const channel = required("--channel").toLowerCase();
 const commit = required("--commit");
+const environment = required("--environment");
+const hardwareProfile = required("--hardware-profile");
+const hardwareTarget = required("--hardware-target");
+const buildId = required("--build-id");
 const keyId = required("--key-id");
 const privateKeyPath = resolve(required("--private-key"));
-const notesPath = args.get("--notes") ? resolve(args.get("--notes")) : null;
+const notesPath = resolve(required("--notes"));
 
-if (!["stable", "beta", "recovery"].includes(channel)) {
+if (!["stable", "beta"].includes(channel)) {
+  if (channel === "recovery") {
+    throw new Error(
+      "Recovery packaging is disabled until it has a dedicated artifact-bound build pipeline.",
+    );
+  }
   throw new Error(`Unsupported release channel: ${channel}`);
 }
+if (channel === "stable" && requestedVersion.includes("-")) {
+  throw new Error("Stable releases require an exact X.Y.Z version without a prerelease suffix.");
+}
+if (channel === "beta" && !requestedVersion.includes("-")) {
+  throw new Error("Beta releases require an explicit prerelease suffix, for example X.Y.Z-beta.");
+}
 if (!/^[a-f0-9]{40}$/i.test(commit)) throw new Error("Source commit must be a full Git SHA.");
+const hardwareIdentity = validateHardwareIdentity({
+  environment,
+  hardwareProfile,
+  hardwareTarget,
+});
+validateGeneratedBuildId({ buildId, commit, environment });
+const version = effectiveReleaseVersion(requestedVersion, buildId);
+const privateKey = createPrivateKey(await readFile(privateKeyPath, "utf8"));
+if (privateKey.asymmetricKeyType !== "ed25519") {
+  throw new Error("The installer release key is not Ed25519.");
+}
+const derivedKeyId = `aura-installer-ed25519-${createHash("sha256")
+  .update(createPublicKey(privateKey).export({ type: "spki", format: "der" }))
+  .digest("hex")
+  .slice(0, 16)}`;
+if (keyId !== derivedKeyId) {
+  throw new Error("Installer key ID does not match the supplied private key.");
+}
 
 let sourceParts;
 let updateNames;
@@ -45,17 +85,17 @@ if (channel === "recovery") {
   const manifestUpdate = JSON.parse(
     await readFile(join(sourceDir, "manifest-update.json"), "utf8"),
   );
-  const fullParts = manifestFull?.builds?.[0]?.parts;
-  const updateParts = manifestUpdate?.builds?.[0]?.parts;
-  if (!Array.isArray(fullParts) || fullParts.length === 0) {
-    throw new Error("manifest.json does not contain a valid ESP32-S3 build.");
-  }
-  if (!Array.isArray(updateParts) || updateParts.length === 0) {
-    throw new Error("manifest-update.json does not contain an Update build.");
-  }
-  updateNames = new Set(updateParts.map((part) => basename(String(part.path))));
+  const { fullParts, updateParts } = validateCanonicalReleaseManifests({
+    fullManifest: manifestFull,
+    updateManifest: manifestUpdate,
+    version,
+    hardwareTarget,
+    hardwareProfile,
+    buildId,
+  });
+  updateNames = new Set(updateParts.map((part) => String(part.path)));
   sourceParts = fullParts.map((part) => ({
-    fileName: basename(String(part.path)),
+    fileName: String(part.path),
     flashOffset: part.offset,
   }));
 }
@@ -81,33 +121,57 @@ for (const part of sourceParts) {
     await describeAsset({
       directory: sourceDir,
       fileName: part.fileName,
-      assetKind: part.fileName.replace(/\.bin$/i, "").replaceAll("-", "_"),
+      assetKind:
+        channel === "recovery"
+          ? "recovery"
+          : CANONICAL_RELEASE_LAYOUT[part.fileName].assetKind,
       flashOffset: part.flashOffset,
       modes: assetModes,
     }),
   );
 }
 validateFlashLayout(assets, modes);
+const artifactStamp = JSON.parse(
+  await readFile(join(sourceDir, "release-artifacts.json"), "utf8"),
+);
+validateReleaseArtifactStamp({
+  stamp: artifactStamp,
+  environment,
+  commit,
+  buildId,
+  hardwareProfile,
+  hardwareTarget,
+  assets,
+});
+const releaseNotes = await readFile(notesPath);
+if (releaseNotes.byteLength === 0) throw new Error("Release notes must not be empty.");
+const releaseNotesSha256 = createHash("sha256").update(releaseNotes).digest("hex");
 
 const release = {
   schema: PACKAGE_SCHEMA,
   product_key: "aura-aq",
   version,
   channel,
-  title: `Aura AQ ${version}`,
-  release_notes_file: notesPath ? "release-notes.md" : null,
-  hardware_target: "aura-aq-v1",
+  title: `${hardwareIdentity.displayName} ${version}`,
+  release_notes_file: "release-notes.md",
+  release_notes_sha256: releaseNotesSha256,
+  hardware_target: hardwareTarget,
   chip_family: "ESP32-S3",
   modes,
   compatibility: {
     hardware_revision: "v1",
+    hardware_profile: hardwareProfile,
     flash_size_bytes: FLASH_SIZE_BYTES,
   },
   provenance: {
-    build_id: commit.slice(0, 12),
+    build_id: buildId,
     commit,
+    environment,
+    hardware_profile: hardwareProfile,
+    hardware_target: hardwareTarget,
   },
   signature: {
+    schema: SIGNATURE_SCHEMA,
     algorithm: "ed25519",
     key_id: keyId,
     value: "",
@@ -115,17 +179,13 @@ const release = {
   assets,
 };
 
-const privateKey = createPrivateKey(await readFile(privateKeyPath, "utf8"));
-if (privateKey.asymmetricKeyType !== "ed25519") {
-  throw new Error("The installer release key is not Ed25519.");
-}
 release.signature.value = sign(null, signatureBytes(release), privateKey).toString("base64");
 
 await mkdir(stagingDir, { recursive: false });
 for (const asset of assets) {
   await copyFile(join(sourceDir, asset.file_name), join(stagingDir, asset.file_name));
 }
-if (notesPath) await copyFile(notesPath, join(stagingDir, "release-notes.md"));
+await copyFile(notesPath, join(stagingDir, "release-notes.md"));
 await writeFile(join(stagingDir, "release.json"), `${JSON.stringify(release, null, 2)}\n`, "utf8");
 
 process.stdout.write(JSON.stringify({ stagingDir, release }, null, 2));
