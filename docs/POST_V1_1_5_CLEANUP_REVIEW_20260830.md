@@ -2,6 +2,13 @@
 
 Date: 2026-08-30
 
+Branch follow-up: the firmware checkpoint is now `dual-profile-release` at
+`019d87b`; local `main` continues the clean chain. The former diagnostic main
+and dirty root remain archived. Read
+[local main preparation](LOCAL_MAIN_PREPARATION_20260830.md) before continuing.
+The user has not authorized a push. Branch names below describe this historical
+review, not the current checkout.
+
 This is the historical `fac6e30` cleanup/build/package snapshot, not the latest
 flash candidate. Later commits `0b68e92` (panel sampling), `35001ed` (optional
 sensor UI alerts), and the [built-in OTA hardware guard](OTA_HARDWARE_TARGET_GUARD.md)
