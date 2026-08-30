@@ -4,19 +4,23 @@ Date: 2026-08-30
 
 ## Status
 
-The source cleanup and the production firmware split are complete on the
-local branch `codex/post-115-cleanup`.
+The source cleanup, production firmware split, and target-aware producer are
+complete on the local branch `codex/dual-profile-release`.
 
 Current reviewed firmware commit:
 
 ```text
-989b323785fba0b05c930ed95d234136c64902e4
-Harden build and native test identities
+fac6e307b3d8df35db891b56f7022dbf89000d79
+Make CH422G diagnostics profile safe
 ```
 
-This is not a release approval. The firmware source and both production builds
-are ready for controlled physical validation, but the release and installer
-pipeline is still single-target and must not publish the 7-inch image yet.
+This is not a release approval. The firmware source, both exact production
+builds, and the local dual-target packaging/control-plane/installer
+implementation are ready for controlled physical validation. External 7-inch
+publication remains locked until the exact clean artifact completes physical
+qualification, a trusted 7-inch identity enrollment/attestation path is
+implemented and reviewed, and the coordinated non-rolling control-plane
+cutover is completed.
 
 No serial port was opened or flashed during this cleanup review.
 
@@ -29,7 +33,9 @@ as a narrow commit chain on top of the current `origin/main`:
 v1.1.5              8535723beddc696d974df94ea16111a5881f525a
 origin/main         da92fcce310924ec43f7be4378dee5ced0f40c48
 diagnostic beta     7437b2c782cc3e38e63e909f8ef29e30303facb4
-clean firmware HEAD 989b323785fba0b05c930ed95d234136c64902e4
+runtime cleanup HEAD 989b323785fba0b05c930ed95d234136c64902e4
+producer checkpoint  0a6ed35133853375109a91bb7cdf9aa73d4055c0
+current source HEAD  fac6e307b3d8df35db891b56f7022dbf89000d79
 ```
 
 Audited ranges:
@@ -38,6 +44,11 @@ Audited ranges:
 - `origin/main..7437b2c`: 28 later diagnostic and recovery commits.
 - `origin/main..989b323`: exactly 19 local commits: 18 implementation commits
   plus the first audit-document commit.
+- `origin/main..0a6ed35`: 24 local commits after the target-aware producer and
+  its release identity follow-up were added.
+- `origin/main..fac6e30`: exactly 25 local commits before this final
+  documentation update: 23 implementation commits plus the two audit-document
+  commits `437c4e5` and `ba8f693`.
 
 The three largest mixed commits were not transferred or reverted wholesale:
 
@@ -69,10 +80,15 @@ The three largest mixed commits were not transferred or reverted wholesale:
 | `b44b7a6` | Add the production 7-inch dual-I2C profile |
 | `43c5f85` | Require the sensor host for OTA and Last Known Good validation |
 | `989b323` | Harden build identity and native-launcher self-tests |
+| `6e90340` | Identify dual-profile 1.1.6 beta builds |
+| `dbbeae9` | Protect dual-profile firmware releases |
+| `99202c5` | Fix release partition offset parsing |
+| `0a6ed35` | Normalize seven-inch release identity |
+| `fac6e30` | Keep the disabled CH422G diagnostic profile-safe |
 
 Each fix is independently reviewable. None of these commits imports Aura Link
-or Aura Hub code. The audit-only `437c4e5` commit is intentionally omitted from
-the implementation table.
+or Aura Hub code. The audit-only `437c4e5` and `ba8f693` commits are
+intentionally omitted from the implementation table.
 
 ## Audit of v1.1.5 through origin/main
 
@@ -229,6 +245,12 @@ There are no retry loops, shadow-cache success claims, forced runtime writes,
 or automatic recovery additions in this fork. Native tests assert the exact
 order, reject `0xFF`, and verify that each failure stops without retry.
 
+At `fac6e30`, the normally disabled legacy `Ch422gReadyProbe` was also made
+profile-safe. Its 4.3-inch diagnostic image remains `0xFF`, while a 7-inch
+compilation uses `0xD1`; the 7-inch topology test explicitly rejects `0xFF`.
+Enabling that diagnostic later therefore cannot silently switch `USB_SEL` away
+from native Type_C2.
+
 ## I2C fault domains
 
 The 4.3-inch profile preserves the previous shared-bus startup order and
@@ -251,7 +273,7 @@ The 7-inch profile treats panel I2C0 and sensor I2C1 as separate fault domains:
 
 ## Final holistic review follow-up
 
-Three confirmed review findings were fixed after the first audit document:
+Four confirmed review findings were fixed after the first audit document:
 
 1. A 7-inch boot with a failed I2C1 driver installation could previously
    confirm OTA and accumulate Last Known Good dwell through a healthy display.
@@ -264,13 +286,19 @@ Three confirmed review findings were fixed after the first audit document:
    therefore participate in a binary whose ID still looked commit-clean.
    `989b323` now includes untracked files in dirty detection and has an
    integration regression test.
+4. The disabled legacy `Ch422gReadyProbe` still used the 4.3-inch `0xFF`
+   output image. If enabled later in a 7-inch build, it could drive
+   EXIO5/USB_SEL high and switch away from native Type_C2. `fac6e30` selects
+   `0xD1` for the 7-inch profile and adds a topology regression assertion while
+   preserving `0xFF` for 4.3-inch diagnostics.
 
 The GPIO43/R107 source comment was also narrowed to the physical evidence:
 the old route failed under combined load, while R107 remains the leading
 electrical explanation rather than an independently proven cause.
 
-Independent final passes found no additional P0-P2 regressions in the cleaned
-commit range after these fixes.
+Independent final source passes found no additional P0-P2 regressions in the
+cleaned commit range after these fixes. Exact `fac6e30` build, package, and
+verifier validation also completed successfully as recorded below.
 
 ## Known pre-v1.1.5 concurrency debt
 
@@ -291,12 +319,19 @@ in this hardware cleanup.
 
 ## Build and automated test evidence
 
-Both production environments were rebuilt from clean commit `989b323`:
+Both production environments were rebuilt from exact clean source commit
+`fac6e307b3d8df35db891b56f7022dbf89000d79`:
 
-| Environment | Build ID | RAM | Flash | Firmware SHA-256 |
-| --- | --- | ---: | ---: | --- |
-| `project_aura` | `989b323` | 157860 / 327680 | 4297262 / 6553600 | `4EAD3820F17041846E3C0417FA1766240322DBE5F029E82EDF497D7D09E7FFAD` |
-| `project_aura_7` | `989b323-7_dual_i2c_scl6` | 157956 / 327680 | 4291630 / 6553600 | `0FB4C0FD2A2CE3EB8497C8A94AE03FEB2C94E5E269DC0132792F360993F558EF` |
+The durable software-evidence root is:
+
+```text
+D:\21cncstudio\project_aura\logs\firmware_candidate_fac6e30_DUAL_PROFILE_BUILD_EVIDENCE_20260830
+```
+
+| Environment | Build ID | RAM | Flash | BIN bytes | Firmware SHA-256 |
+| --- | --- | ---: | ---: | ---: | --- |
+| `project_aura` | `fac6e30` | 157860 / 327680 | 4297358 / 6553600 | 4297744 | `45BB0ADE4E673EEA4E13B3F09D56987A3135B5EBEE00BD67467F43BF065707CF` |
+| `project_aura_7` | `fac6e30-7-dual-i2c-scl6` | 157956 / 327680 | 4291746 / 6553600 | 4292128 | `5B85F49BE8FE30FE213AAA216789CC91C751DDB0043050761A142E464340E4FB` |
 
 Both builds passed:
 
@@ -306,17 +341,27 @@ Both builds passed:
 - correct dependency resolution: official CH422G for 4.3-inch and only the
   vendored profile fork for 7-inch.
 
-The post-commit canonical native matrix passed 816 of 816 cases:
+The exact-source canonical native matrix passed 816 of 816 cases across 106
+suites and nine invocations:
 
 ```text
-.pio/native-tests/reports/20260830T052619Z-ce8100aa/launcher.json
+D:\21cncstudio\project_aura\logs\firmware_candidate_fac6e30_DUAL_PROFILE_BUILD_EVIDENCE_20260830\native-tests\20260830T093109Z-74d73bce\launcher.json
 status=PASSED
 ```
 
 The total includes the main 740-case suite plus dedicated SFA30, SFA40, DFR,
 GP8403, 4.3 topology, 7-inch topology, CH422G reset, and startup-policy suites.
-All 35 Python tooling self-tests also passed, including launcher inventory and
-untracked-build-input identity coverage.
+The final producer checks also passed 63 Python tests, 20 Node package tests,
+and all four PowerShell release-layout tests. The test-signed 4.3-inch and
+7-inch ZIPs were both accepted by the real Aura Link verifier with their exact
+target/profile/environment/build identity. A cross-target verification attempt
+was rejected. The integration packages remain test-key artifacts, not release
+assets:
+
+| Target | Effective version | Package SHA-256 |
+| --- | --- | --- |
+| `aura-aq-v1` | `1.1.6-beta-fac6e30` | `8EB074F46A9D3C26983B7D051DC6E28DCC4F257D48AD243E6953AB8B02067954` |
+| `aura-aq-7-v1` | `1.1.6-beta-fac6e30-7-dual-i2c-scl6` | `F0AAEF9C334C1C8831F9600C19B9AEED88FC6958B4770202AAEAFE524939F7D8` |
 
 `git diff --check` and `git diff --cached --check` were clean before the
 firmware commit. The worktree was clean after the post-commit builds and tests.
@@ -354,12 +399,13 @@ useful evidence, not a completed release qualification. The original handoff
 requested a longer soak and repeat exact-normal-image cold boots.
 
 The dirty diagnostic binaries and their logs prove hardware observations only.
-They do not prove that the clean `989b323` binaries were physically flashed.
+They do not prove that the exact clean `fac6e30` binaries were physically
+flashed.
 
 Remaining physical validation gaps:
 
-1. Flash the exact clean `project_aura_7` artifact and record its build ID and
-   SHA-256 in the capture.
+1. Flash the exact clean `project_aura_7` `fac6e30-7-dual-i2c-scl6` artifact
+   and record its SHA-256 in the capture.
 2. Run controlled 7-inch physical cold boots with the final wiring and full
    sensor/DAC set.
 3. Repeat the no-SFA30 long-run observation with a normally closed receipt.
@@ -367,97 +413,91 @@ Remaining physical validation gaps:
 5. Keep upload reset, EN reset, software restart, USB reconnect, and physical
    OFF/ON results classified separately.
 
-## Release and installer blocker
+## Release and installer safety follow-up
 
-The firmware profiles must not be published with the existing packaging flow.
-The review found a separate P1 release-safety issue:
+The first firmware-only review found a separate P1 release-safety issue. Both
+profiles shared output names, the producer's signature contract did not match
+the real importer, Aura Link keyed current releases without a hardware target,
+and the installer could not bind a selected board to an exact target/version.
+Publishing either profile through that flow was stopped.
 
-- Both environments currently write the same release directory and generic
-  artifact names, so one profile can overwrite the other.
-- The producer currently creates signature-v1 packages while the current Aura
-  Link importer requires the signature-v2 canonical payload. Adding fields is
-  not sufficient: `signature.schema`, `title`, `release_notes_sha256`, and
-  `asset_kind` must participate in the signed payload. The outer package schema
-  remains `aura-firmware-release-package-v1`.
-- Aura Link currently admits only `aura-aq-v1`, keys releases without hardware
-  target, and stores one current pointer per product/channel.
-- The installer and OTA selection are also product/channel based, so publishing
-  the 7-inch image as the old target could replace the 4.3-inch current image.
-- GitHub publication with `-PruneAssetsToList` can delete the other profile's
-  OTA asset if the command is run once per profile with an incomplete list.
+The coordinated local implementation has now resolved those structural
+blockers in three isolated worktrees:
 
-Immediate stop conditions:
+| Scope | Reviewed commit | Result |
+| --- | --- | --- |
+| Project Aura producer | `fac6e307b3d8df35db891b56f7022dbf89000d79` | Target-specific artifacts, signature-v2, source-bound identities, profile-safe diagnostics, protected GitHub publication |
+| Aura Link | `e826b46ff4952be2da616133af89b584a625360d` | Target-aware releases/pointers/transactions, strict importer, fail-closed server-owned identity storage/policy, locked 7-inch OTA |
+| Aura AQ site | `85cb5f805e4e1a1252c05f333908790ecb2ee7c3` | Versioned attempt identities, physical-target acknowledgement, exact target/version manifests, locked 7-inch installer lane |
 
-- Do not import newly produced signed ZIP files for either `project_aura` or
-  `project_aura_7` until the producer emits the signature-v2 contract accepted
-  by the real Aura Link importer.
-- Do not alter existing published 4.3-inch releases while implementing the new
-  package path.
-- Do not publish the 7-inch image through the installer, GitHub OTA assets,
-  the public OTA catalog, or recovery packages until target isolation is live.
+Aura Link's final follow-up after the initial `08a3b83` control-plane commit is
+split into four reviewable commits:
 
-Required target model:
+```text
+ea56aa8ab0b49d272a38a90a7907a34864563743 Harden legacy firmware import identity
+a5ed293363bb08f8495a226aa715bc87b28e488b Make firmware package import commit-safe
+c1a7ed0f27742465ee63f53b97656bb5fb5907a9 Serialize installer quota attempts
+e826b46ff4952be2da616133af89b584a625360d Require server-owned OTA hardware identity
+```
+
+The canonical target model is:
 
 | Firmware environment | Hardware target | Hardware profile |
 | --- | --- | --- |
 | `project_aura` | `aura-aq-v1` | `4_3` |
 | `project_aura_7` | `aura-aq-7-v1` | `7_dual_i2c_scl6` |
 
-These are strict pairs. The importer must reject `aura-aq-v1` with the 7-inch
-profile and reject `aura-aq-7-v1` with the 4.3-inch profile.
+These are strict pairs. The producer and importer reject a mismatched pair. The
+installer and catalog also reject ambiguous duplicate target/version entries
+and asset reuse across identities. Existing target-less requests remain a
+4.3-inch-only compatibility path.
 
-The safe release implementation requires coordinated changes in three scopes:
+The integration verification established:
 
-1. Project Aura producer:
-   - use target-specific outer directories, ZIP names, and public OTA names;
-   - keep the importer's required generic names inside each ZIP:
-     `bootloader.bin`, `partitions.bin`, `boot_app0.bin`, `firmware.bin`,
-     `littlefs.bin`, `release-notes.md`, and `release.json`;
-   - read the actual generated build ID, profile, and target from the selected
-     PlatformIO environment and include them in signed metadata;
-   - implement the complete signature-v2 canonical payload while retaining the
-     package-v1 outer schema;
-   - either publish both OTA assets with one complete prune list or disable
-     `-PruneAssetsToList` for dual-profile tags;
-   - keep legacy static manifests profile-local unless every public URL and BIN
-     is made profile-qualified.
-2. Aura Link on `feature/aura-link`:
-   - make the release uniqueness key include `hardwareTarget`;
-   - make the current-pointer uniqueness key include `hardwareTarget`;
-   - scope publish, rollback, and conflict handling by target;
-   - transactionally backfill existing releases and pointers as `aura-aq-v1`;
-   - keep a missing target in a legacy installer request equivalent to
-     `aura-aq-v1`;
-   - enforce the strict target-profile pairs in the import allowlist;
-   - keep 7-inch OTA disabled until enrollment/device metadata reports an
-     explicit hardware target. A missing device target means 4.3-inch only and
-     must never be inferred from version or channel.
-3. Aura AQ site:
-   - add explicit hardware selection and target propagation;
-   - verify that the returned manifest target matches the user's selection
-     before erase or write;
-   - make public OTA catalog lookup include target before listing two images
-     with the same product/version;
-   - remove the display-only 7-inch block only after the backend supports both
-     targets.
+- both real producer ZIP layouts are accepted by the `e826b46` Aura Link
+  verifier;
+- signature, target, profile, environment, build ID, asset kind, offset, size,
+  and SHA-256 are bound together;
+- a cross-target expected identity is rejected;
+- release/current uniqueness and publish/rollback operations include target;
+- the 7-inch external GitHub publisher fails locally before credential lookup;
+- recovery packaging remains fail-closed;
+- the installer requires an explicit physical-target acknowledgement for all
+  modes and freezes target/version/channel before erase or write.
 
-The existing recovery package is 4.3-inch-only. A 7-inch recovery package needs
-its own target-specific binary, packaging, and physical validation.
+The final independent Aura Link pass found no P0-P2 issue in
+`08a3b83..e826b46`; all 194 Vitest files and 1425 tests passed, TypeScript
+checking passed, and the range diff was clean. The final site pass found no
+active-path issue, with 32 focused tests and TypeScript checking passing. Its
+broader existing suite remains 292/293 because of the previously known,
+unrelated favicon expectation.
 
-Minimum release acceptance tests:
+Remaining stop conditions are deliberate:
 
-- A real producer ZIP is accepted by the real Aura Link importer.
-- Two packages with the same version and channel but different targets coexist.
-- A target-profile mismatch is rejected.
-- Publish or rollback of one target does not change the other target.
-- A legacy request without target resolves only to the 4.3-inch image.
-- A 7-inch manifest contains its target and the site verifies it before write.
-- Signed build ID, profile, and target match the selected environment's
-  generated identity.
-
-Those repositories and branch scopes were deliberately not modified by this
-firmware cleanup. Until the coordinated release work is complete, the 7-inch
-profile is source- and build-ready but unpublished.
+- the generated integration ZIPs use a temporary test key and are not
+  production release assets;
+- Aura Link migrations `0042`, `0043`, and `0044` have not been applied, and
+  none of the three local branches has been pushed or deployed;
+- migration `0044` defines server-owned device target/profile/source fields,
+  but the production inventory and reviewed backfill have not been executed;
+- a trusted one-time 7-inch identity enrollment/grant/claim path has not been
+  implemented, reviewed, or exercised. Aura Link `e826b46` plus migration
+  `0044` provide fail-closed storage and policy only; they are not an unlock;
+- the control-plane rollout must be a coordinated non-rolling maintenance
+  operation: stop Installer/OTA/firmware mutations, drain or reject legacy
+  unversioned attempts, apply migrations `0042`, `0043`, and `0044` in order,
+  complete the reviewed inventory/backfill and strict database checks, then
+  switch Aura Link and the installer site together. An application-only
+  rollback to the legacy attempt formula or missing-identity inference is not
+  supported;
+- the 7-inch target remains locked in GitHub, Aura Link promotion, installer,
+  public OTA, and recovery until physical qualification is completed and a
+  dedicated reviewed unlock commit links the evidence;
+- current device claim/telemetry does not yet attest hardware target/profile,
+  so Aura Link must not automatically offer 7-inch OTA;
+- a browser cannot electrically detect the display size. The protected
+  installer reduces manual cross-flash risk through explicit target binding,
+  but raw/manual OTA still requires an operator to verify the physical board.
 
 ## Final decision
 
@@ -469,5 +509,5 @@ profile is source- and build-ready but unpublished.
 | Move the 7-inch external sensor chain to I2C1 SDA44/SCL6? | Yes |
 | Change the panel bus to 400 kHz during cleanup? | No |
 | Return PCLK to 16 MHz? | Already done and vendor-equivalent |
-| Publish the 7-inch image now? | No; target-aware release pipeline is required first |
+| Publish the 7-inch image now? | No; exact `fac6e30` physical qualification, a reviewed trusted identity-enrollment path, and the coordinated non-rolling cutover remain required |
 | Proceed to exact clean-artifact physical validation? | Yes, as the next controlled stage |
