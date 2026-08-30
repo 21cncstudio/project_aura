@@ -10,6 +10,7 @@ namespace BoardRecoveryPolicy {
 enum class Decision : uint8_t {
     NotNeeded = 0,
     Restart,
+    SuppressPolicyDisabled,
     SuppressAlreadyAttempted,
     SuppressNotEligible,
     SuppressRestartUnavailable,
@@ -19,7 +20,8 @@ Decision decide(bool board_ready,
                 bool lvgl_ready,
                 bool board_recovery_eligible,
                 bool auto_recovery_boot,
-                bool restart_task_ready);
+                bool restart_task_ready,
+                bool automatic_recovery_enabled);
 const char *decisionText(Decision decision);
 
 } // namespace BoardRecoveryPolicy

@@ -380,20 +380,30 @@ void poll_runtime_i2c_recovery(uint32_t now_ms) {
 
     if (touch_offline && lines.idle() && !gt911_runtime_recovery_attempted) {
         gt911_runtime_recovery_attempted = true;
-        if (try_runtime_gt911_recovery()) {
-            return;
+        if (Config::PANEL_RUNTIME_GT911_HARD_RECOVERY_ENABLED) {
+            if (try_runtime_gt911_recovery()) {
+                return;
+            }
+            LOGE("GT911",
+                 "runtime address recovery failed; evaluating restart policy");
+        } else {
+            LOGW("GT911",
+                 "touch offline with idle panel bus; automatic CH422G hard recovery disabled");
         }
-        LOGE("GT911", "runtime address recovery failed; falling back to restart policy");
     }
+
+    const bool actionable_touch_offline =
+        Config::PANEL_RUNTIME_TOUCH_AUTO_RESTART_ENABLED && touch_offline;
 
     const RuntimeI2cRecoveryPolicy::Decision decision =
         runtime_i2c_recovery_policy.poll(now_ms,
                                          lines.idle(),
-                                         touch_offline,
+                                         actionable_touch_offline,
                                          boot_any_auto_recovery_boot(),
                                          restart_task_ready);
     if (runtime_i2c_recovery_policy.sharedBusFaultConfirmed() &&
-        i2c_runtime_ready) {
+        i2c_runtime_ready &&
+        Config::PANEL_RUNTIME_STUCK_BUS_AUTO_RECOVERY_ENABLED) {
         disable_runtime_shared_i2c_owners();
 
         // Quiesce both restart and suppressed paths immediately. A controlled
@@ -433,6 +443,17 @@ void poll_runtime_i2c_recovery(uint32_t now_ms) {
     if (decision == RuntimeI2cRecoveryPolicy::Decision::None) {
         return;
     }
+    const bool automatic_recovery_enabled =
+        actionable_touch_offline ||
+        (runtime_i2c_recovery_policy.sharedBusFaultConfirmed() &&
+         Config::PANEL_RUNTIME_STUCK_BUS_AUTO_RECOVERY_ENABLED);
+    if (!automatic_recovery_enabled) {
+        LOGE("I2C",
+             "runtime panel-bus fault observed; automatic shutdown/restart disabled (SDA=%u SCL=%u)",
+             lines.sda_high ? 1u : 0u,
+             lines.scl_high ? 1u : 0u);
+        return;
+    }
     if (decision != RuntimeI2cRecoveryPolicy::Decision::Restart) {
         LOGE("I2C",
              "runtime recovery suppressed: %s",
@@ -442,7 +463,7 @@ void poll_runtime_i2c_recovery(uint32_t now_ms) {
 
     LOGE("I2C",
          "runtime I2C fault detected (touch_offline=%s, shared_bus_stuck=%s, SDA=%u, SCL=%u); scheduling one controlled restart",
-         touch_offline ? "yes" : "no",
+         actionable_touch_offline ? "yes" : "no",
          runtime_i2c_recovery_policy.sharedBusFaultConfirmed() ? "yes" : "no",
          lines.sda_high ? 1u : 0u,
          lines.scl_high ? 1u : 0u);
@@ -654,7 +675,8 @@ void setup()
         lvgl_ready,
         board_recovery_eligible,
         auto_recovery_boot,
-        restart_task_ready);
+        restart_task_ready,
+        Config::PANEL_STARTUP_AUTO_RESTART_ENABLED);
     if (recovery_decision == BoardRecoveryPolicy::Decision::Restart) {
         if (!board_ready) {
             LOGE("Main", "Board startup failed; controlled recovery restart will be scheduled");

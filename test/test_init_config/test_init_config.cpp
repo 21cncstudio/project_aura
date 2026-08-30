@@ -45,11 +45,21 @@ void test_default_date_format_uses_japanese_iso_and_unit_defaults() {
                           static_cast<int>(Config::defaultDateFormat(Config::Language::EN, false)));
 }
 
+void test_production_panel_recovery_defaults_do_not_run_unproven_hardware_actions() {
+    TEST_ASSERT_FALSE(Config::PANEL_CH422G_STARTUP_PREFLIGHT_ENABLED);
+    TEST_ASSERT_FALSE(Config::PANEL_PREINIT_BUS_RECOVERY_ENABLED);
+    TEST_ASSERT_FALSE(Config::PANEL_RUNTIME_GT911_HARD_RECOVERY_ENABLED);
+    TEST_ASSERT_FALSE(Config::PANEL_RUNTIME_TOUCH_AUTO_RESTART_ENABLED);
+    TEST_ASSERT_FALSE(Config::PANEL_RUNTIME_STUCK_BUS_AUTO_RECOVERY_ENABLED);
+    TEST_ASSERT_FALSE(Config::PANEL_STARTUP_AUTO_RESTART_ENABLED);
+}
+
 int main(int, char **) {
     UNITY_BEGIN();
     RUN_TEST(test_normalize_offsets_rounding);
     RUN_TEST(test_normalize_offsets_clamps_high);
     RUN_TEST(test_normalize_offsets_clamps_low);
     RUN_TEST(test_default_date_format_uses_japanese_iso_and_unit_defaults);
+    RUN_TEST(test_production_panel_recovery_defaults_do_not_run_unproven_hardware_actions);
     return UNITY_END();
 }

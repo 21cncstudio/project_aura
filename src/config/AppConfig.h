@@ -48,6 +48,24 @@ namespace Config {
     constexpr i2c_port_t I2C_PORT = I2C_NUM_0;
     constexpr uint32_t I2C_FREQ_HZ = 100000;
     constexpr uint32_t I2C_TIMEOUT_MS = 50;
+
+    // Keep production startup on the vendor-owned panel path. Earlier COM7
+    // experiments added an extra CH422G host/write sequence and GPIO clock
+    // recovery before Board::begin(); neither action stabilized the physical
+    // fault, and both can change panel power/reset state before vendor init.
+    // The implementations remain available for controlled diagnostic work.
+    constexpr bool PANEL_CH422G_STARTUP_PREFLIGHT_ENABLED = false;
+    constexpr bool PANEL_PREINIT_BUS_RECOVERY_ENABLED = false;
+
+    // Touch-offline, sampled stuck lines, and startup failures remain health
+    // and diagnostic signals, but do not authorize CH422G hard recovery,
+    // shared-bus shutdown, or restart through these paths. The guarded UI
+    // display-sync/stall policy is separate and remains unchanged pending a
+    // dedicated product decision.
+    constexpr bool PANEL_RUNTIME_GT911_HARD_RECOVERY_ENABLED = false;
+    constexpr bool PANEL_RUNTIME_TOUCH_AUTO_RESTART_ENABLED = false;
+    constexpr bool PANEL_RUNTIME_STUCK_BUS_AUTO_RECOVERY_ENABLED = false;
+    constexpr bool PANEL_STARTUP_AUTO_RESTART_ENABLED = false;
     constexpr uint8_t LOG_LEVEL = 3; // 0=error, 1=warn, 2=info, 3=debug
     constexpr bool LOG_SERIAL_OUTPUT = true;
     constexpr bool LOG_SERIAL_SENSORS_OUTPUT = false;
@@ -560,10 +578,9 @@ namespace Config {
     constexpr uint32_t UI_TICK_MS = 30;
     constexpr uint32_t BOOT_LOGO_MS = 5000;
     constexpr uint32_t BOOT_DIAG_MS = 3000;
-    // If the display board rejects its first cold initialization, finish the
-    // headless boot and use the normal controlled restart path once. This
-    // matches the web restart that successfully recovers the tested 7-inch
-    // board, instead of restarting directly from the middle of setup().
+    // If the display board rejects its first initialization, finish the
+    // headless boot and use the normal controlled restart path at most once.
+    // This is containment, not proof that restart repairs the hardware fault.
     constexpr uint32_t BOARD_RECOVERY_RESTART_DELAY_MS = 15UL * 1000UL;
     constexpr uint32_t WIFI_CONNECT_TIMEOUT_MS = 45000;
     constexpr uint32_t WIFI_CONNECT_RETRY_DELAY_MS = 1000;

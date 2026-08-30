@@ -27,11 +27,9 @@ using esp_panel::board::Board;
 using esp_panel::drivers::BusRGB;
 
 constexpr uint32_t kBeginTimeoutMs = 10000;
-// Prepare CH422G before the display library touches it. The safe sequence
-// preloads the output latches, enables the outputs, waits for the attached
-// display load to settle, and only then validates the vendor reset writes.
-// A two-second bound leaves room for fresh-host retries on a marginal bus
-// without allowing startup to loop indefinitely.
+// Optional diagnostic preflight retained for controlled experiments. Normal
+// production builds leave CH422G ownership and panel sequencing to the vendor
+// Board::begin() path.
 constexpr uint32_t kStartupProbeTimeoutMs = 2000;
 constexpr uint32_t kStartupProbePollMs = 250;
 constexpr uint32_t kStartupProbeLoadSettleMs = 250;
@@ -341,7 +339,9 @@ Result initBoard(const I2cBusRecovery::LineState &early_state,
         pre_init_state.scl_high,
     };
     const BoardInitPolicy::PreInitAction pre_init_action =
-        BoardInitPolicy::preInitAction(auto_recovery_boot, recovery_samples);
+        BoardInitPolicy::preInitAction(
+            auto_recovery_boot && Config::PANEL_PREINIT_BUS_RECOVERY_ENABLED,
+            recovery_samples);
     if (pre_init_action == BoardInitPolicy::PreInitAction::RecoverThenVendorInit) {
         LOGW("Main", "Marked recovery boot found stuck I2C lines; applying one pre-init recovery");
         result.last_recovery = I2cBusRecovery::recover(
@@ -361,28 +361,32 @@ Result initBoard(const I2cBusRecovery::LineState &early_state,
     }
     if (result.cold_power_start) {
         boot_mark_board_power_settle_complete();
-        LOGI("Main", "Cold power start: preparing CH422G before vendor board init");
+        LOGI("Main", "Cold power start: using bounded vendor board initialization");
     }
 
-    result.last_stage = Stage::Expander;
-    noteStage(Stage::Expander);
-    result.expander_probe = prepareExpanderForVendorInit();
-    if (!result.expander_probe.ready()) {
-        result.failure = Failure::ExpanderNotReady;
-        LOGE("Main",
-             "CH422G safe startup preparation failed after %lu ms at phase=%s address=0x%02X error=%d",
-             static_cast<unsigned long>(result.expander_probe.waited_ms),
-             Ch422gReadyProbe::phaseText(result.expander_probe.phase),
-             static_cast<unsigned>(result.expander_probe.failed_address),
-             static_cast<int>(result.expander_probe.last_error));
-        return result;
-    }
+    if (Config::PANEL_CH422G_STARTUP_PREFLIGHT_ENABLED) {
+        result.last_stage = Stage::Expander;
+        noteStage(Stage::Expander);
+        result.expander_probe = prepareExpanderForVendorInit();
+        if (!result.expander_probe.ready()) {
+            result.failure = Failure::ExpanderNotReady;
+            LOGE("Main",
+                 "CH422G diagnostic startup preflight failed after %lu ms at phase=%s address=0x%02X error=%d",
+                 static_cast<unsigned long>(result.expander_probe.waited_ms),
+                 Ch422gReadyProbe::phaseText(result.expander_probe.phase),
+                 static_cast<unsigned>(result.expander_probe.failed_address),
+                 static_cast<int>(result.expander_probe.last_error));
+            return result;
+        }
 
-    // The readiness probe owns a temporary legacy I2C host and deletes it
-    // before returning. Give that teardown a deterministic handoff window
-    // before the display library installs its shared host.
-    vTaskDelay(pdMS_TO_TICKS(kStartupProbeHostHandoffMs));
-    LOGI("Main", "CH422G outputs stable; starting one bounded vendor board attempt");
+        // The diagnostic preflight owns a temporary legacy I2C host and
+        // deletes it before returning. Give teardown a deterministic handoff
+        // before the display library installs its shared host.
+        vTaskDelay(pdMS_TO_TICKS(kStartupProbeHostHandoffMs));
+        LOGI("Main", "CH422G diagnostic preflight complete");
+    } else {
+        LOGI("Main", "CH422G startup preflight disabled; using vendor init directly");
+    }
 
     result.last_stage = Stage::Bus;
     g_stage.store(static_cast<uint8_t>(Stage::Bus), std::memory_order_relaxed);
@@ -432,7 +436,9 @@ Result initBoard(const I2cBusRecovery::LineState &early_state,
     LOGI("Main", "Deleting board @%p", board);
     delete board;
     logMemory("after cleanup");
-    if (begin_result == BeginResult::Failed && result.last_stage == Stage::Expander) {
+    if (Config::PANEL_CH422G_STARTUP_PREFLIGHT_ENABLED &&
+        begin_result == BeginResult::Failed &&
+        result.last_stage == Stage::Expander) {
         result.expander_probe = probeExpanderAfterVendorFailure();
     }
     return result;
