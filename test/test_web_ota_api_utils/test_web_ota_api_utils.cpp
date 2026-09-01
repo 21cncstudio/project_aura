@@ -1,6 +1,7 @@
 #include <unity.h>
 
 #include <ArduinoJson.h>
+#include <cstring>
 
 #include "web/WebOtaApiUtils.h"
 
@@ -154,13 +155,19 @@ void test_web_ota_api_utils_build_prepare_result_reports_unavailable_state() {
 }
 
 void test_web_ota_api_utils_model_codes_are_not_inferred_from_error_text() {
-    const char *codes[] = {"HARDWARE_TARGET_MISMATCH", "HARDWARE_TARGET_MISSING",
-                           "HARDWARE_METADATA_UNSUPPORTED", "INVALID_FIRMWARE"};
+    const char *codes[] = {
+        "HARDWARE_TARGET_MISMATCH", "FIRMWARE_FLAVOR_MISMATCH",
+        "HARDWARE_TARGET_MISSING", "HARDWARE_METADATA_UNSUPPORTED",
+        "FIRMWARE_FLAVOR_MISSING", "FIRMWARE_FLAVOR_UNSUPPORTED",
+        "FIRMWARE_FLAVOR_INVALID", "FIRMWARE_IDENTITY_INVALID",
+        "INVALID_FIRMWARE"};
     for (size_t i = 0; i < sizeof(codes) / sizeof(codes[0]); ++i) {
         const WebOtaApiUtils::Result result = WebOtaApiUtils::buildUpdateResult(
             true, false, 0, 6553600, true, 4000000,
             "Model mismatch or missing metadata, not a file-size error", codes[i]);
-        TEST_ASSERT_EQUAL_INT(i == 0 ? 409 : 400, result.status_code);
+        const bool conflict = strcmp(codes[i], "HARDWARE_TARGET_MISMATCH") == 0 ||
+                              strcmp(codes[i], "FIRMWARE_FLAVOR_MISMATCH") == 0;
+        TEST_ASSERT_EQUAL_INT(conflict ? 409 : 400, result.status_code);
         TEST_ASSERT_EQUAL_STRING(codes[i], result.error_code.c_str());
         ArduinoJson::JsonDocument doc;
         WebOtaApiUtils::fillUpdateJson(doc.to<ArduinoJson::JsonObject>(), result);

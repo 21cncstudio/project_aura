@@ -58,6 +58,7 @@ public:
     uint16_t count() const { return state_.count; }
     uint16_t index() const { return state_.index; }
     uint32_t latestEpoch() const { return state_.epoch; }
+    uint8_t optionalGasType() const { return state_.optional_gas_type; }
 
     bool entryFromOldest(uint16_t offset, Entry &out) const;
     bool metricValueFromOldest(uint16_t offset, Metric metric, float &value, bool &valid) const;

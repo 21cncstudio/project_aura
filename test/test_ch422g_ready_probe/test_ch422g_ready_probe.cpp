@@ -8,7 +8,7 @@ namespace {
 #if defined(AURA_HARDWARE_PROFILE_7) && AURA_HARDWARE_PROFILE_7
 constexpr uint8_t kExpectedInitialIo = 0xD1U;
 #else
-constexpr uint8_t kExpectedInitialIo = 0xDFU;
+constexpr uint8_t kExpectedInitialIo = 0xDBU;
 #endif
 
 struct WriteRecord {
@@ -161,6 +161,8 @@ void tearDown() {}
 void test_probe_uses_shared_native_usb_policy_and_exact_profile_image() {
     TEST_ASSERT_EQUAL_HEX8(0x20U, AURA_CH422G_USB_SEL_MASK);
     TEST_ASSERT_EQUAL_HEX8(kExpectedInitialIo, AURA_CH422G_INITIAL_IO_VALUE);
+    TEST_ASSERT_EQUAL_HEX8(
+        0U, AURA_CH422G_INITIAL_IO_VALUE & AURA_CH422G_BACKLIGHT_MASK);
     TEST_ASSERT_EQUAL_HEX8(
         AURA_CH422G_INITIAL_IO_VALUE, Ch422gReadyProbe::kWriteIoSafeValue);
     const auto result = runProbe();

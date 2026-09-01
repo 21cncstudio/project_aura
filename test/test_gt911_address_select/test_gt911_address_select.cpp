@@ -89,7 +89,7 @@ void tearDown() {}
 
 void test_backup_address_sequence_matches_gt911_timing() {
     FakeContext ctx;
-    const auto result = Gt911AddressSelect::selectBackupAddress(makeOps(ctx));
+    const auto result = Gt911AddressSelect::selectAddress(makeOps(ctx), 0x14);
 
     TEST_ASSERT_TRUE(result.ok());
     TEST_ASSERT_EQUAL_UINT32(11U, ctx.event_count);
@@ -111,10 +111,10 @@ void test_failure_after_reset_assertion_releases_reset_and_int() {
     ctx.fail_event = EventType::IntLevel;
     ctx.fail_occurrence = 2U;
 
-    const auto result = Gt911AddressSelect::selectBackupAddress(makeOps(ctx));
+    const auto result = Gt911AddressSelect::selectAddress(makeOps(ctx), 0x14);
 
     TEST_ASSERT_EQUAL_UINT8(
-        static_cast<uint8_t>(Gt911AddressSelect::Failure::IntHigh),
+        static_cast<uint8_t>(Gt911AddressSelect::Failure::IntSelect),
         static_cast<uint8_t>(result.failure));
     TEST_ASSERT_EQUAL_UINT32(8U, ctx.event_count);
     assertEvent(ctx, 5, EventType::IntLevel, 1U);
@@ -127,10 +127,48 @@ void test_missing_operation_is_rejected_without_gpio_activity() {
     auto ops = makeOps(ctx);
     ops.release_int = nullptr;
 
-    const auto result = Gt911AddressSelect::selectBackupAddress(ops);
+    const auto result = Gt911AddressSelect::selectAddress(ops, 0x14);
 
     TEST_ASSERT_EQUAL_UINT8(
         static_cast<uint8_t>(Gt911AddressSelect::Failure::InvalidOps),
+        static_cast<uint8_t>(result.failure));
+    TEST_ASSERT_EQUAL_UINT32(0U, ctx.event_count);
+}
+
+void test_primary_address_changes_only_the_strap_level() {
+    FakeContext alternate;
+    FakeContext primary;
+    TEST_ASSERT_TRUE(Gt911AddressSelect::selectAddress(makeOps(alternate), 0x14).ok());
+    TEST_ASSERT_TRUE(Gt911AddressSelect::selectAddress(makeOps(primary), 0x5D).ok());
+
+    TEST_ASSERT_EQUAL_UINT32(alternate.event_count, primary.event_count);
+    for (size_t i = 0; i < primary.event_count; ++i) {
+        assertEvent(primary, i, alternate.events[i].type,
+                    i == 5 ? 0U : alternate.events[i].value);
+    }
+    assertEvent(primary, 5, EventType::IntLevel, 0U);
+    assertEvent(primary, 7, EventType::ResetLevel, 1U);
+}
+
+void test_primary_strap_failure_also_releases_reset_and_int() {
+    FakeContext ctx;
+    ctx.fail_event = EventType::IntLevel;
+    ctx.fail_occurrence = 2U;
+    const auto result = Gt911AddressSelect::selectAddress(makeOps(ctx), 0x5D);
+
+    TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Gt911AddressSelect::Failure::IntSelect),
+                            static_cast<uint8_t>(result.failure));
+    assertEvent(ctx, 5, EventType::IntLevel, 0U);
+    assertEvent(ctx, 6, EventType::ResetLevel, 1U);
+    assertEvent(ctx, 7, EventType::ReleaseInt, 0U);
+}
+
+void test_invalid_address_is_rejected_without_gpio_activity() {
+    FakeContext ctx;
+    // 0xBA is the 8-bit write address, not the 7-bit address required here.
+    const auto result = Gt911AddressSelect::selectAddress(makeOps(ctx), 0xBA);
+    TEST_ASSERT_EQUAL_UINT8(
+        static_cast<uint8_t>(Gt911AddressSelect::Failure::InvalidAddress),
         static_cast<uint8_t>(result.failure));
     TEST_ASSERT_EQUAL_UINT32(0U, ctx.event_count);
 }
@@ -140,5 +178,8 @@ int main(int, char **) {
     RUN_TEST(test_backup_address_sequence_matches_gt911_timing);
     RUN_TEST(test_failure_after_reset_assertion_releases_reset_and_int);
     RUN_TEST(test_missing_operation_is_rejected_without_gpio_activity);
+    RUN_TEST(test_primary_address_changes_only_the_strap_level);
+    RUN_TEST(test_primary_strap_failure_also_releases_reset_and_int);
+    RUN_TEST(test_invalid_address_is_rejected_without_gpio_activity);
     return UNITY_END();
 }

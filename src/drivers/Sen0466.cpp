@@ -19,4 +19,6 @@ Sen0466::Sen0466()
           nullptr,
           0,
           true,
+          Config::SEN0466_RUNTIME_TRANSPORT_RETRY_DELAY_MS,
+          true,
       }) {}

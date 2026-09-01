@@ -54,7 +54,10 @@ public:
     }
 
     void reset();
-    void beginUpload(uint32_t now_ms);
+    void beginUpload(uint32_t now_ms, uint32_t validated_confirm_id = 0);
+    uint32_t sessionId() const { return session_id_; }
+    bool rejectedUploadMatches(uint32_t confirm_id, size_t expected_size,
+                               uint32_t now_ms) const;
     bool isActive() const;
     bool isBusy() const;
     bool hasError() const;
@@ -85,6 +88,7 @@ private:
     bool reboot_pending_ = false;
     bool size_known_ = false;
     uint32_t session_id_ = 0;
+    uint32_t validated_confirm_id_ = 0;
     uint32_t next_session_id_ = 1;
     uint32_t total_timeout_ms_ = 0;
     size_t expected_size_ = 0;

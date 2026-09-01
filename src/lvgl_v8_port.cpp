@@ -6,6 +6,7 @@
 
 #include "esp_timer.h"
 #include "esp_debug_helpers.h"
+#include "esp_idf_version.h"
 #include "esp_log.h"
 #include <atomic>
 #include <string.h>
@@ -13,8 +14,11 @@
 #define ESP_UTILS_LOG_TAG "LvPort"
 #include "esp_lib_utils.h"
 #include "core/BootState.h"
+#include "core/LvglLockDiagnostics.h"
 #include "core/LvglWaitPolicy.h"
+#include "core/RotatedFramebufferPolicy.h"
 #include "core/SharedI2cRuntimeGate.h"
+#include "core/TouchReleaseGatePolicy.h"
 #include "core/TouchWakePolicy.h"
 #include "core/WakePowerGuard.h"
 #include "lvgl_v8_port.h"
@@ -31,11 +35,18 @@ static std::atomic<bool> lvgl_port_paused{false};
 static std::atomic<bool> lvgl_pause_requested{false};
 static std::atomic<bool> lvgl_display_sync_fault{false};
 static std::atomic<bool> lvgl_display_task_fail_stopped{false};
+static std::atomic<bool> lvgl_diagnostics_available{false};
+static std::atomic<uint32_t> lvgl_presented_frame_count{0};
 static volatile bool lvgl_vsync_notify_enabled = false;
 static LCD *lvgl_port_lcd = nullptr;
 static Touch *lvgl_port_touch = nullptr;
-static bool lvgl_port_screen_flip_180 = false;
-static void *lvgl_port_rotated_fb = nullptr;
+static std::atomic<bool> lvgl_port_screen_flip_180{false};
+static std::atomic<bool> lvgl_rotation_pipeline_active{false};
+static void *lvgl_port_driver_fb[RotatedFramebufferPolicy::FRAME_BUFFER_COUNT] = {};
+// ESP-IDF starts an RGB panel on framebuffer zero. Every later ownership
+// change is published only after the refresh callback acknowledgement.
+static int lvgl_port_active_scanout_index = -1;
+static RotatedFramebufferPolicy::FlipLayout lvgl_port_flip_layout;
 static void *lvgl_buf[LVGL_PORT_BUFFER_NUM_MAX] = {};
 static std::atomic<uint32_t> lvgl_touch_read_block_until_ms{0};
 static std::atomic<bool> lvgl_touch_wait_release_after_block{false};
@@ -67,8 +78,13 @@ static volatile uint32_t lvgl_diag_flush_count = 0;
 static volatile uint32_t lvgl_diag_flush_last_ms = 0;
 static volatile uint32_t lvgl_diag_vsync_count = 0;
 static volatile uint32_t lvgl_diag_vsync_last_ms = 0;
+static volatile uint32_t lvgl_diag_refresh_callback_max_gap_ms = 0;
 static volatile uint32_t lvgl_diag_vsync_wait_timeout_count = 0;
-static volatile uint32_t lvgl_diag_lock_fail_count = 0;
+static volatile uint32_t lvgl_diag_rotated_copy_switch_count = 0;
+static volatile uint32_t lvgl_diag_framebuffer_ownership_violation_count = 0;
+static lvgl_port_refresh_callback_semantics_t lvgl_refresh_callback_semantics =
+    LVGL_PORT_REFRESH_CALLBACK_UNKNOWN;
+static LvglLockDiagnostics::Counters lvgl_diag_lock_counts;
 static volatile uint32_t lvgl_diag_touch_read_error_count = 0;
 static constexpr uint32_t LVGL_TOUCH_POLL_INTERVAL_MS = 12;
 static constexpr uint32_t LVGL_TOUCH_READ_RETRY_DELAY_MS = 2;
@@ -163,6 +179,30 @@ static inline uint32_t lvgl_diag_age_ms(uint32_t now_ms, uint32_t stamp_ms)
     return age_ms;
 }
 
+static int lvgl_port_framebuffer_index(const void *frame_buffer)
+{
+    if (frame_buffer == nullptr) {
+        return -1;
+    }
+    for (int index = 0; index < RotatedFramebufferPolicy::FRAME_BUFFER_COUNT;
+         ++index) {
+        if (lvgl_port_driver_fb[index] == frame_buffer) {
+            return index;
+        }
+    }
+    return -1;
+}
+
+static bool lvgl_port_framebuffers_are_distinct()
+{
+    return lvgl_port_driver_fb[0] != nullptr &&
+           lvgl_port_driver_fb[1] != nullptr &&
+           lvgl_port_driver_fb[2] != nullptr &&
+           lvgl_port_driver_fb[0] != lvgl_port_driver_fb[1] &&
+           lvgl_port_driver_fb[0] != lvgl_port_driver_fb[2] &&
+           lvgl_port_driver_fb[1] != lvgl_port_driver_fb[2];
+}
+
 #if LVGL_PORT_AVOID_TEAR
 static void lvgl_port_latch_display_sync_fault(const char *reason)
 {
@@ -240,7 +280,25 @@ static bool lvgl_port_switch_and_confirm_vsync(LCD *lcd, void *frame_buffer)
         return false;
     }
     const uint32_t baseline_vsync_count = lvgl_diag_vsync_count;
-    return lvgl_port_wait_for_vsync_after(baseline_vsync_count);
+    if (!lvgl_port_wait_for_vsync_after(baseline_vsync_count)) {
+        return false;
+    }
+#if LVGL_PORT_DIRECT_MODE && (LVGL_PORT_ROTATION_DEGREE == 0) && \
+    (LVGL_PORT_DISP_BUFFER_NUM >= 3)
+    const int acknowledged_index = lvgl_port_framebuffer_index(frame_buffer);
+    if (!RotatedFramebufferPolicy::validIndex(acknowledged_index)) {
+        ++lvgl_diag_framebuffer_ownership_violation_count;
+        lvgl_rotation_pipeline_active.store(false, std::memory_order_release);
+        lvgl_port_latch_display_sync_fault(
+            "Acknowledged framebuffer is outside the owned RGB set");
+        return false;
+    }
+    lvgl_port_active_scanout_index = acknowledged_index;
+#endif
+    // Publish only a completed framebuffer hand-off, never flush entry or an
+    // unrelated VSYNC. This acknowledges the driver path, not optical output.
+    lvgl_presented_frame_count.fetch_add(1, std::memory_order_release);
+    return true;
 }
 
 [[noreturn]] static void lvgl_port_fail_stop_display_task()
@@ -483,7 +541,7 @@ static void lvgl_port_copy_frame_180(const lv_color_t *src, lv_color_t *dst, uin
 
 static void lvgl_port_apply_screen_flip_to_touch_point(TouchPoint &point)
 {
-    if (!lvgl_port_screen_flip_180) {
+    if (!lvgl_port_screen_flip_180.load(std::memory_order_acquire)) {
         return;
     }
 
@@ -509,13 +567,73 @@ static bool lvgl_port_apply_screen_flip_180(bool enabled)
     if (lvgl_port_lcd == nullptr) {
         return false;
     }
-#if LVGL_PORT_AVOID_TEAR && LVGL_PORT_DIRECT_MODE && (LVGL_PORT_ROTATION_DEGREE == 0)
-    if (enabled && lvgl_port_rotated_fb == nullptr) {
+#if LVGL_PORT_AVOID_TEAR && LVGL_PORT_DIRECT_MODE && \
+    (LVGL_PORT_ROTATION_DEGREE == 0) && (LVGL_PORT_DISP_BUFFER_NUM >= 3)
+    if (enabled == lvgl_port_screen_flip_180.load(std::memory_order_acquire)) {
+        return !enabled ||
+               (lvgl_rotation_pipeline_active.load(
+                    std::memory_order_acquire) &&
+                RotatedFramebufferPolicy::ownsActive(
+                    lvgl_port_flip_layout,
+                    lvgl_port_active_scanout_index));
+    }
+
+    lv_disp_t *disp = lv_disp_get_default();
+    lv_disp_draw_buf_t *draw_buf =
+        (disp != nullptr && disp->driver != nullptr)
+            ? disp->driver->draw_buf
+            : nullptr;
+    if (draw_buf == nullptr || draw_buf->flushing != 0 ||
+        !lvgl_port_framebuffers_are_distinct() ||
+        !RotatedFramebufferPolicy::validIndex(
+            lvgl_port_active_scanout_index)) {
+        return false;
+    }
+
+    if (enabled) {
+        const int preferred_renderer =
+            lvgl_port_framebuffer_index(draw_buf->buf_act);
+        const RotatedFramebufferPolicy::FlipLayout layout =
+            RotatedFramebufferPolicy::makeFlipLayout(
+                lvgl_port_active_scanout_index, preferred_renderer);
+        if (!RotatedFramebufferPolicy::valid(layout)) {
+            return false;
+        }
+
+        // While flipped, LVGL owns exactly one logical renderer. The other
+        // two buffers are output-only and alternate around the acknowledged
+        // active scanout, so the CPU never writes the buffer being scanned.
+        draw_buf->buf1 = lvgl_port_driver_fb[layout.renderer];
+        draw_buf->buf2 = nullptr;
+        draw_buf->buf_act = draw_buf->buf1;
+        lvgl_port_flip_layout = layout;
+        lvgl_rotation_pipeline_active.store(true, std::memory_order_release);
+    } else {
+        const RotatedFramebufferPolicy::NormalLayout layout =
+            RotatedFramebufferPolicy::makeNormalLayout(
+                lvgl_port_flip_layout, lvgl_port_active_scanout_index);
+        if (!RotatedFramebufferPolicy::valid(layout)) {
+            return false;
+        }
+
+        // Restore LVGL double buffering with the acknowledged scanout as the
+        // on-screen member and the former logical renderer as the safe first
+        // draw target. Full invalidation below repaints it unrotated.
+        draw_buf->buf1 = lvgl_port_driver_fb[layout.on_screen];
+        draw_buf->buf2 = lvgl_port_driver_fb[layout.renderer];
+        draw_buf->buf_act = draw_buf->buf2;
+        lvgl_port_flip_layout = {};
+        lvgl_rotation_pipeline_active.store(false, std::memory_order_release);
+    }
+#else
+    if (enabled) {
+        ESP_LOGE("LVGL",
+                 "screen 180 flip requires avoid-tear direct mode with three framebuffers");
         return false;
     }
 #endif
 
-    lvgl_port_screen_flip_180 = enabled;
+    lvgl_port_screen_flip_180.store(enabled, std::memory_order_release);
     lvgl_touch_set_cached_state(LV_INDEV_STATE_RELEASED);
     lvgl_touch_wait_release_after_block.store(true, std::memory_order_release);
     lvgl_touch_read_block_until_ms.store(get_monotonic_ms() + 250,
@@ -1047,15 +1165,38 @@ static void flush_callback(lv_disp_drv_t *drv, const lv_area_t *area, lv_color_t
     /* Action after last area refresh */
     if (lv_disp_flush_is_last(drv)) {
         void *next_frame_buffer = color_map;
-        if (lvgl_port_screen_flip_180 && lvgl_port_rotated_fb != nullptr) {
+        if (lvgl_port_screen_flip_180.load(std::memory_order_acquire)) {
+            const int color_map_index =
+                lvgl_port_framebuffer_index(color_map);
+            const int output_index =
+                RotatedFramebufferPolicy::selectInactiveOutput(
+                    lvgl_port_flip_layout,
+                    lvgl_port_active_scanout_index);
+            if (color_map_index != lvgl_port_flip_layout.renderer ||
+                !RotatedFramebufferPolicy::validIndex(output_index) ||
+                output_index == lvgl_port_active_scanout_index ||
+                output_index == color_map_index) {
+                ++lvgl_diag_framebuffer_ownership_violation_count;
+                lvgl_rotation_pipeline_active.store(false,
+                                                    std::memory_order_release);
+                lvgl_port_latch_display_sync_fault(
+                    "Rotated framebuffer ownership violation");
+                lvgl_port_fail_stop_display_task();
+            }
+            next_frame_buffer = lvgl_port_driver_fb[output_index];
             lvgl_port_copy_frame_180(
-                color_map, static_cast<lv_color_t *>(lvgl_port_rotated_fb), drv->hor_res, drv->ver_res
+                color_map,
+                static_cast<lv_color_t *>(next_frame_buffer),
+                drv->hor_res,
+                drv->ver_res
             );
-            next_frame_buffer = lvgl_port_rotated_fb;
         }
 
         if (!lvgl_port_switch_and_confirm_vsync(lcd, next_frame_buffer)) {
             lvgl_port_fail_stop_display_task();
+        }
+        if (lvgl_port_screen_flip_180.load(std::memory_order_acquire)) {
+            ++lvgl_diag_rotated_copy_switch_count;
         }
     }
 
@@ -1137,7 +1278,15 @@ IRAM_ATTR bool onLcdVsyncCallback(void *user_data)
         return false;
     }
     BaseType_t need_yield = pdFALSE;
-    lvgl_diag_vsync_last_ms = get_rtos_ms_isr();
+    const uint32_t callback_ms = get_rtos_ms_isr();
+    const uint32_t previous_callback_ms = lvgl_diag_vsync_last_ms;
+    if (previous_callback_ms != 0) {
+        const uint32_t gap_ms = callback_ms - previous_callback_ms;
+        if (gap_ms > lvgl_diag_refresh_callback_max_gap_ms) {
+            lvgl_diag_refresh_callback_max_gap_ms = gap_ms;
+        }
+    }
+    lvgl_diag_vsync_last_ms = callback_ms;
     ++lvgl_diag_vsync_count;
 #if LVGL_PORT_FULL_REFRESH && (LVGL_PORT_DISP_BUFFER_NUM == 3) && (LVGL_PORT_ROTATION_DEGREE == 0)
     if (lvgl_port_lcd_next_buf != lvgl_port_lcd_last_buf) {
@@ -1285,7 +1434,28 @@ static lv_disp_t *display_init(LCD *lcd)
         lvgl_buf[i] = lcd->getFrameBufferByIndex(i);
     }
 #if LVGL_PORT_DIRECT_MODE && (LVGL_PORT_ROTATION_DEGREE == 0) && (LVGL_PORT_DISP_BUFFER_NUM >= 3)
-    lvgl_port_rotated_fb = lcd->getFrameBufferByIndex(2);
+    for (int index = 0;
+         index < RotatedFramebufferPolicy::FRAME_BUFFER_COUNT;
+         ++index) {
+        lvgl_port_driver_fb[index] = lcd->getFrameBufferByIndex(index);
+    }
+    if (!lvgl_port_framebuffers_are_distinct()) {
+        ESP_UTILS_LOGE("RGB framebuffer set is incomplete or aliases storage");
+        return nullptr;
+    }
+    // ESP-IDF starts the RGB engine from framebuffer zero. Keep that storage
+    // output-only until the first acknowledged switch; otherwise LVGL could
+    // begin drawing into the same buffer while the bounce engine reads it.
+    const RotatedFramebufferPolicy::InitialLayout initial_layout =
+        RotatedFramebufferPolicy::makeInitialLayout(0);
+    if (!RotatedFramebufferPolicy::valid(initial_layout)) {
+        ESP_UTILS_LOGE("RGB initial framebuffer ownership is invalid");
+        return nullptr;
+    }
+    lvgl_buf[0] = lvgl_port_driver_fb[initial_layout.renderer_a];
+    lvgl_buf[1] = lvgl_port_driver_fb[initial_layout.renderer_b];
+    lvgl_port_active_scanout_index = initial_layout.scanout;
+    lvgl_port_flip_layout = {};
 #endif
 
 #endif
@@ -1448,17 +1618,29 @@ static void touchpad_read(lv_indev_drv_t *indev_drv, lv_indev_data_t *data)
     // After wake block ends, require a clean release first. This avoids
     // turning a wake touch into an accidental click on a UI control.
     if (lvgl_touch_wait_release_after_block.load(std::memory_order_acquire)) {
+        if ((lvgl_touch_last_sample_ms != 0) &&
+            is_before_deadline(
+                now_ms,
+                lvgl_touch_last_sample_ms + LVGL_TOUCH_POLL_INTERVAL_MS)) {
+            lvgl_touch_set_cached_state(LV_INDEV_STATE_RELEASED);
+            data->state = lvgl_touch_cached_state;
+            return;
+        }
+        lvgl_touch_last_sample_ms = now_ms;
         int release_probe =
             lvgl_touch_read_points_with_retry(tp, &point, access);
-        if (release_probe <= 0) {
-            lvgl_touch_wait_release_after_block.store(false,
-                                                       std::memory_order_release);
-            if (release_probe < 0) {
-                lvgl_touch_note_error(tp, now_ms, "release_probe", access);
-            } else {
-                lvgl_touch_note_success();
-            }
+        const TouchReleaseGatePolicy::ProbeResult probe_result =
+            TouchReleaseGatePolicy::classify(release_probe);
+        if (probe_result == TouchReleaseGatePolicy::ProbeResult::Error) {
+            lvgl_touch_note_error(tp, now_ms, "release_probe", access);
+        } else if (TouchReleaseGatePolicy::readSucceeded(probe_result)) {
+            lvgl_touch_note_success();
         }
+        // A transport error is not evidence of release. Store this after the
+        // error/recovery path because that path also updates block state.
+        lvgl_touch_wait_release_after_block.store(
+            TouchReleaseGatePolicy::keepWaiting(probe_result),
+            std::memory_order_release);
         lvgl_touch_set_cached_state(LV_INDEV_STATE_RELEASED);
         data->state = lvgl_touch_cached_state;
         return;
@@ -1596,9 +1778,8 @@ static bool tick_deinit(void)
 
 static bool lvgl_port_cleanup_partial_init(lv_disp_t *disp, lv_indev_t *indev)
 {
-    // This helper is only used before an LVGL task has been created, so all
-    // resources can be released without suspending another task or taking the
-    // LVGL mutex.
+    // This helper is used only while no LVGL task remains. Resources can be
+    // released without suspending another task or taking the LVGL mutex.
     bool success = true;
     lvgl_vsync_notify_enabled = false;
 
@@ -1656,9 +1837,17 @@ static bool lvgl_port_cleanup_partial_init(lv_disp_t *disp, lv_indev_t *indev)
     lvgl_port_paused.store(true, std::memory_order_release);
     lvgl_display_task_fail_stopped.store(false, std::memory_order_release);
     lvgl_port_lcd = nullptr;
+    lvgl_diagnostics_available.store(false, std::memory_order_release);
     lvgl_port_touch = nullptr;
-    lvgl_port_rotated_fb = nullptr;
-    lvgl_port_screen_flip_180 = false;
+    for (int index = 0;
+         index < RotatedFramebufferPolicy::FRAME_BUFFER_COUNT;
+         ++index) {
+        lvgl_port_driver_fb[index] = nullptr;
+    }
+    lvgl_port_active_scanout_index = -1;
+    lvgl_port_flip_layout = {};
+    lvgl_port_screen_flip_180.store(false, std::memory_order_release);
+    lvgl_rotation_pipeline_active.store(false, std::memory_order_release);
     lvgl_touch_read_block_until_ms.store(0, std::memory_order_release);
     lvgl_touch_wait_release_after_block.store(false, std::memory_order_release);
     lvgl_touch_wake_policy_reset();
@@ -1779,13 +1968,21 @@ bool lvgl_port_init(LCD *lcd, Touch *tp)
         "Touch I2C gate still has active users");
     lvgl_display_sync_fault.store(false, std::memory_order_release);
     lvgl_display_task_fail_stopped.store(false, std::memory_order_release);
+    lvgl_diag_vsync_count = 0;
+    lvgl_diag_vsync_last_ms = 0;
     lvgl_diag_vsync_wait_timeout_count = 0;
+    lvgl_diag_refresh_callback_max_gap_ms = 0;
+    lvgl_diag_rotated_copy_switch_count = 0;
+    lvgl_diag_framebuffer_ownership_violation_count = 0;
+    lvgl_presented_frame_count.store(0, std::memory_order_release);
+    lvgl_refresh_callback_semantics = LVGL_PORT_REFRESH_CALLBACK_UNKNOWN;
     lvgl_vsync_notify_enabled = false;
     lvgl_task_handle = nullptr;
     lvgl_mux = nullptr;
     lvgl_pause_requested.store(false, std::memory_order_release);
     lvgl_port_paused.store(false, std::memory_order_release);
     lvgl_port_lcd = nullptr;
+    lvgl_diagnostics_available.store(false, std::memory_order_release);
     lvgl_port_touch = nullptr;
     lvgl_touch_read_block_until_ms.store(0, std::memory_order_release);
     lvgl_touch_wait_release_after_block.store(false, std::memory_order_release);
@@ -1799,7 +1996,13 @@ bool lvgl_port_init(LCD *lcd, Touch *tp)
     lvgl_touch_error_streak.reset();
     lvgl_touch_recovery.reset();
     lvgl_touch_offline.store(false, std::memory_order_release);
-    lvgl_port_rotated_fb = nullptr;
+    for (int index = 0;
+         index < RotatedFramebufferPolicy::FRAME_BUFFER_COUNT;
+         ++index) {
+        lvgl_port_driver_fb[index] = nullptr;
+    }
+    lvgl_port_active_scanout_index = -1;
+    lvgl_port_flip_layout = {};
     for (int i = 0; i < LVGL_PORT_BUFFER_NUM_MAX; ++i) {
         lvgl_buf[i] = nullptr;
     }
@@ -1808,6 +2011,23 @@ bool lvgl_port_init(LCD *lcd, Touch *tp)
                                          std::memory_order_release);
 
     auto bus_type = lcd->getBus()->getBasicAttributes().type;
+#if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 4, 0)
+    if (bus_type == ESP_PANEL_BUS_TYPE_RGB) {
+        lvgl_refresh_callback_semantics =
+            LVGL_PORT_REFRESH_CALLBACK_FRAME_BUFFER_COMPLETE;
+    }
+#else
+    // BoardInit configures a non-zero RGB bounce buffer for every supported
+    // Aura RGB profile, so ESP32_Display_Panel registers this exact callback.
+    if (bus_type == ESP_PANEL_BUS_TYPE_RGB) {
+        lvgl_refresh_callback_semantics =
+            LVGL_PORT_REFRESH_CALLBACK_BOUNCE_FRAME_FINISH;
+    }
+#endif
+    if (bus_type == ESP_PANEL_BUS_TYPE_MIPI_DSI) {
+        lvgl_refresh_callback_semantics =
+            LVGL_PORT_REFRESH_CALLBACK_DSI_REFRESH_DONE;
+    }
 #if LVGL_PORT_AVOID_TEAR
     ESP_UTILS_CHECK_FALSE_RETURN(
         (bus_type == ESP_PANEL_BUS_TYPE_RGB) || (bus_type == ESP_PANEL_BUS_TYPE_MIPI_DSI), false,
@@ -1843,6 +2063,7 @@ bool lvgl_port_init(LCD *lcd, Touch *tp)
     // Record the initial rotation of the display
     lv_disp_set_rotation(disp, LV_DISP_ROT_NONE);
     lvgl_port_lcd = lcd;
+    lvgl_diagnostics_available.store(true, std::memory_order_release);
 
     // For non-RGB LCD, need to notify LVGL that the buffer is ready when the refresh is finished
     if (bus_type != ESP_PANEL_BUS_TYPE_RGB) {
@@ -1875,7 +2096,8 @@ bool lvgl_port_init(LCD *lcd, Touch *tp)
 #endif
     }
 
-    lvgl_port_screen_flip_180 = false;
+    lvgl_port_screen_flip_180.store(false, std::memory_order_release);
+    lvgl_rotation_pipeline_active.store(false, std::memory_order_release);
 
     ESP_UTILS_LOGD("Create mutex for LVGL");
     lvgl_mux = xSemaphoreCreateRecursiveMutex();
@@ -1885,37 +2107,75 @@ bool lvgl_port_init(LCD *lcd, Touch *tp)
         return false;
     }
 
+    // Hold the serialization boundary while the task is created and the RGB
+    // hand-off callback is attached. LVGL marks its first refresh ready
+    // immediately, so allowing the new task to enter lv_timer_handler() before
+    // callback registration could turn the first flush into a false sync
+    // timeout.
+    if (xSemaphoreTakeRecursive(lvgl_mux, portMAX_DELAY) != pdTRUE) {
+        (void)lvgl_port_cleanup_partial_init(disp, indev);
+        ESP_UTILS_LOGE("Lock LVGL startup barrier failed");
+        return false;
+    }
+
     ESP_UTILS_LOGD("Create LVGL task");
     BaseType_t core_id = (LVGL_PORT_TASK_CORE < 0) ? tskNO_AFFINITY : LVGL_PORT_TASK_CORE;
     BaseType_t ret = xTaskCreatePinnedToCore(lvgl_port_task, "lvgl", LVGL_PORT_TASK_STACK_SIZE, NULL,
                      LVGL_PORT_TASK_PRIORITY, &lvgl_task_handle, core_id);
     if (ret != pdPASS) {
         lvgl_task_handle = nullptr;
+        (void)xSemaphoreGiveRecursive(lvgl_mux);
         (void)lvgl_port_cleanup_partial_init(disp, indev);
         ESP_UTILS_LOGE("Create LVGL task failed");
         return false;
     }
 
 #if LVGL_PORT_AVOID_TEAR
+    if (!lcd->attachRefreshFinishCallback(onLcdVsyncCallback,
+                                          (void *)lvgl_task_handle)) {
+        vTaskDelete(lvgl_task_handle);
+        lvgl_task_handle = nullptr;
+        (void)xSemaphoreGiveRecursive(lvgl_mux);
+        (void)lvgl_port_cleanup_partial_init(disp, indev);
+        ESP_UTILS_LOGE("Attach LCD refresh finish callback failed");
+        return false;
+    }
     lvgl_vsync_notify_enabled = true;
-    lcd->attachRefreshFinishCallback(onLcdVsyncCallback, (void *)lvgl_task_handle);
 #endif
     lvgl_port_paused.store(false, std::memory_order_release);
     lvgl_pause_requested.store(false, std::memory_order_release);
 
+    if (xSemaphoreGiveRecursive(lvgl_mux) != pdTRUE) {
+        lvgl_vsync_notify_enabled = false;
+        vTaskDelete(lvgl_task_handle);
+        lvgl_task_handle = nullptr;
+        (void)lvgl_port_cleanup_partial_init(disp, indev);
+        ESP_UTILS_LOGE("Release LVGL startup barrier failed");
+        return false;
+    }
+
     return true;
 }
 
-bool lvgl_port_lock(int timeout_ms)
+static bool lvgl_port_lock_for(int timeout_ms, LvglLockDiagnostics::Purpose purpose)
 {
     ESP_UTILS_CHECK_NULL_RETURN(lvgl_mux, false, "LVGL mutex is not initialized");
 
     const TickType_t timeout_ticks = (timeout_ms < 0) ? portMAX_DELAY : pdMS_TO_TICKS(timeout_ms);
     const bool locked = (xSemaphoreTakeRecursive(lvgl_mux, timeout_ticks) == pdTRUE);
-    if (!locked) {
-        ++lvgl_diag_lock_fail_count;
-    }
-    return locked;
+    return lvgl_diag_lock_counts.recordAttempt(purpose, locked);
+}
+
+bool lvgl_port_lock(int timeout_ms)
+{
+    return lvgl_port_lock_for(timeout_ms, LvglLockDiagnostics::Purpose::Runtime);
+}
+
+bool lvgl_port_lock_startup_logo(int timeout_ms)
+{
+    // This explicit call site distinguishes bounded logo retries from normal
+    // callers. No global startup phase suppresses failures on other tasks.
+    return lvgl_port_lock_for(timeout_ms, LvglLockDiagnostics::Purpose::StartupLogo);
 }
 
 bool lvgl_port_unlock(void)
@@ -1943,7 +2203,7 @@ bool lvgl_port_set_screen_flip_180(bool enabled)
 
 bool lvgl_port_get_screen_flip_180(void)
 {
-    return lvgl_port_screen_flip_180;
+    return lvgl_port_screen_flip_180.load(std::memory_order_acquire);
 }
 
 bool lvgl_port_block_touch_read(uint32_t duration_ms)
@@ -2130,9 +2390,53 @@ bool lvgl_port_take_wake_touch_pending(void)
     return lvgl_touch_wake_policy_take_pending();
 }
 
+bool lvgl_port_get_presented_frame_count(uint32_t *out)
+{
+#if LVGL_PORT_AVOID_TEAR && (LVGL_PORT_DIRECT_MODE || (LVGL_PORT_FULL_REFRESH && (LVGL_PORT_DISP_BUFFER_NUM == 2)))
+    if (out == nullptr || lvgl_task_handle == nullptr ||
+        lvgl_pause_requested.load(std::memory_order_acquire) ||
+        lvgl_port_paused.load(std::memory_order_acquire) ||
+        lvgl_display_sync_fault.load(std::memory_order_acquire) ||
+        lvgl_display_task_fail_stopped.load(std::memory_order_acquire)) {
+        return false;
+    }
+    *out = lvgl_presented_frame_count.load(std::memory_order_acquire);
+    return true;
+#else
+    // Triple-buffer full-refresh and non-tearing paths have no synchronous
+    // framebuffer acknowledgement here. Do not qualify them by flush count.
+    (void)out;
+    return false;
+#endif
+}
+
+bool lvgl_port_wait_presented_frame(uint32_t baseline, uint32_t timeout_ms)
+{
+    if (xTaskGetCurrentTaskHandle() == lvgl_task_handle) {
+        return false;
+    }
+    const uint32_t started_ms = get_monotonic_ms();
+    for (;;) {
+        uint32_t current = 0;
+        if (!lvgl_port_get_presented_frame_count(&current)) {
+            return false;
+        }
+        if (current != baseline) {
+            return true;
+        }
+        if (static_cast<uint32_t>(get_monotonic_ms() - started_ms) >= timeout_ms) {
+            return false;
+        }
+        vTaskDelay(1);
+    }
+}
+
 bool lvgl_port_get_diagnostics(lvgl_port_diagnostics_t *out)
 {
     ESP_UTILS_CHECK_FALSE_RETURN(out != nullptr, false, "Invalid diagnostics snapshot");
+    if (!lvgl_diagnostics_available.load(std::memory_order_acquire)) {
+        return false;
+    }
 
     const uint32_t now_ms = get_rtos_ms();
     const uint32_t timer_last_ms = lvgl_diag_timer_handler_last_ms;
@@ -2146,12 +2450,26 @@ bool lvgl_port_get_diagnostics(lvgl_port_diagnostics_t *out)
     out->flush_age_ms = lvgl_diag_age_ms(now_ms, flush_last_ms);
     out->vsync_count = lvgl_diag_vsync_count;
     out->vsync_age_ms = lvgl_diag_age_ms(now_ms, vsync_last_ms);
+    out->refresh_callback_max_gap_ms =
+        lvgl_diag_refresh_callback_max_gap_ms;
+    out->refresh_callback_semantics = lvgl_refresh_callback_semantics;
     out->vsync_wait_timeout_count = lvgl_diag_vsync_wait_timeout_count;
+    out->presented_frame_count =
+        lvgl_presented_frame_count.load(std::memory_order_acquire);
     out->display_sync_fault =
         lvgl_display_sync_fault.load(std::memory_order_acquire);
-    out->lock_fail_count = lvgl_diag_lock_fail_count;
+    const LvglLockDiagnostics::Snapshot lock_counts = lvgl_diag_lock_counts.snapshot();
+    out->lock_fail_count = lock_counts.runtime_failures;
+    out->startup_lock_miss_count = lock_counts.startup_logo_misses;
     out->touch_read_error_count = lvgl_diag_touch_read_error_count;
     out->touch_offline = lvgl_touch_offline.load(std::memory_order_acquire);
+    out->screen_flip_180 =
+        lvgl_port_screen_flip_180.load(std::memory_order_acquire);
+    out->rotation_pipeline_active =
+        lvgl_rotation_pipeline_active.load(std::memory_order_acquire);
+    out->rotated_copy_switch_count = lvgl_diag_rotated_copy_switch_count;
+    out->framebuffer_ownership_violation_count =
+        lvgl_diag_framebuffer_ownership_violation_count;
     out->paused = lvgl_port_paused.load(std::memory_order_acquire);
 
     return true;
@@ -2209,56 +2527,30 @@ bool lvgl_port_request_quiesce(void)
 
 bool lvgl_port_deinit(void)
 {
-    TaskHandle_t task = lvgl_task_handle;
-    ESP_UTILS_CHECK_FALSE_RETURN(
-        (task == nullptr) || (task != xTaskGetCurrentTaskHandle()),
-        false,
-        "LVGL task cannot deinitialize itself");
-    ESP_UTILS_CHECK_FALSE_RETURN(
-        lvgl_port_lock(LvglWaitPolicy::DEINIT_LOCK_TIMEOUT_MS),
-        false,
-        "Lock LVGL for deinit failed");
-
+    bool lifecycle_empty =
+        lvgl_task_handle == nullptr &&
+        lvgl_mux == nullptr &&
+        lvgl_port_lcd == nullptr &&
+        lvgl_port_touch == nullptr &&
+        !lvgl_vsync_notify_enabled &&
+        lvgl_touch_registered_interrupt_handle == nullptr;
 #if !LV_TICK_CUSTOM
-    if (!tick_deinit()) {
-        (void)lvgl_port_unlock();
-        ESP_UTILS_LOGE("Deinitialize LVGL tick failed");
-        return false;
-    }
+    lifecycle_empty = lifecycle_empty && lvgl_tick_timer == nullptr;
 #endif
-
-    // Keep VSYNC notifications alive until the finite mutex acquisition above
-    // proves that no flush is still waiting for the current frame hand-off.
-    lvgl_vsync_notify_enabled = false;
-    if (!lvgl_touch_unregister_direct_interrupt()) {
-        (void)lvgl_port_unlock();
-        return false;
-    }
-    if (task != nullptr) {
-        vTaskDelete(task);
-        lvgl_task_handle = nullptr;
-    }
-    ESP_UTILS_CHECK_FALSE_RETURN(lvgl_port_unlock(), false, "Unlock LVGL failed");
-
-#if LV_ENABLE_GC || !LV_MEM_CUSTOM
-    lv_deinit();
-#else
-    ESP_UTILS_LOGW("LVGL memory is custom, `lv_deinit()` will not work");
-#endif
-#if !LVGL_PORT_AVOID_TEAR
-    for (int i = 0; i < LVGL_PORT_BUFFER_NUM; i++) {
-        if (lvgl_buf[i] != nullptr) {
-            free(lvgl_buf[i]);
-            lvgl_buf[i] = nullptr;
-        }
-    }
-#endif
-    if (lvgl_mux != nullptr) {
-        vSemaphoreDelete(lvgl_mux);
-        lvgl_mux = nullptr;
+    if (lifecycle_empty) {
+        return true;
     }
 
-    return true;
+    // The vendor RGB refresh callback cannot be detached safely in every
+    // supported build, and LV_MEM_CUSTOM prevents a complete LVGL teardown.
+    // Deleting the task would therefore leave an ISR with a stale TCB and make
+    // a same-boot reinitialization assume framebuffer zero is active again.
+    // Keep the live lifecycle untouched and fail closed. Reboot teardown uses
+    // lvgl_port_prepare_restart(), which retains the suspended task storage
+    // until reset and makes the callback inert first.
+    ESP_UTILS_LOGE(
+        "Runtime LVGL deinit/reinit is unsupported; use restart preparation");
+    return false;
 }
 
 bool lvgl_port_prepare_restart(void)

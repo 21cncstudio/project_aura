@@ -20,9 +20,14 @@ import sys
 
 DESCRIPTOR_OFFSET = 24 + 8 + 256
 DESCRIPTOR_SIZE = 64
-PREFIX_SIZE = DESCRIPTOR_OFFSET + DESCRIPTOR_SIZE
+FLAVOR_DESCRIPTOR_OFFSET = DESCRIPTOR_OFFSET + DESCRIPTOR_SIZE
+FLAVOR_DESCRIPTOR_SIZE = 32
+PREFIX_SIZE = FLAVOR_DESCRIPTOR_OFFSET + FLAVOR_DESCRIPTOR_SIZE
 MAGIC = b"AURA_OTA_TARGET\0"
+FLAVOR_MAGIC = b"AURA_OTA_FLAVOR\0"
 TARGETS = ("aura-aq-v1", "aura-aq-7-v1")
+IMAGE_TARGETS = TARGETS + ("aura-aq-7-diag-v1",)
+FLAVORS = ("production", "diagnostic")
 
 
 class OtaIdentityError(ValueError):
@@ -31,10 +36,19 @@ class OtaIdentityError(ValueError):
         super().__init__(f"{code}: {message}")
 
 
-def parse_prefix(prefix: bytes, image_size: int, expected_target: str) -> str:
+def parse_prefix(
+    prefix: bytes,
+    image_size: int,
+    expected_target: str,
+    expected_flavor: str,
+) -> tuple[str, str]:
     """Mirror the firmware's bounded, fail-closed compatibility precheck."""
     if expected_target not in TARGETS:
         raise OtaIdentityError("INVALID_TARGET", "Unknown expected hardware target")
+    if expected_flavor not in FLAVORS or (
+        expected_flavor == "diagnostic" and expected_target != "aura-aq-7-v1"
+    ):
+        raise OtaIdentityError("INVALID_FLAVOR", "Unknown or impossible running firmware flavor")
     if image_size < PREFIX_SIZE or len(prefix) < PREFIX_SIZE:
         raise OtaIdentityError("TRUNCATED", "Image does not contain the complete OTA identity prefix")
     load_address, data_length = struct.unpack_from("<II", prefix, 24)
@@ -47,7 +61,7 @@ def parse_prefix(prefix: bytes, image_size: int, expected_target: str) -> str:
         or prefix[23] not in (0, 1)
         or not 0x3C000000 <= load_address < 0x3E000000
         or data_length > 0x3E000000 - load_address
-        or data_length < 256 + DESCRIPTOR_SIZE
+        or data_length < 256 + DESCRIPTOR_SIZE + FLAVOR_DESCRIPTOR_SIZE
         or data_length % 4
         or data_length > image_size - 32
         or app_magic != 0xABCD5432
@@ -60,12 +74,33 @@ def parse_prefix(prefix: bytes, image_size: int, expected_target: str) -> str:
     if version != 1 or size != DESCRIPTOR_SIZE or any(descriptor[52:64]):
         raise OtaIdentityError("UNSUPPORTED_METADATA", "Unsupported Aura OTA descriptor version or layout")
     field = descriptor[20:52]
-    target = next((candidate for candidate in TARGETS if field == candidate.encode("ascii").ljust(32, b"\0")), None)
+    target = next((candidate for candidate in IMAGE_TARGETS if field == candidate.encode("ascii").ljust(32, b"\0")), None)
     if target is None:
         raise OtaIdentityError("INVALID_TARGET", "Unknown or malformed Aura hardware target")
-    if target != expected_target:
+    physical_target = "aura-aq-7-v1" if target == "aura-aq-7-diag-v1" else target
+    if physical_target != expected_target:
         raise OtaIdentityError("TARGET_MISMATCH", f"BIN targets {target}, expected {expected_target}")
-    return target
+
+    flavor_descriptor = prefix[FLAVOR_DESCRIPTOR_OFFSET:PREFIX_SIZE]
+    if flavor_descriptor[:16] != FLAVOR_MAGIC:
+        raise OtaIdentityError("MISSING_FLAVOR_METADATA", "BIN has no Aura firmware flavor at the fixed descriptor offset")
+    version, size = struct.unpack_from("<HH", flavor_descriptor, 16)
+    if version != 1 or size != FLAVOR_DESCRIPTOR_SIZE:
+        raise OtaIdentityError("UNSUPPORTED_FLAVOR_METADATA", "Unsupported Aura OTA flavor descriptor version or layout")
+    flavor_field = flavor_descriptor[20:32]
+    flavor = next((candidate for candidate in FLAVORS if flavor_field == candidate.encode("ascii").ljust(12, b"\0")), None)
+    if flavor is None:
+        raise OtaIdentityError("INVALID_FLAVOR", "Unknown or malformed Aura firmware flavor")
+
+    valid_pair = (
+        (target in TARGETS and flavor == "production")
+        or (target == "aura-aq-7-diag-v1" and flavor == "diagnostic")
+    )
+    if not valid_pair:
+        raise OtaIdentityError("INCONSISTENT_IDENTITY", "OTA image target and firmware flavor are inconsistent")
+    if expected_flavor == "production" and flavor != "production":
+        raise OtaIdentityError("FLAVOR_MISMATCH", "Production firmware cannot accept diagnostic firmware")
+    return target, flavor
 
 
 def validate_image_integrity(image: bytes) -> bool:
@@ -102,18 +137,25 @@ def validate_image_integrity(image: bytes) -> bool:
     return False
 
 
-def inspect_image(path: Path | str, expected_target: str) -> dict:
+def inspect_image(path: Path | str, expected_target: str, expected_flavor: str) -> dict:
     path = Path(path)
     image = path.read_bytes()
-    target = parse_prefix(image[:PREFIX_SIZE], len(image), expected_target)
+    target, flavor = parse_prefix(
+        image[:PREFIX_SIZE], len(image), expected_target, expected_flavor
+    )
     hash_verified = validate_image_integrity(image)
     return {
-        "schema": "project-aura.ota-image-identity.v1",
+        "schema": "project-aura.ota-image-identity.v2",
         "image": str(path.resolve()),
-        "hardware_target": target,
+        "hardware_target": "aura-aq-7-v1" if target == "aura-aq-7-diag-v1" else target,
+        "ota_image_target": target,
+        "firmware_flavor": flavor,
         "descriptor_offset": DESCRIPTOR_OFFSET,
         "descriptor_size": DESCRIPTOR_SIZE,
         "descriptor_version": 1,
+        "flavor_descriptor_offset": FLAVOR_DESCRIPTOR_OFFSET,
+        "flavor_descriptor_size": FLAVOR_DESCRIPTOR_SIZE,
+        "flavor_descriptor_version": 1,
         "image_size": len(image),
         "image_sha256": hashlib.sha256(image).hexdigest(),
         "esp_checksum_verified": True,
@@ -125,9 +167,10 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("image", type=Path)
     parser.add_argument("--expected-target", required=True, choices=TARGETS)
+    parser.add_argument("--expected-flavor", required=True, choices=FLAVORS)
     args = parser.parse_args()
     try:
-        result = inspect_image(args.image, args.expected_target)
+        result = inspect_image(args.image, args.expected_target, args.expected_flavor)
     except (OtaIdentityError, OSError) as error:
         print(str(error), file=sys.stderr)
         return 1

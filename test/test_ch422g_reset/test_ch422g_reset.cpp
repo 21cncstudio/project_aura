@@ -7,6 +7,14 @@
 #include "driver/i2c.h"
 #include "port/esp_io_expander_ch422g.h"
 
+// Public vendor type constants, needed when compiling the board configuration
+// without the ESP32-only display driver. Firmware builds check the real types.
+#define ESP_PANEL_BACKLIGHT_TYPE_SWITCH_GPIO 0
+#define ESP_PANEL_BACKLIGHT_TYPE_SWITCH_EXPANDER 1
+#define ESP_PANEL_BACKLIGHT_TYPE_PWM_LEDC 2
+#define ESP_PANEL_BACKLIGHT_TYPE_CUSTOM 3
+#include "esp_panel_board_custom_conf.h"
+
 namespace {
 
 constexpr uint8_t kWriteOcAddress = 0x23U;
@@ -16,7 +24,7 @@ constexpr uint8_t kUsbSelMask = 0x20U;
 #if defined(AURA_HARDWARE_PROFILE_7) && AURA_HARDWARE_PROFILE_7
 constexpr uint8_t kExpectedInitialIo = 0xD1U;
 #else
-constexpr uint8_t kExpectedInitialIo = 0xDFU;
+constexpr uint8_t kExpectedInitialIo = 0xDBU;
 #endif
 constexpr uint32_t kExpectedInitialOutput = 0x0F00U | kExpectedInitialIo;
 
@@ -34,6 +42,33 @@ struct FakeTransport {
 };
 
 FakeTransport *g_transport = nullptr;
+
+struct BacklightExpander {
+    esp_io_expander_handle_t handle = nullptr;
+    size_t write_calls = 0;
+
+    bool digitalWrite(uint8_t pin, uint8_t level) {
+        ++write_calls;
+        return esp_io_expander_set_level(handle, 1U << pin, level) == ESP_OK;
+    }
+};
+
+struct BacklightAdapter {
+    BacklightExpander *base = nullptr;
+
+    BacklightExpander *getBase() { return base; }
+};
+
+// Expands the production custom callback while routing writes into the real
+// CH422G C driver above. No mock brightness implementation duplicates it.
+struct Board {
+    BacklightAdapter *adapter = nullptr;
+
+    BacklightAdapter *getIO_Expander() { return adapter; }
+};
+
+bool setBacklight(int percent, void *user_data)
+    ESP_PANEL_BOARD_BACKLIGHT_CUSTOM_FUNCTION(percent, user_data)
 
 void assertEvent(size_t index, uint8_t address, uint8_t value) {
     TEST_ASSERT_NOT_NULL(g_transport);
@@ -118,16 +153,90 @@ void setUp() {
 
 void tearDown() {}
 
-void test_policy_changes_only_usb_sel_on_4_3_and_preserves_7_image() {
+void test_policy_keeps_usb_and_backlight_low_without_changing_other_outputs() {
     TEST_ASSERT_EQUAL_HEX8(kUsbSelMask, AURA_CH422G_USB_SEL_MASK);
     TEST_ASSERT_EQUAL_HEX8(kExpectedInitialIo, AURA_CH422G_INITIAL_IO_VALUE);
     TEST_ASSERT_EQUAL_HEX8(
         0U, AURA_CH422G_INITIAL_IO_VALUE & AURA_CH422G_USB_SEL_MASK);
+    TEST_ASSERT_EQUAL_HEX8(0x04U, AURA_CH422G_BACKLIGHT_MASK);
+    TEST_ASSERT_EQUAL_HEX8(
+        0U, AURA_CH422G_INITIAL_IO_VALUE & AURA_CH422G_BACKLIGHT_MASK);
 #if defined(AURA_HARDWARE_PROFILE_7) && AURA_HARDWARE_PROFILE_7
     TEST_ASSERT_EQUAL_HEX8(0xD1U, AURA_CH422G_INITIAL_IO_VALUE);
 #else
-    TEST_ASSERT_EQUAL_HEX8(0x20U, 0xFFU ^ AURA_CH422G_INITIAL_IO_VALUE);
+    TEST_ASSERT_EQUAL_HEX8(
+        AURA_CH422G_BACKLIGHT_MASK, 0xDFU ^ AURA_CH422G_INITIAL_IO_VALUE);
 #endif
+}
+
+void test_board_uses_custom_backlight_with_initial_off_and_same_pin() {
+    TEST_ASSERT_EQUAL_INT(
+        ESP_PANEL_BACKLIGHT_TYPE_CUSTOM, ESP_PANEL_BOARD_BACKLIGHT_TYPE);
+    TEST_ASSERT_EQUAL_INT(1, ESP_PANEL_BOARD_BACKLIGHT_IDLE_OFF);
+    TEST_ASSERT_EQUAL_INT(2, ESP_PANEL_BOARD_BACKLIGHT_IO);
+    TEST_ASSERT_EQUAL_INT(1, ESP_PANEL_BOARD_BACKLIGHT_ON_LEVEL);
+    TEST_ASSERT_EQUAL_HEX8(
+        AURA_CH422G_BACKLIGHT_MASK, 1U << ESP_PANEL_BOARD_BACKLIGHT_IO);
+}
+
+void test_custom_backlight_off_is_quiet_and_later_on_off_only_changes_exio2() {
+    FakeTransport transport;
+    g_transport = &transport;
+    const auto handle = createExpander();
+    BacklightExpander expander{handle};
+    BacklightAdapter adapter{&expander};
+    Board board{&adapter};
+    const size_t initial_writes = transport.event_count;
+
+    TEST_ASSERT_TRUE(setBacklight(0, &board));
+    TEST_ASSERT_EQUAL_UINT32(initial_writes, transport.event_count);
+    TEST_ASSERT_EQUAL_HEX32(kExpectedInitialOutput, outputShadow(handle));
+
+    TEST_ASSERT_TRUE(setBacklight(100, &board));
+    TEST_ASSERT_EQUAL_UINT32(initial_writes + 2U, transport.event_count);
+    TEST_ASSERT_EQUAL_HEX32(
+        kExpectedInitialOutput | AURA_CH422G_BACKLIGHT_MASK, outputShadow(handle));
+    assertEvent(initial_writes, kWriteOcAddress, 0x0FU);
+    assertEvent(initial_writes + 1U, kWriteIoAddress,
+                kExpectedInitialIo | AURA_CH422G_BACKLIGHT_MASK);
+
+    TEST_ASSERT_TRUE(setBacklight(0, &board));
+    TEST_ASSERT_EQUAL_UINT32(initial_writes + 4U, transport.event_count);
+    TEST_ASSERT_EQUAL_HEX32(kExpectedInitialOutput, outputShadow(handle));
+    TEST_ASSERT_EQUAL_UINT32(3U, expander.write_calls);
+    TEST_ASSERT_EQUAL_UINT32(0U, transport.read_count);
+    assertUsbRemainsSelected();
+    TEST_ASSERT_EQUAL_INT(ESP_OK, esp_io_expander_del(handle));
+}
+
+void test_custom_backlight_rejects_missing_board_adapter_or_base_without_writes() {
+    FakeTransport transport;
+    g_transport = &transport;
+    Board board{};
+    BacklightAdapter adapter{};
+    TEST_ASSERT_FALSE(setBacklight(100, nullptr));
+    TEST_ASSERT_FALSE(setBacklight(100, &board));
+    board.adapter = &adapter;
+    TEST_ASSERT_FALSE(setBacklight(100, &board));
+    TEST_ASSERT_EQUAL_UINT32(0U, transport.event_count);
+    TEST_ASSERT_EQUAL_UINT32(0U, transport.read_count);
+}
+
+void test_custom_backlight_propagates_failed_write_without_retry() {
+    FakeTransport transport;
+    g_transport = &transport;
+    const auto handle = createExpander();
+    BacklightExpander expander{handle};
+    BacklightAdapter adapter{&expander};
+    Board board{&adapter};
+    const size_t initial_writes = transport.event_count;
+    transport.fail_call = initial_writes + 2U;
+
+    TEST_ASSERT_FALSE(setBacklight(100, &board));
+    TEST_ASSERT_EQUAL_UINT32(initial_writes + 2U, transport.event_count);
+    TEST_ASSERT_EQUAL_UINT32(1U, expander.write_calls);
+    TEST_ASSERT_EQUAL_HEX32(kExpectedInitialOutput, outputShadow(handle));
+    TEST_ASSERT_EQUAL_INT(ESP_OK, esp_io_expander_del(handle));
 }
 
 void test_profile_image_is_preloaded_before_enabling_outputs() {
@@ -250,7 +359,11 @@ void test_masked_writes_to_other_exio_preserve_usb_and_unselected_bits() {
 
 int main(int, char **) {
     UNITY_BEGIN();
-    RUN_TEST(test_policy_changes_only_usb_sel_on_4_3_and_preserves_7_image);
+    RUN_TEST(test_policy_keeps_usb_and_backlight_low_without_changing_other_outputs);
+    RUN_TEST(test_board_uses_custom_backlight_with_initial_off_and_same_pin);
+    RUN_TEST(test_custom_backlight_off_is_quiet_and_later_on_off_only_changes_exio2);
+    RUN_TEST(test_custom_backlight_rejects_missing_board_adapter_or_base_without_writes);
+    RUN_TEST(test_custom_backlight_propagates_failed_write_without_retry);
     RUN_TEST(test_profile_image_is_preloaded_before_enabling_outputs);
     RUN_TEST(test_repeated_reset_restores_profile_image_without_usb_high);
     RUN_TEST(test_each_constructor_reset_failure_stops_at_failed_stage_without_retry);

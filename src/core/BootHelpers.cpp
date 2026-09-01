@@ -24,8 +24,9 @@ using namespace Config;
 
 constexpr auto GT911_PROBE_PLAN = Gt911ProbePolicy::configuredAddressOnly(
     static_cast<uint8_t>(ESP_PANEL_BOARD_TOUCH_I2C_ADDRESS));
-static_assert(GT911_PROBE_PLAN.address != SFA3X_ADDR,
-              "Configured GT911 address must not collide with SFA3X");
+static_assert((SENSOR_I2C_SEPARATE && SENSOR_I2C_PORT != I2C_PORT) ||
+                  GT911_PROBE_PLAN.address != SFA3X_ADDR,
+              "Configured GT911 address must not collide with SFA3X on the same bus");
 
 bool gt911_read_product_id(uint8_t addr, uint8_t *out, size_t len) {
     uint8_t reg[2] = {

@@ -6,6 +6,7 @@
 
 #include "modules/SensorManager.h"
 
+#include <float.h>
 #include <math.h>
 #include <stdio.h>
 #include "core/BootState.h"
@@ -40,12 +41,35 @@ uint8_t normalize_ppm_decimals(uint8_t decimals) {
     return decimals <= 2 ? decimals : 1;
 }
 
+float ppm_resolution(uint8_t decimals) {
+    switch (normalize_ppm_decimals(decimals)) {
+        case 0:
+            return 1.0f;
+        case 2:
+            return 0.01f;
+        case 1:
+        default:
+            return 0.1f;
+    }
+}
+
+bool ppm_value_changed(float current, float next, float resolution) {
+    if (!isfinite(current)) {
+        return true;
+    }
+    const float magnitude = fmaxf(1.0f, fmaxf(fabsf(current), fabsf(next)));
+    const float tolerance = fmaxf(resolution * 0.00001f,
+                                  4.0f * FLT_EPSILON * magnitude);
+    return fabsf(current - next) >= resolution - tolerance;
+}
+
 bool sync_ppm_sensor_fields(bool sensor_present,
                             bool sensor_warmup,
                             bool sensor_valid,
                             float sensor_ppm,
                             float min_ppm,
                             float max_ppm,
+                            float resolution_ppm,
                             bool &present_field,
                             bool &warmup_field,
                             bool &valid_field,
@@ -74,7 +98,7 @@ bool sync_ppm_sensor_fields(bool sensor_present,
         valid_field = sensor_valid;
         changed = true;
     }
-    if (!isfinite(ppm_field) || fabsf(ppm_field - sensor_ppm) > 0.01f) {
+    if (ppm_value_changed(ppm_field, sensor_ppm, resolution_ppm)) {
         ppm_field = sensor_ppm;
         changed = true;
     }
@@ -89,6 +113,7 @@ bool sync_co_fields(SensorData &data, const Sen0466 &co_sensor) {
                                   co_sensor.coPpm(),
                                   Config::SEN0466_CO_MIN_PPM,
                                   Config::SEN0466_CO_MAX_PPM,
+                                  0.01f,
                                   data.co_sensor_present,
                                   data.co_warmup,
                                   data.co_valid,
@@ -114,6 +139,7 @@ bool sync_optional_gas_fields(SensorData &data, const DfrOptionalGasSensor &opti
                                           sensor_ppm,
                                           min_ppm,
                                           max_ppm,
+                                          ppm_resolution(sensor_decimals),
                                           data.optional_gas_sensor_present,
                                           data.optional_gas_warmup,
                                           data.optional_gas_valid,
@@ -137,6 +163,7 @@ bool sync_optional_gas_fields(SensorData &data, const DfrOptionalGasSensor &opti
                                       nh3_present ? sensor_ppm : 0.0f,
                                       Config::SEN0469_NH3_MIN_PPM,
                                       Config::SEN0469_NH3_MAX_PPM,
+                                      ppm_resolution(sensor_decimals),
                                       data.nh3_sensor_present,
                                       data.nh3_warmup,
                                       data.nh3_valid,
@@ -691,7 +718,8 @@ void SensorManager::begin(StorageManager &storage, float temp_offset, float hum_
 
     sen0466_.begin();
     if (sen0466_.start()) {
-        Logger::log(Logger::Info, "Sensors", "%s OK at 0x%02X",
+        Logger::log(Logger::Info, "Sensors",
+                    "%s address detected at 0x%02X; measurement pending warmup",
                     sen0466_.label(),
                     static_cast<unsigned>(sen0466_.address()));
     } else {

@@ -33,6 +33,7 @@ struct UpdateState {
 struct State {
     UpdateState update;
     std::string hardware_target = "aura-aq-v1";
+    std::string firmware_flavor = "production";
     bool boot_pending_verify = false;
     bool partition_available = true;
     uint32_t partition_size = 4UL * 1024UL * 1024UL;

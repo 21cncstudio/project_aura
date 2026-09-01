@@ -9,8 +9,8 @@
 #include <ArduinoJson.h>
 
 #include "core/ChartsRuntimeState.h"
+#include "drivers/DfrOptionalGasSensor.h"
 #include "modules/ChartsHistory.h"
-#include "modules/SensorManager.h"
 #include "web/WebChartsApiUtils.h"
 #include "web/WebResponseUtils.h"
 
@@ -22,7 +22,8 @@ constexpr const char kApiErrorOtaBusyJson[] =
 
 class ChartsRuntimeHistoryView final : public WebChartsApiUtils::HistoryView {
 public:
-    explicit ChartsRuntimeHistoryView(const ChartsRuntimeState &history) : history_(history) {}
+    explicit ChartsRuntimeHistoryView(const ChartsRuntimeState::Snapshot &history)
+        : history_(history) {}
 
     uint16_t count() const override { return history_.count(); }
 
@@ -40,7 +41,7 @@ public:
     }
 
 private:
-    const ChartsRuntimeState &history_;
+    const ChartsRuntimeState::Snapshot &history_;
 };
 
 void send_ota_busy_json(WebRequest &server) {
@@ -63,11 +64,21 @@ void handleData(WebHandlerContext &context, bool ota_busy) {
 
     WebRequest &server = *context.server;
     const ChartsRuntimeState &history = *context.charts_runtime;
-    const ChartsRuntimeHistoryView history_view(history);
+    const std::unique_ptr<const ChartsRuntimeState::Snapshot> snapshot =
+        history.copySnapshot();
+    if (!snapshot) {
+        WebResponseUtils::sendNoStoreHeaders(server);
+        server.send(503,
+                    "application/json",
+                    "{\"success\":false,\"error\":\"Charts snapshot unavailable\","
+                    "\"error_code\":\"CHARTS_SNAPSHOT_UNAVAILABLE\"}");
+        return;
+    }
+
+    const ChartsRuntimeHistoryView history_view(*snapshot);
     const DfrOptionalGasSensor::OptionalGasType optional_gas_type =
-        context.sensor_manager
-            ? context.sensor_manager->optionalGasType()
-            : DfrOptionalGasSensor::OptionalGasType::None;
+        static_cast<DfrOptionalGasSensor::OptionalGasType>(
+            snapshot->optionalGasType());
     ArduinoJson::JsonDocument doc;
     WebChartsApiUtils::fillJson(
         doc.to<ArduinoJson::JsonObject>(),

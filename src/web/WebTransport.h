@@ -63,6 +63,27 @@ public:
     virtual bool waitUntilWritable(uint16_t wait_ms, int &last_error) = 0;
     virtual void endStreamResponse() = 0;
     virtual WebUpload upload() = 0;
+
+    // Request-local OTA bookkeeping. A rejected HTTP request must not replace
+    // the retained result of an earlier, physically confirmed upload.
+    void resetUploadResponseState() {
+        upload_session_id_ = 0;
+        upload_rejection_status_ = 0;
+        upload_rejection_json_ = "";
+    }
+    void setUploadSessionId(uint32_t id) { upload_session_id_ = id; }
+    uint32_t uploadSessionId() const { return upload_session_id_; }
+    void cacheUploadRejection(int status, const String &json) {
+        upload_rejection_status_ = status;
+        upload_rejection_json_ = json;
+    }
+    int uploadRejectionStatus() const { return upload_rejection_status_; }
+    const String &uploadRejectionJson() const { return upload_rejection_json_; }
+
+private:
+    uint32_t upload_session_id_ = 0;
+    int upload_rejection_status_ = 0;
+    String upload_rejection_json_;
 };
 
 using WebHandlerFn = void (*)();

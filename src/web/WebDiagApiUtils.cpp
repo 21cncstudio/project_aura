@@ -12,6 +12,93 @@
 
 namespace WebDiagApiUtils {
 
+namespace {
+
+void fillGt911StartupJson(
+    ArduinoJson::JsonObject output,
+    const Gt911StartupDiagnostics::Snapshot &snapshot) {
+    output["captured"] = snapshot.captured;
+    output["phase"] = "after_address_select_before_vendor_touch_begin";
+    output["bounded"] = true;
+    ArduinoJson::JsonArray probes = output["probes"].to<ArduinoJson::JsonArray>();
+    if (!snapshot.captured) {
+        output["configured_address"] = nullptr;
+        output["requested_address"] = nullptr;
+        output["int_level"] = nullptr;
+        output["reset_exio"] = nullptr;
+        output["sequence"] = nullptr;
+        output["selection"] = nullptr;
+        return;
+    }
+
+    output["configured_address"] = snapshot.requested_address;
+    output["requested_address"] = snapshot.requested_address;
+    output["int_level"] = snapshot.int_level_high ? "high" : "low";
+    output["reset_exio"] = snapshot.reset_exio;
+    ArduinoJson::JsonObject sequence =
+        output["sequence"].to<ArduinoJson::JsonObject>();
+    sequence["api"] = "Gt911AddressSelect::selectAddress";
+    sequence["int_gpio"] = snapshot.int_gpio;
+    sequence["int_select_level"] = snapshot.int_level_high ? "high" : "low";
+    sequence["reset_controller"] = "ch422g";
+    sequence["reset_exio"] = snapshot.reset_exio;
+    sequence["pin_levels_measured"] = snapshot.pin_levels_measured;
+    ArduinoJson::JsonObject selection =
+        output["selection"].to<ArduinoJson::JsonObject>();
+    selection["succeeded"] = snapshot.selection_succeeded;
+    selection["failure_code"] = static_cast<uint8_t>(snapshot.selection_failure);
+    selection["failure"] = Gt911AddressSelect::failureText(snapshot.selection_failure);
+    selection["severity"] =
+        Gt911DiagnosticPolicy::severityText(snapshot.selection_severity);
+
+    const size_t count = snapshot.probe_count < Gt911StartupDiagnostics::kProbeCount
+                             ? snapshot.probe_count
+                             : Gt911StartupDiagnostics::kProbeCount;
+    for (size_t i = 0; i < count; ++i) {
+        const Gt911StartupDiagnostics::Probe &source = snapshot.probes[i];
+        ArduinoJson::JsonObject probe = probes.add<ArduinoJson::JsonObject>();
+        probe["role"] = Gt911DiagnosticPolicy::probeRoleText(source.role);
+        probe["address"] = source.address;
+        probe["port"] = source.port;
+
+        ArduinoJson::JsonObject identity =
+            probe["identity"].to<ArduinoJson::JsonObject>();
+        identity["attempted"] = source.identity_attempted;
+        identity["register"] = Gt911StartupDiagnostics::kProductIdRegister;
+        identity["error_code"] = source.identity_error;
+        identity["result"] =
+            Gt911DiagnosticPolicy::readResultText(source.identity_result);
+        ArduinoJson::JsonArray product_id =
+            identity["product_id"].to<ArduinoJson::JsonArray>();
+        for (uint8_t byte : source.product_id) {
+            product_id.add(byte);
+        }
+        identity["valid"] = source.identity_valid;
+        identity["severity"] =
+            Gt911DiagnosticPolicy::severityText(source.identity_severity);
+
+        ArduinoJson::JsonObject config =
+            probe["config"].to<ArduinoJson::JsonObject>();
+        config["attempted"] = source.config_attempted;
+        config["register"] = Gt911StartupDiagnostics::kConfigVersionRegister;
+        if (source.config_attempted) {
+            config["error_code"] = source.config_error;
+            config["result"] =
+                Gt911DiagnosticPolicy::readResultText(source.config_result);
+            config["version"] = source.config_version;
+            config["severity"] =
+                Gt911DiagnosticPolicy::severityText(source.config_severity);
+        } else {
+            config["error_code"] = nullptr;
+            config["result"] = nullptr;
+            config["version"] = nullptr;
+            config["severity"] = nullptr;
+        }
+    }
+}
+
+} // namespace
+
 bool accessAllowed(bool ap_mode, bool sta_connected) {
     return ap_mode || sta_connected;
 }
@@ -25,6 +112,60 @@ void fillJson(ArduinoJson::JsonObject root,
     root["uptime_s"] = payload.uptime_s;
     root["ota_busy"] = payload.ota_busy;
 
+    ArduinoJson::JsonObject device = root["device"].to<ArduinoJson::JsonObject>();
+    device["firmware"] = payload.device.firmware;
+    device["build_id"] = payload.device.build_id;
+    device["hardware_profile"] = payload.device.hardware_profile;
+    device["hardware_target"] = payload.device.hardware_target;
+
+    ArduinoJson::JsonObject i2c_buses = root["i2c_buses"].to<ArduinoJson::JsonObject>();
+    ArduinoJson::JsonObject panel = i2c_buses["panel"].to<ArduinoJson::JsonObject>();
+    panel["port"] = payload.panel_i2c.port;
+    panel["sda_gpio"] = payload.panel_i2c.sda_gpio;
+    panel["scl_gpio"] = payload.panel_i2c.scl_gpio;
+    ArduinoJson::JsonObject sensors = i2c_buses["sensors"].to<ArduinoJson::JsonObject>();
+    sensors["port"] = payload.sensor_i2c.port;
+    sensors["sda_gpio"] = payload.sensor_i2c.sda_gpio;
+    sensors["scl_gpio"] = payload.sensor_i2c.scl_gpio;
+    sensors["shared_with_panel"] = payload.sensor_i2c_shared_with_panel;
+
+    ArduinoJson::JsonObject display = root["display"].to<ArduinoJson::JsonObject>();
+    display["available"] = payload.display.available;
+    if (payload.display.available) {
+        display["sample_ms"] = payload.display.sample_ms;
+        display["timer_handler_count"] = payload.display.timer_handler_count;
+        display["timer_handler_age_ms"] = payload.display.timer_handler_age_ms;
+        display["flush_count"] = payload.display.flush_count;
+        display["flush_age_ms"] = payload.display.flush_age_ms;
+        display["refresh_callback_semantics"] =
+            payload.display.refresh_callback_semantics;
+        display["refresh_callback_count"] =
+            payload.display.refresh_callback_count;
+        display["refresh_callback_age_ms"] =
+            payload.display.refresh_callback_age_ms;
+        display["refresh_callback_max_gap_ms"] =
+            payload.display.refresh_callback_max_gap_ms;
+        display["framebuffer_handoff_count"] =
+            payload.display.framebuffer_handoff_count;
+        display["framebuffer_wait_timeout_count"] =
+            payload.display.framebuffer_wait_timeout_count;
+        display["display_sync_fault"] = payload.display.display_sync_fault;
+        display["runtime_lock_failures"] =
+            payload.display.runtime_lock_failures;
+        display["startup_logo_lock_misses"] =
+            payload.display.startup_logo_lock_misses;
+        display["touch_read_errors"] = payload.display.touch_read_errors;
+        display["touch_offline"] = payload.display.touch_offline;
+        display["screen_flip_180"] = payload.display.screen_flip_180;
+        display["rotation_pipeline_active"] =
+            payload.display.rotation_pipeline_active;
+        display["rotated_copy_switch_count"] =
+            payload.display.rotated_copy_switch_count;
+        display["framebuffer_ownership_violation_count"] =
+            payload.display.framebuffer_ownership_violation_count;
+        display["paused"] = payload.display.paused;
+    }
+
     ArduinoJson::JsonObject heap = root["heap"].to<ArduinoJson::JsonObject>();
     heap["free"] = payload.heap_free;
     heap["min_free"] = payload.heap_min_free;
@@ -35,6 +176,14 @@ void fillJson(ArduinoJson::JsonObject root,
     boot["i2c_status"] = payload.boot.i2c_status;
     boot["sda_high"] = payload.boot.sda_high;
     boot["scl_high"] = payload.boot.scl_high;
+    // Keep the raw legacy values above; describe their historical origin separately.
+    ArduinoJson::JsonObject i2c_snapshot = boot["i2c_snapshot"].to<ArduinoJson::JsonObject>();
+    i2c_snapshot["phase"] = "before_board_init";
+    i2c_snapshot["bus"] = "panel";
+    i2c_snapshot["port"] = payload.panel_i2c.port;
+    i2c_snapshot["sda_gpio"] = payload.panel_i2c.sda_gpio;
+    i2c_snapshot["scl_gpio"] = payload.panel_i2c.scl_gpio;
+    i2c_snapshot["live"] = false;
     boot["board_ready"] = payload.boot.board_ready;
     boot["board_rounds"] = payload.boot.board_rounds;
     boot["board_begin_attempts"] = payload.boot.board_begin_attempts;
@@ -73,6 +222,9 @@ void fillJson(ArduinoJson::JsonObject root,
     boot["board_stage"] = payload.boot.board_stage;
     boot["board_failure"] = payload.boot.board_failure;
     boot["lvgl_ready"] = payload.boot.lvgl_ready;
+    ArduinoJson::JsonObject gt911_startup =
+        boot["gt911_startup"].to<ArduinoJson::JsonObject>();
+    fillGt911StartupJson(gt911_startup, payload.boot.gt911_startup);
     boot["previous_backlight_trace_status"] = payload.boot.previous_backlight_trace_status;
     boot["previous_backlight_trace_retention_uncertain"] =
         payload.boot.previous_backlight_trace_retention_uncertain;

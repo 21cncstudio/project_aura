@@ -858,7 +858,9 @@ bool StorageManager::loadConfig() {
         readValue(ui, "header_status_enabled", loaded.header_status_enabled);
         readValue(ui, "led_indicators", loaded.led_indicators);
         readValue(ui, "alert_blink", loaded.alert_blink);
-        readValue(ui, "screen_flip_180", loaded.screen_flip_180);
+        const ArduinoJson::JsonVariantConst screen_flip_180 = ui["screen_flip_180"];
+        loaded.screen_flip_180 = Config::resolveScreenFlip180(
+            !screen_flip_180.isNull(), screen_flip_180.as<bool>());
         readValue(ui, "asc_enabled", loaded.asc_enabled);
         readValue(ui, "pressure_altitude_set", loaded.pressure_altitude_set);
         readValue(ui, "pressure_altitude_m", loaded.pressure_altitude_m);

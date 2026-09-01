@@ -17,7 +17,16 @@ void setRegisters(uint8_t addr, uint8_t reg, const uint8_t *data, size_t len);
 void setReadWrap(uint8_t addr, uint8_t last_reg);
 void setReadFailure(uint8_t addr, uint8_t reg, bool fail);
 void setReadFailureOnCall(uint8_t addr, uint8_t reg, uint32_t call_number);
+void setReadErrorOnCall(uint8_t addr,
+                        uint8_t reg,
+                        uint32_t call_number,
+                        esp_err_t error);
 void setWriteFailure(uint8_t addr, uint8_t reg, bool fail);
+void setWriteFailureOnCall(uint8_t addr, uint8_t reg, uint32_t call_number);
+void setWriteErrorOnCall(uint8_t addr,
+                         uint8_t reg,
+                         uint32_t call_number,
+                         esp_err_t error);
 void setParameterConfigResult(esp_err_t result);
 void setDriverInstallResult(esp_err_t result);
 uint8_t getRegister(uint8_t addr, uint8_t reg);

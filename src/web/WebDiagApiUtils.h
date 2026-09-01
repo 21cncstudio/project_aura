@@ -11,10 +11,52 @@
 #include <stdint.h>
 
 #include "core/Logger.h"
+#include "core/Gt911StartupDiagnostics.h"
 #include "web/WebNetworkUtils.h"
 #include "web/WebStreamState.h"
 
 namespace WebDiagApiUtils {
+
+struct DevicePayload {
+    const char *firmware = "unknown";
+    const char *build_id = "unknown";
+    const char *hardware_profile = "unknown";
+    const char *hardware_target = "unknown";
+};
+
+// Compile-time routing supplied by the handler, not a live bus measurement.
+struct I2cBusPayload {
+    int port = -1;
+    int sda_gpio = -1;
+    int scl_gpio = -1;
+};
+
+// Runtime LVGL/RGB observations. The refresh callback name is supplied by the
+// firmware so a bounce-buffer completion is never presented as physical VSYNC.
+struct DisplayPayload {
+    bool available = false;
+    uint32_t sample_ms = 0;
+    uint32_t timer_handler_count = 0;
+    uint32_t timer_handler_age_ms = UINT32_MAX;
+    uint32_t flush_count = 0;
+    uint32_t flush_age_ms = UINT32_MAX;
+    const char *refresh_callback_semantics = "unknown";
+    uint32_t refresh_callback_count = 0;
+    uint32_t refresh_callback_age_ms = UINT32_MAX;
+    uint32_t refresh_callback_max_gap_ms = 0;
+    uint32_t framebuffer_handoff_count = 0;
+    uint32_t framebuffer_wait_timeout_count = 0;
+    bool display_sync_fault = false;
+    uint32_t runtime_lock_failures = 0;
+    uint32_t startup_logo_lock_misses = 0;
+    uint32_t touch_read_errors = 0;
+    bool touch_offline = false;
+    bool screen_flip_180 = false;
+    bool rotation_pipeline_active = false;
+    uint32_t rotated_copy_switch_count = 0;
+    uint32_t framebuffer_ownership_violation_count = 0;
+    bool paused = false;
+};
 
 struct BootPayload {
     const char *reset_reason = "UNKNOWN";
@@ -45,6 +87,7 @@ struct BootPayload {
     const char *board_stage = "bus";
     const char *board_failure = "none";
     bool lvgl_ready = false;
+    Gt911StartupDiagnostics::Snapshot gt911_startup{};
     const char *previous_backlight_trace_status = "empty";
     bool previous_backlight_trace_valid = false;
     const char *previous_backlight_trace_event = "none";
@@ -80,6 +123,11 @@ struct BootPayload {
 };
 
 struct Payload {
+    DevicePayload device{};
+    I2cBusPayload panel_i2c{};
+    I2cBusPayload sensor_i2c{};
+    bool sensor_i2c_shared_with_panel = false;
+    DisplayPayload display{};
     uint32_t uptime_s = 0;
     bool ota_busy = false;
     uint32_t heap_free = 0;

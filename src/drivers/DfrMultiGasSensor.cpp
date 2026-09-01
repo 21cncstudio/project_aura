@@ -34,6 +34,7 @@ bool DfrMultiGasSensor::begin() {
     raw_gas_type_ = 0;
     fail_count_ = 0;
     warmup_started_ = false;
+    warmup_complete_ = false;
     warmup_started_ms_ = 0;
     last_poll_ms_ = 0;
     last_data_ms_ = 0;
@@ -89,6 +90,7 @@ bool DfrMultiGasSensor::start() {
         raw_gas_type_ = 0;
         fail_count_ = 0;
         warmup_started_ = false;
+        warmup_complete_ = false;
         warned_type_mismatch_ = false;
         fail_cooldown_active_ = false;
         fail_cooldown_started_ms_ = 0;
@@ -106,6 +108,7 @@ bool DfrMultiGasSensor::start() {
     present_ = true;
     if (!was_present) {
         warmup_started_ = true;
+        warmup_complete_ = false;
         warmup_started_ms_ = millis();
         data_valid_ = false;
         ppm_ = 0.0f;
@@ -131,7 +134,8 @@ bool DfrMultiGasSensor::start() {
     if (readGasConcentration(startup_ppm,
                              startup_gas_type,
                              startup_decimals,
-                             startup_read_failure)) {
+                             startup_read_failure,
+                             false)) {
         last_read_failure_reason_ = FailureReason::None;
         LOGI(config_.log_tag,
              "read-only startup probe confirmed; mode write skipped");
@@ -199,6 +203,7 @@ void DfrMultiGasSensor::poll() {
                     raw_gas_type_ = 0;
                     fail_count_ = 0;
                     warmup_started_ = false;
+                    warmup_complete_ = false;
                     warmup_started_ms_ = 0;
                     warned_type_mismatch_ = false;
                     fail_cooldown_active_ = false;
@@ -218,17 +223,10 @@ void DfrMultiGasSensor::poll() {
         }
 
         cooldown_probe_fail_count_ = 0;
-        fail_count_ = 0;
-        warned_type_mismatch_ = false;
         last_poll_ms_ = now;
         LOGI(config_.log_tag,
              "cooldown elapsed, address acknowledged; resuming read-only polling");
         return;
-    }
-
-    if (data_valid_ && last_data_ms_ != 0 &&
-        (now - last_data_ms_ > Config::DFR_GAS_STALE_MS)) {
-        data_valid_ = false;
     }
 
     if (now - last_poll_ms_ < Config::DFR_GAS_POLL_MS) {
@@ -240,30 +238,14 @@ void DfrMultiGasSensor::poll() {
     uint8_t gas_type = 0;
     uint8_t decimals = 1;
     FailureReason read_failure = FailureReason::None;
-    if (!readGasConcentration(ppm, gas_type, decimals, read_failure)) {
-        last_read_failure_reason_ = read_failure;
-        if (fail_count_ < UINT8_MAX) {
-            ++fail_count_;
-        }
-        if (fail_count_ >= Config::DFR_GAS_MAX_FAILS) {
-            data_valid_ = false;
-            fail_cooldown_active_ = true;
-            fail_cooldown_started_ms_ = now;
-            cooldown_probe_fail_count_ = 0;
-            LOGW(config_.log_tag, "read failed %u times (%s), entering cooldown %lu ms",
-                 static_cast<unsigned>(fail_count_),
-                 failureReasonLabel(read_failure),
-                 static_cast<unsigned long>(Config::DFR_GAS_FAIL_COOLDOWN_MS));
-        }
+    if (!readGasConcentration(ppm,
+                              gas_type,
+                              decimals,
+                              read_failure,
+                              true)) {
+        notePollFailure(now, read_failure);
         return;
     }
-
-    cooldown_probe_fail_count_ = 0;
-    fail_count_ = 0;
-    last_read_failure_reason_ = FailureReason::None;
-    last_data_ms_ = now;
-    raw_gas_type_ = gas_type;
-    gas_type_ = mapGasType(gas_type);
 
     if (!isGasTypeAccepted(gas_type)) {
         if (!warned_type_mismatch_) {
@@ -278,21 +260,46 @@ void DfrMultiGasSensor::poll() {
             }
             warned_type_mismatch_ = true;
         }
-        data_valid_ = false;
+        if (config_.defer_semantic_invalidation_until_failure_limit) {
+            notePollFailure(now, FailureReason::UnexpectedGasType);
+        } else {
+            last_read_failure_reason_ = FailureReason::UnexpectedGasType;
+            data_valid_ = false;
+        }
         return;
     }
-    warned_type_mismatch_ = false;
 
     if (!isfinite(ppm) || ppm < config_.min_ppm) {
-        data_valid_ = false;
+        if (config_.defer_semantic_invalidation_until_failure_limit) {
+            notePollFailure(now, FailureReason::InvalidConcentration);
+        } else {
+            last_read_failure_reason_ = FailureReason::InvalidConcentration;
+            data_valid_ = false;
+        }
         return;
     }
     if (config_.max_ppm > config_.min_ppm && ppm > config_.max_ppm) {
         ppm = config_.max_ppm;
     }
 
+    // Commit only a fully validated sample. Rejected transport, frame, type or
+    // range results leave the last accepted value and freshness timestamp
+    // untouched until the common consecutive-failure policy invalidates them.
+    cooldown_probe_fail_count_ = 0;
+    fail_count_ = 0;
+    last_read_failure_reason_ = FailureReason::None;
+    last_data_ms_ = now;
+    raw_gas_type_ = gas_type;
+    gas_type_ = mapGasType(gas_type);
+    warned_type_mismatch_ = false;
     ppm_ = ppm;
     ppm_decimals_ = decimals;
+    if (warmup_started_ && !warmup_complete_ &&
+        (now - warmup_started_ms_) >= Config::DFR_GAS_WARMUP_MS) {
+        // Time reaching the deadline is not enough to publish a pre-deadline
+        // sample. Complete warmup only as part of this fully accepted sample.
+        warmup_complete_ = true;
+    }
     data_valid_ = !isWarmupActive();
 }
 
@@ -300,7 +307,14 @@ bool DfrMultiGasSensor::isWarmupActive() const {
     if (!present_ || !warmup_started_) {
         return false;
     }
-    return (millis() - warmup_started_ms_) < Config::DFR_GAS_WARMUP_MS;
+    if (warmup_complete_) {
+        return false;
+    }
+    // Keep the timer/sample transition coherent, but do not present WARMUP
+    // forever when every post-boundary frame is rejected. Reuse the existing
+    // stale-data safety window as a conservative bounded grace period.
+    return (millis() - warmup_started_ms_) <
+           (Config::DFR_GAS_WARMUP_MS + Config::DFR_GAS_STALE_MS);
 }
 
 void DfrMultiGasSensor::invalidate() {
@@ -474,13 +488,55 @@ bool DfrMultiGasSensor::pingAddress() {
 bool DfrMultiGasSensor::readGasConcentration(float &ppm,
                                              uint8_t &gas_type,
                                              uint8_t &decimal_places,
-                                             FailureReason &failure_reason) {
+                                             FailureReason &failure_reason,
+                                             bool allow_runtime_transport_retry) {
+    bool retryable_transport_failure = false;
+    if (readGasConcentrationOnce(ppm,
+                                 gas_type,
+                                 decimal_places,
+                                 failure_reason,
+                                 retryable_transport_failure)) {
+        return true;
+    }
+
+    if (!allow_runtime_transport_retry ||
+        config_.runtime_transport_retry_delay_ms == 0 ||
+        !retryable_transport_failure) {
+        return false;
+    }
+
+    const FailureReason first_failure = failure_reason;
+    delay(config_.runtime_transport_retry_delay_ms);
+    if (readGasConcentrationOnce(ppm,
+                                 gas_type,
+                                 decimal_places,
+                                 failure_reason,
+                                 retryable_transport_failure)) {
+        LOGI(config_.log_tag,
+             "runtime read recovered after %lu ms retry (first failure: %s)",
+             static_cast<unsigned long>(config_.runtime_transport_retry_delay_ms),
+             failureReasonLabel(first_failure));
+        return true;
+    }
+    return false;
+}
+
+bool DfrMultiGasSensor::readGasConcentrationOnce(
+    float &ppm,
+    uint8_t &gas_type,
+    uint8_t &decimal_places,
+    FailureReason &failure_reason,
+    bool &retryable_transport_failure) {
     failure_reason = FailureReason::None;
+    retryable_transport_failure = false;
     uint8_t tx[kFrameLen] = {0};
     buildFrame(Config::DFR_GAS_CMD_READ_GAS, 0, 0, 0, 0, 0, tx);
 
     uint8_t rx[kFrameLen] = {0};
-    if (!transact(tx, rx, &failure_reason)) {
+    if (!transact(tx,
+                  rx,
+                  &failure_reason,
+                  &retryable_transport_failure)) {
         return false;
     }
     if (rx[0] != 0xFF || rx[1] != Config::DFR_GAS_CMD_READ_GAS) {
@@ -511,11 +567,43 @@ bool DfrMultiGasSensor::readGasConcentration(float &ppm,
     return true;
 }
 
+void DfrMultiGasSensor::notePollFailure(uint32_t now,
+                                        FailureReason reason) {
+    last_read_failure_reason_ = reason;
+    if (fail_count_ < UINT8_MAX) {
+        ++fail_count_;
+    }
+    // A successful catch-up read commits the new sample without exposing a
+    // transient invalid state. On a failed catch-up, the independent stale
+    // safety limit still wins even before the consecutive-failure limit.
+    if (data_valid_ && last_data_ms_ != 0 &&
+        (now - last_data_ms_ > Config::DFR_GAS_STALE_MS)) {
+        data_valid_ = false;
+    }
+    if (fail_count_ < Config::DFR_GAS_MAX_FAILS) {
+        return;
+    }
+
+    data_valid_ = false;
+    fail_cooldown_active_ = true;
+    fail_cooldown_started_ms_ = now;
+    cooldown_probe_fail_count_ = 0;
+    LOGW(config_.log_tag,
+         "read failed %u times (%s), entering cooldown %lu ms",
+         static_cast<unsigned>(fail_count_),
+         failureReasonLabel(reason),
+         static_cast<unsigned long>(Config::DFR_GAS_FAIL_COOLDOWN_MS));
+}
+
 bool DfrMultiGasSensor::transact(const uint8_t *tx_frame,
                                  uint8_t *rx_frame,
-                                 FailureReason *failure_reason) {
+                                 FailureReason *failure_reason,
+                                 bool *retryable_transport_failure) {
     if (failure_reason) {
         *failure_reason = FailureReason::None;
+    }
+    if (retryable_transport_failure) {
+        *retryable_transport_failure = false;
     }
     uint8_t tx[kFrameLen + 1] = {0};
     tx[0] = 0x00;
@@ -554,6 +642,10 @@ bool DfrMultiGasSensor::transact(const uint8_t *tx_frame,
 #endif
         if (failure_reason) {
             *failure_reason = FailureReason::I2cWrite;
+        }
+        if (retryable_transport_failure) {
+            *retryable_transport_failure =
+                err == ESP_FAIL || err == ESP_ERR_TIMEOUT;
         }
         return false;
     }
@@ -597,8 +689,14 @@ bool DfrMultiGasSensor::transact(const uint8_t *tx_frame,
              lines_after_read.scl_high ? 1U : 0U);
     }
 #endif
-    if (err != ESP_OK && failure_reason) {
-        *failure_reason = FailureReason::I2cRead;
+    if (err != ESP_OK) {
+        if (failure_reason) {
+            *failure_reason = FailureReason::I2cRead;
+        }
+        if (retryable_transport_failure) {
+            *retryable_transport_failure =
+                err == ESP_FAIL || err == ESP_ERR_TIMEOUT;
+        }
     }
     return err == ESP_OK;
 }
@@ -620,6 +718,10 @@ const char *DfrMultiGasSensor::failureReasonLabel(FailureReason reason) {
             return "bad checksum";
         case FailureReason::BadDecimals:
             return "bad decimals";
+        case FailureReason::UnexpectedGasType:
+            return "unexpected gas type";
+        case FailureReason::InvalidConcentration:
+            return "invalid concentration";
         case FailureReason::None:
         default:
             return "unknown";

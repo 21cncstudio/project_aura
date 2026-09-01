@@ -20,8 +20,10 @@ static_assert(ESP_CHIP_ID_ESP32S3 == 0x0009,
               "ESP32-S3 chip identity changed");
 static_assert(SOC_DROM_LOW == 0x3C000000 && SOC_DROM_HIGH == 0x3E000000,
               "ESP32-S3 DROM layout changed");
-static_assert(sizeof(APP_HARDWARE_TARGET) <= OtaImageIdentity::kTargetSize,
-              "OTA hardware target does not fit descriptor");
+static_assert(sizeof(APP_OTA_IMAGE_TARGET) <= OtaImageIdentity::kTargetSize,
+              "OTA image target does not fit descriptor");
+static_assert(sizeof(APP_FIRMWARE_FLAVOR) <= OtaImageIdentity::kFlavorSize,
+              "OTA firmware flavor does not fit descriptor");
 
 #if __BYTE_ORDER__ != __ORDER_LITTLE_ENDIAN__
 #error "The OTA descriptor integer fields require a little-endian build target"
@@ -31,12 +33,20 @@ static_assert(sizeof(APP_HARDWARE_TARGET) <= OtaImageIdentity::kTargetSize,
 // prevents compiler removal; -Wl,-u,aura_ota_image_identity prevents linker GC.
 // The post-BIN build check fails if this fixed location or target ever drifts.
 extern "C" {
-extern const OtaImageIdentity::Descriptor aura_ota_image_identity
+extern const OtaImageIdentity::IdentityEnvelope aura_ota_image_identity
     __attribute__((section(".rodata_custom_desc"), used, aligned(4))) = {
-        "AURA_OTA_TARGET",
-        OtaImageIdentity::kDescriptorVersion,
-        OtaImageIdentity::kDescriptorSize,
-        APP_HARDWARE_TARGET,
-        {},
+        {
+            "AURA_OTA_TARGET",
+            OtaImageIdentity::kDescriptorVersion,
+            OtaImageIdentity::kDescriptorSize,
+            APP_OTA_IMAGE_TARGET,
+            {},
+        },
+        {
+            "AURA_OTA_FLAVOR",
+            OtaImageIdentity::kFlavorDescriptorVersion,
+            OtaImageIdentity::kFlavorDescriptorSize,
+            APP_FIRMWARE_FLAVOR,
+        },
     };
 }

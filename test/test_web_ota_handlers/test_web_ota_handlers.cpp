@@ -19,7 +19,7 @@ namespace {
 
 constexpr size_t kFixtureSize = 512;
 constexpr size_t kMetadataOffset = 288;
-constexpr size_t kPrefixSize = 352;
+constexpr size_t kPrefixSize = 384;
 constexpr uint32_t kUploadTimeoutMs = 5000;
 constexpr uint32_t kRestartDelayMs = 800;
 
@@ -38,7 +38,8 @@ void put32(std::vector<uint8_t> &bytes, size_t offset, uint32_t value) {
 // It has an identity-valid prefix and an opaque deterministic remainder.
 // Full-image checksum/signature verification remains the mocked Update.end()
 // responsibility; this suite proves handler gating and byte accounting only.
-std::vector<uint8_t> image_for(const char *target) {
+std::vector<uint8_t> image_for(const char *target,
+                               const char *flavor = "production") {
     std::vector<uint8_t> bytes(kFixtureSize, 0);
     for (size_t i = kPrefixSize; i < bytes.size(); ++i) {
         bytes[i] = static_cast<uint8_t>(31 * i + 7);
@@ -54,6 +55,15 @@ std::vector<uint8_t> image_for(const char *target) {
     put16(bytes, kMetadataOffset + 16, 1);
     put16(bytes, kMetadataOffset + 18, 64);
     std::memcpy(bytes.data() + kMetadataOffset + 20, target, std::strlen(target));
+    if (flavor) {
+        const char flavor_magic[16] = "AURA_OTA_FLAVOR";
+        std::memcpy(bytes.data() + kMetadataOffset + 64,
+                    flavor_magic, sizeof(flavor_magic));
+        put16(bytes, kMetadataOffset + 80, 1);
+        put16(bytes, kMetadataOffset + 82, 32);
+        std::memcpy(bytes.data() + kMetadataOffset + 84,
+                    flavor, std::strlen(flavor));
+    }
     return bytes;
 }
 
@@ -167,10 +177,12 @@ struct Harness {
     std::vector<uint32_t> cancelled;
     std::vector<std::pair<WebUiBridge::FirmwareUpdateScreenMode, uint32_t>> ui;
 
-    explicit Harness(const char *target = "aura-aq-v1")
+    explicit Harness(const char *target = "aura-aq-v1",
+                     const char *flavor = "production")
         : runtime{context, state, restart, upload_confirm_id, validator} {
         OtaPlatformMock::reset();
         OtaPlatformMock::state().hardware_target = target;
+        OtaPlatformMock::state().firmware_flavor = flavor;
         current = this;
         context.server = &request;
         context.wifi_stop_scan = stop_scan;
@@ -332,6 +344,52 @@ void assert_success(Harness &h, const std::vector<uint8_t> &image) {
     TEST_ASSERT_EQUAL_UINT32(0, h.upload_confirm_id.load());
 }
 
+void assert_terminal_result_unchanged(const WebOtaSnapshot &before,
+                                      const WebOtaSnapshot &after) {
+    TEST_ASSERT_EQUAL(before.upload_seen, after.upload_seen);
+    TEST_ASSERT_EQUAL(before.active, after.active);
+    TEST_ASSERT_EQUAL(before.success, after.success);
+    TEST_ASSERT_EQUAL(before.reboot_pending, after.reboot_pending);
+    TEST_ASSERT_EQUAL(before.size_known, after.size_known);
+    TEST_ASSERT_EQUAL_UINT32(before.session_id, after.session_id);
+    TEST_ASSERT_EQUAL_UINT32(before.expected_size, after.expected_size);
+    TEST_ASSERT_EQUAL_UINT32(before.slot_size, after.slot_size);
+    TEST_ASSERT_EQUAL_UINT32(before.written_size, after.written_size);
+    TEST_ASSERT_EQUAL_STRING(before.error.c_str(), after.error.c_str());
+    TEST_ASSERT_EQUAL_STRING(before.error_code.c_str(), after.error_code.c_str());
+    TEST_ASSERT_EQUAL_UINT32(before.upload_start_ms, after.upload_start_ms);
+    TEST_ASSERT_EQUAL_UINT32(before.result_set_ms, after.result_set_ms);
+    TEST_ASSERT_EQUAL_UINT32(before.result_ttl_ms, after.result_ttl_ms);
+    TEST_ASSERT_EQUAL_UINT32(before.chunk_count, after.chunk_count);
+    TEST_ASSERT_EQUAL_UINT32(before.chunk_sum_size, after.chunk_sum_size);
+}
+
+void start_request_without_new_approval(Harness &h,
+                                       const std::map<String, String> &args) {
+    h.request = FakeRequest{};
+    h.request.args = args;
+    h.request.current_upload.status = WebUploadStatus::Start;
+    h.request.current_upload.filename = "firmware.bin";
+    WebOtaHandlers::handleUpload(h.runtime, false);
+}
+
+void complete_rejected_request(Harness &h, std::vector<uint8_t> &image) {
+    TEST_ASSERT_TRUE(h.request.rejected);
+    // A rejected HTTP request must remain inert even if callbacks arrive late.
+    h.write(image, 0, image.size());
+    h.finish();
+    h.abort(WebUploadAbortReason::ClientDisconnected);
+    h.respond();
+    TEST_ASSERT_FALSE(h.state.isBusy());
+    TEST_ASSERT_FALSE(h.upload_locked);
+    TEST_ASSERT_FALSE(h.restart.is_scheduled());
+    TEST_ASSERT_FALSE(h.restart.is_requested());
+    TEST_ASSERT_EQUAL_UINT32(0, h.upload_confirm_id.load());
+    TEST_ASSERT_TRUE(h.request.stopped);
+    TEST_ASSERT_EQUAL_STRING("close", h.request.header("Connection").c_str());
+    assert_no_flash_calls();
+}
+
 }  // namespace
 
 void setUp() { setMillis(100); OtaPlatformMock::reset(); }
@@ -433,6 +491,48 @@ void test_43_device_rejects_7_even_with_renamed_file_and_forged_form_target() {
     TEST_ASSERT_NOT_NULL(std::strstr(h.state.snapshot().error.c_str(), "device is Aura AQ 4.3\""));
 }
 
+void test_production_7_rejects_diagnostic_bin_before_flash() {
+    Harness h("aura-aq-7-v1", "production");
+    auto image = image_for("aura-aq-7-diag-v1", "diagnostic");
+    const uint32_t id = h.start(image.size(), "renamed-production.bin");
+    h.write(image, 0, image.size());
+    h.finish();
+    assert_no_flash_calls();
+    assert_failure(h, "FIRMWARE_FLAVOR_MISMATCH", 409, id);
+    TEST_ASSERT_NOT_NULL(std::strstr(
+        h.state.snapshot().error.c_str(), "diagnostic-only firmware"));
+    TEST_ASSERT_NOT_NULL(std::strstr(
+        h.state.snapshot().error.c_str(), "Nothing was written"));
+}
+
+void test_diagnostic_7_accepts_diagnostic_update_and_production_exit() {
+    {
+        Harness h("aura-aq-7-v1", "diagnostic");
+        auto image = image_for("aura-aq-7-diag-v1", "diagnostic");
+        h.start();
+        h.write(image, 0, image.size());
+        assert_success(h, image);
+    }
+    {
+        Harness h("aura-aq-7-v1", "diagnostic");
+        auto image = image_for("aura-aq-7-v1", "production");
+        h.start();
+        h.write(image, 0, image.size());
+        assert_success(h, image);
+    }
+}
+
+void test_new_guard_rejects_legacy_target_only_bin_before_flash() {
+    Harness h("aura-aq-7-v1", "production");
+    auto image = image_for("aura-aq-7-v1", nullptr);
+    const uint32_t id = h.start();
+    h.write(image, 0, image.size());
+    assert_no_flash_calls();
+    assert_failure(h, "FIRMWARE_FLAVOR_MISSING", 400, id);
+    TEST_ASSERT_NOT_NULL(std::strstr(
+        h.state.snapshot().error.c_str(), "cannot distinguish production firmware"));
+}
+
 void test_legacy_bin_without_fixed_metadata_is_rejected_despite_target_elsewhere() {
     Harness h;
     auto image = image_for("aura-aq-v1");
@@ -528,6 +628,177 @@ void test_rejected_image_cleanup_allows_good_retry_on_same_runtime() {
     assert_success(h, correct);
     TEST_ASSERT_EQUAL_UINT32(2, h.restore_power_save_calls);
     TEST_ASSERT_EQUAL_UINT32(2, h.end_upload_calls);
+}
+
+void test_terminal_identity_rejection_replays_original_result_for_same_confirmation() {
+    for (const char *target : {"aura-aq-v1", "aura-aq-7-v1"}) {
+        for (bool missing_metadata : {false, true}) {
+            Harness h(target);
+            const char *other_target = std::strcmp(target, "aura-aq-v1") == 0
+                                           ? "aura-aq-7-v1" : "aura-aq-v1";
+            auto rejected = image_for(missing_metadata ? target : other_target);
+            if (missing_metadata) {
+                std::fill(rejected.begin() + kMetadataOffset,
+                          rejected.begin() + kPrefixSize, 0);
+            }
+            const char *code = missing_metadata ? "HARDWARE_TARGET_MISSING"
+                                                : "HARDWARE_TARGET_MISMATCH";
+            const int status = missing_metadata ? 400 : 409;
+            const uint32_t id = h.start(rejected.size());
+            h.write(rejected, 0, rejected.size());
+            assert_failure(h, code, status, id);
+            const auto before = h.state.snapshot();
+            const size_t ui_count = h.ui.size();
+            const size_t cancel_count = h.cancelled.size();
+            const unsigned power_save_count = h.disable_power_save_calls;
+            const unsigned scan_count = h.stop_scan_calls;
+
+            // Match the observed separate POSTs at +10 and +18 seconds.
+            for (uint32_t elapsed_ms : {10000U, 18000U}) {
+                setMillis(before.result_set_ms + elapsed_ms);
+                start_request_without_new_approval(h, {
+                    {"ota_size", std::to_string(rejected.size())},
+                    {"ota_confirm_id", std::to_string(id)},
+                });
+                complete_rejected_request(h, rejected);
+                TEST_ASSERT_EQUAL_INT(status, h.request.response_status);
+                const auto json = h.request.json();
+                TEST_ASSERT_EQUAL_STRING(code, json["error_code"].as<const char *>());
+                TEST_ASSERT_EQUAL_STRING(before.error.c_str(), json["error"].as<const char *>());
+                TEST_ASSERT_TRUE(json["written"].is<uint32_t>());
+                TEST_ASSERT_EQUAL_UINT32(0, json["written"].as<uint32_t>());
+                TEST_ASSERT_EQUAL_UINT32(rejected.size(), json["expected"].as<uint32_t>());
+                TEST_ASSERT_FALSE(json["success"].as<bool>());
+                TEST_ASSERT_FALSE(json["rebooting"].as<bool>());
+                assert_terminal_result_unchanged(before, h.state.snapshot());
+                TEST_ASSERT_EQUAL_UINT32(ui_count, h.ui.size());
+                TEST_ASSERT_EQUAL_UINT32(cancel_count, h.cancelled.size());
+                TEST_ASSERT_EQUAL_UINT32(power_save_count, h.disable_power_save_calls);
+                TEST_ASSERT_EQUAL_UINT32(scan_count, h.stop_scan_calls);
+            }
+
+            // A new physical approval must still permit an actual retry.
+            auto correct = image_for(target);
+            const uint32_t next_id = h.start(correct.size());
+            TEST_ASSERT_NOT_EQUAL(id, next_id);
+            TEST_ASSERT_NOT_EQUAL(before.session_id, h.state.snapshot().session_id);
+            TEST_ASSERT_FALSE(h.state.hasError());
+            h.write(correct, 0, correct.size());
+            assert_success(h, correct);
+        }
+    }
+}
+
+void test_unrelated_start_refusals_do_not_replace_terminal_identity_result() {
+    struct RefusalCase {
+        const char *size;
+        const char *confirm_id;
+        bool pending_boot;
+        int status;
+        const char *code;
+        const char *message;
+    };
+    const RefusalCase cases[] = {
+        {"512", "99999", false, 409, "OTA_PHYSICAL_CONFIRM_MISMATCH",
+         "Firmware update confirmation does not match this upload."},
+        {"512", nullptr, false, 403, "OTA_PHYSICAL_CONFIRM_REQUIRED",
+         "Firmware update confirmation is required."},
+        {"512", "invalid", false, 403, "OTA_PHYSICAL_CONFIRM_REQUIRED",
+         "Firmware update confirmation is required."},
+        {"512", "0", false, 403, "OTA_PHYSICAL_CONFIRM_REQUIRED",
+         "Firmware update confirmation is required."},
+        {"512", "4294967296", false, 403, "OTA_PHYSICAL_CONFIRM_REQUIRED",
+         "Firmware update confirmation is required."},
+        {"513", "1", false, 409, "OTA_PHYSICAL_CONFIRM_MISMATCH",
+         "Firmware update confirmation does not match this upload."},
+        {"invalid", "1", false, 400, "INVALID_SIZE", "Invalid firmware size"},
+        {"0", "1", false, 400, "INVALID_SIZE", "Invalid firmware size"},
+        {nullptr, "1", false, 400, "INVALID_SIZE", "Firmware size is required"},
+        {"512", "1", true, 409, "OTA_BOOT_PENDING_VERIFY",
+         "Firmware boot validation is still pending; wait until the device is stable before starting another OTA."},
+    };
+    for (const auto &test_case : cases) {
+        Harness h;
+        auto wrong = image_for("aura-aq-7-v1");
+        const uint32_t id = h.start();
+        TEST_ASSERT_EQUAL_UINT32(1, id);
+        h.write(wrong, 0, wrong.size());
+        assert_failure(h, "HARDWARE_TARGET_MISMATCH", 409, id);
+        const auto before = h.state.snapshot();
+        const size_t ui_count = h.ui.size();
+        const size_t cancel_count = h.cancelled.size();
+        advanceMillis(1000);
+        std::map<String, String> args;
+        if (test_case.size) args["ota_size"] = test_case.size;
+        if (test_case.confirm_id) args["ota_confirm_id"] = test_case.confirm_id;
+        OtaPlatformMock::state().boot_pending_verify = test_case.pending_boot;
+        start_request_without_new_approval(h, args);
+        complete_rejected_request(h, wrong);
+        const auto json = h.request.json();
+        TEST_ASSERT_EQUAL_INT(test_case.status, h.request.response_status);
+        TEST_ASSERT_EQUAL_STRING(test_case.code, json["error_code"].as<const char *>());
+        TEST_ASSERT_EQUAL_STRING(test_case.message, json["error"].as<const char *>());
+        TEST_ASSERT_FALSE(json["success"].as<bool>());
+        assert_terminal_result_unchanged(before, h.state.snapshot());
+        TEST_ASSERT_EQUAL_UINT32(ui_count, h.ui.size());
+        TEST_ASSERT_EQUAL_UINT32(cancel_count, h.cancelled.size());
+    }
+}
+
+void test_rejection_replay_expires_at_original_terminal_deadline() {
+    Harness h;
+    auto wrong = image_for("aura-aq-7-v1");
+    const uint32_t id = h.start();
+    h.write(wrong, 0, wrong.size());
+    assert_failure(h, "HARDWARE_TARGET_MISMATCH", 409, id);
+    const auto before = h.state.snapshot();
+    const std::map<String, String> args = {
+        {"ota_size", std::to_string(wrong.size())},
+        {"ota_confirm_id", std::to_string(id)},
+    };
+    setMillis(before.result_set_ms + before.result_ttl_ms - 1);
+    start_request_without_new_approval(h, args);
+    complete_rejected_request(h, wrong);
+    TEST_ASSERT_EQUAL_STRING("HARDWARE_TARGET_MISMATCH",
+                             h.request.json()["error_code"].as<const char *>());
+    assert_terminal_result_unchanged(before, h.state.snapshot());
+
+    advanceMillis(1);
+    start_request_without_new_approval(h, args);
+    complete_rejected_request(h, wrong);
+    TEST_ASSERT_EQUAL_INT(403, h.request.response_status);
+    TEST_ASSERT_EQUAL_STRING("OTA_PHYSICAL_CONFIRM_EXPIRED",
+                             h.request.json()["error_code"].as<const char *>());
+    TEST_ASSERT_FALSE(h.state.snapshot().hasTerminalResult(millis()));
+    TEST_ASSERT_FALSE(h.state.isActive());
+}
+
+void test_old_confirmation_cannot_replay_after_new_session_replaces_result() {
+    Harness h;
+    auto wrong = image_for("aura-aq-7-v1");
+    const uint32_t old_id = h.start();
+    h.write(wrong, 0, wrong.size());
+    assert_failure(h, "HARDWARE_TARGET_MISMATCH", 409, old_id);
+    auto legacy = image_for("aura-aq-v1");
+    std::fill(legacy.begin() + kMetadataOffset, legacy.begin() + kPrefixSize, 0);
+    advanceMillis(1000);
+    const uint32_t new_id = h.start();
+    TEST_ASSERT_NOT_EQUAL(old_id, new_id);
+    h.write(legacy, 0, legacy.size());
+    assert_failure(h, "HARDWARE_TARGET_MISSING", 400, new_id);
+    const auto before = h.state.snapshot();
+    const size_t ui_count = h.ui.size();
+
+    start_request_without_new_approval(h, {
+        {"ota_size", std::to_string(wrong.size())},
+        {"ota_confirm_id", std::to_string(old_id)},
+    });
+    complete_rejected_request(h, wrong);
+    TEST_ASSERT_EQUAL_INT(409, h.request.response_status);
+    TEST_ASSERT_EQUAL_STRING("OTA_PHYSICAL_CONFIRM_MISMATCH",
+                             h.request.json()["error_code"].as<const char *>());
+    assert_terminal_result_unchanged(before, h.state.snapshot());
+    TEST_ASSERT_EQUAL_UINT32(ui_count, h.ui.size());
 }
 
 void test_total_timeout_while_prefix_pending_never_begins_flash() {
@@ -668,6 +939,190 @@ void test_busy_start_cannot_reset_active_prefix_session_or_screen() {
     }
 }
 
+void test_busy_replay_cannot_release_or_change_new_active_session() {
+    for (bool busy_argument : {false, true}) {
+        Harness h;
+        auto wrong = image_for("aura-aq-7-v1");
+        const uint32_t old_id = h.start();
+        h.write(wrong, 0, wrong.size());
+        assert_failure(h, "HARDWARE_TARGET_MISMATCH", 409, old_id);
+        auto correct = image_for("aura-aq-v1");
+        const uint32_t new_id = h.start();
+        h.write(correct, 0, 150);
+        const auto before = h.state.snapshot();
+        const size_t ui_count = h.ui.size();
+        const unsigned cleanup_count = h.end_upload_calls;
+        const unsigned restore_count = h.restore_power_save_calls;
+        FakeRequest competing;
+        competing.args["ota_size"] = std::to_string(wrong.size());
+        competing.args["ota_confirm_id"] = std::to_string(old_id);
+        competing.current_upload.status = WebUploadStatus::Start;
+        h.context.server = &competing;
+        WebOtaHandlers::handleUpload(h.runtime, busy_argument);
+        TEST_ASSERT_TRUE(competing.rejected);
+        competing.current_upload.status = WebUploadStatus::Write;
+        competing.current_upload.buf = wrong.data();
+        competing.current_upload.currentSize = wrong.size();
+        WebOtaHandlers::handleUpload(h.runtime, true);
+        competing.current_upload.status = WebUploadStatus::End;
+        WebOtaHandlers::handleUpload(h.runtime, true);
+        competing.current_upload.status = WebUploadStatus::Aborted;
+        competing.current_upload.abort_reason = WebUploadAbortReason::ClientDisconnected;
+        WebOtaHandlers::handleUpload(h.runtime, true);
+        WebOtaHandlers::handleUpdate(h.runtime, true);
+        TEST_ASSERT_EQUAL_INT(503, competing.response_status);
+        TEST_ASSERT_EQUAL_STRING("OTA_BUSY", competing.json()["error_code"].as<const char *>());
+        assert_terminal_result_unchanged(before, h.state.snapshot());
+        TEST_ASSERT_EQUAL_UINT32(new_id, h.upload_confirm_id.load());
+        TEST_ASSERT_EQUAL_UINT32(150, h.validator.size());
+        TEST_ASSERT_TRUE(h.state.isActive());
+        TEST_ASSERT_TRUE(h.state.isBusy());
+        TEST_ASSERT_TRUE(h.upload_locked);
+        TEST_ASSERT_EQUAL_UINT32(ui_count, h.ui.size());
+        TEST_ASSERT_EQUAL_UINT32(cleanup_count, h.end_upload_calls);
+        TEST_ASSERT_EQUAL_UINT32(restore_count, h.restore_power_save_calls);
+        assert_no_flash_calls();
+        h.context.server = &h.request;
+        h.write(correct, 150, correct.size() - 150);
+        assert_success(h, correct);
+    }
+}
+
+void test_bare_update_request_does_not_reuse_previous_rejection() {
+    Harness h;
+    auto wrong = image_for("aura-aq-7-v1");
+    const uint32_t id = h.start();
+    h.write(wrong, 0, wrong.size());
+    assert_failure(h, "HARDWARE_TARGET_MISMATCH", 409, id);
+    const auto before = h.state.snapshot();
+    const unsigned cleanup_count = h.end_upload_calls;
+    const size_t ui_count = h.ui.size();
+    FakeRequest bare;
+    h.context.server = &bare;
+    WebOtaHandlers::handleUpdate(h.runtime, false);
+    TEST_ASSERT_EQUAL_INT(400, bare.response_status);
+    const auto json = bare.json();
+    TEST_ASSERT_EQUAL_STRING("MISSING_FILE", json["error_code"].as<const char *>());
+    TEST_ASSERT_FALSE(json["success"].as<bool>());
+    TEST_ASSERT_FALSE(json["rebooting"].as<bool>());
+    assert_terminal_result_unchanged(before, h.state.snapshot());
+    TEST_ASSERT_EQUAL_UINT32(cleanup_count, h.end_upload_calls);
+    TEST_ASSERT_EQUAL_UINT32(ui_count, h.ui.size());
+    TEST_ASSERT_FALSE(h.restart.is_scheduled());
+    assert_no_flash_calls();
+}
+
+void test_bare_update_request_does_not_reuse_success_or_reschedule_restart() {
+    Harness h;
+    auto image = image_for("aura-aq-v1");
+    h.start();
+    h.write(image, 0, image.size());
+    assert_success(h, image);
+    const auto before = h.state.snapshot();
+    const uint32_t restart_due = h.restart.due_ms();
+    const unsigned cleanup_count = h.end_upload_calls;
+    const size_t ui_count = h.ui.size();
+    const auto before_update = OtaPlatformMock::state().update;
+    advanceMillis(200);
+    FakeRequest bare;
+    h.context.server = &bare;
+    WebOtaHandlers::handleUpdate(h.runtime, false);
+    TEST_ASSERT_EQUAL_INT(400, bare.response_status);
+    const auto json = bare.json();
+    TEST_ASSERT_EQUAL_STRING("MISSING_FILE", json["error_code"].as<const char *>());
+    TEST_ASSERT_FALSE(json["success"].as<bool>());
+    TEST_ASSERT_FALSE(json["rebooting"].as<bool>());
+    TEST_ASSERT_TRUE(h.restart.is_scheduled());
+    TEST_ASSERT_EQUAL_UINT32(restart_due, h.restart.due_ms());
+    assert_terminal_result_unchanged(before, h.state.snapshot());
+    TEST_ASSERT_EQUAL_UINT32(cleanup_count, h.end_upload_calls);
+    TEST_ASSERT_EQUAL_UINT32(ui_count, h.ui.size());
+    const auto &after_update = OtaPlatformMock::state().update;
+    TEST_ASSERT_EQUAL_UINT32(before_update.begin_calls, after_update.begin_calls);
+    TEST_ASSERT_EQUAL_UINT32(before_update.write_calls, after_update.write_calls);
+    TEST_ASSERT_EQUAL_UINT32(before_update.end_calls, after_update.end_calls);
+    TEST_ASSERT_EQUAL_UINT32(before_update.abort_calls, after_update.abort_calls);
+}
+
+void test_late_abort_after_successful_end_preserves_success_until_response() {
+    Harness h;
+    auto image = image_for("aura-aq-v1");
+    h.start();
+    h.write(image, 0, image.size());
+    h.finish();
+    const auto completed = h.state.snapshot();
+    TEST_ASSERT_TRUE(completed.success);
+    TEST_ASSERT_FALSE(completed.active);
+    TEST_ASSERT_FALSE(h.restart.is_scheduled());
+    const auto flash = OtaPlatformMock::state().update;
+    advanceMillis(25);
+    h.abort(WebUploadAbortReason::ClientDisconnected);
+    assert_terminal_result_unchanged(completed, h.state.snapshot());
+    TEST_ASSERT_TRUE(h.upload_locked);
+    TEST_ASSERT_FALSE(h.restart.is_scheduled());
+    h.respond();
+    const auto json = h.request.json();
+    TEST_ASSERT_EQUAL_INT(200, h.request.response_status);
+    TEST_ASSERT_TRUE(json["success"].as<bool>());
+    TEST_ASSERT_TRUE(json["rebooting"].as<bool>());
+    TEST_ASSERT_TRUE(json["error_code"].isNull());
+    TEST_ASSERT_EQUAL_UINT32(image.size(), json["written"].as<uint32_t>());
+    TEST_ASSERT_FALSE(h.state.isBusy());
+    TEST_ASSERT_FALSE(h.upload_locked);
+    TEST_ASSERT_EQUAL_UINT32(0, h.upload_confirm_id.load());
+    TEST_ASSERT_EQUAL_UINT32(1, h.end_upload_calls);
+    TEST_ASSERT_EQUAL_UINT32(1, h.restore_power_save_calls);
+    TEST_ASSERT_TRUE(h.restart.is_scheduled());
+    TEST_ASSERT_EQUAL_UINT32(millis() + kRestartDelayMs, h.restart.due_ms());
+    const auto &after_flash = OtaPlatformMock::state().update;
+    TEST_ASSERT_EQUAL_UINT32(flash.begin_calls, after_flash.begin_calls);
+    TEST_ASSERT_EQUAL_UINT32(flash.write_calls, after_flash.write_calls);
+    TEST_ASSERT_EQUAL_UINT32(1, after_flash.end_calls);
+    TEST_ASSERT_EQUAL_UINT32(0, after_flash.abort_calls);
+}
+
+void test_reused_request_reset_clears_old_session_and_cached_refusal() {
+    Harness h;
+    auto wrong = image_for("aura-aq-7-v1");
+    const uint32_t old_id = h.start();
+    h.write(wrong, 0, wrong.size());
+    assert_failure(h, "HARDWARE_TARGET_MISMATCH", 409, old_id);
+    const auto before = h.state.snapshot();
+    // Reuse the transport object, without assigning a fresh FakeRequest.
+    const auto next_request = [&h]() {
+        h.request.resetUploadResponseState();
+        h.request.args.clear();
+        h.request.headers.clear();
+        h.request.current_upload = WebUpload{};
+        h.request.received = 0;
+        h.request.connected = true;
+        h.request.rejected = false;
+        h.request.stopped = false;
+        h.request.response_status = 0;
+        h.request.response.clear();
+    };
+    next_request();
+    h.respond();
+    TEST_ASSERT_EQUAL_INT(400, h.request.response_status);
+    TEST_ASSERT_EQUAL_STRING("MISSING_FILE", h.request.json()["error_code"].as<const char *>());
+    assert_terminal_result_unchanged(before, h.state.snapshot());
+    assert_no_flash_calls();
+
+    next_request();
+    auto correct = image_for("aura-aq-v1");
+    const auto approval = h.physical_confirm.prepare(correct.size(), false, 0, millis());
+    TEST_ASSERT_TRUE(h.physical_confirm.allowCurrent(approval.confirm_id, millis()));
+    TEST_ASSERT_NOT_EQUAL(old_id, approval.confirm_id);
+    h.request.args["ota_size"] = std::to_string(correct.size());
+    h.request.args["ota_confirm_id"] = std::to_string(approval.confirm_id);
+    h.request.current_upload.status = WebUploadStatus::Start;
+    h.request.current_upload.filename = "firmware.bin";
+    WebOtaHandlers::handleUpload(h.runtime, false);
+    h.write(correct, 0, correct.size());
+    assert_success(h, correct);
+    TEST_ASSERT_NOT_EQUAL(before.session_id, h.state.snapshot().session_id);
+}
+
 void test_rejection_drains_only_bounded_body_and_keeps_failure_payload() {
     Harness h;
     auto image = image_for("aura-aq-7-v1");
@@ -769,6 +1224,9 @@ int main(int, char **) {
     RUN_TEST(test_exact_prefix_boundary_and_later_chunks_keep_byte_order);
     RUN_TEST(test_7_device_rejects_43_even_with_renamed_file_and_forged_form_target);
     RUN_TEST(test_43_device_rejects_7_even_with_renamed_file_and_forged_form_target);
+    RUN_TEST(test_production_7_rejects_diagnostic_bin_before_flash);
+    RUN_TEST(test_diagnostic_7_accepts_diagnostic_update_and_production_exit);
+    RUN_TEST(test_new_guard_rejects_legacy_target_only_bin_before_flash);
     RUN_TEST(test_legacy_bin_without_fixed_metadata_is_rejected_despite_target_elsewhere);
     RUN_TEST(test_unsupported_metadata_version_is_not_misclassified_as_missing_file);
     RUN_TEST(test_unknown_target_inside_valid_descriptor_is_rejected);
@@ -777,6 +1235,10 @@ int main(int, char **) {
     RUN_TEST(test_end_with_partial_prefix_is_invalid_firmware_not_size_mismatch);
     RUN_TEST(test_declared_file_shorter_than_identity_prefix_is_rejected_at_start);
     RUN_TEST(test_rejected_image_cleanup_allows_good_retry_on_same_runtime);
+    RUN_TEST(test_terminal_identity_rejection_replays_original_result_for_same_confirmation);
+    RUN_TEST(test_unrelated_start_refusals_do_not_replace_terminal_identity_result);
+    RUN_TEST(test_rejection_replay_expires_at_original_terminal_deadline);
+    RUN_TEST(test_old_confirmation_cannot_replay_after_new_session_replaces_result);
     RUN_TEST(test_total_timeout_while_prefix_pending_never_begins_flash);
     RUN_TEST(test_idle_abort_while_prefix_pending_resets_cleanly_for_retry);
     RUN_TEST(test_begin_failure_reports_original_error_without_write_or_reboot);
@@ -784,6 +1246,11 @@ int main(int, char **) {
     RUN_TEST(test_short_remainder_write_that_self_aborts_keeps_original_error);
     RUN_TEST(test_finalize_failure_aborts_and_never_schedules_restart);
     RUN_TEST(test_busy_start_cannot_reset_active_prefix_session_or_screen);
+    RUN_TEST(test_busy_replay_cannot_release_or_change_new_active_session);
+    RUN_TEST(test_bare_update_request_does_not_reuse_previous_rejection);
+    RUN_TEST(test_bare_update_request_does_not_reuse_success_or_reschedule_restart);
+    RUN_TEST(test_late_abort_after_successful_end_preserves_success_until_response);
+    RUN_TEST(test_reused_request_reset_clears_old_session_and_cached_refusal);
     RUN_TEST(test_rejection_drains_only_bounded_body_and_keeps_failure_payload);
     RUN_TEST(test_partition_unavailable_and_declared_oversize_do_not_begin_flash);
     RUN_TEST(test_size_guard_counts_pending_prefix_not_only_written_bytes);

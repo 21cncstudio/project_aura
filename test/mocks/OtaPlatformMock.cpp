@@ -102,6 +102,9 @@ namespace AppVersion {
 const char *hardwareTarget() {
     return OtaPlatformMock::state().hardware_target.c_str();
 }
+const char *firmwareFlavor() {
+    return OtaPlatformMock::state().firmware_flavor.c_str();
+}
 }  // namespace AppVersion
 
 namespace OtaRollback {

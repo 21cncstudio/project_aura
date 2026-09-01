@@ -19,6 +19,8 @@ using SemaphoreHandle_t = StaticSemaphore_t *;
 
 namespace FreeRtosSemaphoreMock {
 
+using BlockedTakeHook = void (*)(SemaphoreHandle_t);
+
 inline std::atomic<uint32_t> &tickDurationMicroseconds() {
     static std::atomic<uint32_t> duration{1000};
     return duration;
@@ -30,6 +32,19 @@ inline void setTickDurationMicroseconds(uint32_t duration) {
 
 inline void resetTickDuration() {
     tickDurationMicroseconds().store(1000);
+}
+
+inline std::atomic<BlockedTakeHook> &blockedTakeHook() {
+    static std::atomic<BlockedTakeHook> hook{nullptr};
+    return hook;
+}
+
+inline void setBlockedTakeHook(BlockedTakeHook hook) {
+    blockedTakeHook().store(hook);
+}
+
+inline void resetBlockedTakeHook() {
+    blockedTakeHook().store(nullptr);
 }
 
 } // namespace FreeRtosSemaphoreMock
@@ -69,6 +84,12 @@ inline int xSemaphoreTake(SemaphoreHandle_t semaphore, TickType_t wait_ticks) {
     std::unique_lock<std::mutex> lock(semaphore->state_mutex);
     const auto available = [semaphore]() { return semaphore->available; };
     bool acquired = available();
+    if (!acquired) {
+        const auto hook = FreeRtosSemaphoreMock::blockedTakeHook().load();
+        if (hook) {
+            hook(semaphore);
+        }
+    }
     if (!acquired && wait_ticks == portMAX_DELAY) {
         semaphore->changed.wait(lock, available);
         acquired = true;

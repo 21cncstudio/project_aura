@@ -6,6 +6,8 @@
 
 #pragma once
 
+#include <memory>
+
 #include <freertos/FreeRTOS.h>
 #include <freertos/semphr.h>
 
@@ -13,18 +15,36 @@
 
 class ChartsRuntimeState {
 public:
+    class Snapshot {
+    public:
+        uint16_t count() const { return count_; }
+        uint32_t latestEpoch() const { return latest_epoch_; }
+        uint8_t optionalGasType() const { return optional_gas_type_; }
+        bool metricValueFromOldest(uint16_t offset,
+                                   ChartsHistory::Metric metric,
+                                   float &value,
+                                   bool &valid) const;
+        bool latestMetric(ChartsHistory::Metric metric, float &out_value) const;
+
+    private:
+        friend class ChartsRuntimeState;
+        Snapshot() = default;
+
+        uint16_t count_ = 0;
+        uint32_t latest_epoch_ = 0;
+        uint8_t optional_gas_type_ = 0;
+        ChartsHistory::Entry entries_[ChartsHistory::kCapacity]{};
+    };
+
     ChartsRuntimeState();
 
     void update(const ChartsHistory &history);
+    std::unique_ptr<const Snapshot> copySnapshot() const;
 
-    uint16_t count() const;
-    uint32_t latestEpoch() const;
-    bool entryFromOldest(uint16_t offset, ChartsHistory::Entry &out) const;
-    bool metricValueFromOldest(uint16_t offset,
-                               ChartsHistory::Metric metric,
-                               float &value,
-                               bool &valid) const;
-    bool latestMetric(ChartsHistory::Metric metric, float &out_value) const;
+#ifdef UNIT_TEST
+    using SnapshotCopyHook = void (*)();
+    static void setSnapshotCopyHook(SnapshotCopyHook hook);
+#endif
 
 private:
     void lock() const;
@@ -35,5 +55,10 @@ private:
     uint16_t count_ = 0;
     uint16_t source_index_ = 0;
     uint32_t latest_epoch_ = 0;
+    uint8_t optional_gas_type_ = 0;
     ChartsHistory::Entry entries_[ChartsHistory::kCapacity]{};
+
+#ifdef UNIT_TEST
+    static SnapshotCopyHook snapshot_copy_hook_;
+#endif
 };

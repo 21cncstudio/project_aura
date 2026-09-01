@@ -11,8 +11,8 @@ class Board;
 
 namespace Gt911Hardware {
 
-// Runs the board-specific reset/address-select sequence through CH422G.
-// No transaction is sent to the conflicting default address 0x5D.
-bool selectBackupAddress(esp_panel::board::Board *board);
+// Runs the configured RESET/INT sequence through CH422G. Normal profiles probe
+// only their configured address; dual-address reads are diagnostic-only.
+bool selectConfiguredAddress(esp_panel::board::Board *board);
 
 } // namespace Gt911Hardware

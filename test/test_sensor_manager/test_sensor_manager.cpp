@@ -72,6 +72,20 @@ void test_sensor_manager_initializes_both_dfr_drivers() {
     TEST_ASSERT_TRUE(DfrOptionalGasSensor::state().begin_called);
 }
 
+void test_sensor_manager_sen0466_start_log_does_not_claim_valid_measurement() {
+    StorageManager storage;
+    storage.begin();
+    Sen0466::state().start_ok = true;
+    Sen0466::state().data_valid = false;
+
+    SensorManager manager;
+    manager.begin(storage, 0.0f, 0.0f);
+
+    TEST_ASSERT_TRUE(recentContainsMessagePrefix(
+        "SEN0466 CO address detected at 0x74; measurement pending warmup"));
+    TEST_ASSERT_FALSE(recentContainsMessagePrefix("SEN0466 CO OK"));
+}
+
 void test_sensor_manager_poll_updates_data() {
     setMillis(Config::PRESSURE_HISTORY_STEP_MS);
 
@@ -650,6 +664,37 @@ void test_sensor_manager_optional_gas_o3_updates_generic_without_nh3_compat_fiel
     TEST_ASSERT_FALSE(data.nh3_sensor_present);
     TEST_ASSERT_FALSE(data.nh3_valid);
     TEST_ASSERT_FLOAT_WITHIN(0.001f, 0.0f, data.nh3_ppm);
+}
+
+void test_sensor_manager_optional_gas_publishes_one_two_decimal_step() {
+    StorageManager storage;
+    storage.begin();
+    PressureHistory history;
+    SensorManager manager;
+    SensorData data;
+
+    auto &optional_gas = DfrOptionalGasSensor::state();
+    optional_gas.start_ok = true;
+    optional_gas.present = true;
+    optional_gas.data_valid = true;
+    optional_gas.warmup = false;
+    optional_gas.ppm = 0.23f;
+    optional_gas.ppm_decimals = 2;
+    optional_gas.gas_type = DfrOptionalGasSensor::OptionalGasType::O3;
+
+    manager.begin(storage, 0.0f, 0.0f);
+    const SensorManager::PollResult first =
+        manager.poll(data, storage, history, true);
+    TEST_ASSERT_TRUE(first.data_changed);
+    TEST_ASSERT_FLOAT_WITHIN(0.0001f, 0.23f, data.optional_gas_ppm);
+
+    optional_gas.ppm = 0.24f;
+    const SensorManager::PollResult second =
+        manager.poll(data, storage, history, true);
+
+    TEST_ASSERT_TRUE(second.data_changed);
+    TEST_ASSERT_FLOAT_WITHIN(0.0001f, 0.24f, data.optional_gas_ppm);
+    TEST_ASSERT_EQUAL_UINT8(2, data.optional_gas_ppm_decimals);
 }
 
 void test_sensor_manager_optional_gas_o2_updates_generic_without_nh3_compat_fields() {
@@ -1385,6 +1430,7 @@ void test_sensor_manager_late_probes_are_serialized_round_robin() {
 int main(int, char **) {
     UNITY_BEGIN();
     RUN_TEST(test_sensor_manager_initializes_both_dfr_drivers);
+    RUN_TEST(test_sensor_manager_sen0466_start_log_does_not_claim_valid_measurement);
     RUN_TEST(test_sensor_manager_poll_updates_data);
     RUN_TEST(test_sensor_manager_warmup_change);
     RUN_TEST(test_sensor_manager_stale_preserves_other_sensor_data);
@@ -1405,6 +1451,7 @@ int main(int, char **) {
     RUN_TEST(test_sensor_manager_optional_gas_so2_does_not_populate_nh3_compat_fields);
     RUN_TEST(test_sensor_manager_optional_gas_h2s_updates_generic_without_nh3_compat_fields);
     RUN_TEST(test_sensor_manager_optional_gas_o3_updates_generic_without_nh3_compat_fields);
+    RUN_TEST(test_sensor_manager_optional_gas_publishes_one_two_decimal_step);
     RUN_TEST(test_sensor_manager_optional_gas_o2_updates_generic_without_nh3_compat_fields);
     RUN_TEST(test_sensor_manager_sfa_absent_is_not_fault);
     RUN_TEST(test_sensor_manager_falls_back_to_sfa30_when_sfa40_probe_is_rejected);

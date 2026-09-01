@@ -406,6 +406,7 @@ public:
     };
 
     void begin(httpd_req_t *req) {
+        resetUploadResponseState();
         req_ = req;
         response_storage_.reset();
         args_.clear();
@@ -419,6 +420,7 @@ public:
     }
 
     void reset() {
+        resetUploadResponseState();
         req_ = nullptr;
         response_storage_.reset();
         args_.clear();

@@ -23,7 +23,11 @@ struct DeviceState {
     std::array<bool, 256> read_fail{};
     std::array<uint32_t, 256> read_call_count{};
     std::array<uint32_t, 256> read_fail_on_call{};
+    std::array<esp_err_t, 256> read_error_on_call{};
     std::array<bool, 256> write_fail{};
+    std::array<uint32_t, 256> write_call_count{};
+    std::array<uint32_t, 256> write_fail_on_call{};
+    std::array<esp_err_t, 256> write_error_on_call{};
     std::unordered_set<uint16_t> failing_cmds;
     std::unordered_map<uint16_t, std::vector<uint8_t>> cmd_reads;
     std::unordered_map<uint16_t, uint32_t> sensor_cmd_counts;
@@ -129,12 +133,35 @@ void setCommandAdvanceMs(uint32_t advance_ms) {
 }
 
 void setReadFailureOnCall(uint8_t addr, uint8_t reg, uint32_t call_number) {
+    setReadErrorOnCall(addr, reg, call_number, ESP_FAIL);
+}
+
+void setReadErrorOnCall(uint8_t addr,
+                        uint8_t reg,
+                        uint32_t call_number,
+                        esp_err_t error) {
     device(addr).read_call_count[reg] = 0;
     device(addr).read_fail_on_call[reg] = call_number;
+    device(addr).read_error_on_call[reg] = error;
 }
 
 void setWriteFailure(uint8_t addr, uint8_t reg, bool fail) {
     device(addr).write_fail[reg] = fail;
+}
+
+void setWriteFailureOnCall(uint8_t addr,
+                           uint8_t reg,
+                           uint32_t call_number) {
+    setWriteErrorOnCall(addr, reg, call_number, ESP_FAIL);
+}
+
+void setWriteErrorOnCall(uint8_t addr,
+                         uint8_t reg,
+                         uint32_t call_number,
+                         esp_err_t error) {
+    device(addr).write_call_count[reg] = 0;
+    device(addr).write_fail_on_call[reg] = call_number;
+    device(addr).write_error_on_call[reg] = error;
 }
 
 void setParameterConfigResult(esp_err_t result) {
@@ -295,7 +322,10 @@ esp_err_t i2c_master_write_read_device(i2c_port_t port,
     if (state.read_fail[reg] ||
         (state.read_fail_on_call[reg] != 0U &&
          state.read_call_count[reg] == state.read_fail_on_call[reg])) {
-        return ESP_FAIL;
+        if (state.read_fail[reg]) {
+            return ESP_FAIL;
+        }
+        return state.read_error_on_call[reg];
     }
     if (state.has_last_sensor_cmd) {
         auto it = state.cmd_reads.find(state.last_sensor_cmd);
@@ -332,6 +362,8 @@ esp_err_t i2c_master_write_to_device(i2c_port_t port,
         return ESP_FAIL;
     }
     const uint8_t reg = write_buffer[0];
+    DeviceState &state = device(addr);
+    ++state.write_call_count[reg];
     if (write_size >= 4 && write_buffer[0] == 0x00 && write_buffer[1] == 0xFF &&
         write_buffer[2] == 0x01) {
         // Count command attempts before emulating NACK/write failure so safety
@@ -341,8 +373,13 @@ esp_err_t i2c_master_write_to_device(i2c_port_t port,
     if (!device(addr).present) {
         return ESP_FAIL;
     }
-    if (device(addr).write_fail[reg]) {
-        return ESP_FAIL;
+    if (state.write_fail[reg] ||
+        (state.write_fail_on_call[reg] != 0U &&
+         state.write_call_count[reg] == state.write_fail_on_call[reg])) {
+        if (state.write_fail[reg]) {
+            return ESP_FAIL;
+        }
+        return state.write_error_on_call[reg];
     }
     if (write_size == 1) {
         return ESP_OK;

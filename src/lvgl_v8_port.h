@@ -148,7 +148,13 @@ extern "C" {
 bool lvgl_port_init(esp_panel::drivers::LCD *lcd, esp_panel::drivers::Touch *tp);
 
 /**
- * @brief Deinitialize the LVGL porting.
+ * @brief Report whether an already-empty LVGL lifecycle is deinitialized.
+ *
+ * Runtime teardown/reinitialization is intentionally unsupported for the RGB
+ * port because its ISR callback cannot be detached safely in every build and
+ * custom LVGL memory cannot be fully released. An active lifecycle is left
+ * untouched and returns false. Use lvgl_port_prepare_restart() only when the
+ * device is already committed to reboot.
  *
  * @return true if success, otherwise false
  */
@@ -233,6 +239,17 @@ bool lvgl_port_prepare_restart(void);
 bool lvgl_port_lock(int timeout_ms);
 
 /**
+ * @brief Lock for a short retry while UiController::begin waits for the logo.
+ *
+ * Uses the same recursive mutex and timeout semantics as lvgl_port_lock.
+ * Only the bounded boot-logo wait loop may use this entry point; ordinary
+ * startup initialization and runtime callers must use lvgl_port_lock.
+ * Misses are counted separately, never discarded. The caller must retain its
+ * overall logo deadline and report failure if the logo cannot be made ready.
+ */
+bool lvgl_port_lock_startup_logo(int timeout_ms);
+
+/**
  * @brief Unlock the LVGL mutex. This function should be called after using LVGL APIs when not in LVGL task, and the
  *        `lvgl_port_lock()` function should be called before.
  *
@@ -285,7 +302,7 @@ bool lvgl_port_prepare_touch_hard_recovery(void);
 /**
  * @brief Restore GT911 GPIO/input state after a coordinated hard reset.
  *
- * @param recovered True only after product ID was verified at address 0x14.
+ * @param recovered True only after product ID was verified at the configured address.
  * @param wake_probe_enabled Restore dark-screen wake probing when true.
  * @return true when the recovered touch and IRQ state were restored.
  */
@@ -341,6 +358,41 @@ bool lvgl_port_set_wake_touch_probe(bool enabled);
  */
 bool lvgl_port_take_wake_touch_pending(void);
 
+/**
+ * @brief Read the generation of acknowledged framebuffer hand-offs.
+ *
+ * Capture the baseline while holding the LVGL mutex, after loading and fully
+ * invalidating the desired screen. This function does not acquire that mutex.
+ * The generation changes only after a framebuffer switch and a subsequent
+ * VSYNC acknowledgement; it does not prove physical/optical display output.
+ * Baselines are valid only for the current LVGL port initialization.
+ *
+ * @return false for a null output, unsupported refresh mode, absent task,
+ *         requested/active pause, display-sync fault or terminal fail-stop.
+ */
+bool lvgl_port_get_presented_frame_count(uint32_t *out);
+
+/**
+ * @brief Wait for an acknowledged frame newer than the captured baseline.
+ *
+ * Call only after releasing the LVGL mutex and never from the LVGL task.
+ * The wait yields one RTOS tick between checks, keeps its original deadline,
+ * and never forces a refresh or resumes a paused display. A zero timeout
+ * performs one nonblocking check. A timeout or unavailable acknowledgement
+ * leaves the caller responsible for keeping the startup backlight off.
+ *
+ * @return true if a newer frame was acknowledged while the port was valid.
+ */
+bool lvgl_port_wait_presented_frame(uint32_t baseline, uint32_t timeout_ms);
+
+typedef enum {
+    LVGL_PORT_REFRESH_CALLBACK_UNKNOWN = 0,
+    LVGL_PORT_REFRESH_CALLBACK_VSYNC = 1,
+    LVGL_PORT_REFRESH_CALLBACK_BOUNCE_FRAME_FINISH = 2,
+    LVGL_PORT_REFRESH_CALLBACK_FRAME_BUFFER_COMPLETE = 3,
+    LVGL_PORT_REFRESH_CALLBACK_DSI_REFRESH_DONE = 4,
+} lvgl_port_refresh_callback_semantics_t;
+
 typedef struct {
     uint32_t sample_ms;
     uint32_t timer_handler_count;
@@ -349,11 +401,19 @@ typedef struct {
     uint32_t flush_age_ms;
     uint32_t vsync_count;
     uint32_t vsync_age_ms;
+    uint32_t refresh_callback_max_gap_ms;
+    lvgl_port_refresh_callback_semantics_t refresh_callback_semantics;
     uint32_t vsync_wait_timeout_count;
+    uint32_t presented_frame_count;
     bool display_sync_fault;
-    uint32_t lock_fail_count;
+    uint32_t lock_fail_count; // Normal callers, including those during startup.
+    uint32_t startup_lock_miss_count; // Explicit bounded boot-logo retries only.
     uint32_t touch_read_error_count;
     bool touch_offline;
+    bool screen_flip_180;
+    bool rotation_pipeline_active;
+    uint32_t rotated_copy_switch_count;
+    uint32_t framebuffer_ownership_violation_count;
     bool paused;
 } lvgl_port_diagnostics_t;
 
@@ -362,7 +422,10 @@ typedef struct {
  *
  * @param out Pointer to destination snapshot.
  *
- * @return true if snapshot stored, false for invalid argument.
+ * @return true if a display diagnostic lifecycle exists and the snapshot was
+ *         stored; false before display initialization, after partial-init
+ *         cleanup, or for an invalid argument. A fail-stopped LVGL task still
+ *         has an available snapshot so startup faults remain observable.
  */
 bool lvgl_port_get_diagnostics(lvgl_port_diagnostics_t *out);
 

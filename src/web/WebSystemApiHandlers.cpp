@@ -10,6 +10,7 @@
 
 #include <ArduinoJson.h>
 
+#include "config/AppConfig.h"
 #include "core/AppVersion.h"
 #include "core/BoardInit.h"
 #include "core/BootDiagnostics.h"
@@ -17,6 +18,7 @@
 #include "core/ConnectivityRuntime.h"
 #include "core/Logger.h"
 #include "core/WebRuntimeState.h"
+#include "lvgl_v8_port.h"
 #include "web/WebDiagApiUtils.h"
 #include "web/WebEventsApiUtils.h"
 #include "web/WebResponseUtils.h"
@@ -34,6 +36,23 @@ constexpr const char kApiErrorOtaBusyJson[] =
     "{\"success\":false,\"error\":\"OTA upload in progress\","
     "\"error_code\":\"OTA_BUSY\",\"ota_busy\":true}";
 Logger::RecentEntry g_events_snapshot[kEventsApiMaxEntries];
+
+const char *refresh_callback_semantics_text(
+    lvgl_port_refresh_callback_semantics_t semantics) {
+    switch (semantics) {
+        case LVGL_PORT_REFRESH_CALLBACK_VSYNC:
+            return "vsync";
+        case LVGL_PORT_REFRESH_CALLBACK_BOUNCE_FRAME_FINISH:
+            return "bounce_frame_finish";
+        case LVGL_PORT_REFRESH_CALLBACK_FRAME_BUFFER_COMPLETE:
+            return "frame_buffer_complete";
+        case LVGL_PORT_REFRESH_CALLBACK_DSI_REFRESH_DONE:
+            return "dsi_refresh_done";
+        case LVGL_PORT_REFRESH_CALLBACK_UNKNOWN:
+        default:
+            return "unknown";
+    }
+}
 
 void send_ota_busy_json(WebRequest &server) {
     WebResponseUtils::sendNoStoreHeaders(server);
@@ -81,13 +100,57 @@ void handleDiagData(WebHandlerContext &context,
     ArduinoJson::JsonDocument doc;
     const size_t event_count = Logger::copyRecentAlerts(g_events_snapshot, kEventsApiMaxEntries);
     WebDiagApiUtils::Payload payload{};
+    const BootDiagnostics::Snapshot &boot = BootDiagnostics::state;
+    payload.device.firmware = AppVersion::fullVersion();
+    payload.device.build_id = AppVersion::buildId();
+    payload.device.hardware_profile = AppVersion::hardwareProfile();
+    payload.device.hardware_target = AppVersion::hardwareTarget();
+    payload.panel_i2c.port = static_cast<int>(Config::I2C_PORT);
+    payload.panel_i2c.sda_gpio = Config::I2C_SDA_PIN;
+    payload.panel_i2c.scl_gpio = Config::I2C_SCL_PIN;
+    payload.sensor_i2c.port = static_cast<int>(Config::SENSOR_I2C_PORT);
+    payload.sensor_i2c.sda_gpio = Config::SENSOR_I2C_SDA_PIN;
+    payload.sensor_i2c.scl_gpio = Config::SENSOR_I2C_SCL_PIN;
+    payload.sensor_i2c_shared_with_panel = !Config::SENSOR_I2C_SEPARATE;
+    lvgl_port_diagnostics_t display{};
+    payload.display.available = lvgl_port_get_diagnostics(&display);
+    if (payload.display.available) {
+        payload.display.sample_ms = display.sample_ms;
+        payload.display.timer_handler_count = display.timer_handler_count;
+        payload.display.timer_handler_age_ms = display.timer_handler_age_ms;
+        payload.display.flush_count = display.flush_count;
+        payload.display.flush_age_ms = display.flush_age_ms;
+        payload.display.refresh_callback_semantics =
+            refresh_callback_semantics_text(display.refresh_callback_semantics);
+        payload.display.refresh_callback_count = display.vsync_count;
+        payload.display.refresh_callback_age_ms = display.vsync_age_ms;
+        payload.display.refresh_callback_max_gap_ms =
+            display.refresh_callback_max_gap_ms;
+        payload.display.framebuffer_handoff_count =
+            display.presented_frame_count;
+        payload.display.framebuffer_wait_timeout_count =
+            display.vsync_wait_timeout_count;
+        payload.display.display_sync_fault = display.display_sync_fault;
+        payload.display.runtime_lock_failures = display.lock_fail_count;
+        payload.display.startup_logo_lock_misses =
+            display.startup_lock_miss_count;
+        payload.display.touch_read_errors = display.touch_read_error_count;
+        payload.display.touch_offline = display.touch_offline;
+        payload.display.screen_flip_180 = display.screen_flip_180;
+        payload.display.rotation_pipeline_active =
+            display.rotation_pipeline_active;
+        payload.display.rotated_copy_switch_count =
+            display.rotated_copy_switch_count;
+        payload.display.framebuffer_ownership_violation_count =
+            display.framebuffer_ownership_violation_count;
+        payload.display.paused = display.paused;
+    }
     payload.uptime_s = millis() / 1000UL;
     payload.ota_busy = ota_busy;
     payload.heap_free = ESP.getFreeHeap();
     payload.heap_min_free = ESP.getMinFreeHeap();
     payload.network = WebRuntimeCapture::captureNetworkSnapshot(context);
     payload.web_stream = web_stream_snapshot;
-    const BootDiagnostics::Snapshot &boot = BootDiagnostics::state;
     payload.boot.reset_reason = BootHelpers::resetReasonText(boot.reset_reason);
     payload.boot.auto_recovery_boot = boot.auto_recovery_boot;
     payload.boot.i2c_status = I2cBusRecovery::statusText(boot.i2c_status);
@@ -117,6 +180,7 @@ void handleDiagData(WebHandlerContext &context,
     payload.boot.board_stage = BoardInit::stageText(boot.board_stage);
     payload.boot.board_failure = BoardInit::failureText(boot.board_failure);
     payload.boot.lvgl_ready = boot.lvgl_ready;
+    payload.boot.gt911_startup = boot.gt911_startup;
     const BacklightWakeBreadcrumbs::BootSnapshot &previous_trace =
         boot.previous_backlight_trace;
     payload.boot.previous_backlight_trace_status =

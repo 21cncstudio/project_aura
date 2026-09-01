@@ -142,36 +142,24 @@ void send_ota_physical_confirm_prepare_json(
     server.send(prepare_confirm_http_status(decision.status), "application/json", json);
 }
 
-void send_ota_busy_upload_response(WebRequest &server) {
+void send_upload_json_response(WebRequest &server, int status, const String &json) {
     WebResponseUtils::sendNoStoreHeaders(server);
     const size_t pending_body_bytes = server.pendingRequestBodyBytes();
     if (pending_body_bytes > 0) {
         const size_t drained =
             server.drainPendingRequestBody(kOtaAbortDrainMaxBytes,
                                            kOtaAbortDrainTimeoutMs);
-        LOGI("OTA", "drained %u/%u pending request bytes before busy response",
+        LOGI("OTA", "drained %u/%u pending request bytes before upload response",
              static_cast<unsigned>(drained),
              static_cast<unsigned>(pending_body_bytes));
     }
     server.sendHeader("Connection", "close");
-    server.send(503, "application/json", kApiErrorOtaBusyJson);
+    server.send(status, "application/json", json);
     server.stopClient();
 }
 
-void send_ota_boot_pending_verify_upload_response(WebRequest &server) {
-    WebResponseUtils::sendNoStoreHeaders(server);
-    const size_t pending_body_bytes = server.pendingRequestBodyBytes();
-    if (pending_body_bytes > 0) {
-        const size_t drained =
-            server.drainPendingRequestBody(kOtaAbortDrainMaxBytes,
-                                           kOtaAbortDrainTimeoutMs);
-        LOGI("OTA", "drained %u/%u pending request bytes before boot-validation response",
-             static_cast<unsigned>(drained),
-             static_cast<unsigned>(pending_body_bytes));
-    }
-    server.sendHeader("Connection", "close");
-    server.send(409, "application/json", kApiErrorOtaBootPendingVerifyJson);
-    server.stopClient();
+void send_ota_busy_upload_response(WebRequest &server) {
+    send_upload_json_response(server, 503, kApiErrorOtaBusyJson);
 }
 
 int upload_confirm_error_status(const String &error) {
@@ -194,36 +182,39 @@ const char *upload_confirm_error_code(const String &error) {
     return "OTA_PHYSICAL_CONFIRM_REQUIRED";
 }
 
-bool is_upload_confirm_error(const String &error) {
-    return error == kOtaPhysicalConfirmRequiredError ||
-           error == kOtaPhysicalConfirmDeniedError ||
-           error == kOtaPhysicalConfirmExpiredError ||
-           error == kOtaPhysicalConfirmMismatchError;
-}
-
-void send_ota_physical_confirm_upload_response(WebRequest &server, const String &error) {
-    WebResponseUtils::sendNoStoreHeaders(server);
-    const size_t pending_body_bytes = server.pendingRequestBodyBytes();
-    if (pending_body_bytes > 0) {
-        const size_t drained =
-            server.drainPendingRequestBody(kOtaAbortDrainMaxBytes,
-                                           kOtaAbortDrainTimeoutMs);
-        LOGI("OTA", "drained %u/%u pending request bytes before physical-confirm response",
-             static_cast<unsigned>(drained),
-             static_cast<unsigned>(pending_body_bytes));
-    }
-
+void cache_upload_error(WebRequest &server, int status, const char *code,
+                        const String &error) {
     ArduinoJson::JsonDocument doc;
     ArduinoJson::JsonObject root = doc.to<ArduinoJson::JsonObject>();
     root["success"] = false;
-    root["error_code"] = upload_confirm_error_code(error);
+    root["error_code"] = code;
     root["error"] = error;
+    root["written"] = 0;
+    root["rebooting"] = false;
     String json;
     serializeJson(doc, json);
 
-    server.sendHeader("Connection", "close");
-    server.send(upload_confirm_error_status(error), "application/json", json);
-    server.stopClient();
+    server.cacheUploadRejection(status, json);
+}
+
+void cache_rejected_upload_result(WebRequest &server, const WebOtaSnapshot &ota) {
+    const auto result = WebOtaApiUtils::buildUpdateResult(
+        ota.upload_seen, false, ota.written_size, ota.slot_size,
+        ota.size_known, ota.expected_size, ota.error, ota.error_code);
+    ArduinoJson::JsonDocument doc;
+    WebOtaApiUtils::fillUpdateJson(doc.to<ArduinoJson::JsonObject>(), result);
+    String json;
+    serializeJson(doc, json);
+    server.cacheUploadRejection(result.status_code, json);
+}
+
+void reject_before_session(WebOtaHandlers::Runtime &runtime, WebRequest &server) {
+    server.rejectUpload();
+    // Only the admission gate was acquired. Do not touch the previous OTA
+    // session, flash, preflight UI or WiFi power-save state.
+    if (runtime.end_upload) {
+        runtime.end_upload();
+    }
 }
 
 String ota_error_prefixed(const char *prefix) {
@@ -318,7 +309,8 @@ const char *hardware_model_name(const char *target) {
     if (target && strcmp(target, OtaImageIdentity::kTarget43) == 0) {
         return "Aura AQ 4.3\"";
     }
-    if (target && strcmp(target, OtaImageIdentity::kTarget7) == 0) {
+    if (target && (strcmp(target, OtaImageIdentity::kTarget7) == 0 ||
+                   strcmp(target, OtaImageIdentity::kTarget7Diagnostic) == 0)) {
         return "Aura AQ 7\"";
     }
     return "an unknown Aura AQ model";
@@ -351,6 +343,36 @@ void reject_image_identity(WebOtaHandlers::Runtime &runtime, WebRequest &server)
             error = "The Aura AQ model label is unknown or invalid. "
                     "OTA cannot verify compatibility. Select firmware for this device.";
             break;
+        case OtaImageIdentity::Status::FlavorMismatch:
+            error_code = "FIRMWARE_FLAVOR_MISMATCH";
+            // The policy deliberately allows diagnostic firmware to install a
+            // matching production image as its exit path. The only possible
+            // mismatch is therefore a diagnostic image offered to production.
+            error = "This is diagnostic-only firmware. This device is running "
+                    "production firmware. Select production firmware for this device.";
+            break;
+        case OtaImageIdentity::Status::MissingFlavorMetadata:
+            error_code = "FIRMWARE_FLAVOR_MISSING";
+            error = "This BIN has no Aura AQ firmware flavor label. OTA cannot distinguish "
+                    "production firmware from diagnostic firmware. Select a current firmware "
+                    "BIN for this device.";
+            break;
+        case OtaImageIdentity::Status::UnsupportedFlavorMetadata:
+            error_code = "FIRMWARE_FLAVOR_UNSUPPORTED";
+            error = "This BIN uses unsupported Aura AQ firmware flavor metadata. "
+                    "Select a current compatible firmware BIN for this device.";
+            break;
+        case OtaImageIdentity::Status::InvalidFlavor:
+            error_code = "FIRMWARE_FLAVOR_INVALID";
+            error = "The Aura AQ firmware flavor label is unknown or invalid. "
+                    "OTA cannot verify compatibility. Select firmware for this device.";
+            break;
+        case OtaImageIdentity::Status::InconsistentIdentity:
+            error_code = "FIRMWARE_IDENTITY_INVALID";
+            error = "The Aura AQ firmware target and flavor labels are inconsistent. "
+                    "OTA cannot verify compatibility. Select a current firmware BIN "
+                    "for this device.";
+            break;
         case OtaImageIdentity::Status::Truncated:
             error = "Firmware header is incomplete. "
                     "Select an intact Aura AQ firmware BIN for this device.";
@@ -364,8 +386,9 @@ void reject_image_identity(WebOtaHandlers::Runtime &runtime, WebRequest &server)
     error += " Nothing was written; the device was not restarted.";
     fail_upload(runtime, error, error_code);
     server.rejectUpload();
-    LOGW("OTA", "image rejected before flash: code=%s expected=%s image=%s",
-         error_code, AppVersion::hardwareTarget(), runtime.image_validator.target());
+    LOGW("OTA", "image rejected before flash: code=%s expected=%s/%s image=%s/%s",
+         error_code, AppVersion::hardwareTarget(), AppVersion::firmwareFlavor(),
+         runtime.image_validator.target(), runtime.image_validator.flavor());
 }
 
 bool write_image_bytes(WebOtaHandlers::Runtime &runtime, uint8_t *bytes, size_t size) {
@@ -554,6 +577,7 @@ void handleUpload(Runtime &runtime, bool ota_busy) {
     if (upload.status == WebUploadStatus::Start) {
         if (ota_busy || !runtime.try_begin_upload || !runtime.try_begin_upload()) {
             LOGW("OTA", "reject upload start while OTA is busy");
+            server.cacheUploadRejection(503, kApiErrorOtaBusyJson);
             server.rejectUpload();
             return;
         }
@@ -563,12 +587,10 @@ void handleUpload(Runtime &runtime, bool ota_busy) {
         // The client-supplied value is untrusted until the confirmation state
         // machine consumes it. Cleanup must never publish a UI command with an
         // unvalidated ID because that could advance the screen lineage.
-        runtime.upload_confirm_id.store(0, std::memory_order_release);
         if (OtaRollback::isPendingVerify()) {
             LOGW("OTA", "reject upload start while boot validation is pending");
-            runtime.ota_state.beginUpload(millis());
-            fail_upload(runtime, kOtaBootPendingVerifyError);
-            server.rejectUpload();
+            cache_upload_error(server, 409, "OTA_BOOT_PENDING_VERIFY", kOtaBootPendingVerifyError);
+            reject_before_session(runtime, server);
             return;
         }
 
@@ -577,12 +599,19 @@ void handleUpload(Runtime &runtime, bool ota_busy) {
         const bool size_known =
             size_supplied && WebTextUtils::parsePositiveSize(server.arg("ota_size"), expected_size);
         if (!size_known) {
-            const uint32_t now_ms = millis();
-            runtime.ota_state.beginUpload(now_ms);
-            fail_upload(runtime,
-                        size_supplied ? "Invalid firmware size" : "Firmware size is required");
-            server.rejectUpload();
+            cache_upload_error(server, 400, "INVALID_SIZE",
+                               size_supplied ? "Invalid firmware size" : "Firmware size is required");
+            reject_before_session(runtime, server);
             LOGW("OTA", "reject upload start without valid ota_size");
+            return;
+        }
+
+        // A consumed confirmation cannot authorize another write. It can only
+        // retrieve the still-live failure of its original validated session.
+        if (has_confirm_id && runtime.ota_state.rejectedUploadMatches(
+                                  confirm_id, expected_size, millis())) {
+            cache_rejected_upload_result(server, runtime.ota_state.snapshot());
+            reject_before_session(runtime, server);
             return;
         }
 
@@ -597,10 +626,10 @@ void handleUpload(Runtime &runtime, bool ota_busy) {
                     confirm_decision.status == OtaPhysicalConfirm::ConsumeStatus::Consumed,
                 confirm_decision.confirm_id);
         if (validated_confirm_id == 0) {
-            const uint32_t now_ms = millis();
-            runtime.ota_state.beginUpload(now_ms);
-            fail_upload(runtime, upload_confirm_error_message(confirm_decision.status));
-            server.rejectUpload();
+            const String error = upload_confirm_error_message(confirm_decision.status);
+            cache_upload_error(server, upload_confirm_error_status(error),
+                               upload_confirm_error_code(error), error);
+            reject_before_session(runtime, server);
             LOGW("OTA", "reject upload start physical_confirm=%s confirm_id=%u expected=%u",
                  OtaPhysicalConfirm::consumeStatusText(confirm_decision.status),
                  static_cast<unsigned>(confirm_decision.confirm_id),
@@ -617,8 +646,12 @@ void handleUpload(Runtime &runtime, bool ota_busy) {
             runtime.cancel_preflight_ui(confirm_id);
         }
         const uint32_t start_ms = millis();
-        runtime.ota_state.beginUpload(start_ms);
-        runtime.image_validator.reset(AppVersion::hardwareTarget(), expected_size);
+        runtime.ota_state.beginUpload(start_ms, confirm_id);
+        runtime.ota_state.setExpectedSize(size_known, expected_size);
+        server.setUploadSessionId(runtime.ota_state.sessionId());
+        runtime.image_validator.reset(AppVersion::hardwareTarget(),
+                                      AppVersion::firmwareFlavor(),
+                                      expected_size);
         if (runtime.disable_wifi_power_save_for_upload) {
             runtime.disable_wifi_power_save_for_upload();
         }
@@ -645,7 +678,6 @@ void handleUpload(Runtime &runtime, bool ota_busy) {
             return;
         }
         runtime.ota_state.setSlotSize(target_partition->size);
-        runtime.ota_state.setExpectedSize(size_known, expected_size);
         const WebOtaSnapshot ota = runtime.ota_state.snapshot();
         if (ota.expected_size > ota.slot_size) {
             fail_upload(runtime,
@@ -683,7 +715,8 @@ void handleUpload(Runtime &runtime, bool ota_busy) {
         return;
     }
 
-    if (server.uploadRejected()) {
+    if (server.uploadRejected() || server.uploadSessionId() == 0 ||
+        server.uploadSessionId() != runtime.ota_state.sessionId()) {
         return;
     }
 
@@ -743,8 +776,8 @@ void handleUpload(Runtime &runtime, bool ota_busy) {
                 server.rejectUpload();
                 return;
             }
-            LOGI("OTA", "embedded hardware target accepted: %s",
-                 runtime.image_validator.target());
+            LOGI("OTA", "embedded firmware identity accepted: %s/%s",
+                 runtime.image_validator.target(), runtime.image_validator.flavor());
             // Arduino Update takes mutable input, but only copies these bytes.
             if (!write_image_bytes(runtime,
                                    const_cast<uint8_t *>(runtime.image_validator.data()),
@@ -814,6 +847,9 @@ void handleUpload(Runtime &runtime, bool ota_busy) {
 
     if (upload.status == WebUploadStatus::Aborted) {
         const WebOtaSnapshot ota = runtime.ota_state.snapshot();
+        if (!ota.active) {
+            return;
+        }
         const uint32_t now_ms = millis();
         const bool client_connected = server.clientConnected();
         ota_log_abort_summary(server, ota, upload.abort_reason);
@@ -827,24 +863,22 @@ void handleUpdate(Runtime &runtime, bool ota_busy) {
     }
 
     WebRequest &server = *runtime.context.server;
-    if (server.uploadRejected()) {
-        const WebOtaSnapshot rejected_ota = runtime.ota_state.snapshot();
-        if (rejected_ota.hasError() && rejected_ota.error == kOtaBootPendingVerifyError) {
-            send_ota_boot_pending_verify_upload_response(server);
-            cleanup_after_update_response(runtime, false);
-            return;
-        }
-        if (rejected_ota.hasError() && is_upload_confirm_error(rejected_ota.error)) {
-            send_ota_physical_confirm_upload_response(server, rejected_ota.error);
-            cleanup_after_update_response(runtime, false);
-            return;
-        }
-        if (!rejected_ota.upload_seen || !rejected_ota.hasError()) {
+    if (server.uploadRejectionStatus() != 0) {
+        send_upload_json_response(server, server.uploadRejectionStatus(),
+                                  server.uploadRejectionJson());
+        return;
+    }
+    const WebOtaSnapshot ota = runtime.ota_state.snapshot();
+    if (server.uploadSessionId() == 0 || server.uploadSessionId() != ota.session_id) {
+        if (ota_busy || server.uploadRejected()) {
             send_ota_busy_upload_response(server);
             return;
         }
+        cache_upload_error(server, 400, "MISSING_FILE", "Firmware file is missing");
+        send_upload_json_response(server, server.uploadRejectionStatus(),
+                                  server.uploadRejectionJson());
+        return;
     }
-    const WebOtaSnapshot ota = runtime.ota_state.snapshot();
     if (ota_busy && ota.reboot_pending) {
         send_ota_busy_json(server);
         return;
@@ -912,6 +946,7 @@ void handleUpdate(Runtime &runtime, bool ota_busy) {
         runtime.restart_controller.schedule(millis(), runtime.deferred_restart_delay_ms);
     }
     cleanup_after_update_response(runtime, result.success);
+    server.setUploadSessionId(0);
 }
 
 }  // namespace WebOtaHandlers

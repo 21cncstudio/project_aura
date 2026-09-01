@@ -22,6 +22,7 @@
 #include "core/ConnectivityRuntime.h"
 #include "core/Logger.h"
 #include "Gt911Hardware.h"
+#include "Gt911Config.h"
 #include "core/MemoryMonitor.h"
 #include "core/MqttRuntimeState.h"
 #include "core/NetworkCommandQueue.h"
@@ -370,7 +371,7 @@ bool try_runtime_gt911_recovery() {
         return false;
     }
 
-    const bool address_selected = Gt911Hardware::selectBackupAddress(runtime_board);
+    const bool address_selected = Gt911Hardware::selectConfiguredAddress(runtime_board);
     uint8_t product_id[3] = {};
     const bool product_read =
         address_selected && BootHelpers::readGt911ConfiguredProductId(product_id);
@@ -384,21 +385,21 @@ bool try_runtime_gt911_recovery() {
         if (product_read) {
             LOGE("GT911",
                  "runtime recovery verification failed at 0x%02X: %02X,%02X,%02X",
-                 GT911_ADDR_ALT,
+                 AURA_GT911_I2C_ADDRESS,
                  product_id[0],
                  product_id[1],
                  product_id[2]);
         } else {
             LOGE("GT911",
                  "runtime recovery verification found no response at 0x%02X",
-                 GT911_ADDR_ALT);
+                 AURA_GT911_I2C_ADDRESS);
         }
         return false;
     }
 
     LOGI("GT911",
          "runtime address recovery verified at 0x%02X: %02X,%02X,%02X",
-         GT911_ADDR_ALT,
+         AURA_GT911_I2C_ADDRESS,
          product_id[0],
          product_id[1],
          product_id[2]);

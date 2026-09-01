@@ -30,12 +30,17 @@ void classify_failure(Result &result, bool has_upload) {
 
     // These codes are set by the device's BIN validator, not inferred from
     // English text ("mismatch" and "missing" also have older size/file meanings).
-    if (result.error_code == "HARDWARE_TARGET_MISMATCH") {
+    if (result.error_code == "HARDWARE_TARGET_MISMATCH" ||
+        result.error_code == "FIRMWARE_FLAVOR_MISMATCH") {
         result.status_code = 409;
         return;
     }
     if (result.error_code == "HARDWARE_TARGET_MISSING" ||
         result.error_code == "HARDWARE_METADATA_UNSUPPORTED" ||
+        result.error_code == "FIRMWARE_FLAVOR_MISSING" ||
+        result.error_code == "FIRMWARE_FLAVOR_UNSUPPORTED" ||
+        result.error_code == "FIRMWARE_FLAVOR_INVALID" ||
+        result.error_code == "FIRMWARE_IDENTITY_INVALID" ||
         result.error_code == "INVALID_FIRMWARE") {
         result.status_code = 400;
         return;

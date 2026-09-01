@@ -26,7 +26,7 @@ uint32_t read32(const uint8_t *bytes) {
            (static_cast<uint32_t>(bytes[3]) << 24);
 }
 
-const char *canonicalTarget(const char *target) {
+const char *canonicalHardwareTarget(const char *target) {
     if (!target) {
         return nullptr;
     }
@@ -35,6 +35,23 @@ const char *canonicalTarget(const char *target) {
     }
     if (strcmp(target, kTarget7) == 0) {
         return kTarget7;
+    }
+    return nullptr;
+}
+
+const char *physicalTargetForImageTarget(const char *target) {
+    return strcmp(target, kTarget7Diagnostic) == 0 ? kTarget7 : target;
+}
+
+const char *canonicalFlavor(const char *flavor) {
+    if (!flavor) {
+        return nullptr;
+    }
+    if (strcmp(flavor, kFlavorProduction) == 0) {
+        return kFlavorProduction;
+    }
+    if (strcmp(flavor, kFlavorDiagnostic) == 0) {
+        return kFlavorDiagnostic;
     }
     return nullptr;
 }
@@ -54,16 +71,53 @@ bool matchesTargetField(const uint8_t *field, const char *target) {
     return true;
 }
 
+const char *canonicalImageTarget(const uint8_t *field) {
+    if (matchesTargetField(field, kTarget43)) {
+        return kTarget43;
+    }
+    if (matchesTargetField(field, kTarget7)) {
+        return kTarget7;
+    }
+    if (matchesTargetField(field, kTarget7Diagnostic)) {
+        return kTarget7Diagnostic;
+    }
+    return nullptr;
+}
+
+bool matchesFlavorField(const uint8_t *field, const char *flavor) {
+    const size_t length = strlen(flavor);
+    if (memcmp(field, flavor, length) != 0) {
+        return false;
+    }
+    for (size_t i = length; i < kFlavorSize; ++i) {
+        if (field[i] != 0) {
+            return false;
+        }
+    }
+    return true;
+}
+
 } // namespace
 
-void PrefixValidator::reset(const char *expected_target, size_t image_size) {
+void PrefixValidator::reset(const char *expected_target,
+                            const char *expected_flavor,
+                            size_t image_size) {
     memset(prefix_, 0, sizeof(prefix_));
     memset(target_, 0, sizeof(target_));
+    memset(flavor_, 0, sizeof(flavor_));
     prefix_size_ = 0;
     image_size_ = image_size;
     // Keep an internal canonical string, not a pointer into caller storage.
-    expected_target_ = canonicalTarget(expected_target);
-    status_ = expected_target_ ? Status::NeedMore : Status::InvalidTarget;
+    expected_target_ = canonicalHardwareTarget(expected_target);
+    expected_flavor_ = canonicalFlavor(expected_flavor);
+    status_ = expected_target_ ? (expected_flavor_ ? Status::NeedMore
+                                                   : Status::InvalidFlavor)
+                               : Status::InvalidTarget;
+    if (status_ == Status::NeedMore &&
+        strcmp(expected_flavor_, kFlavorDiagnostic) == 0 &&
+        strcmp(expected_target_, kTarget7) != 0) {
+        status_ = Status::InvalidFlavor;
+    }
     if (status_ == Status::NeedMore && image_size_ < kPrefixSize) {
         status_ = Status::Truncated;
     }
@@ -102,7 +156,7 @@ void PrefixValidator::validate() {
         read16(prefix_ + 12) != kEsp32S3ChipId || prefix_[23] > 1 ||
         segment_address < kDromLow || segment_address >= kDromHigh ||
         segment_size > kDromHigh - segment_address ||
-        segment_size < kAppDescriptorSize + kDescriptorSize ||
+        segment_size < kAppDescriptorSize + kDescriptorSize + kFlavorDescriptorSize ||
         (segment_size & 3U) != 0 ||
         segment_size > image_size_ - first_data_offset ||
         read32(prefix_ + first_data_offset) != kAppDescriptorMagic) {
@@ -128,20 +182,58 @@ void PrefixValidator::validate() {
     }
 
     const uint8_t *field = descriptor + 20;
-    const char *image_target = nullptr;
-    if (matchesTargetField(field, kTarget43)) {
-        image_target = kTarget43;
-    } else if (matchesTargetField(field, kTarget7)) {
-        image_target = kTarget7;
-    }
+    const char *image_target = canonicalImageTarget(field);
     if (!image_target) {
         status_ = Status::InvalidTarget;
         return;
     }
     memcpy(target_, image_target, strlen(image_target) + 1);
-    status_ = strcmp(image_target, expected_target_) == 0
+    if (strcmp(physicalTargetForImageTarget(image_target), expected_target_) != 0) {
+        status_ = Status::TargetMismatch;
+        return;
+    }
+
+    const uint8_t *flavor_descriptor = prefix_ + kFlavorDescriptorOffset;
+    if (memcmp(flavor_descriptor, kFlavorMagic, sizeof(kFlavorMagic)) != 0) {
+        status_ = Status::MissingFlavorMetadata;
+        return;
+    }
+    if (read16(flavor_descriptor + 16) != kFlavorDescriptorVersion ||
+        read16(flavor_descriptor + 18) != kFlavorDescriptorSize) {
+        status_ = Status::UnsupportedFlavorMetadata;
+        return;
+    }
+
+    const uint8_t *flavor_field = flavor_descriptor + 20;
+    const char *image_flavor = nullptr;
+    if (matchesFlavorField(flavor_field, kFlavorProduction)) {
+        image_flavor = kFlavorProduction;
+    } else if (matchesFlavorField(flavor_field, kFlavorDiagnostic)) {
+        image_flavor = kFlavorDiagnostic;
+    }
+    if (!image_flavor) {
+        status_ = Status::InvalidFlavor;
+        return;
+    }
+    memcpy(flavor_, image_flavor, strlen(image_flavor) + 1);
+    const bool valid_pair =
+        (strcmp(image_target, kTarget43) == 0 &&
+         strcmp(image_flavor, kFlavorProduction) == 0) ||
+        (strcmp(image_target, kTarget7) == 0 &&
+         strcmp(image_flavor, kFlavorProduction) == 0) ||
+        (strcmp(image_target, kTarget7Diagnostic) == 0 &&
+         strcmp(image_flavor, kFlavorDiagnostic) == 0);
+    if (!valid_pair) {
+        status_ = Status::InconsistentIdentity;
+        return;
+    }
+
+    // Production is a closed lane. Diagnostic firmware may accept another
+    // diagnostic build or a production build as an explicit OTA exit path.
+    status_ = strcmp(expected_flavor_, kFlavorDiagnostic) == 0 ||
+                      strcmp(image_flavor, kFlavorProduction) == 0
                   ? Status::Compatible
-                  : Status::TargetMismatch;
+                  : Status::FlavorMismatch;
 }
 
 } // namespace OtaImageIdentity

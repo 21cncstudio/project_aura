@@ -12,9 +12,80 @@
 #include <stdio.h>
 #include <string.h>
 
+#ifdef UNIT_TEST
+#include <mutex>
+#else
+#include <freertos/FreeRTOS.h>
+#include <freertos/semphr.h>
+#endif
+
 namespace {
 constexpr size_t kLogBufferSize = 256;
 constexpr uint32_t kRecentDedupWindowMs = 30000;
+
+class LoggerMutex {
+public:
+#ifndef UNIT_TEST
+    LoggerMutex()
+        : mutex_(xSemaphoreCreateMutexStatic(&mutex_buffer_)) {}
+#endif
+
+    void lock() {
+#ifdef UNIT_TEST
+        mutex_.lock();
+#else
+        xSemaphoreTake(mutex_, portMAX_DELAY);
+#endif
+    }
+
+    void unlock() {
+#ifdef UNIT_TEST
+        mutex_.unlock();
+#else
+        xSemaphoreGive(mutex_);
+#endif
+    }
+
+private:
+#ifdef UNIT_TEST
+    std::mutex mutex_{};
+#else
+    StaticSemaphore_t mutex_buffer_{};
+    SemaphoreHandle_t mutex_ = nullptr;
+#endif
+};
+
+LoggerMutex &recentBufferMutex() {
+    // Function-local construction keeps the FreeRTOS mutex out of static
+    // initialization and initializes it on the first Logger buffer access.
+    static LoggerMutex mutex;
+    return mutex;
+}
+
+LoggerMutex &serialOutputMutex() {
+    // Keep potentially blocking Print calls out of the recent-buffer critical
+    // section while still emitting each logical serial line atomically.
+    static LoggerMutex mutex;
+    return mutex;
+}
+
+class LoggerLock {
+public:
+    explicit LoggerLock(LoggerMutex &mutex)
+        : mutex_(mutex) {
+        mutex_.lock();
+    }
+
+    ~LoggerLock() {
+        mutex_.unlock();
+    }
+
+    LoggerLock(const LoggerLock &) = delete;
+    LoggerLock &operator=(const LoggerLock &) = delete;
+
+private:
+    LoggerMutex &mutex_;
+};
 
 bool storeRecentInBuffer(Logger::RecentEntry *buffer,
                          size_t capacity,
@@ -171,16 +242,22 @@ void Logger::vlog(Level level,
     }
 
     if (print_to_serial) {
-        output_->print('[');
-        output_->print(levelName(level));
-        output_->print(']');
-        if (tag && tag[0] != '\0') {
+        LoggerLock lock(serialOutputMutex());
+        // Emit all fragments while holding one output-only lock so another
+        // task cannot splice its level/tag/message into this logical line.
+        if (output_ && serial_output_enabled_ &&
+            (sensors_serial_output_enabled_ || !tag || strcmp(tag, "Sensors") != 0)) {
             output_->print('[');
-            output_->print(tag);
+            output_->print(levelName(level));
             output_->print(']');
+            if (tag && tag[0] != '\0') {
+                output_->print('[');
+                output_->print(tag);
+                output_->print(']');
+            }
+            output_->print(' ');
+            output_->println(buffer);
         }
-        output_->print(' ');
-        output_->println(buffer);
     }
 
     storeRecent(level, tag, buffer, allow_alert);
@@ -209,59 +286,70 @@ void Logger::storeRecent(Level level,
         message_buf[sizeof(message_buf) - 1] = '\0';
     }
 
-    const bool stored_recent =
-        storeRecentInBuffer(recent_, kRecentCapacity, recent_head_, recent_count_,
-                            level, tag_buf, message_buf, now_ms);
+    RecentEntry event_entry{};
+    event_entry.ms = now_ms;
+    event_entry.level = level;
+    strncpy(event_entry.tag, tag_buf, sizeof(event_entry.tag) - 1);
+    event_entry.tag[sizeof(event_entry.tag) - 1] = '\0';
+    strncpy(event_entry.message, message_buf, sizeof(event_entry.message) - 1);
+    event_entry.message[sizeof(event_entry.message) - 1] = '\0';
 
-    if (stored_recent) {
-        RecentEntry entry{};
-        entry.ms = now_ms;
-        entry.level = level;
-        strncpy(entry.tag, tag_buf, sizeof(entry.tag) - 1);
-        entry.tag[sizeof(entry.tag) - 1] = '\0';
-        strncpy(entry.message, message_buf, sizeof(entry.message) - 1);
-        entry.message[sizeof(entry.message) - 1] = '\0';
-        if (SystemEventPolicy::shouldEmit(entry)) {
-            MqttEventQueue::instance().enqueueIfCapturing(entry);
+    const bool emit_event = SystemEventPolicy::shouldEmit(event_entry);
+    const bool store_alert =
+        (allow_alert || level == Error) &&
+        SystemLogFilter::shouldStoreAlert(level, tag_buf, message_buf);
+
+    bool stored_recent = false;
+    {
+        LoggerLock lock(recentBufferMutex());
+        stored_recent =
+            storeRecentInBuffer(recent_, kRecentCapacity, recent_head_, recent_count_,
+                                level, tag_buf, message_buf, now_ms);
+
+        if (store_alert) {
+            uint32_t next_alert_seq = recent_alert_seq_ + 1;
+            if (next_alert_seq == 0) {
+                next_alert_seq = 1;
+            }
+            if (storeRecentInBuffer(recent_alerts_,
+                                    kRecentAlertCapacity,
+                                    recent_alert_head_,
+                                    recent_alert_count_,
+                                    level,
+                                    tag_buf,
+                                    message_buf,
+                                    now_ms,
+                                    next_alert_seq,
+                                    true)) {
+                recent_alert_seq_ = next_alert_seq;
+            }
         }
     }
 
-    if ((allow_alert || level == Error) &&
-        SystemLogFilter::shouldStoreAlert(level, tag_buf, message_buf)) {
-        uint32_t next_alert_seq = recent_alert_seq_ + 1;
-        if (next_alert_seq == 0) {
-            next_alert_seq = 1;
-        }
-        if (storeRecentInBuffer(recent_alerts_,
-                                kRecentAlertCapacity,
-                                recent_alert_head_,
-                                recent_alert_count_,
-                                level,
-                                tag_buf,
-                                message_buf,
-                                now_ms,
-                                next_alert_seq,
-                                true)) {
-            recent_alert_seq_ = next_alert_seq;
-        }
+    if (stored_recent && emit_event) {
+        MqttEventQueue::instance().enqueueIfCapturing(event_entry);
     }
 }
 
 size_t Logger::copyRecent(RecentEntry *out, size_t max_entries) {
+    LoggerLock lock(recentBufferMutex());
     return copyRecentFromBuffer(recent_, kRecentCapacity, recent_head_, recent_count_, out, max_entries);
 }
 
 size_t Logger::copyRecentAlerts(RecentEntry *out, size_t max_entries) {
+    LoggerLock lock(recentBufferMutex());
     return copyRecentFromBuffer(recent_alerts_, kRecentAlertCapacity,
                                 recent_alert_head_, recent_alert_count_, out, max_entries);
 }
 
 uint32_t Logger::latestRecentAlertSeq() {
+    LoggerLock lock(recentBufferMutex());
     return recent_alert_seq_;
 }
 
 #ifdef UNIT_TEST
 void Logger::resetRecentForTest() {
+    LoggerLock lock(recentBufferMutex());
     memset(recent_, 0, sizeof(recent_));
     memset(recent_alerts_, 0, sizeof(recent_alerts_));
     recent_head_ = 0;

@@ -26,6 +26,10 @@
 #define APP_HARDWARE_TARGET "unknown"
 #endif
 
+#ifndef APP_FIRMWARE_FLAVOR
+#define APP_FIRMWARE_FLAVOR "unknown"
+#endif
+
 namespace {
 
 bool isNumeric(char c) {
@@ -70,6 +74,10 @@ const char *hardwareProfile() {
 
 const char *hardwareTarget() {
     return APP_HARDWARE_TARGET;
+}
+
+const char *firmwareFlavor() {
+    return APP_FIRMWARE_FLAVOR;
 }
 
 const char *fullVersion() {

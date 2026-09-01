@@ -68,6 +68,7 @@ bool shouldEmit(const Logger::RecentEntry &entry) {
         "PressureHistory",
         "ChartsHistory",
         "UI",
+        "GT911DIAG",
     };
     return event_tag_in_list(entry.tag, kInfoTags, sizeof(kInfoTags) / sizeof(kInfoTags[0]));
 }

@@ -56,6 +56,7 @@ void test_web_ota_state_error_is_sticky_and_clears_active() {
     state.beginUpload(10);
     TEST_ASSERT_FALSE(state.hasError());
     state.setErrorOnce("first", 40);
+    const uint32_t original_ttl_ms = state.snapshot().result_ttl_ms;
     state.setErrorOnce("second", 50);
 
     const WebOtaSnapshot snapshot = state.snapshot();
@@ -65,6 +66,11 @@ void test_web_ota_state_error_is_sticky_and_clears_active() {
     TEST_ASSERT_FALSE(snapshot.success);
     TEST_ASSERT_TRUE(snapshot.hasTerminalResult(60));
     TEST_ASSERT_EQUAL_STRING("first", snapshot.error.c_str());
+    TEST_ASSERT_EQUAL_UINT32(40, snapshot.result_set_ms);
+    TEST_ASSERT_EQUAL_UINT32(WebOtaState::terminalResultTtlMs(), original_ttl_ms);
+    TEST_ASSERT_EQUAL_UINT32(original_ttl_ms, snapshot.result_ttl_ms);
+    TEST_ASSERT_TRUE(snapshot.hasTerminalResult(40 + original_ttl_ms - 1));
+    TEST_ASSERT_FALSE(snapshot.hasTerminalResult(40 + original_ttl_ms));
 
     state.clearBusy();
     TEST_ASSERT_FALSE(state.isBusy());

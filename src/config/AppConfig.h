@@ -61,6 +61,13 @@ namespace Config {
 #if AURA_HARDWARE_PROFILE_7 != 0 && AURA_HARDWARE_PROFILE_7 != 1
 #error "AURA_HARDWARE_PROFILE_7 must be 0 or 1"
 #endif
+    constexpr bool SCREEN_FLIP_180_DEFAULT = AURA_HARDWARE_PROFILE_7 != 0;
+
+    constexpr bool resolveScreenFlip180(bool persisted_value_present,
+                                        bool persisted_value) {
+        return persisted_value_present ? persisted_value
+                                       : SCREEN_FLIP_180_DEFAULT;
+    }
 #if AURA_HARDWARE_PROFILE_7
     constexpr bool SENSOR_I2C_SEPARATE = true;
     constexpr i2c_port_t SENSOR_I2C_PORT = I2C_NUM_1;
@@ -507,6 +514,7 @@ namespace Config {
     constexpr uint8_t DFR_GAS_MAX_ABSENT_RETRIES = 3;
     constexpr uint8_t DFR_GAS_MAX_START_ATTEMPTS = 3;
     constexpr uint32_t DFR_GAS_I2C_TIMEOUT_MS = 50;
+    constexpr uint32_t SEN0466_RUNTIME_TRANSPORT_RETRY_DELAY_MS = 150;
     constexpr uint32_t DFR_GAS_FAIL_COOLDOWN_MS = 30UL * 1000UL;
     constexpr uint8_t DFR_GAS_MAX_COOLDOWN_RECOVERY_FAILS = 3;
     constexpr uint32_t DFR_GAS_WARMUP_MS = 300UL * 1000UL;
@@ -733,7 +741,7 @@ namespace Config {
         bool header_status_enabled = true;
         bool led_indicators = true;
         bool alert_blink = true;
-        bool screen_flip_180 = false;
+        bool screen_flip_180 = SCREEN_FLIP_180_DEFAULT;
         bool asc_enabled = true;
         bool pressure_altitude_set = false;
         int16_t pressure_altitude_m = 0;

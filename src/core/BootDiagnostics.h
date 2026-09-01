@@ -8,6 +8,7 @@
 
 #include "core/BoardInit.h"
 #include "core/BacklightWakeBreadcrumbs.h"
+#include "core/Gt911StartupDiagnostics.h"
 
 namespace BootDiagnostics {
 
@@ -39,6 +40,7 @@ struct Snapshot {
     BoardInit::Stage board_stage = BoardInit::Stage::Bus;
     BoardInit::Failure board_failure = BoardInit::Failure::None;
     bool lvgl_ready = false;
+    Gt911StartupDiagnostics::Snapshot gt911_startup{};
     BacklightWakeBreadcrumbs::BootSnapshot previous_backlight_trace{};
 };
 
