@@ -130,7 +130,15 @@ namespace Config {
     constexpr uint8_t LOG_LEVEL = 3; // 0=error, 1=warn, 2=info, 3=debug
     constexpr bool LOG_SERIAL_OUTPUT = true;
     constexpr bool LOG_SERIAL_SENSORS_OUTPUT = false;
-    constexpr uint32_t MEM_LOG_INTERVAL_MS = 15UL * 60UL * 1000UL;
+#ifndef AURA_PERIODIC_MEMORY_MONITOR_ENABLED
+#define AURA_PERIODIC_MEMORY_MONITOR_ENABLED 1
+#endif
+#if AURA_PERIODIC_MEMORY_MONITOR_ENABLED != 0 && \
+    AURA_PERIODIC_MEMORY_MONITOR_ENABLED != 1
+#error "AURA_PERIODIC_MEMORY_MONITOR_ENABLED must be 0 or 1"
+#endif
+    constexpr uint32_t MEM_LOG_INTERVAL_MS =
+        AURA_PERIODIC_MEMORY_MONITOR_ENABLED ? 15UL * 60UL * 1000UL : 0UL;
     constexpr uint32_t SAFE_BOOT_STABLE_MS = 60UL * 1000UL;
     constexpr uint8_t SAFE_BOOT_MAX_REBOOTS = 5;
     constexpr uint32_t LAST_GOOD_COMMIT_DELAY_MS = 3UL * 60UL * 1000UL;

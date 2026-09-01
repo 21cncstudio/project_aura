@@ -82,6 +82,9 @@ void test_identity_accepts_each_exact_canonical_target() {
     assertStatus(Status::Compatible, validate(makeImage()));
     assertStatus(Status::Compatible, validate(makeImage("aura-aq-7-v1"), "aura-aq-7-v1"));
     assertStatus(Status::Compatible,
+                 validate(makeImage("aura-aq-diag-v1", "diagnostic"),
+                          "aura-aq-v1", "diagnostic"));
+    assertStatus(Status::Compatible,
                  validate(makeImage("aura-aq-7-diag-v1", "diagnostic"),
                           "aura-aq-7-v1", "diagnostic"));
 }
@@ -98,6 +101,12 @@ void test_identity_rejects_cross_model_in_both_directions() {
 }
 
 void test_production_rejects_diagnostic_and_diagnostic_has_production_exit() {
+    assertStatus(Status::FlavorMismatch,
+                 validate(makeImage("aura-aq-diag-v1", "diagnostic"),
+                          "aura-aq-v1", "production"));
+    assertStatus(Status::Compatible,
+                 validate(makeImage("aura-aq-v1", "production"),
+                          "aura-aq-v1", "diagnostic"));
     assertStatus(Status::FlavorMismatch,
                  validate(makeImage("aura-aq-7-diag-v1", "diagnostic"),
                           "aura-aq-7-v1", "production"));
@@ -117,6 +126,9 @@ void test_hardware_mismatch_remains_the_primary_reason() {
     assertStatus(Status::TargetMismatch,
                  validate(makeImage("aura-aq-7-diag-v1", "diagnostic"),
                           "aura-aq-v1", "production"));
+    assertStatus(Status::TargetMismatch,
+                 validate(makeImage("aura-aq-diag-v1", "diagnostic"),
+                          "aura-aq-7-v1", "production"));
 }
 
 void test_identity_rejects_inconsistent_target_flavor_pairs() {
@@ -126,6 +138,9 @@ void test_identity_rejects_inconsistent_target_flavor_pairs() {
     assertStatus(Status::InconsistentIdentity,
                  validate(makeImage("aura-aq-7-diag-v1", "production"),
                           "aura-aq-7-v1", "diagnostic"));
+    assertStatus(Status::InconsistentIdentity,
+                 validate(makeImage("aura-aq-diag-v1", "production"),
+                          "aura-aq-v1", "diagnostic"));
     assertStatus(Status::InconsistentIdentity,
                  validate(makeImage("aura-aq-v1", "diagnostic")));
 }

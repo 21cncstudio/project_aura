@@ -24,6 +24,7 @@ constexpr char kTarget7[] = "aura-aq-7-v1";
 // Deliberately not understood by the previous target-only validator. This
 // makes an already-installed production guard reject a new diagnostic BIN on
 // its first encounter, before it knows about the appended flavor descriptor.
+constexpr char kTarget43Diagnostic[] = "aura-aq-diag-v1";
 constexpr char kTarget7Diagnostic[] = "aura-aq-7-diag-v1";
 constexpr size_t kFlavorDescriptorOffset = kDescriptorOffset + kDescriptorSize;
 constexpr uint16_t kFlavorDescriptorVersion = 1;

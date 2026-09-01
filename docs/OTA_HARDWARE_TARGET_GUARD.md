@@ -8,6 +8,7 @@ its embedded hardware identity and firmware flavor:
 | Running firmware | Accepted embedded identity |
 | --- | --- |
 | Aura AQ 4.3-inch production (`project_aura`) | `aura-aq-v1` + `production` |
+| Aura AQ 4.3-inch memory-isolation diagnostic (`project_aura_4_3_memlog_off`) | `aura-aq-diag-v1` + `diagnostic`, or `aura-aq-v1` + `production` as an exit |
 | Aura AQ 7-inch production (`project_aura_7`) | `aura-aq-7-v1` + `production` |
 | Aura AQ 7-inch diagnostic (`project_aura_7_gt911_5d`) | `aura-aq-7-diag-v1` + `diagnostic`, or `aura-aq-7-v1` + `production` as an exit |
 
@@ -15,16 +16,17 @@ Production firmware never accepts diagnostic firmware through web OTA.
 Diagnostic firmware may update within the diagnostic lane and may return to the
 normal production lane. Entering the diagnostic lane requires a separately
 controlled service/USB installation; the OTA endpoint is not an entry path.
-`aura-aq-7-diag-v1` is an internal OTA lane marker, not a third physical model
-or a public release hardware target. APIs and packages continue to identify the
-physical 7-inch model as `aura-aq-7-v1`.
+`aura-aq-diag-v1` and `aura-aq-7-diag-v1` are internal OTA lane markers, not
+additional physical models or public release hardware targets. APIs and
+packages continue to identify the physical models as `aura-aq-v1` and
+`aura-aq-7-v1`.
 
 Protection starts only after a firmware containing this guard is installed.
 Old running firmware cannot acquire the check retroactively. The first guarded
 firmware must still be installed using the correct model selected by the operator.
 The original target-only guard cannot understand the appended flavor record.
-To close the first-transition gap, a new diagnostic BIN deliberately places
-`aura-aq-7-diag-v1` in its original 64-byte target descriptor. An already
+To close the first-transition gap, a diagnostic BIN deliberately places its
+internal lane marker in the original 64-byte target descriptor. An already
 installed old production guard rejects that unknown target before flash. The
 new production BIN keeps the old `aura-aq-v1` or `aura-aq-7-v1` descriptor
 unchanged, so an old production guard can install the new guarded production
@@ -68,7 +70,7 @@ define this location; static assertions and a post-BIN check enforce it locally.
 | 372 | 12 | `production` or `diagnostic`, NUL-terminated and zero-padded |
 
 The descriptor is explicitly retained by `-Wl,-u,aura_ota_image_identity`.
-The build fails if any of the three firmware environments lacks its exact
+The build fails if any firmware environment lacks its exact
 target/flavor pair, has an invalid ESP checksum/hash, or disagrees with the
 generated build identity. `tools/ota_image_identity.py` performs the same
 whole-artifact check without opening a serial port.

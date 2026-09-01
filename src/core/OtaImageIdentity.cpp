@@ -40,7 +40,13 @@ const char *canonicalHardwareTarget(const char *target) {
 }
 
 const char *physicalTargetForImageTarget(const char *target) {
-    return strcmp(target, kTarget7Diagnostic) == 0 ? kTarget7 : target;
+    if (strcmp(target, kTarget43Diagnostic) == 0) {
+        return kTarget43;
+    }
+    if (strcmp(target, kTarget7Diagnostic) == 0) {
+        return kTarget7;
+    }
+    return target;
 }
 
 const char *canonicalFlavor(const char *flavor) {
@@ -78,6 +84,9 @@ const char *canonicalImageTarget(const uint8_t *field) {
     if (matchesTargetField(field, kTarget7)) {
         return kTarget7;
     }
+    if (matchesTargetField(field, kTarget43Diagnostic)) {
+        return kTarget43Diagnostic;
+    }
     if (matchesTargetField(field, kTarget7Diagnostic)) {
         return kTarget7Diagnostic;
     }
@@ -113,11 +122,6 @@ void PrefixValidator::reset(const char *expected_target,
     status_ = expected_target_ ? (expected_flavor_ ? Status::NeedMore
                                                    : Status::InvalidFlavor)
                                : Status::InvalidTarget;
-    if (status_ == Status::NeedMore &&
-        strcmp(expected_flavor_, kFlavorDiagnostic) == 0 &&
-        strcmp(expected_target_, kTarget7) != 0) {
-        status_ = Status::InvalidFlavor;
-    }
     if (status_ == Status::NeedMore && image_size_ < kPrefixSize) {
         status_ = Status::Truncated;
     }
@@ -221,6 +225,8 @@ void PrefixValidator::validate() {
          strcmp(image_flavor, kFlavorProduction) == 0) ||
         (strcmp(image_target, kTarget7) == 0 &&
          strcmp(image_flavor, kFlavorProduction) == 0) ||
+        (strcmp(image_target, kTarget43Diagnostic) == 0 &&
+         strcmp(image_flavor, kFlavorDiagnostic) == 0) ||
         (strcmp(image_target, kTarget7Diagnostic) == 0 &&
          strcmp(image_flavor, kFlavorDiagnostic) == 0);
     if (!valid_pair) {

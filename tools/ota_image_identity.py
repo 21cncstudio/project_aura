@@ -26,7 +26,11 @@ PREFIX_SIZE = FLAVOR_DESCRIPTOR_OFFSET + FLAVOR_DESCRIPTOR_SIZE
 MAGIC = b"AURA_OTA_TARGET\0"
 FLAVOR_MAGIC = b"AURA_OTA_FLAVOR\0"
 TARGETS = ("aura-aq-v1", "aura-aq-7-v1")
-IMAGE_TARGETS = TARGETS + ("aura-aq-7-diag-v1",)
+DIAGNOSTIC_TARGETS = {
+    "aura-aq-diag-v1": "aura-aq-v1",
+    "aura-aq-7-diag-v1": "aura-aq-7-v1",
+}
+IMAGE_TARGETS = TARGETS + tuple(DIAGNOSTIC_TARGETS)
 FLAVORS = ("production", "diagnostic")
 
 
@@ -45,9 +49,7 @@ def parse_prefix(
     """Mirror the firmware's bounded, fail-closed compatibility precheck."""
     if expected_target not in TARGETS:
         raise OtaIdentityError("INVALID_TARGET", "Unknown expected hardware target")
-    if expected_flavor not in FLAVORS or (
-        expected_flavor == "diagnostic" and expected_target != "aura-aq-7-v1"
-    ):
+    if expected_flavor not in FLAVORS:
         raise OtaIdentityError("INVALID_FLAVOR", "Unknown or impossible running firmware flavor")
     if image_size < PREFIX_SIZE or len(prefix) < PREFIX_SIZE:
         raise OtaIdentityError("TRUNCATED", "Image does not contain the complete OTA identity prefix")
@@ -77,7 +79,7 @@ def parse_prefix(
     target = next((candidate for candidate in IMAGE_TARGETS if field == candidate.encode("ascii").ljust(32, b"\0")), None)
     if target is None:
         raise OtaIdentityError("INVALID_TARGET", "Unknown or malformed Aura hardware target")
-    physical_target = "aura-aq-7-v1" if target == "aura-aq-7-diag-v1" else target
+    physical_target = DIAGNOSTIC_TARGETS.get(target, target)
     if physical_target != expected_target:
         raise OtaIdentityError("TARGET_MISMATCH", f"BIN targets {target}, expected {expected_target}")
 
@@ -94,7 +96,7 @@ def parse_prefix(
 
     valid_pair = (
         (target in TARGETS and flavor == "production")
-        or (target == "aura-aq-7-diag-v1" and flavor == "diagnostic")
+        or (target in DIAGNOSTIC_TARGETS and flavor == "diagnostic")
     )
     if not valid_pair:
         raise OtaIdentityError("INCONSISTENT_IDENTITY", "OTA image target and firmware flavor are inconsistent")
@@ -147,7 +149,7 @@ def inspect_image(path: Path | str, expected_target: str, expected_flavor: str) 
     return {
         "schema": "project-aura.ota-image-identity.v2",
         "image": str(path.resolve()),
-        "hardware_target": "aura-aq-7-v1" if target == "aura-aq-7-diag-v1" else target,
+        "hardware_target": DIAGNOSTIC_TARGETS.get(target, target),
         "ota_image_target": target,
         "firmware_flavor": flavor,
         "descriptor_offset": DESCRIPTOR_OFFSET,

@@ -82,30 +82,38 @@ class OtaImageIdentityTests(unittest.TestCase):
                 parse_prefix(image[:PREFIX_SIZE], len(image), target, "production"),
             )
             self.assertTrue(validate_image_integrity(image))
-        diagnostic = make_image("aura-aq-7-diag-v1", "diagnostic")
-        self.assertEqual(
-            ("aura-aq-7-diag-v1", "diagnostic"),
-            parse_prefix(
-                diagnostic[:PREFIX_SIZE],
-                len(diagnostic),
-                "aura-aq-7-v1",
-                "diagnostic",
-            ),
-        )
+        for target, physical_target in (
+            ("aura-aq-diag-v1", "aura-aq-v1"),
+            ("aura-aq-7-diag-v1", "aura-aq-7-v1"),
+        ):
+            diagnostic = make_image(target, "diagnostic")
+            self.assertEqual(
+                (target, "diagnostic"),
+                parse_prefix(
+                    diagnostic[:PREFIX_SIZE],
+                    len(diagnostic),
+                    physical_target,
+                    "diagnostic",
+                ),
+            )
 
     def test_production_rejects_diagnostic_but_diagnostic_can_exit_to_production(self):
-        diagnostic = make_image("aura-aq-7-diag-v1", "diagnostic")
-        self.assert_rejected("FLAVOR_MISMATCH", diagnostic, "aura-aq-7-v1")
-        production = make_image("aura-aq-7-v1", "production")
-        self.assertEqual(
-            ("aura-aq-7-v1", "production"),
-            parse_prefix(
-                production[:PREFIX_SIZE],
-                len(production),
-                "aura-aq-7-v1",
-                "diagnostic",
-            ),
-        )
+        for diagnostic_target, physical_target in (
+            ("aura-aq-diag-v1", "aura-aq-v1"),
+            ("aura-aq-7-diag-v1", "aura-aq-7-v1"),
+        ):
+            diagnostic = make_image(diagnostic_target, "diagnostic")
+            self.assert_rejected("FLAVOR_MISMATCH", diagnostic, physical_target)
+            production = make_image(physical_target, "production")
+            self.assertEqual(
+                (physical_target, "production"),
+                parse_prefix(
+                    production[:PREFIX_SIZE],
+                    len(production),
+                    physical_target,
+                    "diagnostic",
+                ),
+            )
 
     def test_old_production_guard_rejects_new_diagnostic_on_first_transition(self):
         production = make_image("aura-aq-7-v1", "production")
@@ -130,6 +138,12 @@ class OtaImageIdentityTests(unittest.TestCase):
             "aura-aq-7-v1",
             "diagnostic",
         )
+        self.assert_rejected(
+            "INCONSISTENT_IDENTITY",
+            make_image("aura-aq-diag-v1", "production"),
+            "aura-aq-v1",
+            "diagnostic",
+        )
 
     def test_checksum_without_appended_hash(self):
         image = make_image(append_hash=False)
@@ -138,6 +152,16 @@ class OtaImageIdentityTests(unittest.TestCase):
     def test_both_cross_model_directions_rejected(self):
         self.assert_rejected("TARGET_MISMATCH", make_image(), "aura-aq-7-v1")
         self.assert_rejected("TARGET_MISMATCH", make_image("aura-aq-7-v1"))
+        self.assert_rejected(
+            "TARGET_MISMATCH",
+            make_image("aura-aq-diag-v1", "diagnostic"),
+            "aura-aq-7-v1",
+        )
+        self.assert_rejected(
+            "TARGET_MISMATCH",
+            make_image("aura-aq-7-diag-v1", "diagnostic"),
+            "aura-aq-v1",
+        )
 
     def test_unknown_current_or_image_target_rejected(self):
         self.assert_rejected("INVALID_TARGET", make_image(), "unknown")
@@ -146,9 +170,6 @@ class OtaImageIdentityTests(unittest.TestCase):
     def test_unknown_current_or_image_flavor_rejected(self):
         self.assert_rejected("INVALID_FLAVOR", make_image(), expected_flavor="unknown")
         self.assert_rejected("INVALID_FLAVOR", make_image(flavor="unknown"))
-        self.assert_rejected(
-            "INVALID_FLAVOR", make_image(), "aura-aq-v1", "diagnostic"
-        )
 
     def test_legacy_target_only_image_is_rejected_by_new_guard(self):
         self.assert_rejected("MISSING_FLAVOR_METADATA", make_image(flavor=None))
@@ -246,6 +267,18 @@ class OtaImageIdentityTests(unittest.TestCase):
             self.assertTrue(result["esp_hash_verified"])
             with self.assertRaises(OtaIdentityError):
                 inspect_image(path, "aura-aq-v1", "production")
+
+            diagnostic_path = Path(temp) / "diagnostic-name-is-not-trusted.bin"
+            diagnostic = make_image("aura-aq-diag-v1", "diagnostic")
+            diagnostic_path.write_bytes(diagnostic)
+            diagnostic_result = inspect_image(
+                diagnostic_path, "aura-aq-v1", "diagnostic"
+            )
+            self.assertEqual("aura-aq-v1", diagnostic_result["hardware_target"])
+            self.assertEqual(
+                "aura-aq-diag-v1", diagnostic_result["ota_image_target"]
+            )
+            self.assertEqual("diagnostic", diagnostic_result["firmware_flavor"])
 
 
 if __name__ == "__main__":

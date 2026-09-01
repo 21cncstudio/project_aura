@@ -21,6 +21,7 @@ class FakeSconsEnvironment(dict):
         environment: str = "project_aura",
         gt911_address: str = "0x14",
         startup_diagnostics: str = "false",
+        periodic_memory_monitor_enabled: str = "true",
     ):
         super().__init__(PROJECT_DIR=str(project_dir))
         self._build_dir = build_dir
@@ -31,6 +32,7 @@ class FakeSconsEnvironment(dict):
             "custom_build_id_suffix": suffix,
             "custom_gt911_address": gt911_address,
             "custom_gt911_startup_diagnostics": startup_diagnostics,
+            "custom_periodic_memory_monitor_enabled": periodic_memory_monitor_enabled,
         }
 
     def GetProjectOption(self, name, default=""):
@@ -102,6 +104,33 @@ class BuildIdScriptTests(unittest.TestCase):
                     startup_diagnostics="true",
                 )
 
+    def test_memory_monitor_isolation_has_a_distinct_43_diagnostic_identity(self):
+        def git_result(command, **_kwargs):
+            return " M memory.cpp" if command[1] == "status" else "5383b77"
+
+        with tempfile.TemporaryDirectory() as temp_dir, patch(
+            "subprocess.check_output", side_effect=git_result
+        ):
+            temp_root = Path(temp_dir)
+            header, identity_json = run_build_id_script(
+                temp_root,
+                temp_root / "build-memory-isolation",
+                environment="project_aura_4_3_memlog_off",
+                periodic_memory_monitor_enabled="false",
+            )
+            self.assertIn("5383b77-memlog-off-diag-dirty", header)
+            identity = json.loads(identity_json)
+            self.assertTrue(identity["diagnostic_only"])
+            self.assertEqual("4_3", identity["hardware_profile"])
+            self.assertEqual("aura-aq-v1", identity["hardware_target"])
+            self.assertEqual("diagnostic", identity["firmware_flavor"])
+            self.assertEqual("aura-aq-diag-v1", identity["ota_image_target"])
+            self.assertEqual("0x14", identity["gt911_address"])
+            self.assertFalse(identity["gt911_startup_diagnostics"])
+            self.assertFalse(identity["periodic_memory_monitor_enabled"])
+            self.assertIn('APP_FIRMWARE_FLAVOR "diagnostic"', header)
+            self.assertIn('APP_OTA_IMAGE_TARGET "aura-aq-diag-v1"', header)
+
     def test_address_and_diagnostics_follow_the_split_profiles(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir)
@@ -124,6 +153,22 @@ class BuildIdScriptTests(unittest.TestCase):
                 run_build_id_script(
                     temp_root, temp_root / "build-invalid-diag-flag",
                     startup_diagnostics="sometimes",
+                )
+            with self.assertRaisesRegex(RuntimeError, "restricted to the 4.3-inch"):
+                run_build_id_script(
+                    temp_root,
+                    temp_root / "build-seven-memory-isolation",
+                    profile="7_dual_i2c_scl6",
+                    target="aura-aq-7-v1",
+                    suffix="7-dual-i2c-scl6",
+                    gt911_address="0x5D",
+                    periodic_memory_monitor_enabled="false",
+                )
+            with self.assertRaisesRegex(RuntimeError, "must be true or false"):
+                run_build_id_script(
+                    temp_root,
+                    temp_root / "build-invalid-memory-flag",
+                    periodic_memory_monitor_enabled="sometimes",
                 )
 
     def test_untracked_build_input_marks_artifact_dirty(self):
@@ -158,6 +203,7 @@ class BuildIdScriptTests(unittest.TestCase):
             self.assertEqual("project_aura", clean_identity_payload["environment"])
             self.assertEqual("0x14", clean_identity_payload["gt911_address"])
             self.assertFalse(clean_identity_payload["gt911_startup_diagnostics"])
+            self.assertTrue(clean_identity_payload["periodic_memory_monitor_enabled"])
             self.assertNotIn("diagnostic_only", clean_identity_payload)
 
             source_dir = project / "src"
@@ -207,6 +253,7 @@ class BuildIdScriptTests(unittest.TestCase):
             self.assertEqual("7_dual_i2c_scl6", identity_payload["hardware_profile"])
             self.assertEqual("0x5d", identity_payload["gt911_address"])
             self.assertFalse(identity_payload["gt911_startup_diagnostics"])
+            self.assertTrue(identity_payload["periodic_memory_monitor_enabled"])
             self.assertEqual("production", identity_payload["firmware_flavor"])
             self.assertEqual("aura-aq-7-v1", identity_payload["ota_image_target"])
             self.assertNotIn("diagnostic_only", identity_payload)

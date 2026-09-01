@@ -505,6 +505,36 @@ void test_production_7_rejects_diagnostic_bin_before_flash() {
         h.state.snapshot().error.c_str(), "Nothing was written"));
 }
 
+void test_production_43_rejects_diagnostic_bin_before_flash() {
+    Harness h("aura-aq-v1", "production");
+    auto image = image_for("aura-aq-diag-v1", "diagnostic");
+    const uint32_t id = h.start(image.size(), "renamed-production.bin");
+    h.write(image, 0, image.size());
+    h.finish();
+    assert_no_flash_calls();
+    assert_failure(h, "FIRMWARE_FLAVOR_MISMATCH", 409, id);
+    TEST_ASSERT_NOT_NULL(std::strstr(
+        h.state.snapshot().error.c_str(), "diagnostic-only firmware"));
+    TEST_ASSERT_NOT_NULL(std::strstr(
+        h.state.snapshot().error.c_str(), "Nothing was written"));
+}
+
+void test_7_device_reports_43_diagnostic_as_43_model() {
+    Harness h("aura-aq-7-v1", "production");
+    auto image = image_for("aura-aq-diag-v1", "diagnostic");
+    const uint32_t id = h.start(image.size(), "renamed-7-inch.bin");
+    h.write(image, 0, image.size());
+    h.finish();
+    assert_no_flash_calls();
+    assert_failure(h, "HARDWARE_TARGET_MISMATCH", 409, id);
+    TEST_ASSERT_NOT_NULL(std::strstr(
+        h.state.snapshot().error.c_str(), "firmware is for Aura AQ 4.3\""));
+    TEST_ASSERT_NOT_NULL(std::strstr(
+        h.state.snapshot().error.c_str(), "device is Aura AQ 7\""));
+    TEST_ASSERT_NOT_NULL(std::strstr(
+        h.state.snapshot().error.c_str(), "Nothing was written"));
+}
+
 void test_diagnostic_7_accepts_diagnostic_update_and_production_exit() {
     {
         Harness h("aura-aq-7-v1", "diagnostic");
@@ -516,6 +546,23 @@ void test_diagnostic_7_accepts_diagnostic_update_and_production_exit() {
     {
         Harness h("aura-aq-7-v1", "diagnostic");
         auto image = image_for("aura-aq-7-v1", "production");
+        h.start();
+        h.write(image, 0, image.size());
+        assert_success(h, image);
+    }
+}
+
+void test_diagnostic_43_accepts_diagnostic_update_and_production_exit() {
+    {
+        Harness h("aura-aq-v1", "diagnostic");
+        auto image = image_for("aura-aq-diag-v1", "diagnostic");
+        h.start();
+        h.write(image, 0, image.size());
+        assert_success(h, image);
+    }
+    {
+        Harness h("aura-aq-v1", "diagnostic");
+        auto image = image_for("aura-aq-v1", "production");
         h.start();
         h.write(image, 0, image.size());
         assert_success(h, image);
@@ -1224,7 +1271,10 @@ int main(int, char **) {
     RUN_TEST(test_exact_prefix_boundary_and_later_chunks_keep_byte_order);
     RUN_TEST(test_7_device_rejects_43_even_with_renamed_file_and_forged_form_target);
     RUN_TEST(test_43_device_rejects_7_even_with_renamed_file_and_forged_form_target);
+    RUN_TEST(test_production_43_rejects_diagnostic_bin_before_flash);
     RUN_TEST(test_production_7_rejects_diagnostic_bin_before_flash);
+    RUN_TEST(test_7_device_reports_43_diagnostic_as_43_model);
+    RUN_TEST(test_diagnostic_43_accepts_diagnostic_update_and_production_exit);
     RUN_TEST(test_diagnostic_7_accepts_diagnostic_update_and_production_exit);
     RUN_TEST(test_new_guard_rejects_legacy_target_only_bin_before_flash);
     RUN_TEST(test_legacy_bin_without_fixed_metadata_is_rejected_despite_target_elsewhere);

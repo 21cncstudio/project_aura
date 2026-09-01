@@ -306,7 +306,8 @@ void fail_upload(WebOtaHandlers::Runtime &runtime, const String &error,
 }
 
 const char *hardware_model_name(const char *target) {
-    if (target && strcmp(target, OtaImageIdentity::kTarget43) == 0) {
+    if (target && (strcmp(target, OtaImageIdentity::kTarget43) == 0 ||
+                   strcmp(target, OtaImageIdentity::kTarget43Diagnostic) == 0)) {
         return "Aura AQ 4.3\"";
     }
     if (target && (strcmp(target, OtaImageIdentity::kTarget7) == 0 ||
