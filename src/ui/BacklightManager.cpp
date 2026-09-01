@@ -116,7 +116,7 @@ void BacklightManager::attachBacklight(esp_panel::drivers::Backlight *backlight)
     startup_frame_ready_.store(false, std::memory_order_release);
     schedule_boot_grace_until_ms_ = millis() + Config::BACKLIGHT_BOOT_GRACE_MS;
     // Startup darkness must not be treated as an ordinary touch-to-wake sleep.
-    lvgl_port_set_wake_touch_probe(false);
+    lvgl_port_set_touch_mode(LVGL_PORT_TOUCH_MODE_SUPPRESSED);
 }
 
 void BacklightManager::markStartupFrameReady() {
@@ -374,7 +374,9 @@ bool BacklightManager::processGuardedWake(uint32_t now_ms) {
         guarded_wake_settle_pending_ = true;
         guarded_wake_settle_succeeded_ = wake_succeeded;
         block_input_until_ms_ = switched_ms + Config::BACKLIGHT_WAKE_BLOCK_MS;
-        lvgl_port_block_touch_read(Config::BACKLIGHT_WAKE_BLOCK_MS);
+        lvgl_port_block_touch_read(
+            Config::BACKLIGHT_WAKE_BLOCK_MS,
+            wake_event == BacklightWakeBreadcrumbs::Event::TouchWake);
         consumeInput();
         pending_wake_event_ =
             !wake_succeeded && pending_command_.active() &&
@@ -600,7 +602,9 @@ bool BacklightManager::setOnWithGateHeld(
                 true, true, 0, sample_shared_i2c_lines());
             BacklightWakeBreadcrumbs::markWakeProbeUpdateBegin();
         }
-        const bool wake_probe_updated = lvgl_port_set_wake_touch_probe(!on);
+        const bool wake_probe_updated = lvgl_port_set_touch_mode(
+            on ? LVGL_PORT_TOUCH_MODE_SCREEN_ON
+               : LVGL_PORT_TOUCH_MODE_DARK_WAKE);
         if (trace_wake) {
             BacklightWakeBreadcrumbs::markWakeProbeUpdateReturned(
                 sample_shared_i2c_lines());
@@ -646,7 +650,8 @@ bool BacklightManager::setOnWithGateHeld(
         if (trace_wake) {
             BacklightWakeBreadcrumbs::markTouchIrqMaskBegin();
         }
-        const bool touch_irq_masked = lvgl_port_set_wake_touch_probe(false);
+        const bool touch_irq_masked =
+            lvgl_port_set_touch_mode(LVGL_PORT_TOUCH_MODE_SUPPRESSED);
         if (trace_wake) {
             BacklightWakeBreadcrumbs::markTouchIrqMaskReturned();
         }
@@ -700,8 +705,9 @@ bool BacklightManager::setOnWithGateHeld(
         BacklightWakeBreadcrumbs::markWakeProbeUpdateBegin();
     }
     backlight_on_ = transition.actual_on;
-    const bool wake_probe_updated =
-        lvgl_port_set_wake_touch_probe(transition.wake_probe_enabled);
+    const bool wake_probe_updated = lvgl_port_set_touch_mode(
+        transition.actual_on ? LVGL_PORT_TOUCH_MODE_SCREEN_ON
+                             : LVGL_PORT_TOUCH_MODE_DARK_WAKE);
     if (trace_wake) {
         BacklightWakeBreadcrumbs::markWakeProbeUpdateReturned(
             sample_shared_i2c_lines());
@@ -795,13 +801,19 @@ bool BacklightManager::finalizeDisabledSharedBus(
     const bool release_permitted =
         BacklightStatePolicy::mayReleaseAfterSuppressedAbort(
             off_outcome, pending_cleared);
+    const bool touch_disabled =
+        lvgl_port_set_touch_mode(LVGL_PORT_TOUCH_MODE_DISABLED);
+    const bool finalization_succeeded = release_permitted && touch_disabled;
     if (defer_guard_release) {
-        guarded_wake_release_permitted_ = release_permitted;
+        guarded_wake_release_permitted_ = finalization_succeeded;
     }
     block_input_until_ms_ = 0;
-    lvgl_port_set_wake_touch_probe(false);
+    if (!touch_disabled) {
+        LOGE("Backlight",
+             "touch IRQ could not be confirmed disabled after shared I2C drain");
+    }
     LOGW("Backlight", "shared I2C bus offline; backlight operations drained");
-    return release_permitted;
+    return finalization_succeeded;
 }
 
 void BacklightManager::storeSchedulePrefs() {
@@ -1094,7 +1106,9 @@ void BacklightManager::poll(bool lvgl_ready) {
             }
             if (retry_succeeded && retry_target_on && !was_on) {
                 block_input_until_ms_ = now_ms + Config::BACKLIGHT_WAKE_BLOCK_MS;
-                lvgl_port_block_touch_read(Config::BACKLIGHT_WAKE_BLOCK_MS);
+                lvgl_port_block_touch_read(
+                    Config::BACKLIGHT_WAKE_BLOCK_MS,
+                    recovery_event == BacklightWakeBreadcrumbs::Event::TouchWake);
                 consumeInput();
             }
         }

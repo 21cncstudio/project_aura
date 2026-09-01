@@ -903,6 +903,9 @@ void loop()
         ota_window_active = false;
         if (lvgl_runtime_available &&
             (ota_pause_requested || ota_lvgl_quiesced || lvgl_port_is_paused())) {
+            // Publish the release gate before the display task can resume.
+            // Otherwise one LVGL handler may run between resume and the block.
+            lvgl_port_block_touch_read(Config::BACKLIGHT_WAKE_BLOCK_MS);
             lvgl_port_request_resume();
             ota_resume_pending = true;
         } else if (lvgl_runtime_available) {

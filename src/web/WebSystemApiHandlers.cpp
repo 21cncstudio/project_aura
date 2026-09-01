@@ -136,6 +136,38 @@ void handleDiagData(WebHandlerContext &context,
             display.startup_lock_miss_count;
         payload.display.touch_read_errors = display.touch_read_error_count;
         payload.display.touch_offline = display.touch_offline;
+        payload.display.touch_polling.mode = display.touch_mode;
+        payload.display.touch_polling.irq_registered =
+            display.touch_irq_registered;
+        payload.display.touch_polling.irq_armed = display.touch_irq_armed;
+        payload.display.touch_polling.irq_config_verified =
+            display.touch_irq_config_verified;
+        payload.display.touch_polling.irq_config_mode =
+            display.touch_irq_config_mode;
+        payload.display.touch_polling.idle_enabled =
+            display.touch_screen_idle_enabled;
+        payload.display.touch_polling.idle_active =
+            display.touch_screen_idle_active;
+        payload.display.touch_polling.fail_safe =
+            display.touch_screen_idle_fail_safe;
+        payload.display.touch_polling.status_reads =
+            display.touch_status_read_count;
+        payload.display.touch_polling.full_reads =
+            display.touch_full_read_count;
+        payload.display.touch_polling.skipped_callbacks =
+            display.touch_idle_skip_count;
+        payload.display.touch_polling.idle_entries =
+            display.touch_idle_entry_count;
+        payload.display.touch_polling.irq_exits =
+            display.touch_idle_irq_exit_count;
+        payload.display.touch_polling.fallback_probes =
+            display.touch_idle_fallback_probe_count;
+        payload.display.touch_polling.missed_irq_presses =
+            display.touch_idle_missed_irq_press_count;
+        payload.display.touch_polling.irq_arm_failures =
+            display.touch_irq_arm_failure_count;
+        payload.display.touch_polling.irq_no_frame =
+            display.touch_irq_no_frame_count;
         payload.display.screen_flip_180 = display.screen_flip_180;
         payload.display.rotation_pipeline_active =
             display.rotation_pipeline_active;

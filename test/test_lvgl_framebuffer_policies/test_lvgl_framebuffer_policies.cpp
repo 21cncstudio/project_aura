@@ -115,23 +115,112 @@ void test_invalid_or_unowned_state_fails_closed() {
     TEST_ASSERT_FALSE(RotatedFramebufferPolicy::allDistinct(0, 0, 2));
 }
 
-void test_release_gate_clears_only_on_confirmed_release() {
+void test_release_gate_explicit_release_always_opens() {
+    using TouchReleaseGatePolicy::Decision;
+    using TouchReleaseGatePolicy::Gate;
     using TouchReleaseGatePolicy::ProbeResult;
-    TEST_ASSERT_FALSE(TouchReleaseGatePolicy::keepWaiting(ProbeResult::Released));
-    TEST_ASSERT_TRUE(TouchReleaseGatePolicy::keepWaiting(ProbeResult::Pressed));
-    TEST_ASSERT_TRUE(TouchReleaseGatePolicy::keepWaiting(ProbeResult::Error));
-    TEST_ASSERT_EQUAL_INT(
-        static_cast<int>(ProbeResult::Released),
-        static_cast<int>(TouchReleaseGatePolicy::classify(0)));
-    TEST_ASSERT_EQUAL_INT(
-        static_cast<int>(ProbeResult::Pressed),
-        static_cast<int>(TouchReleaseGatePolicy::classify(1)));
-    TEST_ASSERT_EQUAL_INT(
-        static_cast<int>(ProbeResult::Error),
-        static_cast<int>(TouchReleaseGatePolicy::classify(-1)));
-    TEST_ASSERT_TRUE(TouchReleaseGatePolicy::readSucceeded(ProbeResult::Released));
-    TEST_ASSERT_TRUE(TouchReleaseGatePolicy::readSucceeded(ProbeResult::Pressed));
-    TEST_ASSERT_FALSE(TouchReleaseGatePolicy::readSucceeded(ProbeResult::Error));
+
+    Gate gate;
+    gate.begin(false, true);
+    TEST_ASSERT_EQUAL(Decision::Open,
+                      gate.observe(ProbeResult::Released, true, 100));
+    TEST_ASSERT_FALSE(gate.waiting());
+}
+
+void test_release_gate_quiet_fallback_needs_two_spaced_samples() {
+    using TouchReleaseGatePolicy::Decision;
+    using TouchReleaseGatePolicy::Gate;
+    using TouchReleaseGatePolicy::ProbeResult;
+
+    Gate gate;
+    gate.begin(true, false);
+    TEST_ASSERT_TRUE(gate.quietFallbackAllowed());
+    TEST_ASSERT_EQUAL(Decision::Hold,
+                      gate.observe(ProbeResult::NoData, false, 100));
+    TEST_ASSERT_EQUAL(Decision::Hold,
+                      gate.observe(ProbeResult::NoData, false, 139));
+    TEST_ASSERT_EQUAL(Decision::Open,
+                      gate.observe(ProbeResult::NoData, false, 140));
+    TEST_ASSERT_FALSE(gate.waiting());
+}
+
+void test_release_gate_quiet_fallback_requires_safe_begin_state() {
+    using TouchReleaseGatePolicy::Decision;
+    using TouchReleaseGatePolicy::Gate;
+    using TouchReleaseGatePolicy::ProbeResult;
+
+    Gate cached_press;
+    cached_press.begin(false, false);
+    TEST_ASSERT_FALSE(cached_press.quietFallbackAllowed());
+    TEST_ASSERT_EQUAL(Decision::Hold,
+                      cached_press.observe(ProbeResult::NoData, false, 100));
+    TEST_ASSERT_EQUAL(Decision::Hold,
+                      cached_press.observe(ProbeResult::NoData, false, 200));
+
+    Gate active_interrupt;
+    active_interrupt.begin(true, true);
+    TEST_ASSERT_FALSE(active_interrupt.quietFallbackAllowed());
+    TEST_ASSERT_EQUAL(
+        Decision::Hold,
+        active_interrupt.observe(ProbeResult::NoData, false, 100));
+    TEST_ASSERT_EQUAL(
+        Decision::Hold,
+        active_interrupt.observe(ProbeResult::NoData, false, 200));
+}
+
+void test_release_gate_press_requires_later_explicit_release() {
+    using TouchReleaseGatePolicy::Decision;
+    using TouchReleaseGatePolicy::Gate;
+    using TouchReleaseGatePolicy::ProbeResult;
+
+    Gate gate;
+    gate.begin(true, false);
+    TEST_ASSERT_EQUAL(Decision::Hold,
+                      gate.observe(ProbeResult::Pressed, true, 100));
+    TEST_ASSERT_FALSE(gate.quietFallbackAllowed());
+    TEST_ASSERT_EQUAL(Decision::Hold,
+                      gate.observe(ProbeResult::NoData, false, 200));
+    TEST_ASSERT_EQUAL(Decision::Hold,
+                      gate.observe(ProbeResult::NoData, false, 300));
+    TEST_ASSERT_EQUAL(Decision::Open,
+                      gate.observe(ProbeResult::Released, false, 301));
+}
+
+void test_release_gate_error_and_active_interrupt_reset_quiet_window() {
+    using TouchReleaseGatePolicy::Decision;
+    using TouchReleaseGatePolicy::Gate;
+    using TouchReleaseGatePolicy::ProbeResult;
+
+    Gate gate;
+    gate.begin(true, false);
+    TEST_ASSERT_EQUAL(Decision::Hold,
+                      gate.observe(ProbeResult::NoData, false, 100));
+    TEST_ASSERT_EQUAL(Decision::Hold,
+                      gate.observe(ProbeResult::Error, false, 140));
+    TEST_ASSERT_EQUAL(Decision::Hold,
+                      gate.observe(ProbeResult::NoData, false, 180));
+    TEST_ASSERT_EQUAL(Decision::Hold,
+                      gate.observe(ProbeResult::NoData, true, 220));
+    TEST_ASSERT_EQUAL(Decision::Hold,
+                      gate.observe(ProbeResult::NoData, false, 260));
+    TEST_ASSERT_EQUAL(Decision::Open,
+                      gate.observe(ProbeResult::NoData, false, 300));
+}
+
+void test_release_gate_quiet_interval_is_millis_wrap_safe() {
+    using TouchReleaseGatePolicy::Decision;
+    using TouchReleaseGatePolicy::Gate;
+    using TouchReleaseGatePolicy::ProbeResult;
+
+    Gate gate;
+    gate.begin(true, false);
+    TEST_ASSERT_EQUAL(
+        Decision::Hold,
+        gate.observe(ProbeResult::NoData, false, UINT32_MAX - 19U));
+    TEST_ASSERT_EQUAL(Decision::Hold,
+                      gate.observe(ProbeResult::NoData, false, 19U));
+    TEST_ASSERT_EQUAL(Decision::Open,
+                      gate.observe(ProbeResult::NoData, false, 20U));
 }
 
 int main(int, char **) {
@@ -142,6 +231,11 @@ int main(int, char **) {
     RUN_TEST(test_flip_exit_restores_active_and_safe_offscreen_renderer);
     RUN_TEST(test_flip_enable_disable_cycles_preserve_safe_ownership);
     RUN_TEST(test_invalid_or_unowned_state_fails_closed);
-    RUN_TEST(test_release_gate_clears_only_on_confirmed_release);
+    RUN_TEST(test_release_gate_explicit_release_always_opens);
+    RUN_TEST(test_release_gate_quiet_fallback_needs_two_spaced_samples);
+    RUN_TEST(test_release_gate_quiet_fallback_requires_safe_begin_state);
+    RUN_TEST(test_release_gate_press_requires_later_explicit_release);
+    RUN_TEST(test_release_gate_error_and_active_interrupt_reset_quiet_window);
+    RUN_TEST(test_release_gate_quiet_interval_is_millis_wrap_safe);
     return UNITY_END();
 }

@@ -63,6 +63,7 @@ private:
 
 enum class Sample : uint8_t {
     Error = 0,
+    NoData,
     Released,
     Pressed,
 };
@@ -84,7 +85,13 @@ public:
     bool shouldProbe(bool interrupt_gated,
                      bool interrupt_pending,
                      uint32_t now_ms) const;
-    void recordProbe(Sample sample, uint32_t now_ms);
+    void recordProbe(Sample sample,
+                     uint32_t now_ms,
+                     bool selected_by_fresh_interrupt = false);
+
+    // A GT911 edge can precede the ready bit. Consume at most one deferred
+    // callback-speed retry for that edge before returning to sparse probing.
+    bool takeFastRetry();
 
     bool hasPendingWake() const { return pending_wake_; }
     bool takePendingWake();
@@ -93,6 +100,7 @@ private:
     bool enabled_ = false;
     bool armed_ = true;
     bool pending_wake_ = false;
+    bool fast_retry_pending_ = false;
     uint32_t last_probe_ms_ = 0;
 };
 

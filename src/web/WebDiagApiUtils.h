@@ -31,6 +31,26 @@ struct I2cBusPayload {
     int scl_gpio = -1;
 };
 
+struct TouchPollingPayload {
+    const char *mode = "unknown";
+    bool irq_registered = false;
+    bool irq_armed = false;
+    bool irq_config_verified = false;
+    int8_t irq_config_mode = -1;
+    bool idle_enabled = false;
+    bool idle_active = false;
+    bool fail_safe = false;
+    uint32_t status_reads = 0;
+    uint32_t full_reads = 0;
+    uint32_t skipped_callbacks = 0;
+    uint32_t idle_entries = 0;
+    uint32_t irq_exits = 0;
+    uint32_t fallback_probes = 0;
+    uint32_t missed_irq_presses = 0;
+    uint32_t irq_arm_failures = 0;
+    uint32_t irq_no_frame = 0;
+};
+
 // Runtime LVGL/RGB observations. The refresh callback name is supplied by the
 // firmware so a bounce-buffer completion is never presented as physical VSYNC.
 struct DisplayPayload {
@@ -51,6 +71,7 @@ struct DisplayPayload {
     uint32_t startup_logo_lock_misses = 0;
     uint32_t touch_read_errors = 0;
     bool touch_offline = false;
+    TouchPollingPayload touch_polling{};
     bool screen_flip_180 = false;
     bool rotation_pipeline_active = false;
     uint32_t rotated_copy_switch_count = 0;

@@ -1,117 +1,162 @@
-# Screen-on idle touch polling proposal
+# Screen-on adaptive touch polling implementation and qualification note
 
-Date: 2026-08-31. Status: **PENDING DECISION**.
+Date: 2026-09-01. Status: **IMPLEMENTED LOCALLY, NOT HARDWARE QUALIFIED**.
 
-This document records a read-only review and a proposed next change. The user
-has not yet selected idle touch polling for the current candidate. No source,
-IRQ handling, polling interval, I2C frequency, address or wiring was changed
-for this proposal. It does not authorize a build installation, reset, serial
-session or device access. COM8 remains excluded.
+The adaptive screen-on GT911 polling change was prepared locally on
+`main` in `D:\21cncstudio\project_aura\tmp\worktrees\aura-post-115-clean`.
+Its immediate baseline was `f7eff122a13d370686ee8d8850007b4837fabb5e`.
+This implementation has
+not been flashed, installed on either board or validated on hardware. It has
+not been pushed, published or packaged as a release.
 
-Continue in `tmp/worktrees/aura-post-115-clean`, `main` at `5383b77` with the
-existing local OTA, GT911, diagnostic-export and startup-backlight changes
-preserved. The main preparation notes and dated hardware handoff remain the
-entry points; this proposal does not replace their evidence or restrictions.
+The change does not alter the selected GT911 addresses, I2C frequencies,
+power control or wiring. The 4.3-inch production profile remains at `0x14` and
+the 7-inch dual-I2C production profile remains at `0x5D`, as established by
+the preceding `f7eff12` candidate. The tested BINs and release packages from
+earlier checkpoints remain separate and must not be overwritten.
 
-## Current behavior
+## Implemented behavior
 
-- The LVGL input timer uses `LV_INDEV_DEF_READ_PERIOD = 40 ms`, approximately
-  25 callbacks per second when scheduling and guards permit. The project does
-  not override that timer after registering the touch input device.
-- `LVGL_TOUCH_POLL_INTERVAL_MS = 12 ms` is a minimum interval inside the read
-  callback, not an independent 83 Hz polling task. On a normal screen-on
-  callback, `readPoints(..., 1, 0)` performs a read without waiting for the
-  vendor interrupt semaphore. A failed read has the existing single retry
-  after a requested 2 ms delay; startup quiet windows, recovery and runtime
-  admission can suppress reads.
-- The direct GT911 ISR is installed as a bounded latch but physically masked
-  during ordinary screen-on operation. The configured GPIO4 interrupt is
-  active-low; the vendor configures its falling edge. This software setting
-  is not a measurement of the controller's electrical signal or proof that
-  every physical contact will produce a captured interrupt.
-- A normal no-data GT911 read attempts both a status-register read and a
-  status-clear write. At approximately 25 successful polls per second, that
-  suggests approximately 50 I2C transactions per second while idle. This is
-  a code-derived estimate, **not measured bus utilization or power use**.
-- Screen-off wake is already separate: a fresh IRQ requests a probe on the
-  next input callback, with a 2500 ms fallback probe when no IRQ arrives.
-  Its policy reports RELEASED to LVGL and requires a valid touch to request
-  guarded wake. Wake blocking then avoids turning that contact into a click.
-  Reusing this policy unchanged for screen-on input would consume the first
-  intended user interaction.
+The LVGL input callback remains at 40 ms. The policy only decides whether a
+callback needs an I2C access; it does not slow LVGL input scheduling itself.
+The screen-on sequence is:
 
-Source locations reviewed:
+- During a press, after an error or IRQ exit, and for 350 ms after an explicit
+  release frame, the GT911 status is checked every 40 ms.
+- After that 350 ms fast tail, status checks run every 80 ms.
+- At 1000 ms from the explicit release, the code performs one final
+  status-aware boundary read before it can arm IRQ-led idle. A press or error
+  discovered at that boundary prevents arming. Only `NoData` or an explicit
+  release can enter idle, and only when the controller's interrupt
+  configuration has been read and verified as a supported edge mode. While
+  idle, the callback skips I2C until an IRQ is latched or the 200 ms
+  status-only fallback is due.
+- If IRQ registration or arming fails, or a fallback finds a press without a
+  corresponding IRQ, the boot switches to sticky `polling_only` fail-safe.
+  That mode retains 40 ms status polling and is not re-enabled automatically
+  later in the same boot.
 
-- [LVGL input interval](D:/21cncstudio/project_aura/tmp/worktrees/aura-post-115-clean/include/lv_conf.h:92).
-- [IRQ registration and masking](D:/21cncstudio/project_aura/tmp/worktrees/aura-post-115-clean/src/lvgl_v8_port.cpp:365).
-- [Touch read callback](D:/21cncstudio/project_aura/tmp/worktrees/aura-post-115-clean/src/lvgl_v8_port.cpp:1356).
-- [Dark-screen wake policy](D:/21cncstudio/project_aura/tmp/worktrees/aura-post-115-clean/src/core/TouchWakePolicy.h:17).
-- [Backlight transition IRQ plan](D:/21cncstudio/project_aura/tmp/worktrees/aura-post-115-clean/src/core/BacklightStatePolicy.h:73).
+The ISR remains a bounded latch. It performs no I2C, LVGL work, wait or vendor
+driver call. An IRQ-selected read leaves idle mode even if the GT911 ready bit
+has not appeared yet; the next 40 ms callback can then observe the frame. This
+avoids turning an early edge into a false release. A fallback read that races
+with a newly latched IRQ is reconciled as an IRQ exit rather than reported as
+a missed interrupt.
 
-Vendor behavior was checked in the cached, pinned ESP32_Display_Panel source,
-particularly `esp_panel_touch.cpp::readRawData` and
-`port/esp_lcd_touch_gt911.c::esp_lcd_touch_gt911_read_data`. No vendor/cache
-source was edited. The existing driver does not establish that every short
-press and release is queued until a later read.
+The implementation reads GT911 register `0x804D` and uses bits 1:0 as follows:
 
-## Proposed design for discussion
+| Mode | GT911 setting | Direct idle IRQ |
+| --- | --- | --- |
+| `0` | Rising edge | Supported after verification |
+| `1` | Falling edge | Supported after verification |
+| `2` | Low level | Disabled; 40 ms polling path |
+| `3` | High level | Disabled; 40 ms polling path |
 
-Keep the LVGL input timer and active touch polling unchanged. Add a separate
-screen-on idle state after a period of successful RELEASED samples. An initial
-proposal is **about 1 second of idle time and a 250 ms fallback**, but neither
-value is agreed or validated. A fallback deadline is checked by the existing
-40 ms callback, so actual servicing is quantized by that timer and scheduling.
+Level-triggered modes are deliberately not used by this first implementation.
+They select `polling_only` without by themselves setting the diagnostic
+`fail_safe` flag. An unreadable or invalid configuration selects the sticky
+safe polling path.
 
-While idle, arm the existing bounded interrupt latch and skip I2C reads until
-an interrupt is pending or the fallback deadline expires. The ISR must only
-signal the latch: no I2C, LVGL calls, blocking wait, extra task or vendor
-semaphore wait in the ISR. Preserve the existing arm sequence that samples
-the active pin level after enabling the interrupt to cover a held contact.
+Each adaptive read first checks coordinate status register `0x814E`:
 
-On an IRQ, return to the ordinary polling path and deliver the first valid
-PRESS to LVGL. Continue at the existing rate through a stationary hold, drag
-and release, then require the idle period again before reducing reads. Do not
-throttle while the cached state is PRESSED, while release-after-wake is pending,
-or during startup blocking, errors, recovery or a backlight transition. An
-error is not a successful release and must not establish idle eligibility.
+- Ready bit clear means `NoData`. It is not accepted as release evidence, and
+  the full vendor read/status-clear operation is skipped.
+- Ready with point count zero means an explicit release. The vendor read runs
+  to consume and clear the frame.
+- Ready with one to five points means a press. The vendor read obtains the
+  coordinates and clears the frame. If this raw pressed snapshot is followed
+  by a vendor result with zero points, the vendor result is treated as the
+  newer release frame rather than an error.
+- A ready frame with more than five points is malformed. It is cleaned up but
+  treated as an error, never as input.
 
-If IRQ registration or arming is unavailable but cleanup is safe, retain the
-current 40 ms polling behavior. If physical IRQ cleanup cannot be confirmed,
-preserve the existing failure handling rather than silently accepting it.
-Keep screen-off wake unchanged. IRQ masking before both backlight transitions,
-runtime admission, cooperative quiescence and teardown must remain effective.
+This distinction prevents an ordinary no-frame poll from manufacturing a
+release and prevents repeated no-data samples from qualifying the idle state.
 
-This can reduce idle I2C traffic; it does not stop LVGL rendering or establish
-a meaningful power saving or a reliability improvement. With a missed IRQ,
-the first input can be delayed until fallback, and a short contact might be
-missed. Those are acceptance questions, not guarantees supplied by a unit test.
+## Blocking, wake and lifecycle behavior
 
-## Controlled next step and acceptance
+Dark-screen touch wake remains a separate policy. If an IRQ arrives before the
+GT911 ready bit and the first status read returns `NoData`, the policy schedules
+one deferred retry on the next 40 ms LVGL callback. A wake caused by touch must
+still observe an explicit release before input is admitted, so the waking
+contact cannot also click a UI control.
 
-1. Decide whether this optimization belongs in the next candidate and agree
-   the idle/fallback values. Until then, keep the implementation unchanged.
-2. If selected, implement a small, independently testable screen-on policy,
-   preserving all existing guard, screen-off and active-touch behavior. Add
-   native tests for first press, stable hold, drag, release, idle re-entry,
-   IRQ coalescing, stale/held/lost IRQ cases, fallback, errors, timer wraparound
-   and lifecycle transitions. A failed IRQ setup must select normal polling.
-3. Build the affected profiles locally and save a separate exact BIN with
-   its source snapshot, environment, hardware profile, embedded identity and
-   SHA256. Do not overwrite existing BINs or packages. Address, bus frequency,
-   power supply and wiring must remain controlled and unchanged.
-4. Only after separate installation/test authorization, compare against the
-   preceding exact candidate. Verify short taps after long idle, first-touch
-   response, rapid taps, stationary long press, dragging and release at screen
-   edges. Check sleep/wake, schedule/alarm/web transitions, startup and soft
-   restart. Exercise safe IRQ fallback without changing unrelated variables.
-   Record physical screen/touch observations separately from API diagnostics.
-5. Record idle read/IRQ counts if suitable bounded instrumentation is agreed;
-   do not infer traffic reduction from absent error messages. Preserve any
-   failure evidence before recovery. Long screen/touch operation must cover
-   the new exact BIN before calling this optimization validated.
+Startup and non-touch blocks may finish through a bounded quiet fallback only
+when the cached state was already released and no press was seen. With verified
+IRQ polarity, the INT line must also be inactive. In `polling_only`, when IRQ
+polarity is unknown, two `NoData` samples at least 40 ms apart are accepted as
+the bounded quiet evidence for a non-touch block or startup. This exception
+does not apply to `TouchWake`, which always requires an explicit release. An
+active verified INT, press or error prevents the quiet shortcut. The touch
+lifecycle masks the IRQ around startup suppression, backlight changes, OTA
+blocking, recovery and disable/teardown transitions.
 
-No PASS transfers from the earlier GT911 diagnostic cold-start or software-
-restart series to a new BIN containing this change. That series has its own
-capture and physical-observation limits. This proposal neither accepts 0x5D
-for production nor establishes a GT911 fault cause. It also does not explain
-the earlier isolated CO `--` observation with an unknown timestamp.
+## Diagnostics
+
+`/api/diag` now includes `display.touch_polling` with these fields:
+
+- `mode`
+- `irq_registered`
+- `irq_armed`
+- `irq_config_verified`
+- `irq_config_mode` (`null` until known, otherwise `0` through `3`)
+- `idle_enabled`
+- `idle_active`
+- `fail_safe`
+- `status_reads`
+- `full_reads`
+- `skipped_callbacks`
+- `idle_entries`
+- `irq_exits`
+- `fallback_probes`
+- `missed_irq_presses`
+- `irq_arm_failures`
+- `irq_no_frame`
+
+These are diagnostic counters and state, not proof of electrical IRQ quality,
+touch responsiveness or reduced bus utilization.
+
+## Validation completed so far
+
+The relevant native bundle passed 80 test cases across the GT911 runtime
+policy, adaptive screen-on policy, existing dark-screen wake policy, LVGL
+framebuffer policies and diagnostic JSON serialization. The saved report is:
+
+`D:\21cncstudio\project_aura\tmp\worktrees\aura-post-115-clean\.pio\native-tests\reports\20260901T113743Z-f20e8598\00-pio.json`
+
+Local PlatformIO production builds also completed successfully after the
+current source changes for:
+
+- `project_aura` (4.3-inch, GT911 `0x14`): RAM 158956 bytes, flash
+  4325018 bytes.
+- `project_aura_7` (7-inch dual-I2C, GT911 `0x5D`): RAM 158956 bytes, flash
+  4325494 bytes.
+
+The same final source also passed the full native suite: 899 of 899 test cases
+across 104 suites, with no errors or failures. The saved full-suite report is:
+
+`D:\21cncstudio\project_aura\tmp\worktrees\aura-post-115-clean\.pio\native-tests\reports\20260901T114020Z-2ff7f8e3\00-pio.json`
+
+The generated files under `.pio\build` are local build outputs, not signed or
+qualified release artifacts. Native tests and successful compilation do not
+establish physical touch behavior, cold-start reliability or long-run screen
+stability.
+
+## Hardware qualification still required
+
+After a separate flashing authorization, qualify the exact new binaries on
+both profiles without changing wiring, power or I2C settings. At minimum,
+check short taps after a long idle, the first tap after an IRQ exit, rapid
+taps, stationary holds, page buttons, release, sleep/wake, software restart
+and cold start. Watch the diagnostic mode and counters while separately
+recording what is physically seen on the display and touch panel. The 7-inch
+candidate still requires the agreed long screen/touch run.
+
+No hardware PASS from `f7eff12`, `019d87b` or an earlier diagnostic build
+transfers to binaries containing this change. The rare one-second CO `--`
+observation and the rare vertical display movement remain unconfirmed,
+separate observations; this touch-polling work does not establish a cause or
+fix for either one.
+
+This note does not authorize flashing, reset, serial access, COM8 use, push,
+publication or deployment.

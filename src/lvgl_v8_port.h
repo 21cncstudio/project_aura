@@ -283,11 +283,15 @@ bool lvgl_port_get_screen_flip_180(void);
  * During this window LVGL receives `RELEASED` state without querying the touch controller.
  * Useful right after wake-up to avoid unstable I2C reads.
  *
- * @param duration_ms Blocking window duration in milliseconds
+ * @param duration_ms Blocking window duration in milliseconds.
+ * @param require_explicit_release When true, only a GT911 release frame may
+ *        reopen input. Use this for a dark-screen touch wake so the waking
+ *        contact cannot become a UI click.
  *
  * @return true if the touch-read blocking window was updated.
  */
-bool lvgl_port_block_touch_read(uint32_t duration_ms);
+bool lvgl_port_block_touch_read(uint32_t duration_ms,
+                                bool require_explicit_release = false);
 
 /**
  * @brief Prepare paused LVGL touch state for a coordinated GT911 hard reset.
@@ -335,21 +339,25 @@ bool lvgl_port_wait_touch_i2c_idle(uint32_t timeout_ms);
  */
 bool lvgl_port_finalize_touch_i2c_disable_after_drain(void);
 
+typedef enum {
+    LVGL_PORT_TOUCH_MODE_SUPPRESSED = 0,
+    LVGL_PORT_TOUCH_MODE_SCREEN_ON = 1,
+    LVGL_PORT_TOUCH_MODE_DARK_WAKE = 2,
+    LVGL_PORT_TOUCH_MODE_DISABLED = 3,
+} lvgl_port_touch_mode_t;
+
 /**
- * @brief Enable/disable wake-touch probe mode.
+ * @brief Select the single owner of the GT911 interrupt line.
  *
- * In probe mode touch reads do not generate LVGL pressed events.
- * When the controller exposes an interrupt line, touch is sampled only after
- * a new interrupt, with a sparse polling fallback if interrupts are lost.
- * The physical interrupt is armed only in probe mode and remains masked while
- * the screen is on; normal screen-on touch input uses the regular LVGL poll.
+ * Suppressed keeps the source masked across startup and CH422G transitions.
+ * Screen-on mode uses adaptive I2C reads and arms the verified edge IRQ only
+ * after an explicit release has been observed. Dark-wake mode consumes touch
+ * only as a wake request. Disabled is the terminal shared-I2C shutdown state.
  *
- * @param enabled True to enable wake-touch probe mode.
- *
- * @return true if the requested physical state was confirmed, or direct IRQ
- *         control was safely retired in favor of polling fallback.
+ * @return true when the requested physical state was confirmed, or direct IRQ
+ *         control was safely retired in favor of polling.
  */
-bool lvgl_port_set_wake_touch_probe(bool enabled);
+bool lvgl_port_set_touch_mode(lvgl_port_touch_mode_t mode);
 
 /**
  * @brief Consume pending wake request captured by wake-touch probe mode.
@@ -410,6 +418,23 @@ typedef struct {
     uint32_t startup_lock_miss_count; // Explicit bounded boot-logo retries only.
     uint32_t touch_read_error_count;
     bool touch_offline;
+    const char *touch_mode;
+    bool touch_irq_registered;
+    bool touch_irq_armed;
+    bool touch_irq_config_verified;
+    int8_t touch_irq_config_mode;
+    bool touch_screen_idle_enabled;
+    bool touch_screen_idle_active;
+    bool touch_screen_idle_fail_safe;
+    uint32_t touch_status_read_count;
+    uint32_t touch_full_read_count;
+    uint32_t touch_idle_skip_count;
+    uint32_t touch_idle_entry_count;
+    uint32_t touch_idle_irq_exit_count;
+    uint32_t touch_idle_fallback_probe_count;
+    uint32_t touch_idle_missed_irq_press_count;
+    uint32_t touch_irq_arm_failure_count;
+    uint32_t touch_irq_no_frame_count;
     bool screen_flip_180;
     bool rotation_pipeline_active;
     uint32_t rotated_copy_switch_count;

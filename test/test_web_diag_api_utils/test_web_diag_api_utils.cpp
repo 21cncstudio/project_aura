@@ -87,6 +87,65 @@ void test_web_diag_api_utils_names_refresh_callback_and_rotation_ownership() {
         0, display["runtime_lock_failures"].as<uint32_t>());
 }
 
+void test_web_diag_api_utils_serializes_touch_polling_diagnostics() {
+    WebDiagApiUtils::Payload payload{};
+    payload.display.available = true;
+    payload.display.touch_polling.mode = "idle_irq";
+    payload.display.touch_polling.irq_registered = true;
+    payload.display.touch_polling.irq_armed = true;
+    payload.display.touch_polling.irq_config_verified = true;
+    payload.display.touch_polling.irq_config_mode = 1;
+    payload.display.touch_polling.idle_enabled = true;
+    payload.display.touch_polling.idle_active = true;
+    payload.display.touch_polling.fail_safe = false;
+    payload.display.touch_polling.status_reads = 101;
+    payload.display.touch_polling.full_reads = 22;
+    payload.display.touch_polling.skipped_callbacks = 303;
+    payload.display.touch_polling.idle_entries = 4;
+    payload.display.touch_polling.irq_exits = 5;
+    payload.display.touch_polling.fallback_probes = 6;
+    payload.display.touch_polling.missed_irq_presses = 7;
+    payload.display.touch_polling.irq_arm_failures = 8;
+    payload.display.touch_polling.irq_no_frame = 9;
+
+    ArduinoJson::JsonDocument doc;
+    WebDiagApiUtils::fillJson(
+        doc.to<ArduinoJson::JsonObject>(), payload, nullptr, 0, 0);
+
+    const ArduinoJson::JsonObjectConst touch_polling =
+        doc["display"]["touch_polling"].as<ArduinoJson::JsonObjectConst>();
+    TEST_ASSERT_EQUAL_STRING("idle_irq", touch_polling["mode"].as<const char *>());
+    TEST_ASSERT_TRUE(touch_polling["irq_registered"].as<bool>());
+    TEST_ASSERT_TRUE(touch_polling["irq_armed"].as<bool>());
+    TEST_ASSERT_TRUE(touch_polling["irq_config_verified"].as<bool>());
+    TEST_ASSERT_EQUAL_INT8(1, touch_polling["irq_config_mode"].as<int8_t>());
+    TEST_ASSERT_TRUE(touch_polling["idle_enabled"].as<bool>());
+    TEST_ASSERT_TRUE(touch_polling["idle_active"].as<bool>());
+    TEST_ASSERT_FALSE(touch_polling["fail_safe"].as<bool>());
+    TEST_ASSERT_EQUAL_UINT32(101, touch_polling["status_reads"].as<uint32_t>());
+    TEST_ASSERT_EQUAL_UINT32(22, touch_polling["full_reads"].as<uint32_t>());
+    TEST_ASSERT_EQUAL_UINT32(
+        303, touch_polling["skipped_callbacks"].as<uint32_t>());
+    TEST_ASSERT_EQUAL_UINT32(4, touch_polling["idle_entries"].as<uint32_t>());
+    TEST_ASSERT_EQUAL_UINT32(5, touch_polling["irq_exits"].as<uint32_t>());
+    TEST_ASSERT_EQUAL_UINT32(6, touch_polling["fallback_probes"].as<uint32_t>());
+    TEST_ASSERT_EQUAL_UINT32(
+        7, touch_polling["missed_irq_presses"].as<uint32_t>());
+    TEST_ASSERT_EQUAL_UINT32(
+        8, touch_polling["irq_arm_failures"].as<uint32_t>());
+    TEST_ASSERT_EQUAL_UINT32(9, touch_polling["irq_no_frame"].as<uint32_t>());
+
+    payload.display.touch_polling.irq_config_mode = -1;
+    ArduinoJson::JsonDocument unknown_config_doc;
+    WebDiagApiUtils::fillJson(unknown_config_doc.to<ArduinoJson::JsonObject>(),
+                              payload,
+                              nullptr,
+                              0,
+                              0);
+    TEST_ASSERT_TRUE(
+        unknown_config_doc["display"]["touch_polling"]["irq_config_mode"].isNull());
+}
+
 void test_web_diag_api_utils_describes_shared_bus_without_replacing_boot_sample() {
     WebDiagApiUtils::Payload payload{};
     payload.device.firmware = "1.1.6-beta-fixture";
@@ -536,6 +595,7 @@ int main(int, char **) {
     UNITY_BEGIN();
     RUN_TEST(test_web_diag_api_utils_access_allowed_accepts_ap_or_sta_connectivity);
     RUN_TEST(test_web_diag_api_utils_names_refresh_callback_and_rotation_ownership);
+    RUN_TEST(test_web_diag_api_utils_serializes_touch_polling_diagnostics);
     RUN_TEST(test_web_diag_api_utils_describes_shared_bus_without_replacing_boot_sample);
     RUN_TEST(test_web_diag_api_utils_keeps_separate_sensor_bus_out_of_panel_snapshot);
     RUN_TEST(test_web_diag_api_utils_preserves_bounded_gt911_startup_snapshot);

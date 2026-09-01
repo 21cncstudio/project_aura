@@ -200,6 +200,39 @@ void test_probe_error_preserves_armed_state_and_restarts_fallback_interval() {
     TEST_ASSERT_TRUE(policy.takePendingWake());
 }
 
+void test_no_data_probe_does_not_fake_release_or_wake() {
+    StateMachine policy;
+    policy.setEnabled(true, false, 100);
+    policy.recordProbe(Sample::NoData, 200);
+
+    TEST_ASSERT_FALSE(policy.takePendingWake());
+    TEST_ASSERT_FALSE(policy.shouldProbe(
+        true,
+        false,
+        200 + TouchWakePolicy::FALLBACK_PROBE_INTERVAL_MS - 1));
+    policy.recordProbe(Sample::Pressed, 220);
+    TEST_ASSERT_FALSE(policy.takePendingWake());
+    policy.recordProbe(Sample::Released, 240);
+    policy.recordProbe(Sample::Pressed, 260);
+    TEST_ASSERT_TRUE(policy.takePendingWake());
+}
+
+void test_irq_no_data_schedules_exactly_one_fast_retry() {
+    StateMachine policy;
+    policy.setEnabled(true, true, 100);
+
+    policy.recordProbe(Sample::NoData, 120, true);
+    TEST_ASSERT_TRUE(policy.takeFastRetry());
+    TEST_ASSERT_FALSE(policy.takeFastRetry());
+
+    policy.recordProbe(Sample::NoData, 160, false);
+    TEST_ASSERT_FALSE(policy.takeFastRetry());
+
+    policy.recordProbe(Sample::NoData, 200, true);
+    policy.recordProbe(Sample::Pressed, 202, false);
+    TEST_ASSERT_FALSE(policy.takeFastRetry());
+}
+
 void test_reenabling_same_mode_does_not_erase_pending_wake() {
     StateMachine policy;
     policy.setEnabled(true, true, 100);
@@ -246,6 +279,8 @@ int main(int, char **) {
     RUN_TEST(test_polling_controller_uses_sparse_fallback);
     RUN_TEST(test_interrupt_pending_bypasses_sparse_fallback_deadline);
     RUN_TEST(test_probe_error_preserves_armed_state_and_restarts_fallback_interval);
+    RUN_TEST(test_no_data_probe_does_not_fake_release_or_wake);
+    RUN_TEST(test_irq_no_data_schedules_exactly_one_fast_retry);
     RUN_TEST(test_reenabling_same_mode_does_not_erase_pending_wake);
     RUN_TEST(test_fallback_deadline_handles_millisecond_wraparound);
     RUN_TEST(test_sparse_wake_errors_form_a_recovery_streak);
