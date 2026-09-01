@@ -192,6 +192,35 @@ void fillJson(ArduinoJson::JsonObject root,
             payload.display.touch_polling.irq_arm_failures;
         touch_polling["irq_no_frame"] =
             payload.display.touch_polling.irq_no_frame;
+        ArduinoJson::JsonObject rgb_driver =
+            display["rgb_driver"].to<ArduinoJson::JsonObject>();
+        rgb_driver["instrumented"] =
+            payload.display.rgb_driver.instrumented;
+        rgb_driver["layout_valid"] =
+            payload.display.rgb_driver.layout_valid;
+        rgb_driver["snapshot_coherent"] =
+            payload.display.rgb_driver.snapshot_coherent;
+        rgb_driver["observer"] = "same_channel_isr_gdma_start";
+        rgb_driver["expected_eof_per_frame"] =
+            payload.display.rgb_driver.expected_eof_per_frame;
+        rgb_driver["rgb_isr_dma_start_count"] =
+            payload.display.rgb_driver.rgb_isr_dma_start_count;
+        if (!payload.display.rgb_driver.snapshot_coherent ||
+            payload.display.rgb_driver.rgb_isr_dma_start_count == 0) {
+            rgb_driver["rgb_isr_dma_start_last_ms"] = nullptr;
+        } else {
+            rgb_driver["rgb_isr_dma_start_last_ms"] =
+                payload.display.rgb_driver.rgb_isr_dma_start_last_ms;
+        }
+        if (!payload.display.rgb_driver.snapshot_coherent ||
+            payload.display.rgb_driver.rgb_isr_dma_start_count == 0) {
+            rgb_driver["rgb_isr_dma_start_age_ms"] = nullptr;
+        } else {
+            rgb_driver["rgb_isr_dma_start_age_ms"] =
+                payload.display.rgb_driver.rgb_isr_dma_start_age_ms;
+        }
+        rgb_driver["rgb_isr_dma_start_failure_count"] =
+            payload.display.rgb_driver.rgb_isr_dma_start_failure_count;
         display["screen_flip_180"] = payload.display.screen_flip_180;
         display["rotation_pipeline_active"] =
             payload.display.rotation_pipeline_active;

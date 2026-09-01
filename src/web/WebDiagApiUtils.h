@@ -51,6 +51,17 @@ struct TouchPollingPayload {
     uint32_t irq_no_frame = 0;
 };
 
+struct RgbDriverPayload {
+    bool instrumented = false;
+    bool layout_valid = false;
+    bool snapshot_coherent = false;
+    uint32_t expected_eof_per_frame = 0;
+    uint32_t rgb_isr_dma_start_count = 0;
+    uint32_t rgb_isr_dma_start_last_ms = UINT32_MAX;
+    uint32_t rgb_isr_dma_start_age_ms = UINT32_MAX;
+    uint32_t rgb_isr_dma_start_failure_count = 0;
+};
+
 // Runtime LVGL/RGB observations. The refresh callback name is supplied by the
 // firmware so a bounce-buffer completion is never presented as physical VSYNC.
 struct DisplayPayload {
@@ -72,6 +83,7 @@ struct DisplayPayload {
     uint32_t touch_read_errors = 0;
     bool touch_offline = false;
     TouchPollingPayload touch_polling{};
+    RgbDriverPayload rgb_driver{};
     bool screen_flip_180 = false;
     bool rotation_pipeline_active = false;
     uint32_t rotated_copy_switch_count = 0;

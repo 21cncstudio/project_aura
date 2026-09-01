@@ -54,6 +54,14 @@ void test_web_diag_api_utils_names_refresh_callback_and_rotation_ownership() {
     payload.display.startup_logo_lock_misses = 2;
     payload.display.touch_read_errors = 0;
     payload.display.touch_offline = false;
+    payload.display.rgb_driver.instrumented = true;
+    payload.display.rgb_driver.layout_valid = true;
+    payload.display.rgb_driver.snapshot_coherent = true;
+    payload.display.rgb_driver.expected_eof_per_frame = 48;
+    payload.display.rgb_driver.rgb_isr_dma_start_count = 1;
+    payload.display.rgb_driver.rgb_isr_dma_start_last_ms = 12345;
+    payload.display.rgb_driver.rgb_isr_dma_start_age_ms = 450;
+    payload.display.rgb_driver.rgb_isr_dma_start_failure_count = 0;
     payload.display.screen_flip_180 = true;
     payload.display.rotation_pipeline_active = true;
     payload.display.rotated_copy_switch_count = 19;
@@ -85,6 +93,84 @@ void test_web_diag_api_utils_names_refresh_callback_and_rotation_ownership() {
         2, display["startup_logo_lock_misses"].as<uint32_t>());
     TEST_ASSERT_EQUAL_UINT32(
         0, display["runtime_lock_failures"].as<uint32_t>());
+    const ArduinoJson::JsonObjectConst rgb_driver =
+        display["rgb_driver"].as<ArduinoJson::JsonObjectConst>();
+    TEST_ASSERT_TRUE(rgb_driver["instrumented"].as<bool>());
+    TEST_ASSERT_TRUE(rgb_driver["layout_valid"].as<bool>());
+    TEST_ASSERT_TRUE(rgb_driver["snapshot_coherent"].as<bool>());
+    TEST_ASSERT_EQUAL_STRING(
+        "same_channel_isr_gdma_start",
+        rgb_driver["observer"].as<const char *>());
+    TEST_ASSERT_EQUAL_UINT32(
+        48, rgb_driver["expected_eof_per_frame"].as<uint32_t>());
+    TEST_ASSERT_EQUAL_UINT32(
+        1, rgb_driver["rgb_isr_dma_start_count"].as<uint32_t>());
+    TEST_ASSERT_EQUAL_UINT32(
+        12345, rgb_driver["rgb_isr_dma_start_last_ms"].as<uint32_t>());
+    TEST_ASSERT_EQUAL_UINT32(
+        450, rgb_driver["rgb_isr_dma_start_age_ms"].as<uint32_t>());
+    TEST_ASSERT_EQUAL_UINT32(
+        0, rgb_driver["rgb_isr_dma_start_failure_count"].as<uint32_t>());
+}
+
+void test_web_diag_api_utils_uses_null_for_unseen_rgb_events() {
+    WebDiagApiUtils::Payload payload{};
+    payload.display.available = true;
+    payload.display.rgb_driver.instrumented = true;
+
+    ArduinoJson::JsonDocument doc;
+    WebDiagApiUtils::fillJson(
+        doc.to<ArduinoJson::JsonObject>(), payload, nullptr, 0, 0);
+
+    const ArduinoJson::JsonObjectConst rgb_driver =
+        doc["display"]["rgb_driver"].as<ArduinoJson::JsonObjectConst>();
+    TEST_ASSERT_TRUE(rgb_driver["rgb_isr_dma_start_last_ms"].isNull());
+    TEST_ASSERT_TRUE(rgb_driver["rgb_isr_dma_start_age_ms"].isNull());
+}
+
+void test_web_diag_api_utils_keeps_wrapped_rgb_uptime_numeric() {
+    WebDiagApiUtils::Payload payload{};
+    payload.display.available = true;
+    payload.display.rgb_driver.instrumented = true;
+    payload.display.rgb_driver.snapshot_coherent = true;
+    payload.display.rgb_driver.rgb_isr_dma_start_count = 1;
+    payload.display.rgb_driver.rgb_isr_dma_start_last_ms = UINT32_MAX;
+    payload.display.rgb_driver.rgb_isr_dma_start_age_ms = UINT32_MAX;
+
+    ArduinoJson::JsonDocument doc;
+    WebDiagApiUtils::fillJson(
+        doc.to<ArduinoJson::JsonObject>(), payload, nullptr, 0, 0);
+
+    const ArduinoJson::JsonObjectConst rgb_driver =
+        doc["display"]["rgb_driver"].as<ArduinoJson::JsonObjectConst>();
+    TEST_ASSERT_FALSE(rgb_driver["rgb_isr_dma_start_last_ms"].isNull());
+    TEST_ASSERT_FALSE(rgb_driver["rgb_isr_dma_start_age_ms"].isNull());
+    TEST_ASSERT_EQUAL_UINT32(
+        UINT32_MAX, rgb_driver["rgb_isr_dma_start_last_ms"].as<uint32_t>());
+    TEST_ASSERT_EQUAL_UINT32(
+        UINT32_MAX, rgb_driver["rgb_isr_dma_start_age_ms"].as<uint32_t>());
+}
+
+void test_web_diag_api_utils_hides_incoherent_rgb_event_tuple() {
+    WebDiagApiUtils::Payload payload{};
+    payload.display.available = true;
+    payload.display.rgb_driver.instrumented = true;
+    payload.display.rgb_driver.snapshot_coherent = false;
+    payload.display.rgb_driver.rgb_isr_dma_start_count = 2;
+    payload.display.rgb_driver.rgb_isr_dma_start_last_ms = 12000;
+    payload.display.rgb_driver.rgb_isr_dma_start_age_ms = 4;
+
+    ArduinoJson::JsonDocument doc;
+    WebDiagApiUtils::fillJson(
+        doc.to<ArduinoJson::JsonObject>(), payload, nullptr, 0, 0);
+
+    const ArduinoJson::JsonObjectConst rgb_driver =
+        doc["display"]["rgb_driver"].as<ArduinoJson::JsonObjectConst>();
+    TEST_ASSERT_EQUAL_UINT32(
+        2, rgb_driver["rgb_isr_dma_start_count"].as<uint32_t>());
+    TEST_ASSERT_FALSE(rgb_driver["snapshot_coherent"].as<bool>());
+    TEST_ASSERT_TRUE(rgb_driver["rgb_isr_dma_start_last_ms"].isNull());
+    TEST_ASSERT_TRUE(rgb_driver["rgb_isr_dma_start_age_ms"].isNull());
 }
 
 void test_web_diag_api_utils_serializes_touch_polling_diagnostics() {
@@ -595,6 +681,9 @@ int main(int, char **) {
     UNITY_BEGIN();
     RUN_TEST(test_web_diag_api_utils_access_allowed_accepts_ap_or_sta_connectivity);
     RUN_TEST(test_web_diag_api_utils_names_refresh_callback_and_rotation_ownership);
+    RUN_TEST(test_web_diag_api_utils_uses_null_for_unseen_rgb_events);
+    RUN_TEST(test_web_diag_api_utils_keeps_wrapped_rgb_uptime_numeric);
+    RUN_TEST(test_web_diag_api_utils_hides_incoherent_rgb_event_tuple);
     RUN_TEST(test_web_diag_api_utils_serializes_touch_polling_diagnostics);
     RUN_TEST(test_web_diag_api_utils_describes_shared_bus_without_replacing_boot_sample);
     RUN_TEST(test_web_diag_api_utils_keeps_separate_sensor_bus_out_of_panel_snapshot);
