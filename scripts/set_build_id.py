@@ -43,8 +43,6 @@ def resolve_build_id():
     build_id = f"{short_sha}-{suffix}" if suffix else short_sha
     if startup_diagnostics:
         build_id += f"-gt911-{gt911_address[2:]}-diag"
-    if not periodic_memory_monitor_enabled:
-        build_id += "-memlog-off-diag"
     # Untracked source/header files can participate in a PlatformIO build just
     # like tracked files. Include them so a physical-test artifact never looks
     # commit-clean when its compiled inputs are not fully represented by HEAD.
@@ -123,11 +121,11 @@ if startup_diagnostics and hardware_profile != "7_dual_i2c_scl6":
     )
 
 periodic_memory_monitor_enabled = _project_bool_option(
-    "custom_periodic_memory_monitor_enabled", True
+    "custom_periodic_memory_monitor_enabled", False
 )
-if not periodic_memory_monitor_enabled and hardware_profile != "4_3":
+if periodic_memory_monitor_enabled:
     raise RuntimeError(
-        "Periodic memory-monitor isolation is restricted to the 4.3-inch profile"
+        "Periodic MemoryMonitor requires a separately defined diagnostic firmware lane"
     )
 
 env.AppendUnique(CPPDEFINES=[
@@ -151,12 +149,10 @@ os.makedirs(generated_dir, exist_ok=True)
 header_path = os.path.join(generated_dir, "AppBuildId.generated.h")
 build_id = resolve_build_id()
 source_commit = _run_git(["rev-parse", "HEAD"])
-diagnostic_only = startup_diagnostics or not periodic_memory_monitor_enabled
+diagnostic_only = startup_diagnostics
 firmware_flavor = "diagnostic" if diagnostic_only else "production"
 if startup_diagnostics:
     ota_image_target = "aura-aq-7-diag-v1"
-elif not periodic_memory_monitor_enabled:
-    ota_image_target = "aura-aq-diag-v1"
 else:
     ota_image_target = hardware_target
 header = (

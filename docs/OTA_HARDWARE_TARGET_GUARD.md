@@ -8,7 +8,7 @@ its embedded hardware identity and firmware flavor:
 | Running firmware | Accepted embedded identity |
 | --- | --- |
 | Aura AQ 4.3-inch production (`project_aura`) | `aura-aq-v1` + `production` |
-| Aura AQ 4.3-inch memory-isolation diagnostic (`project_aura_4_3_memlog_off`) | `aura-aq-diag-v1` + `diagnostic`, or `aura-aq-v1` + `production` as an exit |
+| Retired Aura AQ 4.3-inch memory-isolation diagnostic | `aura-aq-diag-v1` + `diagnostic`, or `aura-aq-v1` + `production` as an exit |
 | Aura AQ 7-inch production (`project_aura_7`) | `aura-aq-7-v1` + `production` |
 | Aura AQ 7-inch diagnostic (`project_aura_7_gt911_5d`) | `aura-aq-7-diag-v1` + `diagnostic`, or `aura-aq-7-v1` + `production` as an exit |
 
@@ -20,6 +20,12 @@ controlled service/USB installation; the OTA endpoint is not an entry path.
 additional physical models or public release hardware targets. APIs and
 packages continue to identify the physical models as `aura-aq-v1` and
 `aura-aq-7-v1`.
+
+The temporary `project_aura_4_3_memlog_off` environment was removed after its
+boot-only memory-monitor behavior became the normal policy for both production
+profiles. The validator retains the 4.3-inch diagnostic lane so an already
+installed service candidate can safely exit to production. The periodic-memory
+setting is runtime behavior and does not select a firmware flavor or OTA lane.
 
 Protection starts only after a firmware containing this guard is installed.
 Old running firmware cannot acquire the check retroactively. The first guarded
@@ -36,8 +42,8 @@ override. A deliberate downgrade or service recovery can still use USB/esptool.
 
 An old target-only diagnostic firmware, if one was ever installed, can OTA to
 the new production image as its exit path, but cannot directly recognize the
-new diagnostic lane marker. The reviewed diagnostic candidate preceding this
-change was recorded as unflashed, so no hardware PASS is inferred here.
+new diagnostic lane marker. Retaining transition compatibility does not make
+the retired 4.3-inch diagnostic environment an active release target.
 
 This is accidental cross-model protection, not a digital signature, trusted
 physical-board identification, or a replacement for signed release packages.

@@ -131,7 +131,8 @@ namespace Config {
     constexpr bool LOG_SERIAL_OUTPUT = true;
     constexpr bool LOG_SERIAL_SENSORS_OUTPUT = false;
 #ifndef AURA_PERIODIC_MEMORY_MONITOR_ENABLED
-#define AURA_PERIODIC_MEMORY_MONITOR_ENABLED 1
+// Full heap walks are opt-in. Production records the boot snapshot only.
+#define AURA_PERIODIC_MEMORY_MONITOR_ENABLED 0
 #endif
 #if AURA_PERIODIC_MEMORY_MONITOR_ENABLED != 0 && \
     AURA_PERIODIC_MEMORY_MONITOR_ENABLED != 1

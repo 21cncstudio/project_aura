@@ -21,7 +21,7 @@ class FakeSconsEnvironment(dict):
         environment: str = "project_aura",
         gt911_address: str = "0x14",
         startup_diagnostics: str = "false",
-        periodic_memory_monitor_enabled: str = "true",
+        periodic_memory_monitor_enabled: str = "false",
     ):
         super().__init__(PROJECT_DIR=str(project_dir))
         self._build_dir = build_dir
@@ -92,6 +92,7 @@ class BuildIdScriptTests(unittest.TestCase):
             self.assertEqual("aura-aq-7-v1", identity["hardware_target"])
             self.assertEqual("diagnostic", identity["firmware_flavor"])
             self.assertEqual("aura-aq-7-diag-v1", identity["ota_image_target"])
+            self.assertFalse(identity["periodic_memory_monitor_enabled"])
             self.assertIn('APP_HARDWARE_TARGET "aura-aq-7-v1"', header)
             self.assertIn('APP_FIRMWARE_FLAVOR "diagnostic"', header)
             self.assertIn('APP_OTA_IMAGE_TARGET "aura-aq-7-diag-v1"', header)
@@ -104,7 +105,7 @@ class BuildIdScriptTests(unittest.TestCase):
                     startup_diagnostics="true",
                 )
 
-    def test_memory_monitor_isolation_has_a_distinct_43_diagnostic_identity(self):
+    def test_boot_only_memory_monitor_keeps_production_identity_for_both_profiles(self):
         def git_result(command, **_kwargs):
             return " M memory.cpp" if command[1] == "status" else "5383b77"
 
@@ -112,24 +113,57 @@ class BuildIdScriptTests(unittest.TestCase):
             "subprocess.check_output", side_effect=git_result
         ):
             temp_root = Path(temp_dir)
-            header, identity_json = run_build_id_script(
-                temp_root,
-                temp_root / "build-memory-isolation",
-                environment="project_aura_4_3_memlog_off",
-                periodic_memory_monitor_enabled="false",
+            profiles = (
+                {
+                    "profile": "4_3",
+                    "target": "aura-aq-v1",
+                    "suffix": "",
+                    "environment": "project_aura",
+                    "gt911_address": "0x14",
+                    "expected_build_id": "5383b77-dirty",
+                },
+                {
+                    "profile": "7_dual_i2c_scl6",
+                    "target": "aura-aq-7-v1",
+                    "suffix": "7-dual-i2c-scl6",
+                    "environment": "project_aura_7",
+                    "gt911_address": "0x5D",
+                    "expected_build_id": "5383b77-7-dual-i2c-scl6-dirty",
+                },
             )
-            self.assertIn("5383b77-memlog-off-diag-dirty", header)
-            identity = json.loads(identity_json)
-            self.assertTrue(identity["diagnostic_only"])
-            self.assertEqual("4_3", identity["hardware_profile"])
-            self.assertEqual("aura-aq-v1", identity["hardware_target"])
-            self.assertEqual("diagnostic", identity["firmware_flavor"])
-            self.assertEqual("aura-aq-diag-v1", identity["ota_image_target"])
-            self.assertEqual("0x14", identity["gt911_address"])
-            self.assertFalse(identity["gt911_startup_diagnostics"])
-            self.assertFalse(identity["periodic_memory_monitor_enabled"])
-            self.assertIn('APP_FIRMWARE_FLAVOR "diagnostic"', header)
-            self.assertIn('APP_OTA_IMAGE_TARGET "aura-aq-diag-v1"', header)
+            for profile in profiles:
+                with self.subTest(profile=profile["profile"]):
+                    header, identity_json = run_build_id_script(
+                        temp_root,
+                        temp_root / f"build-{profile['environment']}",
+                        profile=profile["profile"],
+                        target=profile["target"],
+                        suffix=profile["suffix"],
+                        environment=profile["environment"],
+                        gt911_address=profile["gt911_address"],
+                    )
+                    self.assertIn(profile["expected_build_id"], header)
+                    self.assertNotIn("memlog-off-diag", header)
+                    identity = json.loads(identity_json)
+                    self.assertEqual(profile["profile"], identity["hardware_profile"])
+                    self.assertEqual(profile["target"], identity["hardware_target"])
+                    self.assertEqual("production", identity["firmware_flavor"])
+                    self.assertEqual(profile["target"], identity["ota_image_target"])
+                    self.assertFalse(identity["gt911_startup_diagnostics"])
+                    self.assertFalse(identity["periodic_memory_monitor_enabled"])
+                    self.assertNotIn("diagnostic_only", identity)
+
+    def test_periodic_memory_monitor_requires_a_separate_diagnostic_lane(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            with self.assertRaisesRegex(
+                RuntimeError, "separately defined diagnostic firmware lane"
+            ):
+                run_build_id_script(
+                    temp_root,
+                    temp_root / "build-periodic-opt-in",
+                    periodic_memory_monitor_enabled="true",
+                )
 
     def test_address_and_diagnostics_follow_the_split_profiles(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -153,16 +187,6 @@ class BuildIdScriptTests(unittest.TestCase):
                 run_build_id_script(
                     temp_root, temp_root / "build-invalid-diag-flag",
                     startup_diagnostics="sometimes",
-                )
-            with self.assertRaisesRegex(RuntimeError, "restricted to the 4.3-inch"):
-                run_build_id_script(
-                    temp_root,
-                    temp_root / "build-seven-memory-isolation",
-                    profile="7_dual_i2c_scl6",
-                    target="aura-aq-7-v1",
-                    suffix="7-dual-i2c-scl6",
-                    gt911_address="0x5D",
-                    periodic_memory_monitor_enabled="false",
                 )
             with self.assertRaisesRegex(RuntimeError, "must be true or false"):
                 run_build_id_script(
@@ -203,7 +227,7 @@ class BuildIdScriptTests(unittest.TestCase):
             self.assertEqual("project_aura", clean_identity_payload["environment"])
             self.assertEqual("0x14", clean_identity_payload["gt911_address"])
             self.assertFalse(clean_identity_payload["gt911_startup_diagnostics"])
-            self.assertTrue(clean_identity_payload["periodic_memory_monitor_enabled"])
+            self.assertFalse(clean_identity_payload["periodic_memory_monitor_enabled"])
             self.assertNotIn("diagnostic_only", clean_identity_payload)
 
             source_dir = project / "src"
@@ -253,7 +277,7 @@ class BuildIdScriptTests(unittest.TestCase):
             self.assertEqual("7_dual_i2c_scl6", identity_payload["hardware_profile"])
             self.assertEqual("0x5d", identity_payload["gt911_address"])
             self.assertFalse(identity_payload["gt911_startup_diagnostics"])
-            self.assertTrue(identity_payload["periodic_memory_monitor_enabled"])
+            self.assertFalse(identity_payload["periodic_memory_monitor_enabled"])
             self.assertEqual("production", identity_payload["firmware_flavor"])
             self.assertEqual("aura-aq-7-v1", identity_payload["ota_image_target"])
             self.assertNotIn("diagnostic_only", identity_payload)
