@@ -40,7 +40,7 @@ function diag(overrides = {}) {
       panel: { port: 0, sda_gpio: 8, scl_gpio: 9 },
       sensors: { port: 1, sda_gpio: 44, scl_gpio: 6, shared_with_panel: false },
     },
-    last_errors: [{ ts_ms: 10, level: 'W', tag: 'GT911DIAG', message: 'saved diagnostic' }],
+    last_errors: [{ ts_ms: 10, level: 'W', tag: 'GT911', message: 'saved diagnostic' }],
     web_stream: { ok_count: 3, last_abort_reason: 'none', last_uri: '/api/events' },
     unknown_future_field: { values: [null, 3, '<raw>&"value"'], nested: { untouched: true } },
     ...overrides,

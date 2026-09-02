@@ -12,93 +12,6 @@
 
 namespace WebDiagApiUtils {
 
-namespace {
-
-void fillGt911StartupJson(
-    ArduinoJson::JsonObject output,
-    const Gt911StartupDiagnostics::Snapshot &snapshot) {
-    output["captured"] = snapshot.captured;
-    output["phase"] = "after_address_select_before_vendor_touch_begin";
-    output["bounded"] = true;
-    ArduinoJson::JsonArray probes = output["probes"].to<ArduinoJson::JsonArray>();
-    if (!snapshot.captured) {
-        output["configured_address"] = nullptr;
-        output["requested_address"] = nullptr;
-        output["int_level"] = nullptr;
-        output["reset_exio"] = nullptr;
-        output["sequence"] = nullptr;
-        output["selection"] = nullptr;
-        return;
-    }
-
-    output["configured_address"] = snapshot.requested_address;
-    output["requested_address"] = snapshot.requested_address;
-    output["int_level"] = snapshot.int_level_high ? "high" : "low";
-    output["reset_exio"] = snapshot.reset_exio;
-    ArduinoJson::JsonObject sequence =
-        output["sequence"].to<ArduinoJson::JsonObject>();
-    sequence["api"] = "Gt911AddressSelect::selectAddress";
-    sequence["int_gpio"] = snapshot.int_gpio;
-    sequence["int_select_level"] = snapshot.int_level_high ? "high" : "low";
-    sequence["reset_controller"] = "ch422g";
-    sequence["reset_exio"] = snapshot.reset_exio;
-    sequence["pin_levels_measured"] = snapshot.pin_levels_measured;
-    ArduinoJson::JsonObject selection =
-        output["selection"].to<ArduinoJson::JsonObject>();
-    selection["succeeded"] = snapshot.selection_succeeded;
-    selection["failure_code"] = static_cast<uint8_t>(snapshot.selection_failure);
-    selection["failure"] = Gt911AddressSelect::failureText(snapshot.selection_failure);
-    selection["severity"] =
-        Gt911DiagnosticPolicy::severityText(snapshot.selection_severity);
-
-    const size_t count = snapshot.probe_count < Gt911StartupDiagnostics::kProbeCount
-                             ? snapshot.probe_count
-                             : Gt911StartupDiagnostics::kProbeCount;
-    for (size_t i = 0; i < count; ++i) {
-        const Gt911StartupDiagnostics::Probe &source = snapshot.probes[i];
-        ArduinoJson::JsonObject probe = probes.add<ArduinoJson::JsonObject>();
-        probe["role"] = Gt911DiagnosticPolicy::probeRoleText(source.role);
-        probe["address"] = source.address;
-        probe["port"] = source.port;
-
-        ArduinoJson::JsonObject identity =
-            probe["identity"].to<ArduinoJson::JsonObject>();
-        identity["attempted"] = source.identity_attempted;
-        identity["register"] = Gt911StartupDiagnostics::kProductIdRegister;
-        identity["error_code"] = source.identity_error;
-        identity["result"] =
-            Gt911DiagnosticPolicy::readResultText(source.identity_result);
-        ArduinoJson::JsonArray product_id =
-            identity["product_id"].to<ArduinoJson::JsonArray>();
-        for (uint8_t byte : source.product_id) {
-            product_id.add(byte);
-        }
-        identity["valid"] = source.identity_valid;
-        identity["severity"] =
-            Gt911DiagnosticPolicy::severityText(source.identity_severity);
-
-        ArduinoJson::JsonObject config =
-            probe["config"].to<ArduinoJson::JsonObject>();
-        config["attempted"] = source.config_attempted;
-        config["register"] = Gt911StartupDiagnostics::kConfigVersionRegister;
-        if (source.config_attempted) {
-            config["error_code"] = source.config_error;
-            config["result"] =
-                Gt911DiagnosticPolicy::readResultText(source.config_result);
-            config["version"] = source.config_version;
-            config["severity"] =
-                Gt911DiagnosticPolicy::severityText(source.config_severity);
-        } else {
-            config["error_code"] = nullptr;
-            config["result"] = nullptr;
-            config["version"] = nullptr;
-            config["severity"] = nullptr;
-        }
-    }
-}
-
-} // namespace
-
 bool accessAllowed(bool ap_mode, bool sta_connected) {
     return ap_mode || sta_connected;
 }
@@ -258,9 +171,6 @@ void fillJson(ArduinoJson::JsonObject root,
     boot["board_stage"] = payload.boot.board_stage;
     boot["board_failure"] = payload.boot.board_failure;
     boot["lvgl_ready"] = payload.boot.lvgl_ready;
-    ArduinoJson::JsonObject gt911_startup =
-        boot["gt911_startup"].to<ArduinoJson::JsonObject>();
-    fillGt911StartupJson(gt911_startup, payload.boot.gt911_startup);
     boot["previous_backlight_trace_status"] = payload.boot.previous_backlight_trace_status;
     boot["previous_backlight_trace_retention_uncertain"] =
         payload.boot.previous_backlight_trace_retention_uncertain;

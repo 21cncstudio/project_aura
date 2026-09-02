@@ -1,5 +1,10 @@
 # GT911 and LVGL diagnostic messages
 
+> Historical note: the dedicated GT911 startup diagnostic environment, its
+> additional register reads, `GT911DIAG` records and structured startup snapshot
+> were retired on 2026-09-02. The LVGL mutex accounting described below remains
+> part of the production firmware. Historical candidate evidence is preserved.
+
 Local candidate prepared on 2026-08-31, based on main 5383b77 with the existing
 OTA, dual-profile and startup-backlight work preserved. The user requested that
 normal operation at GT911 0x5D should not appear as a warning. This changes

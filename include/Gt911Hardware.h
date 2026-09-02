@@ -11,8 +11,8 @@ class Board;
 
 namespace Gt911Hardware {
 
-// Runs the configured RESET/INT sequence through CH422G. Normal profiles probe
-// only their configured address; dual-address reads are diagnostic-only.
+// Runs the configured RESET/INT sequence through CH422G. Each production
+// profile selects and uses only its configured address.
 bool selectConfiguredAddress(esp_panel::board::Board *board);
 
 } // namespace Gt911Hardware

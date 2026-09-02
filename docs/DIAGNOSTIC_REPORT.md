@@ -59,10 +59,10 @@ unique artifact identities; retain the BIN SHA256 with hardware test records.
 - Compile both normal environments: `project_aura` and `project_aura_7`.
 - Browser fixtures and native tests do not qualify an installed firmware image.
 
-The later split-profile decision keeps `project_aura` at GT911 `0x14` and selects
-`0x5D` for normal `project_aura_7`. The diagnostic 7-inch environment uses the
-same address with additional bounded startup reads. Diagnostics do not change
-polling, clocks, power or routing.
+The split-profile decision keeps `project_aura` at GT911 `0x14` and selects
+`0x5D` for normal `project_aura_7`. The retired 7-inch startup probe environment
+is no longer built. The production address selection does not add alternate-
+address reads and does not change polling, clocks, power or routing.
 
 ### Browser file verification, 2026-08-31
 
@@ -78,7 +78,7 @@ Files, hashes and assertions are preserved under
 `D:\21cncstudio\project_aura\logs\beta_local_completion_20260831T182528Z\browser-downloads`.
 No report from a real device was fetched or shared in this check.
 
-## Display and GT911 startup fields, 2026-09-01
+## Display fields, 2026-09-01
 
 `display.available` now describes whether the LVGL port created a display
 diagnostic lifecycle. It is independent of `boot.lvgl_ready`: if the display
@@ -94,8 +94,6 @@ framebuffer ownership violations and pause state. With the current RGB/bounce
 configuration, `refresh_callback_semantics` is not a physical VSYNC measurement.
 Zero counters and a quiet report do not prove optical output.
 
-`boot.gt911_startup` is a bounded structured snapshot. Production builds set
-`captured: false` because they intentionally omit the additional ID/config and
-alternate-address reads. The diagnostic 7-inch build records those reads without
-turning a successful configured `0x5D` result into a warning. `captured: false`
-does not mean that the compile-time address is unknown.
+The retired `boot.gt911_startup` snapshot was removed with its dedicated
+diagnostic build environment. Production still reports its hardware profile and
+uses the compile-time GT911 address enforced for that profile.

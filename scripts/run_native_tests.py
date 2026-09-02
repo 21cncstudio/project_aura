@@ -25,11 +25,13 @@ DEFAULT_INVOCATIONS = (
     ("native_test_sfa40_driver", ("test_sfa40_driver",)),
     ("native_test_dfr_optional_gas_driver", ("test_dfr_optional_gas_driver",)),
     ("native_test_gp8403_driver", ("test_gp8403_driver",)),
-    # Address selection and diagnostic severity are profile-independent and run
-    # in native_test; repeat only the compile-time 7-inch expectations here.
-    ("native_test_gt911_5d", ("test_gt911_probe_policy", "test_screen_flip_profile")),
     ("native_test_i2c_4_3_profile", ("test_i2c_topology", "test_sensor_i2c_routing")),
-    ("native_test_i2c_7_profile", ("test_i2c_topology", "test_sensor_i2c_routing")),
+    ("native_test_i2c_7_profile", (
+        "test_i2c_topology",
+        "test_sensor_i2c_routing",
+        "test_gt911_probe_policy",
+        "test_screen_flip_profile",
+    )),
     ("native_test_ch422g_4_3_profile", ("test_ch422g_reset", "test_ch422g_ready_probe")),
     ("native_test_ch422g_7_profile", ("test_ch422g_reset", "test_ch422g_ready_probe")),
     ("native_test_startup_probe_policy", ("test_startup_probe_policy",)),

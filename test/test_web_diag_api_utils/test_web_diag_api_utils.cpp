@@ -225,122 +225,6 @@ void test_web_diag_api_utils_keeps_separate_sensor_bus_out_of_panel_snapshot() {
     TEST_ASSERT_FALSE(doc["boot"]["i2c_snapshot"]["live"].as<bool>());
 }
 
-void test_web_diag_api_utils_preserves_bounded_gt911_startup_snapshot() {
-    WebDiagApiUtils::Payload payload{};
-    auto &startup = payload.boot.gt911_startup;
-    startup.captured = true;
-    startup.requested_address = 0x5D;
-    startup.int_gpio = 4;
-    startup.int_level_high = false;
-    startup.reset_exio = 1;
-    startup.pin_levels_measured = false;
-    startup.selection_succeeded = true;
-    startup.selection_failure = Gt911AddressSelect::Failure::None;
-    startup.selection_severity = Gt911DiagnosticPolicy::Severity::Info;
-    startup.probe_count = 2;
-
-    auto &configured = startup.probes[0];
-    configured.role = Gt911DiagnosticPolicy::ProbeRole::Configured;
-    configured.address = 0x5D;
-    configured.port = 0;
-    configured.identity_attempted = true;
-    configured.identity_error = 0;
-    configured.identity_result = Gt911DiagnosticPolicy::ReadResult::Ok;
-    configured.product_id[0] = '9';
-    configured.product_id[1] = '1';
-    configured.product_id[2] = '1';
-    configured.identity_valid = true;
-    configured.identity_severity = Gt911DiagnosticPolicy::Severity::Info;
-    configured.config_attempted = true;
-    configured.config_error = 0;
-    configured.config_result = Gt911DiagnosticPolicy::ReadResult::Ok;
-    configured.config_version = 0x58;
-    configured.config_severity = Gt911DiagnosticPolicy::Severity::Info;
-
-    auto &opposite = startup.probes[1];
-    opposite.role = Gt911DiagnosticPolicy::ProbeRole::Opposite;
-    opposite.address = 0x14;
-    opposite.port = 0;
-    opposite.identity_attempted = true;
-    opposite.identity_error = -1;
-    opposite.identity_result = Gt911DiagnosticPolicy::ReadResult::GenericFailure;
-    opposite.identity_valid = false;
-    opposite.identity_severity = Gt911DiagnosticPolicy::Severity::Info;
-
-    ArduinoJson::JsonDocument doc;
-    WebDiagApiUtils::fillJson(
-        doc.to<ArduinoJson::JsonObject>(), payload, nullptr, 0, 0);
-
-    const ArduinoJson::JsonObjectConst snapshot =
-        doc["boot"]["gt911_startup"].as<ArduinoJson::JsonObjectConst>();
-    TEST_ASSERT_TRUE(snapshot["captured"].as<bool>());
-    TEST_ASSERT_TRUE(snapshot["bounded"].as<bool>());
-    TEST_ASSERT_EQUAL_STRING(
-        "after_address_select_before_vendor_touch_begin",
-        snapshot["phase"].as<const char *>());
-    TEST_ASSERT_EQUAL_HEX8(0x5D, snapshot["configured_address"].as<uint8_t>());
-    TEST_ASSERT_EQUAL_HEX8(0x5D, snapshot["requested_address"].as<uint8_t>());
-    TEST_ASSERT_EQUAL_STRING(
-        "Gt911AddressSelect::selectAddress",
-        snapshot["sequence"]["api"].as<const char *>());
-    TEST_ASSERT_EQUAL_INT(4, snapshot["sequence"]["int_gpio"].as<int>());
-    TEST_ASSERT_EQUAL_STRING(
-        "low", snapshot["sequence"]["int_select_level"].as<const char *>());
-    TEST_ASSERT_EQUAL_STRING(
-        "ch422g", snapshot["sequence"]["reset_controller"].as<const char *>());
-    TEST_ASSERT_EQUAL_INT(1, snapshot["sequence"]["reset_exio"].as<int>());
-    TEST_ASSERT_FALSE(snapshot["sequence"]["pin_levels_measured"].as<bool>());
-    TEST_ASSERT_TRUE(snapshot["selection"]["succeeded"].as<bool>());
-    TEST_ASSERT_EQUAL_STRING(
-        "none", snapshot["selection"]["failure"].as<const char *>());
-    TEST_ASSERT_EQUAL_STRING(
-        "info", snapshot["selection"]["severity"].as<const char *>());
-
-    const ArduinoJson::JsonArrayConst probes =
-        snapshot["probes"].as<ArduinoJson::JsonArrayConst>();
-    TEST_ASSERT_EQUAL_UINT32(2, probes.size());
-    TEST_ASSERT_EQUAL_STRING("configured", probes[0]["role"].as<const char *>());
-    TEST_ASSERT_EQUAL_HEX8(0x5D, probes[0]["address"].as<uint8_t>());
-    TEST_ASSERT_EQUAL_INT(0, probes[0]["identity"]["error_code"].as<int>());
-    TEST_ASSERT_EQUAL_STRING("ok", probes[0]["identity"]["result"].as<const char *>());
-    TEST_ASSERT_EQUAL_UINT8('9', probes[0]["identity"]["product_id"][0].as<uint8_t>());
-    TEST_ASSERT_EQUAL_UINT8('1', probes[0]["identity"]["product_id"][1].as<uint8_t>());
-    TEST_ASSERT_EQUAL_UINT8('1', probes[0]["identity"]["product_id"][2].as<uint8_t>());
-    TEST_ASSERT_TRUE(probes[0]["identity"]["valid"].as<bool>());
-    TEST_ASSERT_EQUAL_STRING("info", probes[0]["identity"]["severity"].as<const char *>());
-    TEST_ASSERT_TRUE(probes[0]["config"]["attempted"].as<bool>());
-    TEST_ASSERT_EQUAL_INT(0, probes[0]["config"]["error_code"].as<int>());
-    TEST_ASSERT_EQUAL_HEX8(0x58, probes[0]["config"]["version"].as<uint8_t>());
-    TEST_ASSERT_EQUAL_STRING("info", probes[0]["config"]["severity"].as<const char *>());
-
-    TEST_ASSERT_EQUAL_STRING("opposite", probes[1]["role"].as<const char *>());
-    TEST_ASSERT_EQUAL_HEX8(0x14, probes[1]["address"].as<uint8_t>());
-    TEST_ASSERT_EQUAL_INT(-1, probes[1]["identity"]["error_code"].as<int>());
-    TEST_ASSERT_EQUAL_STRING(
-        "generic_failure", probes[1]["identity"]["result"].as<const char *>());
-    TEST_ASSERT_EQUAL_STRING("info", probes[1]["identity"]["severity"].as<const char *>());
-    TEST_ASSERT_FALSE(probes[1]["config"]["attempted"].as<bool>());
-    TEST_ASSERT_TRUE(probes[1]["config"]["error_code"].isNull());
-    TEST_ASSERT_TRUE(probes[1]["config"]["version"].isNull());
-}
-
-void test_web_diag_api_utils_marks_uncaptured_gt911_snapshot_without_fake_reads() {
-    WebDiagApiUtils::Payload payload{};
-    ArduinoJson::JsonDocument doc;
-    WebDiagApiUtils::fillJson(
-        doc.to<ArduinoJson::JsonObject>(), payload, nullptr, 0, 0);
-
-    const ArduinoJson::JsonObjectConst snapshot =
-        doc["boot"]["gt911_startup"].as<ArduinoJson::JsonObjectConst>();
-    TEST_ASSERT_FALSE(snapshot["captured"].as<bool>());
-    TEST_ASSERT_TRUE(snapshot["bounded"].as<bool>());
-    TEST_ASSERT_TRUE(snapshot["configured_address"].isNull());
-    TEST_ASSERT_TRUE(snapshot["requested_address"].isNull());
-    TEST_ASSERT_TRUE(snapshot["sequence"].isNull());
-    TEST_ASSERT_TRUE(snapshot["selection"].isNull());
-    TEST_ASSERT_EQUAL_UINT32(0, snapshot["probes"].size());
-}
-
 void test_web_diag_api_utils_fill_json_populates_network_errors_and_stream() {
     WebDiagApiUtils::Payload payload{};
     payload.uptime_s = 123;
@@ -598,8 +482,6 @@ int main(int, char **) {
     RUN_TEST(test_web_diag_api_utils_serializes_touch_polling_diagnostics);
     RUN_TEST(test_web_diag_api_utils_describes_shared_bus_without_replacing_boot_sample);
     RUN_TEST(test_web_diag_api_utils_keeps_separate_sensor_bus_out_of_panel_snapshot);
-    RUN_TEST(test_web_diag_api_utils_preserves_bounded_gt911_startup_snapshot);
-    RUN_TEST(test_web_diag_api_utils_marks_uncaptured_gt911_snapshot_without_fake_reads);
     RUN_TEST(test_web_diag_api_utils_fill_json_populates_network_errors_and_stream);
     RUN_TEST(test_web_diag_api_utils_marks_unrun_expander_probe_details_null);
     RUN_TEST(test_web_diag_api_utils_marks_missing_backlight_trace_null);

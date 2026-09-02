@@ -178,22 +178,15 @@ class NativeTestLauncherTests(unittest.TestCase):
         self.assertEqual("platformio", observed["platformio"])
         self.assertEqual("6.2.0", observed["platformio_version"])
 
-    def test_defaults_preserve_all_eleven_official_invocations(self):
+    def test_defaults_preserve_all_ten_official_invocations(self):
         self.assertEqual(list(DEFAULT_INVOCATIONS), choose_invocations([], []))
-        self.assertEqual(11, len(DEFAULT_INVOCATIONS))
+        self.assertEqual(10, len(DEFAULT_INVOCATIONS))
         self.assertIn(
             ("native_test_gp8403_driver", ("test_gp8403_driver",)),
             DEFAULT_INVOCATIONS,
         )
         self.assertIn(
             ("native_test_startup_probe_policy", ("test_startup_probe_policy",)),
-            DEFAULT_INVOCATIONS,
-        )
-        self.assertIn(
-            (
-                "native_test_gt911_5d",
-                ("test_gt911_probe_policy", "test_screen_flip_profile"),
-            ),
             DEFAULT_INVOCATIONS,
         )
         self.assertIn(
@@ -206,7 +199,12 @@ class NativeTestLauncherTests(unittest.TestCase):
         self.assertIn(
             (
                 "native_test_i2c_7_profile",
-                ("test_i2c_topology", "test_sensor_i2c_routing"),
+                (
+                    "test_i2c_topology",
+                    "test_sensor_i2c_routing",
+                    "test_gt911_probe_policy",
+                    "test_screen_flip_profile",
+                ),
             ),
             DEFAULT_INVOCATIONS,
         )
@@ -224,13 +222,16 @@ class NativeTestLauncherTests(unittest.TestCase):
             choose_invocations(["native_test_sfa30_driver"], []),
         )
         self.assertEqual(
-            [
+            [(
+                "native_test_i2c_7_profile",
                 (
-                    "native_test_gt911_5d",
-                    ("test_gt911_probe_policy", "test_screen_flip_profile"),
-                )
-            ],
-            choose_invocations(["native_test_gt911_5d"], []),
+                    "test_i2c_topology",
+                    "test_sensor_i2c_routing",
+                    "test_gt911_probe_policy",
+                    "test_screen_flip_profile",
+                ),
+            )],
+            choose_invocations(["native_test_i2c_7_profile"], []),
         )
         with self.assertRaisesRegex(NativeTestError, "only once"):
             choose_invocations(["native_test", "native_test"], [])

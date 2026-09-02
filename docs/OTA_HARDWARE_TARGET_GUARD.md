@@ -10,22 +10,23 @@ its embedded hardware identity and firmware flavor:
 | Aura AQ 4.3-inch production (`project_aura`) | `aura-aq-v1` + `production` |
 | Retired Aura AQ 4.3-inch memory-isolation diagnostic | `aura-aq-diag-v1` + `diagnostic`, or `aura-aq-v1` + `production` as an exit |
 | Aura AQ 7-inch production (`project_aura_7`) | `aura-aq-7-v1` + `production` |
-| Aura AQ 7-inch diagnostic (`project_aura_7_gt911_5d`) | `aura-aq-7-diag-v1` + `diagnostic`, or `aura-aq-7-v1` + `production` as an exit |
+| Retired Aura AQ 7-inch GT911 diagnostic artifacts | `aura-aq-7-diag-v1` + `diagnostic`, or `aura-aq-7-v1` + `production` as an exit |
 
-Production firmware never accepts diagnostic firmware through web OTA.
-Diagnostic firmware may update within the diagnostic lane and may return to the
-normal production lane. Entering the diagnostic lane requires a separately
-controlled service/USB installation; the OTA endpoint is not an entry path.
+Production firmware never accepts diagnostic firmware through web OTA. There is
+no diagnostic firmware environment in the current PlatformIO configuration.
+The validator retains the old diagnostic markers only to reject saved diagnostic
+BINs explicitly and to let an already-installed historical diagnostic build
+return to the normal production lane.
 `aura-aq-diag-v1` and `aura-aq-7-diag-v1` are internal OTA lane markers, not
 additional physical models or public release hardware targets. APIs and
 packages continue to identify the physical models as `aura-aq-v1` and
 `aura-aq-7-v1`.
 
-The temporary `project_aura_4_3_memlog_off` environment was removed after its
-boot-only memory-monitor behavior became the normal policy for both production
-profiles. The validator retains the 4.3-inch diagnostic lane so an already
-installed service candidate can safely exit to production. The periodic-memory
-setting is runtime behavior and does not select a firmware flavor or OTA lane.
+The temporary `project_aura_4_3_memlog_off` and 7-inch GT911 diagnostic
+environments were removed after their experiments closed. The validator retains
+their diagnostic markers as fail-closed compatibility tombstones, not as active
+release targets. The periodic-memory setting is runtime behavior and does not
+select a firmware flavor or OTA lane.
 
 Protection starts only after a firmware containing this guard is installed.
 Old running firmware cannot acquire the check retroactively. The first guarded
@@ -152,10 +153,10 @@ zero-write rejection still need verification on the exact installed candidate.
 ## Local checks and physical follow-up
 
 Local regression coverage includes the real OTA handlers with a fake flash
-writer, every prefix split/truncation, both target directions, the production
-and diagnostic lanes, the diagnostic-to-production exit, legacy target-only
-BINs, malformed identity, cleanup/retry, write failures, deadlines, explicit
-API codes, and the real embedded JavaScript callbacks. A transport
+writer, every prefix split/truncation, both target directions, production
+identities, rejection of retired diagnostic markers, the historical
+diagnostic-to-production exit, legacy target-only BINs, malformed identity,
+cleanup/retry, write failures, deadlines, explicit API codes, and the real embedded JavaScript callbacks. A transport
 source-contract test guards the early-return link; it is not a live TCP/HTTPD
 test.
 

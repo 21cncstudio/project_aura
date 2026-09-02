@@ -1,5 +1,10 @@
 # Startup backlight candidate
 
+> Current status, 2026-09-02: the startup-backlight behavior remains in both
+> production profiles. The separate GT911 startup diagnostic environment and
+> its additional reads were retired. Candidate tables below are retained as
+> historical artifact provenance.
+
 This documents the local candidate in `main` based on `5383b77`, prepared on
 2026-08-31. The intended behavior is to keep the backlight off until the complete
 boot logo has been rendered and its framebuffer hand-off acknowledged. This is
@@ -68,10 +73,9 @@ reject such a retained record; preserving the layout is not a backward-decoding
 guarantee.
 
 The backlight part of the change does not alter GT911 addresses, bus frequencies,
-wiring or the power supply. In the combined candidate, `project_aura` remains at
-`0x14`; both 7-inch environments select `0x5D`. The diagnostic environment keeps
-its additional bounded startup reads and `diagnostic_only` identity, while the
-normal 7-inch environment does not compile those reads.
+wiring or the power supply. `project_aura` remains at `0x14`, while production
+`project_aura_7` selects `0x5D`. The retired diagnostic environment and its
+additional startup reads are not part of current builds.
 
 ## Validation and hardware acceptance
 

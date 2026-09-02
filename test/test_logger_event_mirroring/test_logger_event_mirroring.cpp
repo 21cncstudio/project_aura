@@ -74,47 +74,11 @@ void test_alert_suppression_keeps_event_mirroring() {
         entry.message);
 }
 
-void test_gt911_info_remains_a_web_event_without_a_user_alert() {
-    Logger::log(Logger::Info, "GT911DIAG", "configured identity valid");
-
-    Logger::RecentEntry recent[2]{};
-    TEST_ASSERT_EQUAL_UINT32(1, Logger::copyRecent(recent, 2));
-    TEST_ASSERT_TRUE(SystemEventPolicy::shouldEmit(recent[0]));
-    TEST_ASSERT_EQUAL(Logger::Info, recent[0].level);
-    TEST_ASSERT_EQUAL_STRING("GT911DIAG", recent[0].tag);
-    TEST_ASSERT_EQUAL_UINT32(0, Logger::copyRecentAlerts(recent, 2));
-
-    Logger::RecentEntry mirrored{};
-    TEST_ASSERT_EQUAL_UINT32(1, MqttEventQueue::instance().size());
-    TEST_ASSERT_TRUE(MqttEventQueue::instance().pop(mirrored));
-    TEST_ASSERT_EQUAL(Logger::Info, mirrored.level);
-    TEST_ASSERT_EQUAL_STRING("GT911DIAG", mirrored.tag);
-    TEST_ASSERT_EQUAL_STRING("configured identity valid", mirrored.message);
-}
-
-void test_gt911_warn_and_error_remain_web_events_and_user_alerts() {
-    Logger::log(Logger::Warn, "GT911DIAG", "configured address read timeout");
-    advanceMillis(1);
-    Logger::log(Logger::Error, "GT911", "address select failed at INT");
-
-    Logger::RecentEntry alerts[2]{};
-    TEST_ASSERT_EQUAL_UINT32(2, Logger::copyRecentAlerts(alerts, 2));
-    TEST_ASSERT_EQUAL(Logger::Warn, alerts[0].level);
-    TEST_ASSERT_EQUAL_STRING("GT911DIAG", alerts[0].tag);
-    TEST_ASSERT_TRUE(SystemEventPolicy::shouldEmit(alerts[0]));
-    TEST_ASSERT_EQUAL(Logger::Error, alerts[1].level);
-    TEST_ASSERT_EQUAL_STRING("GT911", alerts[1].tag);
-    TEST_ASSERT_TRUE(SystemEventPolicy::shouldEmit(alerts[1]));
-    TEST_ASSERT_EQUAL_UINT32(2, MqttEventQueue::instance().size());
-}
-
 int main(int, char **) {
     UNITY_BEGIN();
     RUN_TEST(test_logger_mirrors_only_web_dashboard_events_to_mqtt_queue);
     RUN_TEST(test_logger_mirroring_respects_recent_dedup_window);
     RUN_TEST(test_capture_pause_prevents_recursive_mqtt_feedback);
     RUN_TEST(test_alert_suppression_keeps_event_mirroring);
-    RUN_TEST(test_gt911_info_remains_a_web_event_without_a_user_alert);
-    RUN_TEST(test_gt911_warn_and_error_remain_web_events_and_user_alerts);
     return UNITY_END();
 }

@@ -36,7 +36,7 @@ struct Ops {
 
 // INT high selects 0x14; INT low selects 0x5D when RESET is released.
 // The caller owns the panel I2C bus for the whole sequence. Delays are identical
-// for both addresses so the diagnostic changes only the address strap.
+// for both supported addresses; only the configured strap level differs.
 Result selectAddress(const Ops &ops, uint8_t address);
 
 const char *failureText(Failure failure);

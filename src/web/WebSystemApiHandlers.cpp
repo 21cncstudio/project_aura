@@ -212,7 +212,6 @@ void handleDiagData(WebHandlerContext &context,
     payload.boot.board_stage = BoardInit::stageText(boot.board_stage);
     payload.boot.board_failure = BoardInit::failureText(boot.board_failure);
     payload.boot.lvgl_ready = boot.lvgl_ready;
-    payload.boot.gt911_startup = boot.gt911_startup;
     const BacklightWakeBreadcrumbs::BootSnapshot &previous_trace =
         boot.previous_backlight_trace;
     payload.boot.previous_backlight_trace_status =

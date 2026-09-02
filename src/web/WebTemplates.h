@@ -937,7 +937,6 @@ static const char kDiagPageTemplate[] PROGMEM = R"HTML(
                         'Sections are fetched sequentially, not as an atomic snapshot.',
                         'complete means both API sections were received without an observed uptime decrease; it does not verify a single boot.',
                         'Events and alerts are finite recent buffers, not a complete log or proof of health.',
-                        'boot.gt911_startup is a bounded snapshot of the existing startup address-select and register reads; it is not a live bus scan.',
                         'boot.i2c_status, sda_high and scl_high are a saved startup panel-bus snapshot, not live bus health.'
                     ]
                 };

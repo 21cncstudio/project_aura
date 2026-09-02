@@ -642,3 +642,22 @@ No hardware, COM/serial, flash, reset, OTA, signed package, commit, push,
 publication, deployment or ref mutation was performed. The rare vertical shift
 and the observed one-off CO `--` remain hardware observations with unknown cause;
 neither is transferred as PASS to these exact BINs.
+
+## GT911 diagnostic environment retirement, 2026-09-02
+
+After the address experiment completed and `project_aura_7` was validated with
+GT911 `0x5D`, the user retired the separate `project_aura_7_gt911_5d` firmware
+environment. Current firmware builds expose only the two production environments:
+`project_aura` at `0x14` and `project_aura_7` at `0x5D`.
+
+The extra startup product-ID/config/opposite-address reads, `GT911DIAG` logging,
+and `boot.gt911_startup` API snapshot were removed with that environment. The
+normal RESET/INT address-selection path and its hard profile/address checks remain.
+Production 7-inch regression coverage now runs inside the ordinary 7-inch native
+profile rather than a diagnostic-named test environment.
+
+The OTA validator still recognizes the old diagnostic target/flavor bytes only
+as a fail-closed compatibility tombstone: production rejects those saved BINs,
+and a historical diagnostic installation can return to production. No current
+environment can generate a diagnostic BIN. Historical documents, commits, logs,
+hashes and preserved artifacts remain unchanged as evidence.

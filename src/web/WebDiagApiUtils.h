@@ -11,7 +11,6 @@
 #include <stdint.h>
 
 #include "core/Logger.h"
-#include "core/Gt911StartupDiagnostics.h"
 #include "web/WebNetworkUtils.h"
 #include "web/WebStreamState.h"
 
@@ -108,7 +107,6 @@ struct BootPayload {
     const char *board_stage = "bus";
     const char *board_failure = "none";
     bool lvgl_ready = false;
-    Gt911StartupDiagnostics::Snapshot gt911_startup{};
     const char *previous_backlight_trace_status = "empty";
     bool previous_backlight_trace_valid = false;
     const char *previous_backlight_trace_event = "none";
