@@ -17,7 +17,6 @@
 #include "core/BootHelpers.h"
 #include "core/ConnectivityRuntime.h"
 #include "core/Logger.h"
-#include "core/RgbDmaDiagnostics.h"
 #include "core/WebRuntimeState.h"
 #include "lvgl_v8_port.h"
 #include "web/WebDiagApiUtils.h"
@@ -169,22 +168,6 @@ void handleDiagData(WebHandlerContext &context,
             display.touch_irq_arm_failure_count;
         payload.display.touch_polling.irq_no_frame =
             display.touch_irq_no_frame_count;
-        RgbDmaDiagnostics::Snapshot rgb_driver{};
-        (void)RgbDmaDiagnostics::getSnapshot(&rgb_driver);
-        payload.display.rgb_driver.instrumented = rgb_driver.instrumented;
-        payload.display.rgb_driver.layout_valid = rgb_driver.layout_valid;
-        payload.display.rgb_driver.snapshot_coherent =
-            rgb_driver.snapshot_coherent;
-        payload.display.rgb_driver.expected_eof_per_frame =
-            rgb_driver.expected_eof_per_frame;
-        payload.display.rgb_driver.rgb_isr_dma_start_count =
-            rgb_driver.rgb_isr_dma_start_count;
-        payload.display.rgb_driver.rgb_isr_dma_start_last_ms =
-            rgb_driver.rgb_isr_dma_start_last_ms;
-        payload.display.rgb_driver.rgb_isr_dma_start_age_ms =
-            rgb_driver.rgb_isr_dma_start_age_ms;
-        payload.display.rgb_driver.rgb_isr_dma_start_failure_count =
-            rgb_driver.rgb_isr_dma_start_failure_count;
         payload.display.screen_flip_180 = display.screen_flip_180;
         payload.display.rotation_pipeline_active =
             display.rotation_pipeline_active;

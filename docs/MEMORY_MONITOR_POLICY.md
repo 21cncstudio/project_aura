@@ -43,6 +43,27 @@ variant, requires a separate diagnostic build and hardware A/B test. Do not
 re-enable the full largest-block walk by merely increasing its interval or
 moving it to another task.
 
+## Production candidate check and cleanup
+
+The exact 4.3-inch production candidate `f137a1e` was installed as an
+application-only update on 2026-09-02. During the user-accepted short check it
+crossed at least four former 15-minute boundaries with no RGB DMA recovery
+transition, no reboot, and no reported display or touch fault. The unchanged
+7-inch control continued to record the old approximately 15-minute recovery
+cadence. The user also reported that the screen did not appear to move or
+flicker during the observed portion of the run.
+
+This was an upload-reset run, not a physical power-cycle or cold-boot test, and
+the visual observation was not a continuous optical measurement. The passive
+RGB DMA observer used to establish the A/B result wrapped ESP-IDF 5.3.2 driver
+calls and depended on its private RGB-driver ABI, so it was removed after
+acceptance together with its temporary `display.rgb_driver` diagnostics payload
+and tests. Run-specific evidence collectors that expect this field must not be
+reused with a cleaned build. Normal LVGL fail-stop, display/touch fault counters,
+and the one boot memory snapshot remain. Because the cleanup changes the binary,
+the `f137a1e` result is evidence for the boot-only policy and not byte-for-byte
+qualification of a later release build.
+
 ## Transition compatibility
 
 The temporary `project_aura_4_3_memlog_off` environment and its diagnostic build
