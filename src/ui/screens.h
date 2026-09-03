@@ -95,7 +95,6 @@ typedef struct _objects_t {
     lv_obj_t *btn_settings_1;
     lv_obj_t *label_btn_settings_1;
     lv_obj_t *card_co2_pro;
-    lv_obj_t *label_co2_value_1;
     lv_obj_t *co2_bar_wrap_1;
     lv_obj_t *co2_bar_track_1;
     lv_obj_t *co2_bar_mask_1;
@@ -105,8 +104,10 @@ typedef struct _objects_t {
     lv_obj_t *grad_6;
     lv_obj_t *co2_marker_1;
     lv_obj_t *label_co2_title_1;
-    lv_obj_t *label_co2_unit_1;
     lv_obj_t *dot_co2_1;
+    lv_obj_t *co2_value_unit;
+    lv_obj_t *label_co2_value_1;
+    lv_obj_t *label_co2_unit_1;
     lv_obj_t *card_pressure_pro;
     lv_obj_t *label_pressure_title_1;
     lv_obj_t *label_pressure_value_1;
