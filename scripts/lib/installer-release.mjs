@@ -24,10 +24,10 @@ export const HARDWARE_IDENTITIES = Object.freeze({
   }),
   project_aura_7: Object.freeze({
     hardwareTarget: "aura-aq-7-v1",
-    hardwareProfile: "7_dual_i2c_scl6",
-    buildIdSuffix: "7-dual-i2c-scl6",
-    artifactSlug: "7",
-    displayName: "Aura AQ 7-inch",
+    hardwareProfile: "7_dual_i2c",
+    buildIdSuffix: "7-dual-i2c",
+    artifactSlug: "7-dual-i2c",
+    displayName: "Aura AQ 7-dual-i2c",
   }),
 });
 

@@ -2,6 +2,13 @@
 
 Date: 2026-08-30
 
+Current naming, 2026-09-03: new `1.2.0-beta` builds use `7_dual_i2c`
+and the public suffix `7-dual-i2c`. The environment `project_aura_7`, target
+`aura-aq-7-v1`, native USB and GPIO44/6 routing are unchanged. The migration
+procedure and startup values below are the dated 2026-08-30 record, not a new
+hardware instruction. Later startup policy is documented in
+[STARTUP_BACKLIGHT.md](STARTUP_BACKLIGHT.md).
+
 Both production profiles select native USB CDC for `Serial`. The 4.3-inch
 transition needs a new physical test; the existing `fac6e30` UART capture does
 not validate it. This document defines the checks and authorizes no port open,

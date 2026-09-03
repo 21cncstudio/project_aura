@@ -68,6 +68,27 @@ def run_build_id_script(project_dir: Path, build_dir: Path, **environment_option
 
 
 class BuildIdScriptTests(unittest.TestCase):
+    def test_retired_seven_inch_profile_and_suffix_are_rejected(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            for profile, suffix, error in (
+                ("7_dual_i2c_scl6", "7-dual-i2c-scl6", "Unsupported custom_hardware_profile"),
+                ("7_dual_i2c", "7-dual-i2c-scl6", "custom_build_id_suffix does not match"),
+            ):
+                with self.subTest(profile=profile, suffix=suffix):
+                    build_dir = temp_root / profile
+                    with self.assertRaisesRegex(RuntimeError, error):
+                        run_build_id_script(
+                            temp_root,
+                            build_dir,
+                            profile=profile,
+                            target="aura-aq-7-v1",
+                            suffix=suffix,
+                            environment="project_aura_7",
+                            gt911_address="0x5D",
+                        )
+                    self.assertFalse((build_dir / "generated").exists())
+
     def test_boot_only_memory_monitor_keeps_production_identity_for_both_profiles(self):
         def git_result(command, **_kwargs):
             return " M memory.cpp" if command[1] == "status" else "5383b77"
@@ -86,12 +107,12 @@ class BuildIdScriptTests(unittest.TestCase):
                     "expected_build_id": "5383b77-dirty",
                 },
                 {
-                    "profile": "7_dual_i2c_scl6",
+                    "profile": "7_dual_i2c",
                     "target": "aura-aq-7-v1",
-                    "suffix": "7-dual-i2c-scl6",
+                    "suffix": "7-dual-i2c",
                     "environment": "project_aura_7",
                     "gt911_address": "0x5D",
-                    "expected_build_id": "5383b77-7-dual-i2c-scl6-dirty",
+                    "expected_build_id": "5383b77-7-dual-i2c-dirty",
                 },
             )
             for profile in profiles:
@@ -138,8 +159,8 @@ class BuildIdScriptTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "must be 0x14 or 0x5D"):
                 run_build_id_script(
                     temp_root, temp_root / "build-invalid-address",
-                    profile="7_dual_i2c_scl6", target="aura-aq-7-v1",
-                    suffix="7-dual-i2c-scl6", gt911_address="0xBA",
+                    profile="7_dual_i2c", target="aura-aq-7-v1",
+                    suffix="7-dual-i2c", gt911_address="0xBA",
                 )
             with self.assertRaisesRegex(RuntimeError, "must be true or false"):
                 run_build_id_script(
@@ -217,9 +238,9 @@ class BuildIdScriptTests(unittest.TestCase):
             header, identity = run_build_id_script(
                 project,
                 temp_root / "build-seven",
-                profile="7_dual_i2c_scl6",
+                profile="7_dual_i2c",
                 target="aura-aq-7-v1",
-                suffix="7-dual-i2c-scl6",
+                suffix="7-dual-i2c",
                 environment="project_aura_7",
                 gt911_address="0x5D",
             )
@@ -227,7 +248,7 @@ class BuildIdScriptTests(unittest.TestCase):
             self.assertIn('APP_FIRMWARE_FLAVOR "production"', header)
             self.assertIn('APP_OTA_IMAGE_TARGET "aura-aq-7-v1"', header)
             identity_payload = json.loads(identity)
-            self.assertEqual("7_dual_i2c_scl6", identity_payload["hardware_profile"])
+            self.assertEqual("7_dual_i2c", identity_payload["hardware_profile"])
             self.assertEqual("0x5d", identity_payload["gt911_address"])
             self.assertFalse(identity_payload["periodic_memory_monitor_enabled"])
             self.assertNotIn("gt911_startup_diagnostics", identity_payload)
@@ -239,9 +260,9 @@ class BuildIdScriptTests(unittest.TestCase):
                 run_build_id_script(
                     project,
                     temp_root / "build-invalid",
-                    profile="7_dual_i2c_scl6",
+                    profile="7_dual_i2c",
                     target="aura-aq-v1",
-                    suffix="7-dual-i2c-scl6",
+                    suffix="7-dual-i2c",
                     environment="project_aura_7",
                     gt911_address="0x5D",
                 )

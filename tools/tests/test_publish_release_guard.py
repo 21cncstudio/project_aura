@@ -14,9 +14,9 @@ SOURCE_COMMIT = "0123456789abcdef0123456789abcdef01234567"
 
 
 def create_release_directory(root: Path, *, target: str = "aura-aq-v1", build_id: str = "0123456"):
-    profile = "4_3" if target == "aura-aq-v1" else "7_dual_i2c_scl6"
+    profile = "4_3" if target == "aura-aq-v1" else "7_dual_i2c"
     environment = "project_aura" if target == "aura-aq-v1" else "project_aura_7"
-    slug = "4_3" if target == "aura-aq-v1" else "7"
+    slug = "4_3" if target == "aura-aq-v1" else "7-dual-i2c"
     ota_name = f"project_aura_{slug}_1.1.6_ota_firmware.bin"
     firmware = b"firmware fixture\n"
     (root / ota_name).write_bytes(firmware)
@@ -317,7 +317,7 @@ class PublishReleaseGuardTests(unittest.TestCase):
             create_release_directory(
                 assets,
                 target="aura-aq-7-v1",
-                build_id="0123456-7-dual-i2c-scl6",
+                build_id="0123456-7-dual-i2c",
             )
             result = invoke_publisher(assets, "-HardwareTarget", "aura-aq-7-v1")
             self.assertNotEqual(result.returncode, 0)
@@ -329,7 +329,7 @@ class PublishReleaseGuardTests(unittest.TestCase):
             create_release_directory(
                 assets,
                 target="aura-aq-7-v1",
-                build_id="0123456-7-dual-i2c-scl6",
+                build_id="0123456-7-dual-i2c",
             )
             result = invoke_publisher(assets)
             self.assertNotEqual(result.returncode, 0)

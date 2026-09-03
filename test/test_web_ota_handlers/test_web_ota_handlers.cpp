@@ -466,7 +466,7 @@ void test_7_device_rejects_43_even_with_renamed_file_and_forged_form_target() {
     auto image = image_for("aura-aq-v1");
     const uint32_t id = h.start(image.size(), "Aura_AQ_7_correct.bin");
     h.request.args["hardware_target"] = "aura-aq-7-v1";
-    h.request.args["hardware_profile"] = "7_dual_i2c_scl6";
+    h.request.args["hardware_profile"] = "7_dual_i2c";
     h.write(image, 0, image.size());
     h.finish();
     h.abort(WebUploadAbortReason::ClientDisconnected);

@@ -24,9 +24,9 @@ function diag(overrides = {}) {
     uptime_s: 1200,
     ota_busy: false,
     device: {
-      firmware: '1.1.6-beta-test-7-dual-i2c-scl6',
-      build_id: 'test-7-dual-i2c-scl6',
-      hardware_profile: '7_dual_i2c_scl6',
+      firmware: '1.2.0-beta-test-7-dual-i2c',
+      build_id: 'test-7-dual-i2c',
+      hardware_profile: '7_dual_i2c',
       hardware_target: 'aura-aq-7-v1',
     },
     network: { mode: 'sta', wifi_enabled: true, wifi_ssid: 'Test network', hostname: 'aura-test', ip: '192.0.2.7', rssi: -42 },

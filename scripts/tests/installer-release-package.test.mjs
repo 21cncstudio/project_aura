@@ -40,9 +40,9 @@ function identityArgs(target = "4_3") {
   return target === "7"
     ? [
         "--environment", "project_aura_7",
-        "--hardware-profile", "7_dual_i2c_scl6",
+        "--hardware-profile", "7_dual_i2c",
         "--hardware-target", "aura-aq-7-v1",
-        "--build-id", "0123456-7-dual-i2c-scl6",
+        "--build-id", "0123456-7-dual-i2c",
       ]
     : [
         "--environment", "project_aura",
@@ -82,8 +82,8 @@ async function fixture({ target = "4_3", version = "1.1.6" } = {}) {
   }
   const seven = target === "7";
   const hardwareTarget = seven ? "aura-aq-7-v1" : "aura-aq-v1";
-  const hardwareProfile = seven ? "7_dual_i2c_scl6" : "4_3";
-  const buildId = seven ? "0123456-7-dual-i2c-scl6" : "0123456";
+  const hardwareProfile = seven ? "7_dual_i2c" : "4_3";
+  const buildId = seven ? "0123456-7-dual-i2c" : "0123456";
   const manifestIdentity = {
     version: effectiveReleaseVersion(version, buildId),
     hardware_target: hardwareTarget,
@@ -227,8 +227,9 @@ test("package CLI creates an isolated 7-inch identity and rejects cross-pairs", 
     assert.equal(valid.status, 0, valid.stderr);
     const release = JSON.parse(await readFile(join(value.staging, "release.json"), "utf8"));
     assert.equal(release.hardware_target, "aura-aq-7-v1");
-    assert.equal(release.compatibility.hardware_profile, "7_dual_i2c_scl6");
-    assert.equal(release.version, "1.1.6-beta-0123456-7-dual-i2c-scl6");
+    assert.equal(release.compatibility.hardware_profile, "7_dual_i2c");
+    assert.equal(release.version, "1.1.6-beta-0123456-7-dual-i2c");
+    assert.equal(release.title, "Aura AQ 7-dual-i2c 1.1.6-beta-0123456-7-dual-i2c");
 
     await rm(value.staging, { recursive: true, force: true });
     const invalid = spawnSync(process.execPath, [
@@ -239,15 +240,49 @@ test("package CLI creates an isolated 7-inch identity and rejects cross-pairs", 
       "--channel", "beta",
       "--commit", sourceCommit,
       "--environment", "project_aura_7",
-      "--hardware-profile", "7_dual_i2c_scl6",
+      "--hardware-profile", "7_dual_i2c",
       "--hardware-target", "aura-aq-v1",
-      "--build-id", "0123456-7-dual-i2c-scl6",
+      "--build-id", "0123456-7-dual-i2c",
       "--key-id", value.keyId,
       "--private-key", value.privateKeyPath,
       "--notes", value.notes,
     ], { encoding: "utf8" });
     assert.notEqual(invalid.status, 0);
     assert.match(invalid.stderr, /Unsupported hardware identity/);
+  } finally {
+    await rm(value.root, { recursive: true, force: true });
+  }
+});
+
+test("package CLI rejects retired identity strings before creating signed output", async () => {
+  const value = await fixture({ target: "7", version: "1.2.0-beta" });
+  try {
+    const firmwareBefore = await readFile(join(value.source, "firmware.bin"));
+    const staleIdentities = [
+      ["7_dual_i2c_scl6", "0123456-7-dual-i2c-scl6", /Unsupported hardware identity/],
+      ["7_dual_i2c", "0123456-7-dual-i2c-scl6", /Generated build ID does not match/],
+    ];
+    for (const [profile, buildId, error] of staleIdentities) {
+      const result = spawnSync(process.execPath, [
+        packageScript,
+        "--source", value.source,
+        "--staging", value.staging,
+        "--version", "1.2.0-beta",
+        "--channel", "beta",
+        "--commit", sourceCommit,
+        "--environment", "project_aura_7",
+        "--hardware-profile", profile,
+        "--hardware-target", "aura-aq-7-v1",
+        "--build-id", buildId,
+        "--key-id", value.keyId,
+        "--private-key", join(value.root, "missing-private.pem"),
+        "--notes", value.notes,
+      ], { encoding: "utf8" });
+      assert.notEqual(result.status, 0);
+      assert.match(result.stderr, error);
+      await assert.rejects(readFile(join(value.staging, "release.json")), { code: "ENOENT" });
+      assert.deepEqual(await readFile(join(value.source, "firmware.bin")), firmwareBefore);
+    }
   } finally {
     await rm(value.root, { recursive: true, force: true });
   }

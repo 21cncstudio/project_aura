@@ -10,12 +10,17 @@ closed until this record is completed and reviewed.
 
 - Environment: `project_aura_7`
 - Hardware target: `aura-aq-7-v1`
-- Hardware profile: `7_dual_i2c_scl6`
+- Hardware profile: `7_dual_i2c` for new `1.2.0-beta` builds
 - Panel bus: I2C0, SDA GPIO8, SCL GPIO9, 100 kHz
 - Sensor bus: I2C1, SDA GPIO44, SCL GPIO6, 100 kHz
 - GPIO43/H3 EX_TXD: physically disconnected from sensor SCL
 - ESP32 internal sensor-bus pull-ups: disabled
 - USB/logging: native USB CDC on Type_C2
+
+The former name `7_dual_i2c_scl6` remains part of historical artifacts and
+signed metadata. The rename does not change routing or transfer qualification
+to a new BIN. See [local 1.2 preparation](LOCAL_1_2_PREPARATION_20260903.md)
+for current evidence boundaries and coordinated consumer compatibility.
 
 The [shared native-USB profile policy](../USB_CONSOLE_PROFILES.md) preserves
 this 7-inch baseline and model identity. Its staged migration requires the

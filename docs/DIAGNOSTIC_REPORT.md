@@ -45,7 +45,11 @@ Do not rewrite that value as `ok` merely because the device later initialized.
 | Profile | Panel bus | Sensor bus | Shared |
 | --- | --- | --- | --- |
 | `4_3` | I2C0, SDA8/SCL9 | I2C0, SDA8/SCL9 | Yes |
-| `7_dual_i2c_scl6` | I2C0, SDA8/SCL9 | I2C1, SDA44/SCL6 | No |
+| `7_dual_i2c` | I2C0, SDA8/SCL9 | I2C1, SDA44/SCL6 | No |
+
+Starting with `1.2.0-beta`, `7_dual_i2c` replaces the profile name
+`7_dual_i2c_scl6`. Saved reports retain their original identity; both names
+describe the same 7-inch target and GPIO44/6 sensor routing.
 
 `device` includes `firmware`, `build_id`, `hardware_profile` and `hardware_target`
 from the existing AppVersion accessors. Build IDs that contain `dirty` are not

@@ -123,7 +123,7 @@ class ReleaseIdentityScriptTests(unittest.TestCase):
         target: str = "aura-aq-v1",
         build_id: str | None = None,
     ) -> None:
-        suffix = "-7-dual-i2c-scl6" if environment == "project_aura_7" else ""
+        suffix = "-7-dual-i2c" if environment == "project_aura_7" else ""
         path.write_text(
             json.dumps(
                 {
@@ -157,12 +157,38 @@ class ReleaseIdentityScriptTests(unittest.TestCase):
                 seven,
                 commit=commit,
                 environment="project_aura_7",
-                profile="7_dual_i2c_scl6",
+                profile="7_dual_i2c",
                 target="aura-aq-7-v1",
             )
             seven_result = run_identity(seven, repository, "project_aura_7")
             self.assertEqual(seven_result.returncode, 0, seven_result.stderr)
-            self.assertEqual(json.loads(seven_result.stdout)["ArtifactSlug"], "7")
+            self.assertEqual(json.loads(seven_result.stdout)["ArtifactSlug"], "7-dual-i2c")
+
+    def test_rejects_retired_profile_and_suffix_without_changing_identity(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            repository = root / "repo"
+            repository.mkdir()
+            commit = init_repository(repository)
+            for profile, suffix, error in (
+                ("7_dual_i2c_scl6", "7-dual-i2c-scl6", "does not match"),
+                ("7_dual_i2c", "7-dual-i2c-scl6", "Build identity is stale"),
+            ):
+                with self.subTest(profile=profile, suffix=suffix):
+                    identity_path = root / f"{profile}.json"
+                    self.write_identity(
+                        identity_path,
+                        commit=commit,
+                        environment="project_aura_7",
+                        profile=profile,
+                        target="aura-aq-7-v1",
+                        build_id=f"{commit[:7]}-{suffix}",
+                    )
+                    before = identity_path.read_bytes()
+                    result = run_identity(identity_path, repository, "project_aura_7")
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertIn(error, result.stderr)
+                    self.assertEqual(identity_path.read_bytes(), before)
 
     def test_rejects_cross_profile_and_missing_fields(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -176,7 +202,7 @@ class ReleaseIdentityScriptTests(unittest.TestCase):
                 cross_pair,
                 commit=commit,
                 environment="project_aura_7",
-                profile="7_dual_i2c_scl6",
+                profile="7_dual_i2c",
                 target="aura-aq-v1",
             )
             result = run_identity(cross_pair, repository, "project_aura_7")

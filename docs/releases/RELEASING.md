@@ -50,7 +50,14 @@ The producer supports exactly two production identities:
 | PlatformIO environment | Hardware target | Hardware profile |
 | --- | --- | --- |
 | `project_aura` | `aura-aq-v1` | `4_3` |
-| `project_aura_7` | `aura-aq-7-v1` | `7_dual_i2c_scl6` |
+| `project_aura_7` | `aura-aq-7-v1` | `7_dual_i2c` |
+
+Starting with `1.2.0-beta`, the new 7-inch build suffix and public artifact
+slug are `7-dual-i2c`. Historical packages keep `7_dual_i2c_scl6` and their
+original signed bytes. Consumers must accept both profile names exclusively
+for `aura-aq-7-v1` before the renamed package can be imported or installed.
+Alias support does not enable a new release version or service OTA. See
+[the coordinated local preparation](LOCAL_1_2_PREPARATION_20260903.md).
 
 For a 4.3-inch Stable package, run:
 
@@ -140,7 +147,7 @@ Notes:
   for a safe retry. Untagged or differently bound drafts are never reused.
 - Default target-qualified names are:
   - `project_aura_4_3_X.Y.Z_ota_firmware.bin`
-  - `project_aura_7_X.Y.Z_ota_firmware.bin`
+  - `project_aura_7-dual-i2c_X.Y.Z_ota_firmware.bin`
 
 ## 4) Website usage
 - Aura Admin publishes immutable binaries to Private Blob.

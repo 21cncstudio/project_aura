@@ -15,9 +15,9 @@ function Get-AuraHardwareContract {
       return [pscustomobject]@{
         Environment = "project_aura_7"
         HardwareTarget = "aura-aq-7-v1"
-        HardwareProfile = "7_dual_i2c_scl6"
-        BuildIdSuffix = "7-dual-i2c-scl6"
-        ArtifactSlug = "7"
+        HardwareProfile = "7_dual_i2c"
+        BuildIdSuffix = "7-dual-i2c"
+        ArtifactSlug = "7-dual-i2c"
       }
     }
     default {

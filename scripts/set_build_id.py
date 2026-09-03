@@ -79,9 +79,9 @@ profile_config = {
         "hardware_target": "aura-aq-v1",
         "gt911_address": "0x14",
     },
-    "7_dual_i2c_scl6": {
+    "7_dual_i2c": {
         "is_7_inch": 1,
-        "build_id_suffix": "7-dual-i2c-scl6",
+        "build_id_suffix": "7-dual-i2c",
         "hardware_target": "aura-aq-7-v1",
         "gt911_address": "0x5d",
     },

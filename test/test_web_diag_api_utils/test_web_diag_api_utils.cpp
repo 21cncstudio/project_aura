@@ -193,9 +193,9 @@ void test_web_diag_api_utils_describes_shared_bus_without_replacing_boot_sample(
 
 void test_web_diag_api_utils_keeps_separate_sensor_bus_out_of_panel_snapshot() {
     WebDiagApiUtils::Payload payload{};
-    payload.device.firmware = "1.1.6-beta-fixture-7-dual-i2c-scl6";
-    payload.device.build_id = "fixture-7-dual-i2c-scl6";
-    payload.device.hardware_profile = "7_dual_i2c_scl6";
+    payload.device.firmware = "1.2.0-beta-fixture-7-dual-i2c";
+    payload.device.build_id = "fixture-7-dual-i2c";
+    payload.device.hardware_profile = "7_dual_i2c";
     payload.device.hardware_target = "aura-aq-7-v1";
     payload.panel_i2c.port = 0;
     payload.panel_i2c.sda_gpio = 8;
@@ -208,9 +208,9 @@ void test_web_diag_api_utils_keeps_separate_sensor_bus_out_of_panel_snapshot() {
     ArduinoJson::JsonDocument doc;
     WebDiagApiUtils::fillJson(doc.to<ArduinoJson::JsonObject>(), payload, nullptr, 0, 0);
 
-    TEST_ASSERT_EQUAL_STRING("1.1.6-beta-fixture-7-dual-i2c-scl6", doc["device"]["firmware"].as<const char *>());
-    TEST_ASSERT_EQUAL_STRING("fixture-7-dual-i2c-scl6", doc["device"]["build_id"].as<const char *>());
-    TEST_ASSERT_EQUAL_STRING("7_dual_i2c_scl6", doc["device"]["hardware_profile"].as<const char *>());
+    TEST_ASSERT_EQUAL_STRING("1.2.0-beta-fixture-7-dual-i2c", doc["device"]["firmware"].as<const char *>());
+    TEST_ASSERT_EQUAL_STRING("fixture-7-dual-i2c", doc["device"]["build_id"].as<const char *>());
+    TEST_ASSERT_EQUAL_STRING("7_dual_i2c", doc["device"]["hardware_profile"].as<const char *>());
     TEST_ASSERT_EQUAL_STRING("aura-aq-7-v1", doc["device"]["hardware_target"].as<const char *>());
     TEST_ASSERT_EQUAL_INT(0, doc["i2c_buses"]["panel"]["port"].as<int>());
     TEST_ASSERT_EQUAL_INT(8, doc["i2c_buses"]["panel"]["sda_gpio"].as<int>());
