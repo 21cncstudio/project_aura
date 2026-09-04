@@ -31,6 +31,12 @@ struct Sfa40TestState {
 
 class Sfa40 {
 public:
+    enum class Protocol : uint8_t {
+        Unknown = 0,
+        Production,
+        B4,
+    };
+
     enum class SelfTestStatus : uint8_t {
         Idle = 0,
         Running,
@@ -49,9 +55,11 @@ public:
         bool warmup_active = false;
         bool selftest_active = false;
         Status status = Status::Absent;
-        const char *last_error = "unknown";
+        const char *last_error = "none";
+        Protocol protocol = Protocol::Unknown;
         bool serial_valid = false;
-        uint16_t serial_words[3] = {};
+        uint8_t serial_word_count = 0;
+        uint16_t serial_words[5] = {};
         uint32_t start_ms = 0;
         uint32_t first_ready_ms = 0;
         uint32_t first_within_spec_ms = 0;
@@ -121,6 +129,16 @@ public:
     bool isWarmupActive() const { return state().warmup_active; }
     Status status() const { return state().status; }
     bool shouldFallbackToSfa30() const { return state().fallback_to_sfa30; }
+    static const char *protocolLabel(Protocol protocol) {
+        switch (protocol) {
+            case Protocol::Production:
+                return "production";
+            case Protocol::B4:
+                return "B4";
+            default:
+                return "unknown";
+        }
+    }
     const char *label() const { return "SFA40"; }
     uint32_t lastDataMs() const { return state().last_data_ms; }
     bool takeNewData(float &hcho_ppb) {

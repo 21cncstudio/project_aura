@@ -345,6 +345,8 @@ namespace Config {
     constexpr uint16_t SFA40_CMD_STOP = 0x50D2;
     constexpr uint16_t SFA40_CMD_READ_VALUES = 0xC0EB;
     constexpr uint16_t SFA40_CMD_ID = 0x02CE;
+    constexpr uint16_t SFA40_B4_CMD_READ_VALUES = 0xE06D;
+    constexpr uint16_t SFA40_B4_CMD_ID = 0x0559;
     constexpr uint16_t SFA40_CMD_START_SELFTEST = 0x060A;
     constexpr uint16_t SFA40_CMD_READ_SELFTEST = 0xC0EB;
     constexpr uint16_t SFA40_SELFTEST_RUNNING_RAW = 0xFFFF;
@@ -510,11 +512,13 @@ namespace Config {
     constexpr uint32_t SFA3X_READ_DELAY_MS = 5;
     constexpr uint32_t SFA30_START_SETTLE_MS = 200;
     constexpr uint32_t SFA40_START_SETTLE_MS = 200;
-    constexpr uint32_t SFA3X_POLL_MS = 3000;
+    constexpr uint32_t SFA40_PROTOCOL_STOP_DELAY_MS = 700;
+    constexpr uint32_t SFA40_COMMAND_READ_DELAY_MS = 1;
+    constexpr uint32_t SFA3X_POLL_MS = 1000;
     constexpr uint32_t SFA30_POWERUP_SUPPRESS_MS = 10000;
-    constexpr uint32_t SFA40_POLL_MS = 700;
+    constexpr uint32_t SFA40_POLL_MS = 1000;
     constexpr uint32_t SFA3X_STALE_MS = 10000;
-    constexpr uint32_t SFA40_FIRST_READ_DELAY_MS = 700;
+    constexpr uint32_t SFA40_FIRST_READ_DELAY_MS = 1000;
     constexpr uint32_t DFR_GAS_CMD_DELAY_MS = 20;
     constexpr uint32_t DFR_GAS_POLL_MS = 3000;
     constexpr uint32_t DFR_GAS_STALE_MS = 18000;

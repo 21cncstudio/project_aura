@@ -48,17 +48,24 @@ const char *hcho_type_text(SensorManager::HchoSensorType type) {
 }
 
 String serial_text(const Sfa40::Diagnostics &diag) {
-    if (!diag.serial_valid) {
+    if (!diag.serial_valid || diag.serial_word_count == 0U ||
+        diag.serial_word_count > 5U) {
         return "n/a";
     }
-    char buf[20];
-    snprintf(buf,
-             sizeof(buf),
-             "%04X-%04X-%04X",
-             static_cast<unsigned>(diag.serial_words[0]),
-             static_cast<unsigned>(diag.serial_words[1]),
-             static_cast<unsigned>(diag.serial_words[2]));
-    return String(buf);
+    String out;
+    out.reserve(static_cast<unsigned>(diag.serial_word_count) * 5U);
+    for (size_t i = 0; i < diag.serial_word_count; ++i) {
+        if (i != 0U) {
+            out += '-';
+        }
+        char word[5];
+        snprintf(word,
+                 sizeof(word),
+                 "%04X",
+                 static_cast<unsigned>(diag.serial_words[i]));
+        out += word;
+    }
+    return out;
 }
 
 String seconds_text(uint32_t millis_value) {
@@ -156,6 +163,7 @@ String build_report(WebHandlerContext &context) {
     append_line(out, "Measurement state unknown", bool_text(diag.measurement_state_unknown));
     append_line(out, "Self-test active", bool_text(diag.selftest_active));
     append_line(out, "Last error", diag.last_error);
+    append_line(out, "Protocol", Sfa40::protocolLabel(diag.protocol));
     append_line(out, "Serial", serial_text(diag));
     append_line(out, "Started", seconds_text(diag.start_ms));
     append_line(out, "First ready", seconds_after_start_text(diag.start_ms, diag.first_ready_ms));
@@ -277,8 +285,15 @@ void fill_json(ArduinoJson::JsonObject root, WebHandlerContext &context) {
     sfa["has_new_data"] = diag.has_new_data;
     sfa["selftest_active"] = diag.selftest_active;
     sfa["last_error"] = diag.last_error;
+    sfa["protocol"] = Sfa40::protocolLabel(diag.protocol);
     sfa["serial_valid"] = diag.serial_valid;
+    sfa["serial_word_count"] = diag.serial_word_count;
     sfa["serial"] = serial_text(diag);
+    ArduinoJson::JsonArray serial_words =
+        sfa["serial_words"].to<ArduinoJson::JsonArray>();
+    for (size_t i = 0; i < diag.serial_word_count && i < 5U; ++i) {
+        serial_words.add(diag.serial_words[i]);
+    }
     sfa["start_ms"] = diag.start_ms;
     sfa["first_ready_ms"] = diag.first_ready_ms;
     sfa["first_within_spec_ms"] = diag.first_within_spec_ms;
