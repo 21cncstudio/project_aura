@@ -139,6 +139,7 @@ typedef struct _objects_t {
     lv_obj_t *label_hcho_value_1;
     lv_obj_t *label_hcho_title_1;
     lv_obj_t *dot_hcho_1;
+    lv_obj_t *label_hcho_warmup;
     lv_obj_t *card_nox_pro;
     lv_obj_t *label_nox_unit_1;
     lv_obj_t *label_nox_value_1;

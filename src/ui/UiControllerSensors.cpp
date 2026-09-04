@@ -5,6 +5,7 @@
 // Purchase a Commercial License: see COMMERCIAL_LICENSE_SUMMARY.md
 
 #include "ui/UiController.h"
+#include "ui/UiHchoCardPresentation.h"
 #include "ui/UiOptionalGasProfile.h"
 #include "ui/UiText.h"
 #include "ui/ui.h"
@@ -398,20 +399,27 @@ void UiController::update_sensor_cards(const AirQuality &aq, bool gas_warmup, bo
         set_dot_color(objects.dot_nox_1, alert_color_for_mode(nox_card_col));
     }
 
-    const bool hcho_warmup = sensorManager.isSfaWarmupActive();
-    const bool hcho_available = currentData.hcho_valid;
+    const UiHchoCardPresentation::State hcho_card =
+        UiHchoCardPresentation::resolve(currentData.hcho_valid,
+                                        sensorManager.isSfaWarmupActive());
+    const bool hcho_warmup =
+        hcho_card.mode == UiHchoCardPresentation::Mode::Warmup;
+    const bool hcho_available =
+        hcho_card.mode == UiHchoCardPresentation::Mode::Measurement;
     if (objects.label_hcho_title_1) {
         safe_label_set_text_static(objects.label_hcho_title_1,
-                                   (hcho_available || hcho_warmup)
+                                   hcho_card.use_hcho_identity
                                        ? UiText::LabelHcho()
                                        : UiText::LabelAqi());
     }
     if (objects.label_hcho_unit_1) {
         safe_label_set_text_static(objects.label_hcho_unit_1,
-                                   (hcho_available || hcho_warmup)
+                                   hcho_card.use_hcho_identity
                                        ? UiText::UnitPpb()
                                        : UiText::UnitIndex());
+        set_visible(objects.label_hcho_unit_1, hcho_card.show_unit);
     }
+    set_visible(objects.label_hcho_warmup, hcho_card.show_warmup_label);
     if (objects.label_hcho_value_1) {
         if (hcho_available) {
             snprintf(buf, sizeof(buf), "%d", static_cast<int>(lroundf(currentData.hcho)));
@@ -421,6 +429,7 @@ void UiController::update_sensor_cards(const AirQuality &aq, bool gas_warmup, bo
             snprintf(buf, sizeof(buf), "%d", aq.score);
         }
         safe_label_set_text(objects.label_hcho_value_1, buf);
+        set_visible(objects.label_hcho_value_1, hcho_card.show_value);
     }
     if (objects.dot_hcho_1) {
         lv_color_t hcho_col = hcho_available ? getHCHOColor(currentData.hcho, true)
