@@ -416,9 +416,9 @@ bool Sfa30::pingAddress() {
     i2c_master_write_byte(cmd, (Config::SFA3X_ADDR << 1) | I2C_MASTER_WRITE, true);
     i2c_master_stop(cmd);
     const esp_err_t err = i2c_master_cmd_begin(
-        Config::I2C_PORT,
+        Config::SENSOR_I2C_PORT,
         cmd,
-        pdMS_TO_TICKS(Config::I2C_TIMEOUT_MS)
+        pdMS_TO_TICKS(Config::SENSOR_I2C_TIMEOUT_MS)
     );
     i2c_cmd_link_delete(cmd);
     return err == ESP_OK;

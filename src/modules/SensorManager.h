@@ -44,7 +44,15 @@ public:
 
     void begin(StorageManager &storage, float temp_offset, float hum_offset);
     PollResult poll(SensorData &data, StorageManager &storage, PressureHistory &pressure_history,
-                    bool co2_asc_enabled);
+                    bool co2_asc_enabled, bool system_time_trusted);
+#ifdef UNIT_TEST
+    PollResult poll(SensorData &data,
+                    StorageManager &storage,
+                    PressureHistory &pressure_history,
+                    bool co2_asc_enabled) {
+        return poll(data, storage, pressure_history, co2_asc_enabled, true);
+    }
+#endif
 
     // Permanently stop runtime access to the shared I2C bus. The gate is
     // restored only by begin(), which represents a fresh sensor startup.

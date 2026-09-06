@@ -138,7 +138,7 @@ bool recordValid(const RetainedRecord &record) {
 
     const uint8_t max_event = record.version == kLegacyVersion
         ? static_cast<uint8_t>(Event::AlarmWake)
-        : static_cast<uint8_t>(Event::MqttWake);
+        : static_cast<uint8_t>(Event::StartupWake);
     const uint8_t max_stage = record.version == kLegacyVersion
         ? static_cast<uint8_t>(Stage::PowerSettleReturned)
         : static_cast<uint8_t>(Stage::Aborted);
@@ -477,7 +477,7 @@ void beginWakeAtStage(Event event,
                       bool target_on,
                       bool previous_on,
                       LineState before) {
-    if (event == Event::None || event > Event::MqttWake) {
+    if (event == Event::None || event > Event::StartupWake) {
         return;
     }
     const RetainedRecord latest = currentRecord();
@@ -654,7 +654,7 @@ void updateWakeEvent(Event event) {
     if (!recordValid(record) ||
         record.event == static_cast<uint8_t>(Event::None) ||
         isTerminalStage(static_cast<Stage>(record.stage)) ||
-        event == Event::None || event > Event::MqttWake ||
+        event == Event::None || event > Event::StartupWake ||
         static_cast<uint8_t>(event) == record.event) {
         return;
     }
@@ -912,6 +912,7 @@ const char *eventText(Event event) {
         case Event::AlarmWake: return "alarm_wake";
         case Event::WebWake: return "web_wake";
         case Event::MqttWake: return "mqtt_wake";
+        case Event::StartupWake: return "startup_wake";
         default: return "unknown";
     }
 }
@@ -1038,7 +1039,7 @@ void seedTerminalWithCorruptSibling() {
     g_boot_revision = 0;
 }
 
-void seedLegacyV2CompletedTrace() {
+void seedLegacyV2CompletedTrace(Event event) {
     memset(&g_retained, 0, sizeof(g_retained));
     clearEvidenceMarker();
     RetainedRecord record{};
@@ -1050,7 +1051,7 @@ void seedLegacyV2CompletedTrace() {
     record.uptime_ms = 4567;
     record.epoch_s = 1787000000;
     record.driver_duration_us = 321;
-    record.event = static_cast<uint8_t>(Event::AlarmWake);
+    record.event = static_cast<uint8_t>(event);
     record.stage = static_cast<uint8_t>(Stage::Completed);
     record.driver_result = static_cast<uint8_t>(DriverResult::Succeeded);
     record.flags = encodePrimaryFlags(

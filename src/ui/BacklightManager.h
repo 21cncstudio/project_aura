@@ -37,14 +37,17 @@ public:
     };
 
     struct RuntimeSnapshot {
-        bool actual_on = true;
+        bool actual_on = false;
         bool transition_pending = false;
-        bool target_on = true;
+        bool target_on = false;
         bool wake_critical_section_pending = false;
     };
 
     void loadFromPrefs(StorageManager &storage);
     void attachBacklight(esp_panel::drivers::Backlight *backlight);
+    // Startup only: called after the logo framebuffer's VSYNC acknowledgement.
+    // The first owner poll queues the ordinary guarded wake, without I2C here.
+    void markStartupFrameReady();
     void poll(bool lvgl_ready);
     void updateUi();
     void savePrefs(StorageManager &storage);
@@ -129,9 +132,10 @@ private:
     static constexpr uint8_t RUNTIME_WAKE_CRITICAL_BIT = 1U << 3;
 
     esp_panel::drivers::Backlight *panel_backlight_ = nullptr;
-    bool backlight_on_ = true;
-    std::atomic<uint8_t> runtime_snapshot_bits_{
-        RUNTIME_ACTUAL_ON_BIT | RUNTIME_TARGET_ON_BIT};
+    bool backlight_on_ = false;
+    bool startup_pending_ = false;
+    std::atomic<bool> startup_frame_ready_{false};
+    std::atomic<uint8_t> runtime_snapshot_bits_{0};
     uint32_t command_failure_count_ = 0;
     BacklightStatePolicy::PendingCommand pending_command_;
     BacklightStatePolicy::RuntimeGate runtime_gate_;

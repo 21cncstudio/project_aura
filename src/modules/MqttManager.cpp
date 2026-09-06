@@ -14,6 +14,7 @@
 #include <WiFi.h>
 #include <esp_event.h>
 #include "core/Logger.h"
+#include "core/MqttClientLifecycle.h"
 #include "core/WakePowerGuard.h"
 #include "core/MqttEventQueue.h"
 #include "core/SystemEventPolicy.h"
@@ -374,14 +375,25 @@ void MqttManager::stopClient() {
     mqtt_client_needs_destroy_ = true;
 }
 
-void MqttManager::destroyClient() {
+bool MqttManager::destroyClient() {
     mqtt_connection_signal_.store(static_cast<uint8_t>(ConnectionSignal::None),
                                   std::memory_order_release);
     mqtt_active_client_.store(nullptr, std::memory_order_release);
     resetLiveness(false);
-    if (client_) {
-        esp_mqtt_client_destroy(client_);
-        client_ = nullptr;
+    esp_err_t destroy_error = ESP_OK;
+    const bool destroyed = MqttClientLifecycle::destroyOwned(
+        client_, [&destroy_error](esp_mqtt_client_handle_t client) {
+            destroy_error = esp_mqtt_client_destroy(client);
+            return destroy_error == ESP_OK;
+        });
+    if (!destroyed) {
+        // Keep the handle and retry flag. Replacing it now would leak a live
+        // ESP-MQTT task/client and make subsequent callbacks ambiguous.
+        mqtt_client_needs_destroy_ = true;
+        LOGE("MQTT",
+             "esp_mqtt_client_destroy failed during teardown: %d",
+             static_cast<int>(destroy_error));
+        return false;
     }
     mqtt_client_started_ = false;
     mqtt_client_needs_destroy_ = false;
@@ -391,10 +403,15 @@ void MqttManager::destroyClient() {
     mqtt_command_ingress_.reset();
     mqtt_active_ca_cert_ = "";
     mqtt_active_common_name_ = "";
+    return true;
 }
 
 bool MqttManager::connectTransport(const char *client_id, const char *will_topic) {
-    destroyClient();
+    if (!destroyClient()) {
+        LOGW("MQTT",
+             "refusing replacement client while previous teardown is incomplete");
+        return false;
+    }
 
     if (mqtt_tls_enabled_ && mqtt_ca_cert_.isEmpty()) {
         LOGW("MQTT", "TLS enabled but CA certificate is missing");
@@ -441,14 +458,18 @@ bool MqttManager::connectTransport(const char *client_id, const char *will_topic
     if (esp_mqtt_client_register_event(client_, MQTT_EVENT_ANY,
                                        &MqttManager::staticEventHandler, this) != ESP_OK) {
         LOGW("MQTT", "esp_mqtt_client_register_event failed");
-        destroyClient();
+        if (!destroyClient()) {
+            LOGW("MQTT", "client cleanup deferred after event registration failure");
+        }
         return false;
     }
     mqtt_active_client_.store(client_, std::memory_order_release);
     if (esp_mqtt_client_start(client_) != ESP_OK) {
         mqtt_active_client_.store(nullptr, std::memory_order_release);
         LOGW("MQTT", "esp_mqtt_client_start failed");
-        destroyClient();
+        if (!destroyClient()) {
+            LOGW("MQTT", "client cleanup deferred after start failure");
+        }
         return false;
     }
 
@@ -1722,7 +1743,9 @@ void MqttManager::poll(MqttRuntimeState &runtime_state) {
             esp_mqtt_client_stop(client_);
             mqtt_client_started_ = false;
         }
-        destroyClient();
+        if (!destroyClient()) {
+            return;
+        }
     }
 
     // Consume the publish flag before taking the snapshot. If the UI stores a

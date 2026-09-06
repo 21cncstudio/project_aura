@@ -15,7 +15,10 @@ void bestEffortRelease(const Ops &ops, bool reset_asserted) {
 
 } // namespace
 
-Result selectBackupAddress(const Ops &ops) {
+Result selectAddress(const Ops &ops, uint8_t address) {
+    if (address != 0x14 && address != 0x5D) {
+        return {Failure::InvalidAddress};
+    }
     if (ops.set_int_output == nullptr || ops.set_int_level == nullptr ||
         ops.set_reset_level == nullptr || ops.release_int == nullptr ||
         ops.delay_ms == nullptr) {
@@ -37,9 +40,9 @@ Result selectBackupAddress(const Ops &ops) {
     }
     ops.delay_ms(ops.context, 50U);
 
-    if (!ops.set_int_level(ops.context, true)) {
+    if (!ops.set_int_level(ops.context, address == 0x14)) {
         bestEffortRelease(ops, true);
-        return {Failure::IntHigh};
+        return {Failure::IntSelect};
     }
     ops.delay_ms(ops.context, 5U);
 
@@ -60,10 +63,11 @@ const char *failureText(Failure failure) {
     switch (failure) {
         case Failure::None: return "none";
         case Failure::InvalidOps: return "invalid_ops";
+        case Failure::InvalidAddress: return "invalid_address";
         case Failure::IntOutput: return "int_output";
         case Failure::IntLow: return "int_low";
         case Failure::ResetLow: return "reset_low";
-        case Failure::IntHigh: return "int_high";
+        case Failure::IntSelect: return "int_select";
         case Failure::ResetHigh: return "reset_high";
         case Failure::IntRelease: return "int_release";
         default: return "unknown";

@@ -1059,6 +1059,7 @@ private:
     int firmware_update_return_screen_id_ = 0;
     UiDeferredUnload deferred_unload_;
     bool boot_logo_active = false;
+    bool boot_logo_waiting_for_backlight = false;
     uint32_t boot_logo_start_ms = 0;
     bool boot_diag_active = false;
     bool boot_diag_has_error = false;

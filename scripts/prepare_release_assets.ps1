@@ -11,6 +11,8 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
+. (Join-Path $PSScriptRoot "release_identity.ps1")
+. (Join-Path $PSScriptRoot "release_layout.ps1")
 
 function Write-Step {
   param([string]$Message)
@@ -43,92 +45,59 @@ function Invoke-Platformio {
   }
 }
 
-function Resolve-BuildId {
-  param([string]$Root)
-
-  if ($BuildId) {
-    return $BuildId
-  }
-
-  $git = Get-Command git -ErrorAction SilentlyContinue
-  if (-not $git) {
-    return $null
-  }
-
-  Push-Location $Root
-  try {
-    $sha = (& git rev-parse --short=7 HEAD 2>$null).Trim()
-    if ([string]::IsNullOrWhiteSpace($sha)) {
-      return $null
-    }
-    return $sha
-  } finally {
-    Pop-Location
-  }
-}
-
-function Test-IsStableVersion {
-  param([string]$Value)
-
-  return -not [string]::IsNullOrWhiteSpace($Value) -and
-         $Value -match '^\d+(?:\.\d+)+$'
-}
-
-function Get-PartitionOffset {
-  param(
-    [string]$CsvPath,
-    [string]$Name
-  )
-
-  if (-not (Test-Path $CsvPath)) {
-    return $null
-  }
-
-  $lines = Get-Content $CsvPath | Where-Object { $_ -and $_ -notmatch "^\s*#" }
-  foreach ($line in $lines) {
-    $parts = $line.Split(",") | ForEach-Object { $_.Trim() }
-    if ($parts.Count -ge 4 -and $parts[0] -eq $Name) {
-      return $parts[3]
-    }
-  }
-
-  return $null
-}
-
 $root = Resolve-Path (Join-Path $PSScriptRoot "..")
 $platformioIni = Join-Path $root "platformio.ini"
 $buildDir = Join-Path $root (".pio\\build\\{0}" -f $Env)
 
-if (-not $Version -and (Test-Path $platformioIni)) {
+$configuredVersion = $null
+if (Test-Path $platformioIni) {
   $iniText = Get-Content $platformioIni -Raw
   $match = [regex]::Match($iniText, '-DAPP_VERSION=\\?"?([0-9A-Za-z._-]+)\\?"?')
   if ($match.Success) {
-    $Version = $match.Groups[1].Value
+    $configuredVersion = $match.Groups[1].Value
   }
+}
+
+if (-not $Version) {
+  $Version = $configuredVersion
+} elseif ($configuredVersion -and $Version -ne $configuredVersion) {
+  throw "Requested version $Version does not match platformio.ini version $configuredVersion."
 }
 
 if (-not $Version) {
   throw "Version not found. Pass -Version 1.1.0 or set -DAPP_VERSION in platformio.ini."
 }
-
-$resolvedBuildId = Resolve-BuildId -Root $root
-$displayVersion = $Version
-if ($resolvedBuildId -and -not (Test-IsStableVersion -Value $Version)) {
-  $displayVersion = "{0}-{1}" -f $Version, $resolvedBuildId
-}
+[void](Get-AuraEffectiveVersion -Version $Version -BuildId "validation")
 
 if (-not $Tag) {
   $Tag = "v$Version"
 }
 
-$platformioExe = Resolve-PlatformioCommand
+$contract = Get-AuraHardwareContract -Environment $Env
+if (-not $SkipWebInstallerSync -and $contract.HardwareTarget -ne "aura-aq-v1") {
+  throw "The legacy local web-installer sync is 4.3-inch-only. Use -SkipWebInstallerSync for $($contract.HardwareTarget)."
+}
+$releaseRoot = Join-Path $root (Join-Path $OutputRoot $Tag)
+$outDir = Join-Path $releaseRoot $contract.HardwareTarget
+if (Test-Path -LiteralPath $outDir) {
+  throw "Target-specific release directory already exists: $outDir"
+}
 
 if (-not $SkipBuild) {
+  $platformioExe = Resolve-PlatformioCommand
   Write-Step "Building firmware"
   Invoke-Platformio -Exe $platformioExe -PioArgs @("run", "-e", $Env)
   Write-Step "Building filesystem image"
   Invoke-Platformio -Exe $platformioExe -PioArgs @("run", "-e", $Env, "-t", "buildfs")
 }
+
+$identityPath = Join-Path $buildDir "generated\build-identity.json"
+$identity = Read-AuraBuildIdentity `
+  -IdentityPath $identityPath `
+  -Environment $Env `
+  -RepositoryRoot $root `
+  -ExpectedBuildId $BuildId
+$displayVersion = Get-AuraEffectiveVersion -Version $Version -BuildId $identity.BuildId
 
 $required = @("bootloader.bin", "partitions.bin", "firmware.bin", "littlefs.bin")
 foreach ($name in $required) {
@@ -143,33 +112,49 @@ if (-not (Test-Path $bootApp0)) {
   throw "Missing boot_app0.bin at $bootApp0"
 }
 
-$partitionsCsv = $null
-if (Test-Path $platformioIni) {
-  $iniText = Get-Content $platformioIni -Raw
-  $match = [regex]::Match($iniText, "board_build\\.partitions\\s*=\\s*(\\S+)")
-  if ($match.Success) {
-    $partitionsCsv = Join-Path $root $match.Groups[1].Value
-  }
-}
-if (-not $partitionsCsv -or -not (Test-Path $partitionsCsv)) {
-  $partitionsCsv = Join-Path $root "partitions_16MB_littlefs.csv"
+$partitionsCsv = Join-Path $root $identity.PartitionsFile
+if (-not (Test-Path -LiteralPath $partitionsCsv)) {
+  throw "Selected environment partition file is missing: $partitionsCsv"
 }
 
-$app0Offset = Get-PartitionOffset -CsvPath $partitionsCsv -Name "app0"
+$app0Offset = Get-AuraPartitionOffset -CsvPath $partitionsCsv -Name "app0"
 if (-not $app0Offset) {
-  $app0Offset = "0x10000"
+  throw "Partition table does not define app0: $partitionsCsv"
 }
+$app0Offset = Assert-AuraCanonicalFlashOffset `
+  -Value $app0Offset `
+  -ExpectedValue 0x10000 `
+  -PartitionName "app0"
 
-$littlefsOffset = Get-PartitionOffset -CsvPath $partitionsCsv -Name "littlefs"
-if (-not $littlefsOffset) {
-  $littlefsOffset = Get-PartitionOffset -CsvPath $partitionsCsv -Name "spiffs"
+$littlefsOffset = Get-AuraPartitionOffset -CsvPath $partitionsCsv -Name "littlefs"
+$spiffsOffset = Get-AuraPartitionOffset -CsvPath $partitionsCsv -Name "spiffs"
+if ($littlefsOffset -and $spiffsOffset) {
+  throw "Partition table defines both littlefs and spiffs; expected exactly one filesystem partition: $partitionsCsv"
 }
+$filesystemPartitionName = if ($littlefsOffset) { "littlefs" } else { "spiffs" }
+$littlefsOffset = if ($littlefsOffset) { $littlefsOffset } else { $spiffsOffset }
 if (-not $littlefsOffset) {
-  $littlefsOffset = "0xC90000"
+  throw "Partition table does not define littlefs/spiffs: $partitionsCsv"
 }
+$littlefsOffset = Assert-AuraCanonicalFlashOffset `
+  -Value $littlefsOffset `
+  -ExpectedValue 0xC90000 `
+  -PartitionName $filesystemPartitionName
 
-$outDir = Join-Path $root (Join-Path $OutputRoot $Tag)
-New-Item -ItemType Directory -Force $outDir | Out-Null
+$artifactInputs = Get-AuraArtifactInputs -BuildDirectory $buildDir -BootApp0Path $bootApp0
+$artifactStampPath = Join-Path $buildDir "generated\release-artifacts.json"
+if (-not $SkipBuild) {
+  Write-AuraReleaseArtifactStamp `
+    -StampPath $artifactStampPath `
+    -Identity $identity `
+    -ArtifactInputs $artifactInputs
+}
+$artifactStamp = Read-AuraReleaseArtifactStamp `
+  -StampPath $artifactStampPath `
+  -Identity $identity `
+  -ArtifactInputs $artifactInputs
+
+New-Item -ItemType Directory -Path $outDir | Out-Null
 
 Write-Step "Copying release binaries"
 Copy-Item -Force (Join-Path $buildDir "bootloader.bin") (Join-Path $outDir "bootloader.bin")
@@ -177,25 +162,28 @@ Copy-Item -Force (Join-Path $buildDir "partitions.bin") (Join-Path $outDir "part
 Copy-Item -Force (Join-Path $buildDir "firmware.bin") (Join-Path $outDir "firmware.bin")
 Copy-Item -Force (Join-Path $buildDir "littlefs.bin") (Join-Path $outDir "littlefs.bin")
 Copy-Item -Force $bootApp0 (Join-Path $outDir "boot_app0.bin")
+Copy-Item -LiteralPath $artifactStampPath (Join-Path $outDir "release-artifacts.json")
 
-$otaFileName = "project_aura_{0}_ota_firmware.bin" -f $displayVersion
+$otaFileName = "project_aura_{0}_{1}_ota_firmware.bin" -f $identity.ArtifactSlug, $displayVersion
 Copy-Item -Force (Join-Path $buildDir "firmware.bin") (Join-Path $outDir $otaFileName)
 
-$baseUrl = "https://github.com/$Repo/releases/download/$Tag"
 $manifestFull = [ordered]@{
   name = "Project Aura"
   version = $displayVersion
+  hardware_target = $identity.HardwareTarget
+  hardware_profile = $identity.HardwareProfile
+  build_id = $identity.BuildId
   # ESP Web Tools: skip the Improv provisioning wait because Aura uses its own setup flow.
   new_install_improv_wait_time = 0
   builds = @(
     [ordered]@{
       chipFamily = "ESP32-S3"
       parts = @(
-        [ordered]@{ path = "$baseUrl/bootloader.bin"; offset = "0x0000" }
-        [ordered]@{ path = "$baseUrl/partitions.bin"; offset = "0x8000" }
-        [ordered]@{ path = "$baseUrl/boot_app0.bin"; offset = "0xE000" }
-        [ordered]@{ path = "$baseUrl/firmware.bin"; offset = $app0Offset }
-        [ordered]@{ path = "$baseUrl/littlefs.bin"; offset = $littlefsOffset }
+        [ordered]@{ path = "bootloader.bin"; offset = "0x0000" }
+        [ordered]@{ path = "partitions.bin"; offset = "0x8000" }
+        [ordered]@{ path = "boot_app0.bin"; offset = "0xE000" }
+        [ordered]@{ path = "firmware.bin"; offset = $app0Offset }
+        [ordered]@{ path = "littlefs.bin"; offset = $littlefsOffset }
       )
     }
   )
@@ -203,6 +191,9 @@ $manifestFull = [ordered]@{
 $manifestUpdate = [ordered]@{
   name = "Project Aura"
   version = $displayVersion
+  hardware_target = $identity.HardwareTarget
+  hardware_profile = $identity.HardwareProfile
+  build_id = $identity.BuildId
   # ESP Web Tools: skip the Improv provisioning wait because Aura uses its own setup flow.
   new_install_improv_wait_time = 0
   new_install_prompt_erase = $true
@@ -210,7 +201,7 @@ $manifestUpdate = [ordered]@{
     [ordered]@{
       chipFamily = "ESP32-S3"
       parts = @(
-        [ordered]@{ path = "$baseUrl/firmware.bin"; offset = $app0Offset }
+        [ordered]@{ path = "firmware.bin"; offset = $app0Offset }
       )
     }
   )
@@ -219,6 +210,17 @@ $manifestUpdate = [ordered]@{
 Write-Step "Writing release manifests"
 $manifestFull | ConvertTo-Json -Depth 8 | Set-Content -Encoding Ascii (Join-Path $outDir "manifest.json")
 $manifestUpdate | ConvertTo-Json -Depth 8 | Set-Content -Encoding Ascii (Join-Path $outDir "manifest-update.json")
+$releaseIdentity = [ordered]@{
+  schema = $identity.Schema
+  environment = $identity.Environment
+  source_commit = $identity.SourceCommit
+  build_id = $identity.BuildId
+  hardware_profile = $identity.HardwareProfile
+  hardware_target = $identity.HardwareTarget
+  artifact_slug = $identity.ArtifactSlug
+  partitions_file = $identity.PartitionsFile
+}
+$releaseIdentity | ConvertTo-Json -Depth 4 | Set-Content -Encoding Ascii (Join-Path $outDir "release-identity.json")
 
 $releaseNotes = Join-Path $root ("docs\\releases\\v{0}.md" -f $Version)
 if (Test-Path $releaseNotes) {
@@ -233,11 +235,13 @@ $hashFiles = @(
   "littlefs.bin",
   "manifest.json",
   "manifest-update.json",
+  "release-identity.json",
+  "release-artifacts.json",
   $otaFileName
 )
 $hashLines = foreach ($fileName in $hashFiles) {
   $filePath = Join-Path $outDir $fileName
-  $hash = (Get-FileHash -Algorithm SHA256 -Path $filePath).Hash.ToLowerInvariant()
+  $hash = Get-AuraFileSha256 -Path $filePath
   "$hash  $fileName"
 }
 $hashLines | Set-Content -Encoding Ascii (Join-Path $outDir "sha256sums.txt")
@@ -258,8 +262,15 @@ if (-not $SkipWebInstallerSync) {
 Write-Host ""
 Write-Host "Release assets prepared in: $outDir"
 Write-Host "Tag: $Tag"
+Write-Host "Hardware target: $($identity.HardwareTarget)"
+Write-Host "Hardware profile: $($identity.HardwareProfile)"
+Write-Host "Build ID: $($identity.BuildId)"
 Write-Host "Upload this file to GitHub Release:"
 Write-Host " - $otaFileName"
 Write-Host "Other files in release-assets are for local installer workflow."
 Write-Host ""
-Write-Host "Local website installer files are refreshed in: $root\\web-installer"
+if ($SkipWebInstallerSync) {
+  Write-Host "Legacy local web-installer sync was skipped."
+} else {
+  Write-Host "Local website installer files are refreshed in: $root\\web-installer"
+}

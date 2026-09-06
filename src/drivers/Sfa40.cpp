@@ -57,10 +57,7 @@ bool Sfa40::begin() {
     last_error_cause_ = ErrorCause::None;
     warmup_active_ = false;
     selftest_active_ = false;
-    serial_valid_ = false;
-    for (uint16_t &word : serial_words_) {
-        word = 0;
-    }
+    clearProtocol();
     start_ms_ = 0;
     first_ready_ms_ = 0;
     first_within_spec_ms_ = 0;
@@ -86,6 +83,7 @@ bool Sfa40::begin() {
     late_start_phase_ = LateStartPhase::Idle;
     late_start_due_ms_ = 0;
     late_start_command_ms_ = 0;
+    late_probe_error_ = ErrorCause::None;
     return true;
 }
 
@@ -165,9 +163,10 @@ void Sfa40::beginLateStart() {
     data_valid_ = false;
     has_new_data_ = false;
     warmup_active_ = false;
-    serial_valid_ = false;
+    clearProtocol();
     late_start_due_ms_ = 0;
     late_start_command_ms_ = 0;
+    late_probe_error_ = ErrorCause::None;
     late_start_phase_ = LateStartPhase::Ping;
 }
 
@@ -204,86 +203,74 @@ CooperativeStart::Result Sfa40::pollLateStart(uint32_t now_ms) {
                 last_error_cause_ = ErrorCause::None;
                 return finishLateStart(false, now_ms);
             }
-            late_start_phase_ = measurement_state_unknown_
-                ? LateStartPhase::StopBeforeDetect
-                : LateStartPhase::WriteId;
+            late_start_phase_ = LateStartPhase::StopBeforeDetect;
             return CooperativeStart::Result::InProgress;
         case LateStartPhase::StopBeforeDetect:
-            LOGI(label(), "forcing idle before detect after warm restart");
             if (!writeCmd(Config::SFA40_CMD_STOP)) {
                 status_ = Status::Fault;
-                last_error_cause_ = ErrorCause::WarmRestartStop;
+                last_error_cause_ = ErrorCause::ProtocolStop;
                 return finishLateStart(false, now_ms);
             }
-            late_start_due_ms_ = millis() + Config::SFA3X_STOP_DELAY_MS;
+            late_start_due_ms_ = millis() + Config::SFA40_PROTOCOL_STOP_DELAY_MS;
             late_start_phase_ = LateStartPhase::WaitStopBeforeDetect;
             return CooperativeStart::Result::InProgress;
         case LateStartPhase::WaitStopBeforeDetect:
             if (deadlineReached(now_ms, late_start_due_ms_)) {
                 measuring_ = false;
                 measurement_state_unknown_ = false;
-                late_start_phase_ = LateStartPhase::WriteId;
+                late_start_phase_ = LateStartPhase::WriteProductionId;
             }
             return CooperativeStart::Result::InProgress;
-        case LateStartPhase::WriteId:
+        case LateStartPhase::WriteProductionId:
             if (!writeCmd(Config::SFA40_CMD_ID)) {
-                ++read_command_errors_;
-                status_ = Status::Fault;
-                last_error_cause_ = ErrorCause::ReadCommand;
-                return finishLateStart(false, now_ms);
+                late_probe_error_ = ErrorCause::ReadCommand;
+                late_start_phase_ = LateStartPhase::WriteB4Id;
+                return CooperativeStart::Result::InProgress;
             }
-            late_start_phase_ = LateStartPhase::ReadId;
+            late_start_due_ms_ = millis() + Config::SFA40_COMMAND_READ_DELAY_MS;
+            late_start_phase_ = LateStartPhase::WaitProductionId;
             return CooperativeStart::Result::InProgress;
-        case LateStartPhase::ReadId: {
-            uint8_t buf[9] = {};
-            if (!readBytes(buf, sizeof(buf))) {
-                ++read_bytes_errors_;
+        case LateStartPhase::WaitProductionId: {
+            if (!deadlineReached(now_ms, late_start_due_ms_)) {
+                return CooperativeStart::Result::InProgress;
+            }
+            ErrorCause error = ErrorCause::None;
+            if (readSerialResponse(Protocol::Production, error)) {
                 status_ = Status::Fault;
-                last_error_cause_ = ErrorCause::ReadBytes;
-                return finishLateStart(false, now_ms);
+                last_error_cause_ = ErrorCause::None;
+                late_start_phase_ = LateStartPhase::WriteStart;
+                return CooperativeStart::Result::InProgress;
             }
-            bool nonzero = false;
-            for (size_t i = 0; i < 3U; ++i) {
-                const uint8_t *word = &buf[i * 3U];
-                if (I2C::crc8(word, 2) != word[2]) {
-                    ++read_crc_errors_;
-                    status_ = Status::Fault;
-                    last_error_cause_ = ErrorCause::ReadCrc;
-                    return finishLateStart(false, now_ms);
-                }
-                serial_words_[i] =
-                    (static_cast<uint16_t>(word[0]) << 8) | word[1];
-                nonzero = nonzero || serial_words_[i] != 0U;
-            }
-            if (!nonzero) {
-                status_ = Status::Fault;
-                serial_valid_ = false;
-                last_error_cause_ = ErrorCause::DetectSensor;
-                return finishLateStart(false, now_ms);
-            }
-            serial_valid_ = true;
-            last_error_cause_ = ErrorCause::None;
-            status_ = Status::Fault;
-            late_start_phase_ = measurement_state_unknown_
-                ? LateStartPhase::StopBeforeStart
-                : LateStartPhase::WriteStart;
+            late_probe_error_ = error;
+            clearProtocol();
+            late_start_phase_ = LateStartPhase::WriteB4Id;
             return CooperativeStart::Result::InProgress;
         }
-        case LateStartPhase::StopBeforeStart:
-            if (!writeCmd(Config::SFA40_CMD_STOP)) {
-                last_error_cause_ = ErrorCause::WarmRestartStop;
+        case LateStartPhase::WriteB4Id:
+            if (!writeCmd(Config::SFA40_B4_CMD_ID)) {
+                status_ = Status::Fault;
+                recordProbeFailure(ErrorCause::ReadCommand);
                 return finishLateStart(false, now_ms);
             }
-            late_start_due_ms_ = millis() + Config::SFA3X_STOP_DELAY_MS;
-            late_start_phase_ = LateStartPhase::WaitStopBeforeStart;
+            late_start_due_ms_ = millis() + Config::SFA40_COMMAND_READ_DELAY_MS;
+            late_start_phase_ = LateStartPhase::WaitB4Id;
             return CooperativeStart::Result::InProgress;
-        case LateStartPhase::WaitStopBeforeStart:
-            if (deadlineReached(now_ms, late_start_due_ms_)) {
-                measuring_ = false;
-                measurement_state_unknown_ = false;
-                late_start_phase_ = LateStartPhase::WriteStart;
+        case LateStartPhase::WaitB4Id: {
+            if (!deadlineReached(now_ms, late_start_due_ms_)) {
+                return CooperativeStart::Result::InProgress;
             }
+            ErrorCause error = late_probe_error_;
+            if (!readSerialResponse(Protocol::B4, error)) {
+                status_ = Status::Fault;
+                clearProtocol();
+                recordProbeFailure(error);
+                return finishLateStart(false, now_ms);
+            }
+            status_ = Status::Fault;
+            last_error_cause_ = ErrorCause::None;
+            late_start_phase_ = LateStartPhase::WriteStart;
             return CooperativeStart::Result::InProgress;
+        }
         case LateStartPhase::WriteStart:
             if (!writeCmd(Config::SFA40_CMD_START)) {
                 last_error_cause_ = ErrorCause::StartCommand;
@@ -324,14 +311,21 @@ bool Sfa40::stop() {
 bool Sfa40::readMeasurement(MeasurementReadResult &result) {
     ++measurement_reads_;
     uint16_t words[4];
-    if (!readWords(Config::SFA40_CMD_READ_VALUES, words, 4, 0)) {
+    if (protocol_ == Protocol::Unknown ||
+        !readWords(measurementCommand(),
+                   words,
+                   4,
+                   Config::SFA40_COMMAND_READ_DELAY_MS)) {
         ++measurement_read_failures_;
         return false;
     }
 
     ++measurement_frames_ok_;
     const uint32_t now = millis();
-    const uint8_t status = static_cast<uint8_t>((words[3] >> 8) & 0xFFU);
+    const bool b4 = protocol_ == Protocol::B4;
+    const uint8_t status = b4
+        ? static_cast<uint8_t>(words[3] & 0xFFU)
+        : static_cast<uint8_t>((words[3] >> 8) & 0xFFU);
     const bool not_ready = (status & SFA40_STATUS_NOT_READY) != 0U;
     const bool not_within_spec = (status & SFA40_STATUS_NOT_WITHIN_SPEC) != 0U;
     last_status_valid_ = true;
@@ -339,7 +333,9 @@ bool Sfa40::readMeasurement(MeasurementReadResult &result) {
     last_raw_humidity_ = words[1];
     last_raw_temperature_ = words[2];
     last_status_byte_ = status;
-    last_status_reserved_ = static_cast<uint8_t>(words[3] & 0xFFU);
+    last_status_reserved_ = b4
+        ? static_cast<uint8_t>((words[3] >> 8) & 0xFFU)
+        : static_cast<uint8_t>(words[3] & 0xFFU);
     last_humidity_percent_ = decodeHumidityPercent(words[1]);
     last_temperature_c_ = decodeTemperatureC(words[2]);
     last_measurement_ms_ = now;
@@ -400,7 +396,7 @@ bool Sfa40::startSelfTest() {
         if (measuring_) {
             ok_ = false;
             status_ = Status::Fault;
-            last_error_cause_ = ErrorCause::WarmRestartStop;
+            last_error_cause_ = ErrorCause::ProtocolStop;
             LOGW(label(), "self-test start aborted (%s)", errorCauseLabel());
             return false;
         }
@@ -432,7 +428,10 @@ Sfa40::SelfTestStatus Sfa40::readSelfTestStatus(uint16_t &raw_result) {
     }
 
     uint16_t words[1];
-    if (!readWords(Config::SFA40_CMD_READ_SELFTEST, words, 1, 0)) {
+    if (!readWords(Config::SFA40_CMD_READ_SELFTEST,
+                   words,
+                   1,
+                   Config::SFA40_COMMAND_READ_DELAY_MS)) {
         ok_ = false;
         status_ = Status::Fault;
         selftest_active_ = false;
@@ -525,7 +524,7 @@ bool Sfa40::shouldFallbackToSfa30() const {
     }
     switch (last_error_cause_) {
         case ErrorCause::DetectSensor:
-        case ErrorCause::WarmRestartStop:
+        case ErrorCause::ProtocolStop:
         case ErrorCause::ReadCommand:
         case ErrorCause::ReadBytes:
         case ErrorCause::ReadCrc:
@@ -541,23 +540,131 @@ void Sfa40::invalidate() {
 }
 
 bool Sfa40::detectSensor() {
-    uint16_t words[3];
-    if (!readWords(Config::SFA40_CMD_ID, words, 3, 0)) {
+    clearProtocol();
+    ErrorCause production_error = ErrorCause::None;
+    if (probeProtocol(Protocol::Production, production_error)) {
+        last_error_cause_ = ErrorCause::None;
+        return true;
+    }
+
+    clearProtocol();
+    ErrorCause b4_error = production_error;
+    if (probeProtocol(Protocol::B4, b4_error)) {
+        // A rejected production command is expected on a valid B4 unit. Do
+        // not leave that expected probe failure in diagnostics or counters.
+        last_error_cause_ = ErrorCause::None;
+        return true;
+    }
+
+    clearProtocol();
+    recordProbeFailure(b4_error);
+    return false;
+}
+
+bool Sfa40::probeProtocol(Protocol protocol, ErrorCause &error) {
+    if (!writeCmd(idCommand(protocol))) {
+        error = ErrorCause::ReadCommand;
         return false;
     }
-    for (uint16_t word : words) {
-        if (word != 0) {
-            for (size_t i = 0; i < 3; ++i) {
-                serial_words_[i] = words[i];
-            }
-            serial_valid_ = true;
-            last_error_cause_ = ErrorCause::None;
-            return true;
-        }
+    delay(Config::SFA40_COMMAND_READ_DELAY_MS);
+    return readSerialResponse(protocol, error);
+}
+
+bool Sfa40::readSerialResponse(Protocol protocol, ErrorCause &error) {
+    const size_t word_count = serialWordCount(protocol);
+    if (word_count == 0U || word_count > 5U) {
+        error = ErrorCause::DetectSensor;
+        return false;
     }
+
+    uint8_t buf[15] = {};
+    const size_t byte_count = word_count * 3U;
+    if (!readBytes(buf, byte_count)) {
+        error = ErrorCause::ReadBytes;
+        return false;
+    }
+
+    uint16_t words[5] = {};
+    bool nonzero = false;
+    for (size_t i = 0; i < word_count; ++i) {
+        const uint8_t *word = &buf[i * 3U];
+        if (I2C::crc8(word, 2) != word[2]) {
+            error = ErrorCause::ReadCrc;
+            return false;
+        }
+        words[i] = (static_cast<uint16_t>(word[0]) << 8) | word[1];
+        nonzero = nonzero || words[i] != 0U;
+    }
+    if (!nonzero) {
+        error = ErrorCause::DetectSensor;
+        return false;
+    }
+
+    selectProtocol(protocol, words, word_count);
+    error = ErrorCause::None;
+    return true;
+}
+
+void Sfa40::selectProtocol(Protocol protocol,
+                           const uint16_t *serial_words,
+                           size_t word_count) {
+    clearProtocol();
+    protocol_ = protocol;
+    serial_valid_ = serial_words != nullptr && word_count > 0U && word_count <= 5U;
+    if (!serial_valid_) {
+        return;
+    }
+    serial_word_count_ = static_cast<uint8_t>(word_count);
+    for (size_t i = 0; i < word_count; ++i) {
+        serial_words_[i] = serial_words[i];
+    }
+}
+
+void Sfa40::clearProtocol() {
+    protocol_ = Protocol::Unknown;
     serial_valid_ = false;
-    last_error_cause_ = ErrorCause::DetectSensor;
-    return false;
+    serial_word_count_ = 0;
+    for (uint16_t &word : serial_words_) {
+        word = 0;
+    }
+}
+
+void Sfa40::recordProbeFailure(ErrorCause error) {
+    last_error_cause_ = error;
+    switch (error) {
+        case ErrorCause::ReadCommand:
+            ++read_command_errors_;
+            break;
+        case ErrorCause::ReadBytes:
+            ++read_bytes_errors_;
+            break;
+        case ErrorCause::ReadCrc:
+            ++read_crc_errors_;
+            break;
+        default:
+            break;
+    }
+}
+
+uint16_t Sfa40::idCommand(Protocol protocol) const {
+    return protocol == Protocol::B4 ? Config::SFA40_B4_CMD_ID
+                                    : Config::SFA40_CMD_ID;
+}
+
+uint16_t Sfa40::measurementCommand() const {
+    return protocol_ == Protocol::B4 ? Config::SFA40_B4_CMD_READ_VALUES
+                                     : Config::SFA40_CMD_READ_VALUES;
+}
+
+size_t Sfa40::serialWordCount(Protocol protocol) const {
+    switch (protocol) {
+        case Protocol::Production:
+            return 3U;
+        case Protocol::B4:
+            return 5U;
+        default:
+            return 0U;
+    }
 }
 
 bool Sfa40::readWords(uint16_t cmd, uint16_t *out, size_t words, uint32_t delay_ms) {
@@ -568,7 +675,7 @@ bool Sfa40::readWords(uint16_t cmd, uint16_t *out, size_t words, uint32_t delay_
     }
     delay(delay_ms);
     const size_t bytes = words * 3;
-    uint8_t buf[12];
+    uint8_t buf[15];
     if (bytes > sizeof(buf)) {
         last_error_cause_ = ErrorCause::ReadBytes;
         ++read_bytes_errors_;
@@ -601,8 +708,10 @@ Sfa40::Diagnostics Sfa40::diagnostics() const {
     out.selftest_active = selftest_active_;
     out.status = status_;
     out.last_error = errorCauseLabel();
+    out.protocol = protocol_;
     out.serial_valid = serial_valid_;
-    for (size_t i = 0; i < 3; ++i) {
+    out.serial_word_count = serial_word_count_;
+    for (size_t i = 0; i < 5; ++i) {
         out.serial_words[i] = serial_words_[i];
     }
     out.start_ms = start_ms_;
@@ -633,16 +742,11 @@ Sfa40::Diagnostics Sfa40::diagnostics() const {
 }
 
 bool Sfa40::ensureIdleBeforeDetect() {
-    if (!measurement_state_unknown_) {
-        return true;
-    }
-
-    LOGI(label(), "forcing idle before detect after warm restart");
     if (!writeCmd(Config::SFA40_CMD_STOP)) {
-        last_error_cause_ = ErrorCause::WarmRestartStop;
+        last_error_cause_ = ErrorCause::ProtocolStop;
         return false;
     }
-    delay(Config::SFA3X_STOP_DELAY_MS);
+    delay(Config::SFA40_PROTOCOL_STOP_DELAY_MS);
     measuring_ = false;
     measurement_state_unknown_ = false;
     last_error_cause_ = ErrorCause::None;
@@ -656,7 +760,7 @@ bool Sfa40::ensureIdleBeforeStart() {
 
     LOGI(label(), "forcing idle after warm restart");
     if (!writeCmd(Config::SFA40_CMD_STOP)) {
-        last_error_cause_ = ErrorCause::WarmRestartStop;
+        last_error_cause_ = ErrorCause::ProtocolStop;
         return false;
     }
     delay(Config::SFA3X_STOP_DELAY_MS);
@@ -676,9 +780,9 @@ bool Sfa40::pingAddress() {
     i2c_master_write_byte(cmd, (Config::SFA3X_ADDR << 1) | I2C_MASTER_WRITE, true);
     i2c_master_stop(cmd);
     const esp_err_t err = i2c_master_cmd_begin(
-        Config::I2C_PORT,
+        Config::SENSOR_I2C_PORT,
         cmd,
-        pdMS_TO_TICKS(Config::I2C_TIMEOUT_MS)
+        pdMS_TO_TICKS(Config::SENSOR_I2C_TIMEOUT_MS)
     );
     i2c_cmd_link_delete(cmd);
     return err == ESP_OK;
@@ -694,10 +798,12 @@ bool Sfa40::readBytes(uint8_t *buf, size_t len) {
 
 const char *Sfa40::errorCauseLabel() const {
     switch (last_error_cause_) {
+        case ErrorCause::None:
+            return "none";
         case ErrorCause::DetectSensor:
             return "detect";
-        case ErrorCause::WarmRestartStop:
-            return "warm-restart-stop";
+        case ErrorCause::ProtocolStop:
+            return "protocol-stop";
         case ErrorCause::StartCommand:
             return "start-cmd";
         case ErrorCause::ReadCommand:
@@ -708,6 +814,17 @@ const char *Sfa40::errorCauseLabel() const {
             return "crc";
         case ErrorCause::ReadStatus:
             return "status";
+        default:
+            return "unknown";
+    }
+}
+
+const char *Sfa40::protocolLabel(Protocol protocol) {
+    switch (protocol) {
+        case Protocol::Production:
+            return "production";
+        case Protocol::B4:
+            return "B4";
         default:
             return "unknown";
     }

@@ -25,6 +25,32 @@ uint8_t crc8(const uint8_t *data, size_t len) {
     return crc;
 }
 
+esp_err_t probe(uint8_t addr) {
+    i2c_cmd_handle_t handle = i2c_cmd_link_create();
+    if (!handle) {
+        return ESP_ERR_NO_MEM;
+    }
+
+    esp_err_t err = i2c_master_start(handle);
+    if (err == ESP_OK) {
+        err = i2c_master_write_byte(
+            handle,
+            static_cast<uint8_t>((addr << 1U) | I2C_MASTER_WRITE),
+            true);
+    }
+    if (err == ESP_OK) {
+        err = i2c_master_stop(handle);
+    }
+    if (err == ESP_OK) {
+        err = i2c_master_cmd_begin(
+            Config::SENSOR_I2C_PORT,
+            handle,
+            pdMS_TO_TICKS(Config::SENSOR_I2C_TIMEOUT_MS));
+    }
+    i2c_cmd_link_delete(handle);
+    return err;
+}
+
 esp_err_t write_cmd(uint8_t addr, uint16_t cmd, const uint8_t *params, size_t len) {
     if (len > 0 && !params) {
         return ESP_ERR_INVALID_ARG;
@@ -45,9 +71,9 @@ esp_err_t write_cmd(uint8_t addr, uint16_t cmd, const uint8_t *params, size_t le
     }
     i2c_master_stop(handle);
     esp_err_t err = i2c_master_cmd_begin(
-        Config::I2C_PORT,
+        Config::SENSOR_I2C_PORT,
         handle,
-        pdMS_TO_TICKS(Config::I2C_TIMEOUT_MS)
+        pdMS_TO_TICKS(Config::SENSOR_I2C_TIMEOUT_MS)
     );
     i2c_cmd_link_delete(handle);
     return err;
@@ -55,11 +81,11 @@ esp_err_t write_cmd(uint8_t addr, uint16_t cmd, const uint8_t *params, size_t le
 
 esp_err_t read_bytes(uint8_t addr, uint8_t *data, size_t len) {
     return i2c_master_read_from_device(
-        Config::I2C_PORT,
+        Config::SENSOR_I2C_PORT,
         addr,
         data,
         len,
-        pdMS_TO_TICKS(Config::I2C_TIMEOUT_MS)
+        pdMS_TO_TICKS(Config::SENSOR_I2C_TIMEOUT_MS)
     );
 }
 

@@ -16,6 +16,7 @@
 #pragma once
 
 #include "BoardInitCallbacks.h"
+#include "Gt911Config.h"
 #include "Gt911Hardware.h"
 
 // *INDENT-OFF*
@@ -224,7 +225,7 @@
     #define ESP_PANEL_BOARD_TOUCH_I2C_PRE_INIT_DELAY_MS (150)
 #endif
     /* For panel */
-    #define ESP_PANEL_BOARD_TOUCH_I2C_ADDRESS           (0x14)  // Use GT911 alternate address.
+    #define ESP_PANEL_BOARD_TOUCH_I2C_ADDRESS           (AURA_GT911_I2C_ADDRESS)
                                                                 // - For touchs with only one address, set to 0
                                                                 // - For touchs with multiple addresses, set to 0 or
                                                                 //   the address. Like GT911, there are two addresses:
@@ -269,11 +270,12 @@
  * - `ESP_PANEL_BACKLIGHT_TYPE_PWM_LEDC`: Use LEDC PWM to control the backlight, support brightness adjustment
  * - `ESP_PANEL_BACKLIGHT_TYPE_CUSTOM`: Use custom function to control the backlight
  */
-#define ESP_PANEL_BOARD_BACKLIGHT_TYPE          (ESP_PANEL_BACKLIGHT_TYPE_SWITCH_EXPANDER)
+#define ESP_PANEL_BOARD_BACKLIGHT_TYPE          (ESP_PANEL_BACKLIGHT_TYPE_CUSTOM)
 
 #if (ESP_PANEL_BOARD_BACKLIGHT_TYPE == ESP_PANEL_BACKLIGHT_TYPE_SWITCH_GPIO) || \
     (ESP_PANEL_BOARD_BACKLIGHT_TYPE == ESP_PANEL_BACKLIGHT_TYPE_SWITCH_EXPANDER) || \
-    (ESP_PANEL_BOARD_BACKLIGHT_TYPE == ESP_PANEL_BACKLIGHT_TYPE_PWM_LEDC)
+    (ESP_PANEL_BOARD_BACKLIGHT_TYPE == ESP_PANEL_BACKLIGHT_TYPE_PWM_LEDC) || \
+    (ESP_PANEL_BOARD_BACKLIGHT_TYPE == ESP_PANEL_BACKLIGHT_TYPE_CUSTOM)
 
     /**
      * @brief Backlight control pin configuration
@@ -283,12 +285,29 @@
 
 #endif // ESP_PANEL_BOARD_BACKLIGHT_TYPE
 
+// The vendor switch-expander begin() writes the ON level before idle_off is
+// applied. Its custom driver has no begin-time pin write, so the CH422G startup
+// image stays dark. The expander stage already enabled the IO bank; keep the
+// same EXIO2 switch semantics without changing directions or other outputs.
+#define ESP_PANEL_BOARD_BACKLIGHT_CUSTOM_FUNCTION(percent, user_data) \
+    { \
+        auto board = static_cast<Board *>(user_data); \
+        if (board == nullptr || board->getIO_Expander() == nullptr) \
+            return false; \
+        auto expander = board->getIO_Expander()->getBase(); \
+        if (expander == nullptr) \
+            return false; \
+        const int level = (percent > 0) ? ESP_PANEL_BOARD_BACKLIGHT_ON_LEVEL \
+                                        : !ESP_PANEL_BOARD_BACKLIGHT_ON_LEVEL; \
+        return expander->digitalWrite(ESP_PANEL_BOARD_BACKLIGHT_IO, level); \
+    }
+
 /**
  * @brief Backlight idle state configuration (0/1)
  *
  * Set to 1 if want to turn off the backlight after initializing. Otherwise, the backlight will be on.
  */
-#define ESP_PANEL_BOARD_BACKLIGHT_IDLE_OFF      (0)
+#define ESP_PANEL_BOARD_BACKLIGHT_IDLE_OFF      (1)
 
 #endif // ESP_PANEL_BOARD_USE_BACKLIGHT
 
@@ -414,7 +433,7 @@
     {  \
         auraBoardInitNoteStage(AuraBoardInitStage::Touch); \
         auto board = static_cast<Board *>(p);  \
-        if (!Gt911Hardware::selectBackupAddress(board)) \
+        if (!Gt911Hardware::selectConfiguredAddress(board)) \
             return auraBoardInitStageResult(AuraBoardInitStage::Touch, false); \
         return true;    \
     }

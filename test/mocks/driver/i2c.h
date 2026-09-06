@@ -4,12 +4,31 @@
 #include <cstdint>
 
 typedef int i2c_port_t;
+typedef int i2c_mode_t;
+typedef int gpio_num_t;
+typedef int gpio_pullup_t;
 typedef int esp_err_t;
 typedef uint32_t TickType_t;
 typedef struct MockI2cCmd *i2c_cmd_handle_t;
 
 #ifndef I2C_NUM_0
 #define I2C_NUM_0 0
+#endif
+
+#ifndef I2C_NUM_1
+#define I2C_NUM_1 1
+#endif
+
+#ifndef I2C_MODE_MASTER
+#define I2C_MODE_MASTER 1
+#endif
+
+#ifndef GPIO_PULLUP_DISABLE
+#define GPIO_PULLUP_DISABLE 0
+#endif
+
+#ifndef GPIO_PULLUP_ENABLE
+#define GPIO_PULLUP_ENABLE 1
 #endif
 
 #ifndef ESP_OK
@@ -39,6 +58,25 @@ typedef struct MockI2cCmd *i2c_cmd_handle_t;
 #ifndef pdMS_TO_TICKS
 #define pdMS_TO_TICKS(ms) (ms)
 #endif
+
+struct i2c_config_t {
+    i2c_mode_t mode = I2C_MODE_MASTER;
+    gpio_num_t sda_io_num = -1;
+    gpio_num_t scl_io_num = -1;
+    gpio_pullup_t sda_pullup_en = GPIO_PULLUP_DISABLE;
+    gpio_pullup_t scl_pullup_en = GPIO_PULLUP_DISABLE;
+    struct {
+        uint32_t clk_speed = 0;
+    } master;
+    uint32_t clk_flags = 0;
+};
+
+esp_err_t i2c_param_config(i2c_port_t port, const i2c_config_t *config);
+esp_err_t i2c_driver_install(i2c_port_t port,
+                             i2c_mode_t mode,
+                             size_t rx_buf_len,
+                             size_t tx_buf_len,
+                             int intr_alloc_flags);
 
 i2c_cmd_handle_t i2c_cmd_link_create();
 void i2c_cmd_link_delete(i2c_cmd_handle_t cmd);

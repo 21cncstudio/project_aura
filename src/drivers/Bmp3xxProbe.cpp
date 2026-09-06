@@ -19,13 +19,13 @@ constexpr uint8_t kBmp3xxOdrReservedMask = 0xE0;
 
 bool read_register(uint8_t addr, uint8_t reg, uint8_t &value) {
     const esp_err_t err = i2c_master_write_read_device(
-        Config::I2C_PORT,
+        Config::SENSOR_I2C_PORT,
         addr,
         &reg,
         1,
         &value,
         1,
-        pdMS_TO_TICKS(Config::I2C_TIMEOUT_MS)
+        pdMS_TO_TICKS(Config::SENSOR_I2C_TIMEOUT_MS)
     );
     return err == ESP_OK;
 }

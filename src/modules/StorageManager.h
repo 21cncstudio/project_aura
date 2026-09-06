@@ -6,7 +6,9 @@
 
 #pragma once
 #include <Arduino.h>
+#include <mutex>
 #include "config/AppConfig.h"
+#include "core/OperationalHealth.h"
 
 class StorageManager {
 public:
@@ -21,10 +23,9 @@ public:
     Config::StoredConfig &config();
     bool saveConfig(bool force = false);
     void requestSave();
+    void observeLastGoodHealth(uint32_t now_ms, OperationalHealth health);
     void poll(uint32_t now_ms);
     void clearAll();
-    bool commitLastGood();
-    bool restoreLastGood();
     bool isMounted() const { return mounted_; }
     bool isConfigLoaded() const { return config_loaded_; }
 
@@ -64,7 +65,12 @@ public:
     bool saveTextAtomic(const char *path, const String &text);
 
 #ifdef UNIT_TEST
+    static void resetTestPersistence();
+    static void preserveTestPersistenceForNextBegin();
     static void setTestForceSaveFailure(bool enabled);
+    static void setTestLastGoodCommitFailureCount(uint32_t count);
+    static uint32_t testLastGoodCommitAttemptCount();
+    static bool getTestStoredConfig(const char *path, Config::StoredConfig &out);
 #endif
 
     static constexpr const char *kConfigPath = "/config.json";
@@ -83,13 +89,27 @@ private:
     bool loadConfig();
     bool saveConfigInternal();
     void markDirty();
+    void startLastGoodCandidate();
+    void resetLastGoodHealthProof();
+    bool lastGoodRetryReady(uint32_t now_ms) const;
+    bool commitLastGood();
+    bool restoreLastGood();
 
     Config::StoredConfig config_{}; 
     bool dirty_ = false;
     uint32_t last_save_ms_ = 0;
     uint32_t debounce_ms_ = 1000;
     bool lkg_pending_ = false;
-    uint32_t lkg_start_ms_ = 0;
+    bool lkg_health_window_active_ = false;
+    uint32_t lkg_healthy_accumulated_ms_ = 0;
+    uint32_t lkg_last_health_sample_ms_ = 0;
+    uint32_t lkg_retry_started_ms_ = 0;
+    uint32_t lkg_retry_delay_ms_ = 0;
+    // The LKG candidate is the successfully persisted kConfigPath bytes, not
+    // the current config() reference. This mutex serializes durable writes,
+    // candidate resets, and promotion. Callers of config() still own
+    // synchronization for the returned reference.
+    mutable std::recursive_mutex persistence_mutex_;
     bool mounted_ = false;
     bool config_loaded_ = false;
 };

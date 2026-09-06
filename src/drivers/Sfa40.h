@@ -17,6 +17,12 @@ public:
         Fault,
     };
 
+    enum class Protocol : uint8_t {
+        Unknown = 0,
+        Production,
+        B4,
+    };
+
     enum class SelfTestStatus : uint8_t {
         Idle = 0,
         Running,
@@ -33,10 +39,12 @@ public:
         bool warmup_active = false;
         bool selftest_active = false;
         Status status = Status::Absent;
-        const char *last_error = "unknown";
+        const char *last_error = "none";
 
+        Protocol protocol = Protocol::Unknown;
         bool serial_valid = false;
-        uint16_t serial_words[3] = {};
+        uint8_t serial_word_count = 0;
+        uint16_t serial_words[5] = {};
 
         uint32_t start_ms = 0;
         uint32_t first_ready_ms = 0;
@@ -83,6 +91,7 @@ public:
     Status status() const { return status_; }
     bool isWarmupActive() const { return warmup_active_; }
     bool shouldFallbackToSfa30() const;
+    static const char *protocolLabel(Protocol protocol);
     const char *label() const { return "SFA40"; }
     uint32_t lastDataMs() const { return last_data_ms_; }
     bool takeNewData(float &hcho_ppb);
@@ -95,10 +104,10 @@ private:
         Ping,
         StopBeforeDetect,
         WaitStopBeforeDetect,
-        WriteId,
-        ReadId,
-        StopBeforeStart,
-        WaitStopBeforeStart,
+        WriteProductionId,
+        WaitProductionId,
+        WriteB4Id,
+        WaitB4Id,
         WriteStart,
         WaitStart,
     };
@@ -107,7 +116,7 @@ private:
     enum class ErrorCause : uint8_t {
         None = 0,
         DetectSensor,
-        WarmRestartStop,
+        ProtocolStop,
         StartCommand,
         ReadCommand,
         ReadBytes,
@@ -123,6 +132,14 @@ private:
 
     bool readMeasurement(MeasurementReadResult &result);
     bool detectSensor();
+    bool probeProtocol(Protocol protocol, ErrorCause &error);
+    bool readSerialResponse(Protocol protocol, ErrorCause &error);
+    void selectProtocol(Protocol protocol, const uint16_t *serial_words, size_t word_count);
+    void clearProtocol();
+    void recordProbeFailure(ErrorCause error);
+    uint16_t idCommand(Protocol protocol) const;
+    uint16_t measurementCommand() const;
+    size_t serialWordCount(Protocol protocol) const;
     bool readWords(uint16_t cmd, uint16_t *out, size_t words, uint32_t delay_ms);
     bool ensureIdleBeforeDetect();
     bool ensureIdleBeforeStart();
@@ -145,8 +162,10 @@ private:
     ErrorCause last_error_cause_ = ErrorCause::None;
     bool warmup_active_ = false;
     bool selftest_active_ = false;
+    Protocol protocol_ = Protocol::Unknown;
     bool serial_valid_ = false;
-    uint16_t serial_words_[3] = {};
+    uint8_t serial_word_count_ = 0;
+    uint16_t serial_words_[5] = {};
     uint32_t start_ms_ = 0;
     uint32_t first_ready_ms_ = 0;
     uint32_t first_within_spec_ms_ = 0;
@@ -172,4 +191,5 @@ private:
     LateStartPhase late_start_phase_ = LateStartPhase::Idle;
     uint32_t late_start_due_ms_ = 0;
     uint32_t late_start_command_ms_ = 0;
+    ErrorCause late_probe_error_ = ErrorCause::None;
 };

@@ -59,6 +59,8 @@ constexpr uint32_t STATUS_ROTATE_MS = 5000;
 constexpr int UI_LVGL_LOCK_TIMEOUT_MS = 500;
 constexpr uint32_t UI_LVGL_QUIESCE_TIMEOUT_MS = 250U;
 constexpr int UI_LVGL_STARTUP_LOCK_TIMEOUT_MS = 2000;
+constexpr uint32_t UI_STARTUP_LOGO_TIMEOUT_MS = 1000;
+constexpr uint32_t UI_STARTUP_FRAME_TIMEOUT_MS = 1000;
 constexpr uint32_t UI_LVGL_LOCK_WARN_MS = 60000;
 constexpr uint16_t UI_LVGL_LOCK_WARN_FAIL_STREAK = 3;
 constexpr uint32_t UI_LVGL_DIAG_HEARTBEAT_MS = 60000;
@@ -974,7 +976,12 @@ bool UiController::begin() {
         current_screen_id = SCREEN_ID_PAGE_BOOT_LOGO;
         pending_screen_id = 0;
         boot_logo_active = true;
+        boot_logo_waiting_for_backlight = !backlightManager.isOn();
         boot_logo_start_ms = millis();
+    } else {
+        LOGE("UI", "Boot logo unavailable; startup backlight remains off");
+        lvgl_port_unlock();
+        return false;
     }
     LOGI("UI", "LVGL diagnostics enabled (heartbeat=%lu ms, stall=%lu ms, auto-reboot=%lu ms)",
          static_cast<unsigned long>(UI_LVGL_DIAG_HEARTBEAT_MS),
@@ -984,6 +991,59 @@ bool UiController::begin() {
         LOGE("UI", "LVGL unlock failed in begin");
         return false;
     }
+    // The compiled ui_runtime.c currently loads the logo without animation.
+    // Still require the active screen to be fully opaque and animation-free so
+    // a future generated transition cannot bypass the frame acknowledgement.
+    // Never run the LVGL renderer on this task.
+    uint32_t startup_frame_baseline = 0;
+    bool startup_frame_requested = false;
+    const uint32_t logo_wait_started_ms = millis();
+    for (;;) {
+        const uint32_t elapsed_ms = millis() - logo_wait_started_ms;
+        if (elapsed_ms >= UI_STARTUP_LOGO_TIMEOUT_MS) {
+            break;
+        }
+        const uint32_t remaining_ms = UI_STARTUP_LOGO_TIMEOUT_MS - elapsed_ms;
+        const int lock_wait_ms = static_cast<int>(remaining_ms < 20U ? remaining_ms : 20U);
+        if (lvgl_port_lock_startup_logo(lock_wait_ms)) {
+            const bool logo_visible = lv_scr_act() == objects.page_boot_logo &&
+                lv_anim_get(objects.page_boot_logo, nullptr) == nullptr &&
+                lv_obj_get_style_opa(objects.page_boot_logo, LV_PART_MAIN) == LV_OPA_COVER;
+            if (logo_visible) {
+                lv_obj_invalidate(objects.page_boot_logo);
+                startup_frame_requested =
+                    lvgl_port_get_presented_frame_count(&startup_frame_baseline);
+            }
+            if (!lvgl_port_unlock()) {
+                LOGE("UI", "LVGL unlock failed while waiting for boot logo");
+                return false;
+            }
+            if (logo_visible) {
+                break;
+            }
+        }
+        vTaskDelay(1);
+    }
+    lvgl_port_diagnostics_t startup_lock_diag = {};
+    if (lvgl_port_get_diagnostics(&startup_lock_diag)) {
+        LOGI("UI", "Boot logo mutex: startup_miss=%lu, lock_fail=%lu",
+             static_cast<unsigned long>(startup_lock_diag.startup_lock_miss_count),
+             static_cast<unsigned long>(startup_lock_diag.lock_fail_count));
+    }
+    if (!startup_frame_requested) {
+        LOGE("UI", "Complete boot logo unavailable within %lu ms; backlight remains off",
+             static_cast<unsigned long>(UI_STARTUP_LOGO_TIMEOUT_MS));
+        return false;
+    }
+    // Rendering stays on the LVGL task. Its final flush must complete the RGB
+    // framebuffer switch/VSYNC handshake, not merely start a timer or flush.
+    if (!lvgl_port_wait_presented_frame(startup_frame_baseline, UI_STARTUP_FRAME_TIMEOUT_MS)) {
+        LOGE("UI", "Boot logo frame not acknowledged within %lu ms; backlight remains off",
+             static_cast<unsigned long>(UI_STARTUP_FRAME_TIMEOUT_MS));
+        return false;
+    }
+    backlightManager.markStartupFrameReady();
+    LOGI("UI", "Boot logo framebuffer acknowledged; startup backlight armed");
     last_clock_tick_ms = millis();
     publishWebUiSnapshot();
     return true;
@@ -1538,6 +1598,12 @@ void UiController::poll(uint32_t now) {
 
     const WakePowerGuard::Phase wake_phase_after_web =
         WakePowerGuard::phase(now);
+    if (boot_logo_waiting_for_backlight && backlightManager.isOn()) {
+        // Keep the full logo dwell even if guarded wake or a driver retry took
+        // longer than expected. No screen transition is driven by darkness.
+        boot_logo_waiting_for_backlight = false;
+        boot_logo_start_ms = now;
+    }
     if (wake_phase_after_web == WakePowerGuard::Phase::PreQuiet ||
         wake_phase_after_web == WakePowerGuard::Phase::Switching ||
         wake_phase_after_web == WakePowerGuard::Phase::Settle) {
@@ -1769,7 +1835,7 @@ void UiController::poll(uint32_t now) {
         }
     }
 
-    if (boot_logo_active &&
+    if (boot_logo_active && !boot_logo_waiting_for_backlight &&
         (now - boot_logo_start_ms) >= Config::BOOT_LOGO_MS &&
         current_screen_id == SCREEN_ID_PAGE_BOOT_LOGO &&
         pending_screen_id == 0) {

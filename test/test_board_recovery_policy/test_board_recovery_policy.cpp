@@ -9,52 +9,73 @@ void tearDown() {}
 
 void test_ready_board_never_requests_restart() {
     TEST_ASSERT_EQUAL_INT(static_cast<int>(Decision::NotNeeded),
-                          static_cast<int>(BoardRecoveryPolicy::decide(true, true, true, false, true)));
+                          static_cast<int>(BoardRecoveryPolicy::decide(
+                              true, true, true, false, true, false)));
+}
+
+void test_disabled_policy_keeps_failed_startup_headless_without_restart() {
+    TEST_ASSERT_EQUAL_INT(
+        static_cast<int>(Decision::SuppressPolicyDisabled),
+        static_cast<int>(BoardRecoveryPolicy::decide(
+            false, false, true, false, true, false)));
+    TEST_ASSERT_EQUAL_INT(
+        static_cast<int>(Decision::SuppressPolicyDisabled),
+        static_cast<int>(BoardRecoveryPolicy::decide(
+            true, false, false, false, true, false)));
 }
 
 void test_first_eligible_failure_requests_one_restart() {
     TEST_ASSERT_EQUAL_INT(static_cast<int>(Decision::Restart),
-                          static_cast<int>(BoardRecoveryPolicy::decide(false, false, true, false, true)));
+                          static_cast<int>(BoardRecoveryPolicy::decide(
+                              false, false, true, false, true, true)));
 }
 
 void test_recovery_boot_failure_stays_headless() {
     TEST_ASSERT_EQUAL_INT(static_cast<int>(Decision::SuppressAlreadyAttempted),
-                          static_cast<int>(BoardRecoveryPolicy::decide(false, false, false, true, true)));
+                          static_cast<int>(BoardRecoveryPolicy::decide(
+                              false, false, false, true, true, true)));
 }
 
 void test_ineligible_failure_does_not_auto_restart() {
     TEST_ASSERT_EQUAL_INT(static_cast<int>(Decision::SuppressNotEligible),
-                          static_cast<int>(BoardRecoveryPolicy::decide(false, false, false, false, true)));
+                          static_cast<int>(BoardRecoveryPolicy::decide(
+                              false, false, false, false, true, true)));
 }
 
 void test_eligible_recovery_boot_failure_does_not_request_second_restart() {
     TEST_ASSERT_EQUAL_INT(static_cast<int>(Decision::SuppressAlreadyAttempted),
-                          static_cast<int>(BoardRecoveryPolicy::decide(false, false, true, true, true)));
+                          static_cast<int>(BoardRecoveryPolicy::decide(
+                              false, false, true, true, true, true)));
 }
 
 void test_missing_restart_task_stays_headless() {
     TEST_ASSERT_EQUAL_INT(static_cast<int>(Decision::SuppressRestartUnavailable),
-                          static_cast<int>(BoardRecoveryPolicy::decide(false, false, true, false, false)));
+                          static_cast<int>(BoardRecoveryPolicy::decide(
+                              false, false, true, false, false, true)));
 }
 
 void test_ready_board_with_failed_lvgl_requests_restart() {
     TEST_ASSERT_EQUAL_INT(static_cast<int>(Decision::Restart),
-                          static_cast<int>(BoardRecoveryPolicy::decide(true, false, false, false, true)));
+                          static_cast<int>(BoardRecoveryPolicy::decide(
+                              true, false, false, false, true, true)));
 }
 
 void test_lvgl_failure_after_recovery_boot_does_not_loop() {
     TEST_ASSERT_EQUAL_INT(static_cast<int>(Decision::SuppressAlreadyAttempted),
-                          static_cast<int>(BoardRecoveryPolicy::decide(true, false, false, true, true)));
+                          static_cast<int>(BoardRecoveryPolicy::decide(
+                              true, false, false, true, true, true)));
 }
 
 void test_lvgl_failure_without_restart_task_is_suppressed() {
     TEST_ASSERT_EQUAL_INT(static_cast<int>(Decision::SuppressRestartUnavailable),
-                          static_cast<int>(BoardRecoveryPolicy::decide(true, false, false, false, false)));
+                          static_cast<int>(BoardRecoveryPolicy::decide(
+                              true, false, false, false, false, true)));
 }
 
 int main(int, char **) {
     UNITY_BEGIN();
     RUN_TEST(test_ready_board_never_requests_restart);
+    RUN_TEST(test_disabled_policy_keeps_failed_startup_headless_without_restart);
     RUN_TEST(test_first_eligible_failure_requests_one_restart);
     RUN_TEST(test_recovery_boot_failure_stays_headless);
     RUN_TEST(test_eligible_recovery_boot_failure_does_not_request_second_restart);

@@ -5,6 +5,7 @@
 struct Sen0466TestState {
     bool present = false;
     bool start_ok = false;
+    bool begin_called = false;
     bool start_called = false;
     bool data_valid = false;
     bool warmup = false;
@@ -21,7 +22,10 @@ public:
         return instance;
     }
 
-    bool begin() { return true; }
+    bool begin() {
+        state().begin_called = true;
+        return true;
+    }
     bool start() {
         state().start_called = true;
         state().present = state().start_ok;

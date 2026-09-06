@@ -704,6 +704,7 @@ static const char kDiagPageTemplate[] PROGMEM = R"HTML(
             justify-content: space-between;
             align-items: baseline;
             gap: 10px;
+            flex-wrap: wrap;
         }
         .title {
             margin: 0;
@@ -715,6 +716,20 @@ static const char kDiagPageTemplate[] PROGMEM = R"HTML(
             color: var(--text-dim);
             font-size: 12px;
         }
+        .report-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+        .report-button {
+            color: var(--text);
+            background: #14343a;
+            border: 1px solid #2bb4bd;
+            border-radius: 9px;
+            padding: 10px 14px;
+            font: inherit;
+            font-size: 13px;
+            cursor: pointer;
+        }
+        .report-button:disabled { opacity: 0.6; cursor: wait; }
+        .report-button:focus-visible { outline: 2px solid var(--text); outline-offset: 3px; }
+        .note { margin: 8px 0 0; color: var(--text-dim); font-size: 12px; line-height: 1.5; }
         .grid {
             display: grid;
             grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -791,6 +806,14 @@ static const char kDiagPageTemplate[] PROGMEM = R"HTML(
             <div id="stamp" class="stamp">waiting...</div>
         </div>
 
+        <div>
+            <div class="report-tools">
+                <button id="downloadReport" class="report-button" type="button">Download report</button>
+                <span id="reportStatus" class="stamp" role="status" aria-live="polite"></span>
+            </div>
+            <p class="note">JSON with diagnostics and recent events. Includes network names, addresses and log text; review before sharing. Nothing is uploaded or cleared.</p>
+        </div>
+
         <div class="grid">
             <section class="card">
                 <h3>Network</h3>
@@ -807,6 +830,11 @@ static const char kDiagPageTemplate[] PROGMEM = R"HTML(
             <section class="card">
                 <h3>Web Stream</h3>
                 <div id="webRows" class="rows"></div>
+            </section>
+            <section class="card">
+                <h3>Boot I2C snapshot</h3>
+                <div id="bootI2cRows" class="rows"></div>
+                <p class="note">Saved before board initialization. These pin levels and the saved status are not live bus health. Bus routing below is configuration, not a new measurement.</p>
             </section>
             <section class="card">
                 <h3>Last Errors</h3>
@@ -853,26 +881,135 @@ static const char kDiagPageTemplate[] PROGMEM = R"HTML(
         var diagPollRetryDelayMs = 6000;
         var diagPollRetryMaxMs = 10000;
         var diagPollTimer = null;
+        var diagFetchInFlight = null;
+        var reportDownloading = false;
+
+        // Bound both headers and JSON body reads. Only existing read-only APIs are used.
+        async function fetchDiagJson(path) {
+            var controller = new AbortController();
+            var timeout = setTimeout(function() { controller.abort(); }, 8000);
+            try {
+                var res = await fetch(path, { cache: 'no-store', signal: controller.signal });
+                if (!res.ok) throw new Error('HTTP ' + res.status);
+                var data = await res.json();
+                if (!data || data.success !== true || typeof data.uptime_s !== 'number' ||
+                    (path === '/api/events' && !Array.isArray(data.events))) {
+                    throw new Error('Invalid payload');
+                }
+                return data;
+            } catch (err) {
+                if (err && err.name === 'AbortError') throw new Error('Request timed out');
+                throw err;
+            } finally {
+                clearTimeout(timeout);
+            }
+        }
+
+        async function collectReportSection(path) {
+            var section = { endpoint: path, started_at_browser: new Date().toISOString() };
+            try {
+                section.data = await fetchDiagJson(path);
+                section.ok = true;
+            } catch (err) {
+                section.ok = false;
+                section.error = err && err.message ? err.message : 'Request failed';
+            }
+            section.finished_at_browser = new Date().toISOString();
+            return section;
+        }
+
+        async function downloadReport() {
+            if (reportDownloading) return;
+            reportDownloading = true;
+            clearTimeout(diagPollTimer);
+            var button = document.getElementById('downloadReport');
+            var status = document.getElementById('reportStatus');
+            button.disabled = true;
+            status.textContent = 'Collecting report...';
+            try {
+                // Finish any ordinary poll before starting fresh, sequential captures.
+                if (diagFetchInFlight) await diagFetchInFlight.catch(function() {});
+                var report = {
+                    schema: 'aura-diag-report', schema_version: 1,
+                    started_at_browser: new Date().toISOString(),
+                    notes: [
+                        'Browser timestamps use the browser clock, not the device clock.',
+                        'Sections are fetched sequentially, not as an atomic snapshot.',
+                        'complete means both API sections were received without an observed uptime decrease; it does not verify a single boot.',
+                        'Events and alerts are finite recent buffers, not a complete log or proof of health.',
+                        'boot.i2c_status, sda_high and scl_high are a saved startup panel-bus snapshot, not live bus health.'
+                    ]
+                };
+                report.diag = await collectReportSection('/api/diag');
+                report.events = await collectReportSection('/api/events');
+                if (!report.diag.ok && !report.events.ok) {
+                    throw new Error('Diagnostics: ' + report.diag.error + '; events: ' + report.events.error);
+                }
+                report.complete = report.diag.ok && report.events.ok;
+                report.warnings = [];
+                if (!report.complete) report.warnings.push('One API section could not be collected.');
+                if (report.complete && report.events.data.uptime_s < report.diag.data.uptime_s) {
+                    report.complete = false;
+                    report.warnings.push('Device uptime decreased between requests; sections may cover different boots.');
+                }
+                report.finished_at_browser = new Date().toISOString();
+                var net = report.diag.ok ? (report.diag.data.network || {}) : {};
+                var name = String(net.hostname || 'unknown-device').replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 64);
+                var filename = 'Aura_diag_' + name + '_' + report.started_at_browser.replace(/[^0-9TZ]/g, '') +
+                    (report.complete ? '' : '_partial') + '.json';
+                var blob = new Blob([JSON.stringify(report, null, 2)], { type: 'application/json' });
+                var url = URL.createObjectURL(blob);
+                var link = document.createElement('a');
+                link.href = url;
+                link.download = filename;
+                document.body.appendChild(link);
+                try { link.click(); } finally {
+                    link.remove();
+                    setTimeout(function() { URL.revokeObjectURL(url); }, 1000);
+                }
+                status.textContent = report.complete ? 'Download started.' : 'Partial report download started. See warnings in the file.';
+            } catch (err) {
+                status.textContent = 'Report not downloaded: ' + (err && err.message ? err.message : 'error');
+            } finally {
+                reportDownloading = false;
+                button.disabled = false;
+                scheduleDiagRefresh(diagPollOkDelayMs);
+            }
+        }
+
+        function busDescription(bus) {
+            if (!bus || typeof bus.port !== 'number' || bus.port < 0 ||
+                typeof bus.sda_gpio !== 'number' || bus.sda_gpio < 0 ||
+                typeof bus.scl_gpio !== 'number' || bus.scl_gpio < 0) return '--';
+            return 'I2C' + bus.port + ' / SDA GPIO' + bus.sda_gpio + ' / SCL GPIO' + bus.scl_gpio;
+        }
+
+        function pinLevel(value) {
+            return typeof value === 'boolean' ? (value ? 'HIGH' : 'LOW') : '--';
+        }
 
         function scheduleDiagRefresh(delayMs) {
             if (diagPollTimer) {
                 clearTimeout(diagPollTimer);
             }
-            diagPollTimer = setTimeout(refreshDiag, delayMs);
+            if (!reportDownloading) diagPollTimer = setTimeout(refreshDiag, delayMs);
         }
 
         async function refreshDiag() {
+            if (reportDownloading || diagFetchInFlight) return;
             var stamp = document.getElementById('stamp');
             try {
-                var res = await fetch('/api/diag', { cache: 'no-store' });
-                if (!res.ok) throw new Error('HTTP ' + res.status);
-                var data = await res.json();
-                if (!data || data.success !== true) throw new Error('Invalid payload');
+                diagFetchInFlight = fetchDiagJson('/api/diag');
+                var data = await diagFetchInFlight;
 
                 var net = data.network || {};
                 var heap = data.heap || {};
                 var otaBusy = !!data.ota_busy;
                 var web = data.web_stream || {};
+                var device = data.device || {};
+                var boot = data.boot || {};
+                var snapshot = boot.i2c_snapshot || {};
+                var buses = data.i2c_buses || {};
 
                 setRows('networkRows',
                     row('Mode', esc(net.mode || '--').toUpperCase()) +
@@ -886,9 +1023,24 @@ static const char kDiagPageTemplate[] PROGMEM = R"HTML(
                 );
 
                 setRows('systemRows',
+                    row('Firmware', esc(device.firmware || '--')) +
+                    row('Profile', esc(device.hardware_profile || '--')) +
+                    row('Hardware target', esc(device.hardware_target || '--')) +
                     row('Uptime', (typeof data.uptime_s === 'number' ? data.uptime_s : 0) + ' s') +
                     row('Free heap', (typeof heap.free === 'number' ? heap.free : 0) + ' B') +
                     row('Min free heap', (typeof heap.min_free === 'number' ? heap.min_free : 0) + ' B')
+                );
+
+                setRows('bootI2cRows',
+                    row('Captured', snapshot.phase === 'before_board_init' && snapshot.live === false
+                        ? 'Before board initialization (not live)' : 'Snapshot metadata unavailable') +
+                    row('Sampled bus', esc(busDescription(snapshot))) +
+                    row('Saved status', '<span class="mono">' + esc(boot.i2c_status || '--') + '</span>') +
+                    row('Saved SDA / SCL', pinLevel(boot.sda_high) + ' / ' + pinLevel(boot.scl_high)) +
+                    row('Panel routing', esc(busDescription(buses.panel))) +
+                    row('Sensor routing', esc(busDescription(buses.sensors))) +
+                    row('Sensor bus', buses.sensors && typeof buses.sensors.shared_with_panel === 'boolean'
+                        ? (buses.sensors.shared_with_panel ? 'Shared with panel' : 'Separate from panel') : '--')
                 );
 
                 setRows('otaRows',
@@ -931,9 +1083,12 @@ static const char kDiagPageTemplate[] PROGMEM = R"HTML(
                 var nextRetryMs = diagPollRetryDelayMs;
                 diagPollRetryDelayMs = Math.min(diagPollRetryMaxMs, diagPollRetryDelayMs + 2000);
                 scheduleDiagRefresh(nextRetryMs);
+            } finally {
+                diagFetchInFlight = null;
             }
         }
 
+        document.getElementById('downloadReport').addEventListener('click', downloadReport);
         refreshDiag();
     </script>
 </body>

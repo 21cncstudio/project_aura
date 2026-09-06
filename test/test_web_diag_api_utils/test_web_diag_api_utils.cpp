@@ -35,6 +35,196 @@ void test_web_diag_api_utils_access_allowed_accepts_ap_or_sta_connectivity() {
     TEST_ASSERT_FALSE(WebDiagApiUtils::accessAllowed(false, false));
 }
 
+void test_web_diag_api_utils_names_refresh_callback_and_rotation_ownership() {
+    WebDiagApiUtils::Payload payload{};
+    payload.display.available = true;
+    payload.display.sample_ms = 1234;
+    payload.display.timer_handler_count = 88;
+    payload.display.timer_handler_age_ms = 4;
+    payload.display.flush_count = 21;
+    payload.display.flush_age_ms = 15;
+    payload.display.refresh_callback_semantics = "bounce_frame_finish";
+    payload.display.refresh_callback_count = 63;
+    payload.display.refresh_callback_age_ms = 3;
+    payload.display.refresh_callback_max_gap_ms = 22;
+    payload.display.framebuffer_handoff_count = 20;
+    payload.display.framebuffer_wait_timeout_count = 0;
+    payload.display.display_sync_fault = false;
+    payload.display.runtime_lock_failures = 0;
+    payload.display.startup_logo_lock_misses = 2;
+    payload.display.touch_read_errors = 0;
+    payload.display.touch_offline = false;
+    payload.display.screen_flip_180 = true;
+    payload.display.rotation_pipeline_active = true;
+    payload.display.rotated_copy_switch_count = 19;
+    payload.display.framebuffer_ownership_violation_count = 0;
+    payload.display.paused = false;
+
+    ArduinoJson::JsonDocument doc;
+    WebDiagApiUtils::fillJson(
+        doc.to<ArduinoJson::JsonObject>(), payload, nullptr, 0, 0);
+
+    const ArduinoJson::JsonObjectConst display =
+        doc["display"].as<ArduinoJson::JsonObjectConst>();
+    TEST_ASSERT_TRUE(display["available"].as<bool>());
+    TEST_ASSERT_EQUAL_STRING(
+        "bounce_frame_finish",
+        display["refresh_callback_semantics"].as<const char *>());
+    TEST_ASSERT_EQUAL_UINT32(63,
+                             display["refresh_callback_count"].as<uint32_t>());
+    TEST_ASSERT_EQUAL_UINT32(20,
+                             display["framebuffer_handoff_count"].as<uint32_t>());
+    TEST_ASSERT_TRUE(display["screen_flip_180"].as<bool>());
+    TEST_ASSERT_TRUE(display["rotation_pipeline_active"].as<bool>());
+    TEST_ASSERT_EQUAL_UINT32(
+        19, display["rotated_copy_switch_count"].as<uint32_t>());
+    TEST_ASSERT_EQUAL_UINT32(
+        0,
+        display["framebuffer_ownership_violation_count"].as<uint32_t>());
+    TEST_ASSERT_EQUAL_UINT32(
+        2, display["startup_logo_lock_misses"].as<uint32_t>());
+    TEST_ASSERT_EQUAL_UINT32(
+        0, display["runtime_lock_failures"].as<uint32_t>());
+}
+
+void test_web_diag_api_utils_serializes_touch_polling_diagnostics() {
+    WebDiagApiUtils::Payload payload{};
+    payload.display.available = true;
+    payload.display.touch_polling.mode = "idle_irq";
+    payload.display.touch_polling.irq_registered = true;
+    payload.display.touch_polling.irq_armed = true;
+    payload.display.touch_polling.irq_config_verified = true;
+    payload.display.touch_polling.irq_config_mode = 1;
+    payload.display.touch_polling.idle_enabled = true;
+    payload.display.touch_polling.idle_active = true;
+    payload.display.touch_polling.fail_safe = false;
+    payload.display.touch_polling.status_reads = 101;
+    payload.display.touch_polling.full_reads = 22;
+    payload.display.touch_polling.skipped_callbacks = 303;
+    payload.display.touch_polling.idle_entries = 4;
+    payload.display.touch_polling.irq_exits = 5;
+    payload.display.touch_polling.fallback_probes = 6;
+    payload.display.touch_polling.missed_irq_presses = 7;
+    payload.display.touch_polling.irq_arm_failures = 8;
+    payload.display.touch_polling.irq_no_frame = 9;
+
+    ArduinoJson::JsonDocument doc;
+    WebDiagApiUtils::fillJson(
+        doc.to<ArduinoJson::JsonObject>(), payload, nullptr, 0, 0);
+
+    const ArduinoJson::JsonObjectConst touch_polling =
+        doc["display"]["touch_polling"].as<ArduinoJson::JsonObjectConst>();
+    TEST_ASSERT_EQUAL_STRING("idle_irq", touch_polling["mode"].as<const char *>());
+    TEST_ASSERT_TRUE(touch_polling["irq_registered"].as<bool>());
+    TEST_ASSERT_TRUE(touch_polling["irq_armed"].as<bool>());
+    TEST_ASSERT_TRUE(touch_polling["irq_config_verified"].as<bool>());
+    TEST_ASSERT_EQUAL_INT8(1, touch_polling["irq_config_mode"].as<int8_t>());
+    TEST_ASSERT_TRUE(touch_polling["idle_enabled"].as<bool>());
+    TEST_ASSERT_TRUE(touch_polling["idle_active"].as<bool>());
+    TEST_ASSERT_FALSE(touch_polling["fail_safe"].as<bool>());
+    TEST_ASSERT_EQUAL_UINT32(101, touch_polling["status_reads"].as<uint32_t>());
+    TEST_ASSERT_EQUAL_UINT32(22, touch_polling["full_reads"].as<uint32_t>());
+    TEST_ASSERT_EQUAL_UINT32(
+        303, touch_polling["skipped_callbacks"].as<uint32_t>());
+    TEST_ASSERT_EQUAL_UINT32(4, touch_polling["idle_entries"].as<uint32_t>());
+    TEST_ASSERT_EQUAL_UINT32(5, touch_polling["irq_exits"].as<uint32_t>());
+    TEST_ASSERT_EQUAL_UINT32(6, touch_polling["fallback_probes"].as<uint32_t>());
+    TEST_ASSERT_EQUAL_UINT32(
+        7, touch_polling["missed_irq_presses"].as<uint32_t>());
+    TEST_ASSERT_EQUAL_UINT32(
+        8, touch_polling["irq_arm_failures"].as<uint32_t>());
+    TEST_ASSERT_EQUAL_UINT32(9, touch_polling["irq_no_frame"].as<uint32_t>());
+
+    payload.display.touch_polling.irq_config_mode = -1;
+    ArduinoJson::JsonDocument unknown_config_doc;
+    WebDiagApiUtils::fillJson(unknown_config_doc.to<ArduinoJson::JsonObject>(),
+                              payload,
+                              nullptr,
+                              0,
+                              0);
+    TEST_ASSERT_TRUE(
+        unknown_config_doc["display"]["touch_polling"]["irq_config_mode"].isNull());
+}
+
+void test_web_diag_api_utils_describes_shared_bus_without_replacing_boot_sample() {
+    WebDiagApiUtils::Payload payload{};
+    payload.device.firmware = "1.1.6-beta-fixture";
+    payload.device.build_id = "fixture";
+    payload.device.hardware_profile = "4_3";
+    payload.device.hardware_target = "aura-aq-v1";
+    payload.panel_i2c.port = 0;
+    payload.panel_i2c.sda_gpio = 8;
+    payload.panel_i2c.scl_gpio = 9;
+    payload.sensor_i2c = payload.panel_i2c;
+    payload.sensor_i2c_shared_with_panel = true;
+    payload.boot.i2c_status = "sda_stuck_low";
+    payload.boot.sda_high = false;
+    payload.boot.scl_high = true;
+    payload.boot.board_ready = true;
+    payload.boot.lvgl_ready = true;
+
+    ArduinoJson::JsonDocument doc;
+    WebDiagApiUtils::fillJson(doc.to<ArduinoJson::JsonObject>(), payload, nullptr, 0, 0);
+
+    TEST_ASSERT_EQUAL_STRING("1.1.6-beta-fixture", doc["device"]["firmware"].as<const char *>());
+    TEST_ASSERT_EQUAL_STRING("fixture", doc["device"]["build_id"].as<const char *>());
+    TEST_ASSERT_EQUAL_STRING("4_3", doc["device"]["hardware_profile"].as<const char *>());
+    TEST_ASSERT_EQUAL_STRING("aura-aq-v1", doc["device"]["hardware_target"].as<const char *>());
+    const ArduinoJson::JsonObjectConst boot = doc["boot"].as<ArduinoJson::JsonObjectConst>();
+    TEST_ASSERT_EQUAL_STRING("sda_stuck_low", boot["i2c_status"].as<const char *>());
+    TEST_ASSERT_FALSE(boot["sda_high"].as<bool>());
+    TEST_ASSERT_TRUE(boot["scl_high"].as<bool>());
+    TEST_ASSERT_TRUE(boot["board_ready"].as<bool>());
+    TEST_ASSERT_TRUE(boot["lvgl_ready"].as<bool>());
+    const ArduinoJson::JsonObjectConst snapshot = boot["i2c_snapshot"].as<ArduinoJson::JsonObjectConst>();
+    TEST_ASSERT_EQUAL_STRING("before_board_init", snapshot["phase"].as<const char *>());
+    TEST_ASSERT_EQUAL_STRING("panel", snapshot["bus"].as<const char *>());
+    TEST_ASSERT_FALSE(snapshot["live"].as<bool>());
+    TEST_ASSERT_EQUAL_INT(0, snapshot["port"].as<int>());
+    TEST_ASSERT_EQUAL_INT(8, snapshot["sda_gpio"].as<int>());
+    TEST_ASSERT_EQUAL_INT(9, snapshot["scl_gpio"].as<int>());
+    for (const char *bus : {"panel", "sensors"}) {
+        TEST_ASSERT_EQUAL_INT(0, doc["i2c_buses"][bus]["port"].as<int>());
+        TEST_ASSERT_EQUAL_INT(8, doc["i2c_buses"][bus]["sda_gpio"].as<int>());
+        TEST_ASSERT_EQUAL_INT(9, doc["i2c_buses"][bus]["scl_gpio"].as<int>());
+    }
+    TEST_ASSERT_TRUE(doc["i2c_buses"]["sensors"]["shared_with_panel"].as<bool>());
+}
+
+void test_web_diag_api_utils_keeps_separate_sensor_bus_out_of_panel_snapshot() {
+    WebDiagApiUtils::Payload payload{};
+    payload.device.firmware = "1.2.0-beta-fixture-7-dual-i2c";
+    payload.device.build_id = "fixture-7-dual-i2c";
+    payload.device.hardware_profile = "7_dual_i2c";
+    payload.device.hardware_target = "aura-aq-7-v1";
+    payload.panel_i2c.port = 0;
+    payload.panel_i2c.sda_gpio = 8;
+    payload.panel_i2c.scl_gpio = 9;
+    payload.sensor_i2c.port = 1;
+    payload.sensor_i2c.sda_gpio = 44;
+    payload.sensor_i2c.scl_gpio = 6;
+    payload.sensor_i2c_shared_with_panel = false;
+
+    ArduinoJson::JsonDocument doc;
+    WebDiagApiUtils::fillJson(doc.to<ArduinoJson::JsonObject>(), payload, nullptr, 0, 0);
+
+    TEST_ASSERT_EQUAL_STRING("1.2.0-beta-fixture-7-dual-i2c", doc["device"]["firmware"].as<const char *>());
+    TEST_ASSERT_EQUAL_STRING("fixture-7-dual-i2c", doc["device"]["build_id"].as<const char *>());
+    TEST_ASSERT_EQUAL_STRING("7_dual_i2c", doc["device"]["hardware_profile"].as<const char *>());
+    TEST_ASSERT_EQUAL_STRING("aura-aq-7-v1", doc["device"]["hardware_target"].as<const char *>());
+    TEST_ASSERT_EQUAL_INT(0, doc["i2c_buses"]["panel"]["port"].as<int>());
+    TEST_ASSERT_EQUAL_INT(8, doc["i2c_buses"]["panel"]["sda_gpio"].as<int>());
+    TEST_ASSERT_EQUAL_INT(9, doc["i2c_buses"]["panel"]["scl_gpio"].as<int>());
+    TEST_ASSERT_EQUAL_INT(1, doc["i2c_buses"]["sensors"]["port"].as<int>());
+    TEST_ASSERT_EQUAL_INT(44, doc["i2c_buses"]["sensors"]["sda_gpio"].as<int>());
+    TEST_ASSERT_EQUAL_INT(6, doc["i2c_buses"]["sensors"]["scl_gpio"].as<int>());
+    TEST_ASSERT_FALSE(doc["i2c_buses"]["sensors"]["shared_with_panel"].as<bool>());
+    TEST_ASSERT_EQUAL_INT(0, doc["boot"]["i2c_snapshot"]["port"].as<int>());
+    TEST_ASSERT_EQUAL_INT(8, doc["boot"]["i2c_snapshot"]["sda_gpio"].as<int>());
+    TEST_ASSERT_EQUAL_INT(9, doc["boot"]["i2c_snapshot"]["scl_gpio"].as<int>());
+    TEST_ASSERT_FALSE(doc["boot"]["i2c_snapshot"]["live"].as<bool>());
+}
+
 void test_web_diag_api_utils_fill_json_populates_network_errors_and_stream() {
     WebDiagApiUtils::Payload payload{};
     payload.uptime_s = 123;
@@ -288,6 +478,10 @@ void test_web_diag_api_utils_marks_unrun_expander_probe_details_null() {
 int main(int, char **) {
     UNITY_BEGIN();
     RUN_TEST(test_web_diag_api_utils_access_allowed_accepts_ap_or_sta_connectivity);
+    RUN_TEST(test_web_diag_api_utils_names_refresh_callback_and_rotation_ownership);
+    RUN_TEST(test_web_diag_api_utils_serializes_touch_polling_diagnostics);
+    RUN_TEST(test_web_diag_api_utils_describes_shared_bus_without_replacing_boot_sample);
+    RUN_TEST(test_web_diag_api_utils_keeps_separate_sensor_bus_out_of_panel_snapshot);
     RUN_TEST(test_web_diag_api_utils_fill_json_populates_network_errors_and_stream);
     RUN_TEST(test_web_diag_api_utils_marks_unrun_expander_probe_details_null);
     RUN_TEST(test_web_diag_api_utils_marks_missing_backlight_trace_null);

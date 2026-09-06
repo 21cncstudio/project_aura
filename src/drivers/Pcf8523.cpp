@@ -124,13 +124,13 @@ bool Pcf8523::read(uint8_t reg, uint8_t *buf, size_t len) {
         return false;
     }
     esp_err_t err = i2c_master_write_read_device(
-        Config::I2C_PORT,
+        Config::SENSOR_I2C_PORT,
         Config::PCF8523_ADDR,
         &reg,
         1,
         buf,
         len,
-        pdMS_TO_TICKS(Config::I2C_TIMEOUT_MS)
+        pdMS_TO_TICKS(Config::SENSOR_I2C_TIMEOUT_MS)
     );
     return err == ESP_OK;
 }
@@ -143,11 +143,11 @@ bool Pcf8523::write(uint8_t reg, const uint8_t *buf, size_t len) {
     data[0] = reg;
     memcpy(&data[1], buf, len);
     esp_err_t err = i2c_master_write_to_device(
-        Config::I2C_PORT,
+        Config::SENSOR_I2C_PORT,
         Config::PCF8523_ADDR,
         data,
         len + 1,
-        pdMS_TO_TICKS(Config::I2C_TIMEOUT_MS)
+        pdMS_TO_TICKS(Config::SENSOR_I2C_TIMEOUT_MS)
     );
     return err == ESP_OK;
 }

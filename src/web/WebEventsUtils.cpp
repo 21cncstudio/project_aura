@@ -19,8 +19,20 @@ size_t fillRecentErrorsJson(ArduinoJson::JsonArray errors,
         return 0;
     }
 
+    // Snapshots are stored oldest to newest. Locate the newest eligible tail
+    // first, then emit that tail in snapshot order. Do not sort by uptime:
+    // entry.ms can wrap while the snapshot order remains authoritative.
+    size_t first = count;
+    size_t selected = 0;
+    while (first > 0 && selected < max_items) {
+        const Logger::RecentEntry &entry = entries[--first];
+        if (entry.level == Logger::Error || entry.level == Logger::Warn) {
+            ++selected;
+        }
+    }
+
     size_t added = 0;
-    for (size_t i = 0; i < count && added < max_items; ++i) {
+    for (size_t i = first; i < count; ++i) {
         const Logger::RecentEntry &entry = entries[i];
         if (entry.level != Logger::Error && entry.level != Logger::Warn) {
             continue;

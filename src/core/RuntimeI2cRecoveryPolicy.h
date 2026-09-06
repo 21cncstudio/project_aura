@@ -20,24 +20,32 @@ enum class Decision : uint8_t {
 class State {
 public:
     Decision poll(uint32_t now_ms,
+                  bool line_sample_qualified,
                   bool lines_idle,
                   bool touch_offline,
                   bool recovery_boot,
                   bool restart_available) {
-        if (!shared_bus_fault_confirmed_ &&
-            (!sampled_ ||
-             static_cast<uint32_t>(now_ms - last_sample_ms_) >= SAMPLE_INTERVAL_MS)) {
-            sampled_ = true;
-            last_sample_ms_ = now_ms;
-
-            if (lines_idle) {
+        if (!shared_bus_fault_confirmed_) {
+            if (!line_sample_qualified) {
+                // A raw GPIO snapshot can overlap a legal I2C transaction.
+                // Never carry an unqualified observation into a later streak.
                 stuck_line_samples_ = 0;
-            } else {
-                if (stuck_line_samples_ < UINT8_MAX) {
-                    ++stuck_line_samples_;
-                }
-                if (stuck_line_samples_ >= STUCK_LINE_SAMPLE_LIMIT) {
-                    shared_bus_fault_confirmed_ = true;
+                sampled_ = false;
+            } else if (!sampled_ ||
+                       static_cast<uint32_t>(now_ms - last_sample_ms_) >=
+                           SAMPLE_INTERVAL_MS) {
+                sampled_ = true;
+                last_sample_ms_ = now_ms;
+
+                if (lines_idle) {
+                    stuck_line_samples_ = 0;
+                } else {
+                    if (stuck_line_samples_ < UINT8_MAX) {
+                        ++stuck_line_samples_;
+                    }
+                    if (stuck_line_samples_ >= STUCK_LINE_SAMPLE_LIMIT) {
+                        shared_bus_fault_confirmed_ = true;
+                    }
                 }
             }
         }

@@ -25,6 +25,96 @@ void fillJson(ArduinoJson::JsonObject root,
     root["uptime_s"] = payload.uptime_s;
     root["ota_busy"] = payload.ota_busy;
 
+    ArduinoJson::JsonObject device = root["device"].to<ArduinoJson::JsonObject>();
+    device["firmware"] = payload.device.firmware;
+    device["build_id"] = payload.device.build_id;
+    device["hardware_profile"] = payload.device.hardware_profile;
+    device["hardware_target"] = payload.device.hardware_target;
+
+    ArduinoJson::JsonObject i2c_buses = root["i2c_buses"].to<ArduinoJson::JsonObject>();
+    ArduinoJson::JsonObject panel = i2c_buses["panel"].to<ArduinoJson::JsonObject>();
+    panel["port"] = payload.panel_i2c.port;
+    panel["sda_gpio"] = payload.panel_i2c.sda_gpio;
+    panel["scl_gpio"] = payload.panel_i2c.scl_gpio;
+    ArduinoJson::JsonObject sensors = i2c_buses["sensors"].to<ArduinoJson::JsonObject>();
+    sensors["port"] = payload.sensor_i2c.port;
+    sensors["sda_gpio"] = payload.sensor_i2c.sda_gpio;
+    sensors["scl_gpio"] = payload.sensor_i2c.scl_gpio;
+    sensors["shared_with_panel"] = payload.sensor_i2c_shared_with_panel;
+
+    ArduinoJson::JsonObject display = root["display"].to<ArduinoJson::JsonObject>();
+    display["available"] = payload.display.available;
+    if (payload.display.available) {
+        display["sample_ms"] = payload.display.sample_ms;
+        display["timer_handler_count"] = payload.display.timer_handler_count;
+        display["timer_handler_age_ms"] = payload.display.timer_handler_age_ms;
+        display["flush_count"] = payload.display.flush_count;
+        display["flush_age_ms"] = payload.display.flush_age_ms;
+        display["refresh_callback_semantics"] =
+            payload.display.refresh_callback_semantics;
+        display["refresh_callback_count"] =
+            payload.display.refresh_callback_count;
+        display["refresh_callback_age_ms"] =
+            payload.display.refresh_callback_age_ms;
+        display["refresh_callback_max_gap_ms"] =
+            payload.display.refresh_callback_max_gap_ms;
+        display["framebuffer_handoff_count"] =
+            payload.display.framebuffer_handoff_count;
+        display["framebuffer_wait_timeout_count"] =
+            payload.display.framebuffer_wait_timeout_count;
+        display["display_sync_fault"] = payload.display.display_sync_fault;
+        display["runtime_lock_failures"] =
+            payload.display.runtime_lock_failures;
+        display["startup_logo_lock_misses"] =
+            payload.display.startup_logo_lock_misses;
+        display["touch_read_errors"] = payload.display.touch_read_errors;
+        display["touch_offline"] = payload.display.touch_offline;
+        ArduinoJson::JsonObject touch_polling =
+            display["touch_polling"].to<ArduinoJson::JsonObject>();
+        touch_polling["mode"] = payload.display.touch_polling.mode;
+        touch_polling["irq_registered"] =
+            payload.display.touch_polling.irq_registered;
+        touch_polling["irq_armed"] = payload.display.touch_polling.irq_armed;
+        touch_polling["irq_config_verified"] =
+            payload.display.touch_polling.irq_config_verified;
+        if (payload.display.touch_polling.irq_config_mode < 0) {
+            touch_polling["irq_config_mode"] = nullptr;
+        } else {
+            touch_polling["irq_config_mode"] =
+                payload.display.touch_polling.irq_config_mode;
+        }
+        touch_polling["idle_enabled"] =
+            payload.display.touch_polling.idle_enabled;
+        touch_polling["idle_active"] =
+            payload.display.touch_polling.idle_active;
+        touch_polling["fail_safe"] = payload.display.touch_polling.fail_safe;
+        touch_polling["status_reads"] =
+            payload.display.touch_polling.status_reads;
+        touch_polling["full_reads"] =
+            payload.display.touch_polling.full_reads;
+        touch_polling["skipped_callbacks"] =
+            payload.display.touch_polling.skipped_callbacks;
+        touch_polling["idle_entries"] =
+            payload.display.touch_polling.idle_entries;
+        touch_polling["irq_exits"] = payload.display.touch_polling.irq_exits;
+        touch_polling["fallback_probes"] =
+            payload.display.touch_polling.fallback_probes;
+        touch_polling["missed_irq_presses"] =
+            payload.display.touch_polling.missed_irq_presses;
+        touch_polling["irq_arm_failures"] =
+            payload.display.touch_polling.irq_arm_failures;
+        touch_polling["irq_no_frame"] =
+            payload.display.touch_polling.irq_no_frame;
+        display["screen_flip_180"] = payload.display.screen_flip_180;
+        display["rotation_pipeline_active"] =
+            payload.display.rotation_pipeline_active;
+        display["rotated_copy_switch_count"] =
+            payload.display.rotated_copy_switch_count;
+        display["framebuffer_ownership_violation_count"] =
+            payload.display.framebuffer_ownership_violation_count;
+        display["paused"] = payload.display.paused;
+    }
+
     ArduinoJson::JsonObject heap = root["heap"].to<ArduinoJson::JsonObject>();
     heap["free"] = payload.heap_free;
     heap["min_free"] = payload.heap_min_free;
@@ -35,6 +125,14 @@ void fillJson(ArduinoJson::JsonObject root,
     boot["i2c_status"] = payload.boot.i2c_status;
     boot["sda_high"] = payload.boot.sda_high;
     boot["scl_high"] = payload.boot.scl_high;
+    // Keep the raw legacy values above; describe their historical origin separately.
+    ArduinoJson::JsonObject i2c_snapshot = boot["i2c_snapshot"].to<ArduinoJson::JsonObject>();
+    i2c_snapshot["phase"] = "before_board_init";
+    i2c_snapshot["bus"] = "panel";
+    i2c_snapshot["port"] = payload.panel_i2c.port;
+    i2c_snapshot["sda_gpio"] = payload.panel_i2c.sda_gpio;
+    i2c_snapshot["scl_gpio"] = payload.panel_i2c.scl_gpio;
+    i2c_snapshot["live"] = false;
     boot["board_ready"] = payload.boot.board_ready;
     boot["board_rounds"] = payload.boot.board_rounds;
     boot["board_begin_attempts"] = payload.boot.board_begin_attempts;

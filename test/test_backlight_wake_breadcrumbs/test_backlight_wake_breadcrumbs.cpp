@@ -511,6 +511,7 @@ void test_enum_text_is_stable() {
     TEST_ASSERT_EQUAL_STRING("alarm_wake", eventText(Event::AlarmWake));
     TEST_ASSERT_EQUAL_STRING("web_wake", eventText(Event::WebWake));
     TEST_ASSERT_EQUAL_STRING("mqtt_wake", eventText(Event::MqttWake));
+    TEST_ASSERT_EQUAL_STRING("startup_wake", eventText(Event::StartupWake));
     TEST_ASSERT_EQUAL_STRING("driver_call_begin", stageText(Stage::DriverCallBegin));
     TEST_ASSERT_EQUAL_STRING("touch_irq_mask_begin",
                              stageText(Stage::TouchIrqMaskBegin));
@@ -571,6 +572,93 @@ void test_all_wake_sources_advance_through_all_stages() {
     assert_event_advances_through_all_stages(Event::WebWake);
     test::resetRetained();
     assert_event_advances_through_all_stages(Event::MqttWake);
+    test::resetRetained();
+    assert_event_advances_through_all_stages(Event::StartupWake);
+}
+
+void test_startup_event_appends_without_renumbering_retained_events() {
+    TEST_ASSERT_EQUAL_UINT8(0, static_cast<uint8_t>(Event::None));
+    TEST_ASSERT_EQUAL_UINT8(1, static_cast<uint8_t>(Event::ScheduleWake));
+    TEST_ASSERT_EQUAL_UINT8(2, static_cast<uint8_t>(Event::TouchWake));
+    TEST_ASSERT_EQUAL_UINT8(3, static_cast<uint8_t>(Event::AlarmWake));
+    TEST_ASSERT_EQUAL_UINT8(4, static_cast<uint8_t>(Event::WebWake));
+    TEST_ASSERT_EQUAL_UINT8(5, static_cast<uint8_t>(Event::MqttWake));
+    TEST_ASSERT_EQUAL_UINT8(6, static_cast<uint8_t>(Event::StartupWake));
+}
+
+void test_startup_prequiet_trace_survives_warm_restart() {
+    beginPreQuietWake(
+        Event::StartupWake, 1200, 1787000000, true, false, {true, false, true});
+    markPreQuietWaitExceeded(500, 2);
+    markPreQuietReady(750, {true, true, true});
+    markTouchIrqMaskBegin();
+
+    initializeAtBoot(false);
+
+    const Trace &trace = bootSnapshot().trace;
+    TEST_ASSERT_TRUE(bootSnapshot().has_trace);
+    TEST_ASSERT_EQUAL_INT(static_cast<int>(CaptureStatus::Active),
+                          static_cast<int>(bootSnapshot().status));
+    TEST_ASSERT_EQUAL_INT(static_cast<int>(Event::StartupWake),
+                          static_cast<int>(trace.event));
+    TEST_ASSERT_EQUAL_INT(static_cast<int>(Stage::TouchIrqMaskBegin),
+                          static_cast<int>(trace.stage));
+    TEST_ASSERT_EQUAL_UINT32(1200, trace.uptime_ms);
+    TEST_ASSERT_EQUAL_UINT32(750, trace.pre_quiet_elapsed_ms);
+    TEST_ASSERT_TRUE(trace.pre_quiet_wait_exceeded);
+    TEST_ASSERT_EQUAL_UINT32(2, trace.pre_quiet_wait_exceeded_active_operations);
+    TEST_ASSERT_TRUE(trace.target_on);
+    TEST_ASSERT_FALSE(trace.previous_on);
+}
+
+void test_startup_event_update_preserves_active_trace_context() {
+    // Source-priority policy belongs to the caller; this checks record updates.
+    beginPreQuietWake(
+        Event::ScheduleWake, 1300, 1787000100, true, false, {true, true, true});
+    markPreQuietWaitExceeded(500, 1);
+    updateWakeEvent(Event::StartupWake);
+
+    initializeAtBoot(false);
+
+    const Trace &trace = bootSnapshot().trace;
+    TEST_ASSERT_EQUAL_INT(static_cast<int>(Event::StartupWake),
+                          static_cast<int>(trace.event));
+    TEST_ASSERT_EQUAL_INT(static_cast<int>(Stage::PreQuietWaitExceeded),
+                          static_cast<int>(trace.stage));
+    TEST_ASSERT_EQUAL_UINT32(1, trace.sequence);
+    TEST_ASSERT_EQUAL_UINT32(1300, trace.uptime_ms);
+    TEST_ASSERT_EQUAL_UINT32(1787000100, trace.epoch_s);
+    TEST_ASSERT_EQUAL_UINT32(1, trace.pre_quiet_wait_exceeded_active_operations);
+}
+
+void test_legacy_v2_rejects_events_beyond_alarm_even_with_valid_crc() {
+    const Event unsupported[] = {Event::WebWake, Event::MqttWake, Event::StartupWake};
+    for (Event event : unsupported) {
+        test::resetRetained();
+        test::seedLegacyV2CompletedTrace(event);
+
+        initializeAtBoot(false);
+
+        TEST_ASSERT_EQUAL_INT(static_cast<int>(CaptureStatus::Corrupt),
+                              static_cast<int>(bootSnapshot().status));
+        TEST_ASSERT_FALSE(bootSnapshot().has_trace);
+    }
+}
+
+void test_unknown_event_after_startup_is_not_started_or_applied() {
+    const Event unsupported = static_cast<Event>(7);
+    beginWake(unsupported, 1, 2, true, false, {true, true, true});
+    initializeAtBoot(false);
+    TEST_ASSERT_EQUAL_INT(static_cast<int>(CaptureStatus::Empty),
+                          static_cast<int>(bootSnapshot().status));
+    TEST_ASSERT_FALSE(bootSnapshot().has_trace);
+
+    beginWake(Event::StartupWake, 3, 4, true, false, {true, true, true});
+    updateWakeEvent(unsupported);
+    initializeAtBoot(false);
+    TEST_ASSERT_EQUAL_INT(static_cast<int>(Event::StartupWake),
+                          static_cast<int>(bootSnapshot().trace.event));
+    TEST_ASSERT_EQUAL_UINT32(3, bootSnapshot().trace.uptime_ms);
 }
 
 void test_warm_boot_preserves_incomplete_power_settle() {
@@ -657,6 +745,11 @@ int main(int, char **) {
     RUN_TEST(test_new_operation_increments_sequence);
     RUN_TEST(test_enum_text_is_stable);
     RUN_TEST(test_all_wake_sources_advance_through_all_stages);
+    RUN_TEST(test_startup_event_appends_without_renumbering_retained_events);
+    RUN_TEST(test_startup_prequiet_trace_survives_warm_restart);
+    RUN_TEST(test_startup_event_update_preserves_active_trace_context);
+    RUN_TEST(test_legacy_v2_rejects_events_beyond_alarm_even_with_valid_crc);
+    RUN_TEST(test_unknown_event_after_startup_is_not_started_or_applied);
     RUN_TEST(test_warm_boot_preserves_incomplete_power_settle);
     RUN_TEST(test_dark_wake_source_prefers_alarm_over_touch);
     RUN_TEST(test_ui_context_checkpoints_survive_warm_boot);

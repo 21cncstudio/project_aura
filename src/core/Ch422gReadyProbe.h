@@ -7,6 +7,8 @@
 #include <driver/i2c.h>
 #include <stdint.h>
 
+#include "Ch422gBoardPolicy.h"
+
 namespace Ch422gReadyProbe {
 
 // CH422G encodes each command as a separate 7-bit I2C address.
@@ -14,7 +16,9 @@ constexpr uint8_t kWriteOcAddress = 0x23;
 constexpr uint8_t kWriteSetAddress = 0x24;
 constexpr uint8_t kWriteIoAddress = 0x38;
 constexpr uint8_t kWriteOcSafeValue = 0x0F;
-constexpr uint8_t kWriteIoSafeValue = 0xFF;
+// Match the actual driver image, including when this normally disabled probe
+// is enabled for diagnostics. Neither profile may switch native USB to CAN.
+constexpr uint8_t kWriteIoSafeValue = AURA_CH422G_INITIAL_IO_VALUE;
 constexpr uint8_t kWriteSetOutputValue = 0x01;
 
 enum class Status : uint8_t {

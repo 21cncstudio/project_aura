@@ -65,7 +65,8 @@ void fill_ota_json(ArduinoJson::JsonObject root, const Payload &payload) {
                                           ota.slot_size,
                                           ota.size_known,
                                           ota.expected_size,
-                                          ota.error);
+                                          ota.error,
+                                          ota.error_code);
     root["success"] = result.success;
     if (result.success) {
         root["status"] = ota.reboot_pending ? "rebooting" : "success";

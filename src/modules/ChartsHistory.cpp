@@ -84,6 +84,9 @@ void ChartsHistory::reset(StorageManager &storage, bool clear_storage) {
     last_sample_ms_ = 0;
     last_save_ms_ = 0;
     first_update_after_load_ = true;
+    restored_ = false;
+    backward_time_hold_ = false;
+    replacement_save_pending_ = false;
     if (clear_storage) {
         storage.removeBlob(StorageManager::kChartsPath);
     }
@@ -112,33 +115,49 @@ void ChartsHistory::load(StorageManager &storage) {
         return;
     }
 
-    uint32_t now_epoch = 0;
-    if (getNowEpoch(now_epoch) && isStale(now_epoch)) {
-        LOGW("ChartsHistory", "stored history stale, reset");
-        reset(storage, true);
+    if (state_.epoch == 0) {
+        // Samples recorded without trusted time cannot be placed on an
+        // absolute timeline after a reboot. Start a fresh RAM generation, but
+        // preserve the old atomic blob until the first replacement save works.
+        LOGW("ChartsHistory",
+             "stored history has no trusted timestamp; start new generation");
+        reset(storage, false);
+        replacement_save_pending_ = true;
         return;
     }
 
+    // load() runs before TimeManager validates RTC/NTP. Keep a structurally
+    // valid generation quarantined until update() receives trusted time.
     last_sample_ms_ = millis() - Config::CHART_HISTORY_STEP_MS;
     first_update_after_load_ = true;
+    restored_ = true;
     Logger::log(Logger::Info, "ChartsHistory",
-                "restored count=%u idx=%u epoch=%u",
+                "restored count=%u idx=%u epoch=%u; awaiting trusted time",
                 static_cast<unsigned>(state_.count),
                 static_cast<unsigned>(state_.index),
                 static_cast<unsigned>(state_.epoch));
 }
 
 void ChartsHistory::saveIfDue(StorageManager &storage, uint32_t now_ms) {
+    if (backward_time_hold_) {
+        return;
+    }
     if (state_.count == 0) {
         return;
     }
-    if (now_ms - last_save_ms_ < Config::CHART_HISTORY_SAVE_MS) {
+    if (!replacement_save_pending_ &&
+        now_ms - last_save_ms_ < Config::CHART_HISTORY_SAVE_MS) {
+        return;
+    }
+    state_.magic = kChartsHistoryMagic;
+    state_.version = kChartsHistoryVersion;
+    if (!storage.saveBlobAtomic(
+            StorageManager::kChartsPath, &state_, sizeof(state_))) {
+        LOGW("ChartsHistory", "atomic history save failed; previous blob preserved");
         return;
     }
     last_save_ms_ = now_ms;
-    state_.magic = kChartsHistoryMagic;
-    state_.version = kChartsHistoryVersion;
-    storage.saveBlobAtomic(StorageManager::kChartsPath, &state_, sizeof(state_));
+    replacement_save_pending_ = false;
 }
 
 ChartsHistory::Sample ChartsHistory::makeSample(const SensorData &data, bool gas_warmup) const {
@@ -255,38 +274,66 @@ void ChartsHistory::appendGapPoints(uint32_t gap_points, const Sample &current_s
     }
 }
 
-void ChartsHistory::update(const SensorData &data, StorageManager &storage, bool gas_warmup) {
+void ChartsHistory::update(const SensorData &data,
+                           StorageManager &storage,
+                           bool gas_warmup,
+                           bool system_time_trusted) {
     const uint32_t now_ms = millis();
     const uint32_t step_ms = Config::CHART_HISTORY_STEP_MS;
     const uint32_t step_s = step_ms / 1000UL;
     const uint8_t current_optional_gas_type = optionalGasHistoryType(data);
 
     uint32_t now_epoch = 0;
-    bool time_valid = getNowEpoch(now_epoch);
+    const bool time_valid = system_time_trusted && getNowEpoch(now_epoch);
+    if (backward_time_hold_ && !time_valid) {
+        return;
+    }
+    if (restored_ && !time_valid) {
+        // Do not append, rewrite or delete a restored generation based on a
+        // merely plausible process epoch.
+        return;
+    }
+
+    if (time_valid && state_.epoch != 0 && now_epoch < state_.epoch) {
+        const uint32_t backward_s = state_.epoch - now_epoch;
+        if (backward_s <= step_s) {
+            if (!backward_time_hold_) {
+                Logger::log(Logger::Warn,
+                            "ChartsHistory",
+                            "clock moved backwards %us; holding history until catch-up",
+                            static_cast<unsigned>(backward_s));
+            }
+            backward_time_hold_ = true;
+            return;
+        }
+        backward_time_hold_ = false;
+    } else if (time_valid && backward_time_hold_) {
+        backward_time_hold_ = false;
+        LOGI("ChartsHistory", "clock caught up; history sampling resumed");
+    }
+
     if (time_valid && isStale(now_epoch)) {
         LOGW("ChartsHistory", "history stale, reset");
-        reset(storage, true);
+        // Keep the old generation until the first sample of its replacement
+        // has been committed atomically.
+        reset(storage, false);
+        replacement_save_pending_ = true;
         last_sample_ms_ = now_ms - step_ms;
     }
+    restored_ = false;
 
     Sample sample = makeSample(data, gas_warmup);
 
     if (time_valid && state_.epoch != 0) {
-        if (now_epoch < state_.epoch) {
-            LOGW("ChartsHistory", "epoch moved backwards, reset");
-            reset(storage, true);
-            last_sample_ms_ = now_ms - step_ms;
+        const uint32_t delta_s = now_epoch - state_.epoch;
+        if (delta_s < step_s) {
+            if (!first_update_after_load_) {
+                return;
+            }
         } else {
-            uint32_t delta_s = now_epoch - state_.epoch;
-            if (delta_s < step_s) {
-                if (!first_update_after_load_) {
-                    return;
-                }
-            } else {
-                uint32_t steps = delta_s / step_s;
-                if (steps > 1) {
-                    appendGapPoints(steps - 1, sample);
-                }
+            const uint32_t steps = delta_s / step_s;
+            if (steps > 1) {
+                appendGapPoints(steps - 1, sample);
             }
         }
     } else if (now_ms - last_sample_ms_ < step_ms) {

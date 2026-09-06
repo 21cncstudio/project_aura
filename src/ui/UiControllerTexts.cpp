@@ -59,6 +59,7 @@ void UiController::update_main_texts() {
     if (objects.label_time_title_2) safe_label_set_text(objects.label_time_title_2, UiText::LabelTimeCard());
     if (objects.label_voc_warmup_1) safe_label_set_text(objects.label_voc_warmup_1, UiText::LabelWarmup());
     if (objects.label_nox_warmup_1) safe_label_set_text(objects.label_nox_warmup_1, UiText::LabelWarmup());
+    if (objects.label_hcho_warmup) safe_label_set_text(objects.label_hcho_warmup, UiText::LabelWarmup());
     if (objects.label_co_warmup) safe_label_set_text(objects.label_co_warmup, UiText::LabelWarmup());
     if (objects.label_voc_unit_1) safe_label_set_text(objects.label_voc_unit_1, UiText::UnitIndex());
     if (objects.label_nox_unit_1) safe_label_set_text(objects.label_nox_unit_1, UiText::UnitIndex());

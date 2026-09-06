@@ -1,8 +1,15 @@
 #include <unity.h>
 
+#include "Ch422gBoardPolicy.h"
 #include "core/Ch422gReadyProbe.h"
 
 namespace {
+
+#if defined(AURA_HARDWARE_PROFILE_7) && AURA_HARDWARE_PROFILE_7
+constexpr uint8_t kExpectedInitialIo = 0xD1U;
+#else
+constexpr uint8_t kExpectedInitialIo = 0xDBU;
+#endif
 
 struct WriteRecord {
     uint8_t address = 0;
@@ -130,6 +137,19 @@ void assertWrite(uint16_t index, uint8_t address, uint8_t value) {
     TEST_ASSERT_EQUAL_HEX8(value, writes[index].value);
 }
 
+void assertAllIoWritesUseProfileImage() {
+    TEST_ASSERT_TRUE(write_calls <= (sizeof(writes) / sizeof(writes[0])));
+    uint16_t io_write_calls = 0;
+    for (uint16_t index = 0; index < write_calls; ++index) {
+        if (writes[index].address == Ch422gReadyProbe::kWriteIoAddress) {
+            ++io_write_calls;
+            TEST_ASSERT_EQUAL_HEX8(kExpectedInitialIo, writes[index].value);
+            TEST_ASSERT_EQUAL_HEX8(0U, writes[index].value & 0x20U);
+        }
+    }
+    TEST_ASSERT_GREATER_THAN_UINT16(0U, io_write_calls);
+}
+
 } // namespace
 
 void setUp() {
@@ -137,6 +157,18 @@ void setUp() {
 }
 
 void tearDown() {}
+
+void test_probe_uses_shared_native_usb_policy_and_exact_profile_image() {
+    TEST_ASSERT_EQUAL_HEX8(0x20U, AURA_CH422G_USB_SEL_MASK);
+    TEST_ASSERT_EQUAL_HEX8(kExpectedInitialIo, AURA_CH422G_INITIAL_IO_VALUE);
+    TEST_ASSERT_EQUAL_HEX8(
+        0U, AURA_CH422G_INITIAL_IO_VALUE & AURA_CH422G_BACKLIGHT_MASK);
+    TEST_ASSERT_EQUAL_HEX8(
+        AURA_CH422G_INITIAL_IO_VALUE, Ch422gReadyProbe::kWriteIoSafeValue);
+    const auto result = runProbe();
+    TEST_ASSERT_TRUE(result.ready());
+    assertAllIoWritesUseProfileImage();
+}
 
 void test_probe_primes_used_io_then_validates_vendor_order() {
     const auto result = runProbe();
@@ -155,6 +187,23 @@ void test_probe_primes_used_io_then_validates_vendor_order() {
     assertWrite(2, Ch422gReadyProbe::kWriteSetAddress, Ch422gReadyProbe::kWriteSetOutputValue);
     assertWrite(3, Ch422gReadyProbe::kWriteOcAddress, Ch422gReadyProbe::kWriteOcSafeValue);
     assertWrite(4, Ch422gReadyProbe::kWriteIoAddress, Ch422gReadyProbe::kWriteIoSafeValue);
+}
+
+void test_probe_retries_never_write_a_legacy_usb_high_image() {
+    const esp_err_t failures[] = {ESP_FAIL, ESP_ERR_TIMEOUT};
+    for (const auto failure : failures) {
+        for (uint16_t failed_stage = 1; failed_stage <= 5; ++failed_stage) {
+            resetFake();
+            fail_on_write_call = failed_stage;
+            write_failure_error = failure;
+            const auto result = runProbe();
+
+            TEST_ASSERT_TRUE(result.ready());
+            TEST_ASSERT_EQUAL_UINT16(2, result.attempts);
+            TEST_ASSERT_EQUAL_UINT16(failed_stage + 5, write_calls);
+            assertAllIoWritesUseProfileImage();
+        }
+    }
 }
 
 void test_timeout_recreates_host_recovers_bus_and_then_succeeds() {
@@ -346,7 +395,9 @@ void test_invalid_timing_is_rejected_without_starting_host() {
 
 int main(int, char **) {
     UNITY_BEGIN();
+    RUN_TEST(test_probe_uses_shared_native_usb_policy_and_exact_profile_image);
     RUN_TEST(test_probe_primes_used_io_then_validates_vendor_order);
+    RUN_TEST(test_probe_retries_never_write_a_legacy_usb_high_image);
     RUN_TEST(test_timeout_recreates_host_recovers_bus_and_then_succeeds);
     RUN_TEST(test_nack_recreates_host_without_gpio_recovery);
     RUN_TEST(test_validation_failure_restarts_from_safe_io_on_fresh_host);

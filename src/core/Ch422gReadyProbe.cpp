@@ -88,9 +88,8 @@ Result waitWithOps(i2c_port_t port,
             return result;
         }
 
-        // Preload the eight EXIO latches first. These pins carry LCD_VDD_EN,
-        // reset and backlight, so writing all-high is safe whether IO_OE is
-        // still disabled after POR or a previous timed-out enable took effect.
+        // Preload the eight EXIO latches first. Both profile-specific images
+        // keep USB_SEL low and match the CH422G driver's startup policy.
         bool sequence_ok =
             write_step(Phase::PrimeIo, kWriteIoAddress, kWriteIoSafeValue) &&
             write_step(Phase::EnableOutputs, kWriteSetAddress, kWriteSetOutputValue);

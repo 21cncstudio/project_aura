@@ -56,6 +56,7 @@ void test_web_ota_state_error_is_sticky_and_clears_active() {
     state.beginUpload(10);
     TEST_ASSERT_FALSE(state.hasError());
     state.setErrorOnce("first", 40);
+    const uint32_t original_ttl_ms = state.snapshot().result_ttl_ms;
     state.setErrorOnce("second", 50);
 
     const WebOtaSnapshot snapshot = state.snapshot();
@@ -65,6 +66,11 @@ void test_web_ota_state_error_is_sticky_and_clears_active() {
     TEST_ASSERT_FALSE(snapshot.success);
     TEST_ASSERT_TRUE(snapshot.hasTerminalResult(60));
     TEST_ASSERT_EQUAL_STRING("first", snapshot.error.c_str());
+    TEST_ASSERT_EQUAL_UINT32(40, snapshot.result_set_ms);
+    TEST_ASSERT_EQUAL_UINT32(WebOtaState::terminalResultTtlMs(), original_ttl_ms);
+    TEST_ASSERT_EQUAL_UINT32(original_ttl_ms, snapshot.result_ttl_ms);
+    TEST_ASSERT_TRUE(snapshot.hasTerminalResult(40 + original_ttl_ms - 1));
+    TEST_ASSERT_FALSE(snapshot.hasTerminalResult(40 + original_ttl_ms));
 
     state.clearBusy();
     TEST_ASSERT_FALSE(state.isBusy());
@@ -143,6 +149,23 @@ void test_web_ota_state_new_upload_supersedes_expired_terminal_result() {
     TEST_ASSERT_FALSE(snapshot.hasError());
 }
 
+void test_web_ota_state_preserves_first_error_code_and_clears_it_on_retry() {
+    WebOtaState state;
+    state.beginUpload(100);
+    state.setErrorOnce("Wrong model", 150, "HARDWARE_TARGET_MISMATCH");
+    state.setErrorOnce("Upload interrupted", 160);
+    TEST_ASSERT_EQUAL_STRING("Wrong model", state.snapshot().error.c_str());
+    TEST_ASSERT_EQUAL_STRING("HARDWARE_TARGET_MISMATCH", state.snapshot().error_code.c_str());
+    TEST_ASSERT_EQUAL_UINT32(0, state.snapshot().written_size);
+    TEST_ASSERT_FALSE(state.snapshot().reboot_pending);
+
+    state.clearBusy();
+    state.beginUpload(200);
+    TEST_ASSERT_TRUE(state.snapshot().error_code.empty());
+    state.setErrorOnce("Ordinary failure", 220);
+    TEST_ASSERT_TRUE(state.snapshot().error_code.empty());
+}
+
 int main(int, char **) {
     UNITY_BEGIN();
     RUN_TEST(test_web_ota_state_begin_upload_resets_previous_state);
@@ -152,5 +175,6 @@ int main(int, char **) {
     RUN_TEST(test_web_ota_state_total_timeout_expires_from_upload_start);
     RUN_TEST(test_web_ota_state_terminal_result_expires_after_ttl);
     RUN_TEST(test_web_ota_state_new_upload_supersedes_expired_terminal_result);
+    RUN_TEST(test_web_ota_state_preserves_first_error_code_and_clears_it_on_retry);
     return UNITY_END();
 }

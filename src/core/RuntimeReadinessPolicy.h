@@ -6,7 +6,10 @@
 namespace RuntimeReadinessPolicy {
 
 bool operational(bool board_ready, bool lvgl_ready);
-bool canConfirmOta(bool board_ready, bool lvgl_ready, bool lvgl_runtime_healthy);
+bool canConfirmOta(bool board_ready,
+                   bool lvgl_ready,
+                   bool sensor_bus_ready,
+                   bool lvgl_runtime_healthy);
 bool canManageLvglRuntime(bool shared_i2c_ready,
                           bool lvgl_ready,
                           bool ui_lvgl_ready);

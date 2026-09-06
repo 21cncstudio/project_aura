@@ -92,24 +92,24 @@ bool Bmp3xx::detect(uint8_t addr) {
 bool Bmp3xx::writeU8(uint8_t reg, uint8_t value) {
     uint8_t data[2] = {reg, value};
     esp_err_t err = i2c_master_write_to_device(
-        Config::I2C_PORT,
+        Config::SENSOR_I2C_PORT,
         addr_,
         data,
         sizeof(data),
-        pdMS_TO_TICKS(Config::I2C_TIMEOUT_MS)
+        pdMS_TO_TICKS(Config::SENSOR_I2C_TIMEOUT_MS)
     );
     return err == ESP_OK;
 }
 
 bool Bmp3xx::readBytes(uint8_t reg, uint8_t *buf, size_t len) {
     esp_err_t err = i2c_master_write_read_device(
-        Config::I2C_PORT,
+        Config::SENSOR_I2C_PORT,
         addr_,
         &reg,
         1,
         buf,
         len,
-        pdMS_TO_TICKS(Config::I2C_TIMEOUT_MS)
+        pdMS_TO_TICKS(Config::SENSOR_I2C_TIMEOUT_MS)
     );
     return err == ESP_OK;
 }

@@ -30,6 +30,51 @@ constexpr spi_host_device_t kSdSpiHost = SPI2_HOST;
 
 constexpr size_t kCopyBufferSize = 1024;
 
+bool is_decimal_digit(char ch) {
+    return ch >= '0' && ch <= '9';
+}
+
+bool is_leap_year(unsigned year) {
+    return (year % 4U == 0U && year % 100U != 0U) || year % 400U == 0U;
+}
+
+bool is_valid_iso_day(const char *text) {
+    if (!text ||
+        !is_decimal_digit(text[0]) || !is_decimal_digit(text[1]) ||
+        !is_decimal_digit(text[2]) || !is_decimal_digit(text[3]) ||
+        text[4] != '-' ||
+        !is_decimal_digit(text[5]) || !is_decimal_digit(text[6]) ||
+        text[7] != '-' ||
+        !is_decimal_digit(text[8]) || !is_decimal_digit(text[9])) {
+        return false;
+    }
+
+    const unsigned year = static_cast<unsigned>(text[0] - '0') * 1000U +
+                          static_cast<unsigned>(text[1] - '0') * 100U +
+                          static_cast<unsigned>(text[2] - '0') * 10U +
+                          static_cast<unsigned>(text[3] - '0');
+    const unsigned month = static_cast<unsigned>(text[5] - '0') * 10U +
+                           static_cast<unsigned>(text[6] - '0');
+    const unsigned day = static_cast<unsigned>(text[8] - '0') * 10U +
+                         static_cast<unsigned>(text[9] - '0');
+    if (month == 0U || month > 12U) {
+        return false;
+    }
+
+    static constexpr uint8_t kDaysPerMonth[] = {
+        31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31,
+    };
+    unsigned max_day = kDaysPerMonth[month - 1U];
+    if (month == 2U && is_leap_year(year)) {
+        max_day = 29U;
+    }
+    return day > 0U && day <= max_day;
+}
+
+bool is_valid_daily_csv_row(const char *line, size_t line_len) {
+    return line && line_len >= 11U && is_valid_iso_day(line) && line[10] == ',';
+}
+
 bool path_has_parent_char(char ch) {
     return ch == '/' || ch == '\\';
 }
@@ -833,6 +878,204 @@ bool SdCardManager::appendUniqueTextBlockAtomic(const char *path,
     return true;
 }
 
+bool SdCardManager::removeDailyCsvRowsOnOrAfterAtomic(const char *path,
+                                                       const char *cutoff_iso_day) {
+    constexpr const char *kOperation = "daily_csv_prune";
+    if (!mounted_ || !path || !cutoff_iso_day || strlen(cutoff_iso_day) != 10U ||
+        !is_valid_iso_day(cutoff_iso_day)) {
+        recordFailure(kOperation, "validate", EINVAL, DailyStorageFailureKind::Invalid, true);
+        return false;
+    }
+    if (!lock()) {
+        recordFailure(kOperation, "lock", EBUSY, DailyStorageFailureKind::Busy, false);
+        return false;
+    }
+
+    const String final_path = fullPath(path);
+    const String tmp_path = final_path + ".tmp";
+    const String backup_path = final_path + ".bak";
+    const auto purge_sidecar = [&](const String &candidate,
+                                   const char *stat_stage,
+                                   const char *remove_stage,
+                                   const char *verify_stage) {
+        struct stat st = {};
+        errno = 0;
+        if (stat(candidate.c_str(), &st) != 0) {
+            if (errno == ENOENT) {
+                return true;
+            }
+            const int sidecar_error = current_errno_or_io();
+            recordFailure(kOperation,
+                          stat_stage,
+                          sidecar_error,
+                          classifyErrno(sidecar_error),
+                          true);
+            return false;
+        }
+        errno = 0;
+        if (remove(candidate.c_str()) != 0) {
+            const int sidecar_error = current_errno_or_io();
+            recordFailure(kOperation,
+                          remove_stage,
+                          sidecar_error,
+                          classifyErrno(sidecar_error),
+                          true);
+            return false;
+        }
+        errno = 0;
+        if (stat(candidate.c_str(), &st) != 0 && errno == ENOENT) {
+            return true;
+        }
+        const int sidecar_error = errno == 0 ? EIO : current_errno_or_io();
+        recordFailure(kOperation,
+                      verify_stage,
+                      sidecar_error,
+                      classifyErrno(sidecar_error),
+                      true);
+        return false;
+    };
+    if (!recoverAtomicBackupLocked(final_path, kOperation)) {
+        unlock();
+        return false;
+    }
+    // If a previous committed replace could not remove its backup, discard it
+    // before using the current final as the source of truth. A prune journal
+    // must never be cleared while an unpruned recoverable backup remains.
+    if (!purge_sidecar(tmp_path,
+                       "stat_stale_temp",
+                       "remove_stale_temp",
+                       "verify_stale_temp") ||
+        !purge_sidecar(backup_path,
+                       "stat_stale_backup",
+                       "remove_stale_backup",
+                       "verify_stale_backup")) {
+        unlock();
+        return false;
+    }
+
+    errno = 0;
+    FILE *source = fopen(final_path.c_str(), "rb");
+    if (!source) {
+        if (errno == ENOENT) {
+            recordSuccess(kOperation, false);
+            unlock();
+            return true;
+        }
+        const int error_code = current_errno_or_io();
+        recordFailure(kOperation, "open_source", error_code, classifyErrno(error_code), true);
+        unlock();
+        return false;
+    }
+
+    errno = 0;
+    FILE *target = fopen(tmp_path.c_str(), "wb");
+    if (!target) {
+        const int error_code = current_errno_or_io();
+        fclose(source);
+        recordFailure(kOperation, "open_temp", error_code, classifyErrno(error_code), true);
+        unlock();
+        return false;
+    }
+
+    bool ok = true;
+    bool removed_any = false;
+    bool at_line_start = true;
+    bool remove_current_line = false;
+    int error_code = 0;
+    const char *stage = "";
+    char line[kCopyBufferSize];
+    while (fgets(line, sizeof(line), source)) {
+        const size_t line_len = strlen(line);
+        if (at_line_start) {
+            remove_current_line = is_valid_daily_csv_row(line, line_len) &&
+                                  strncmp(line, cutoff_iso_day, 10U) >= 0;
+            removed_any = removed_any || remove_current_line;
+        }
+        if (!remove_current_line && line_len > 0U &&
+            fwrite(line, 1, line_len, target) != line_len) {
+            ok = false;
+            error_code = current_errno_or_io();
+            stage = "copy_write";
+            break;
+        }
+        at_line_start = line_len > 0U && line[line_len - 1U] == '\n';
+        if (at_line_start) {
+            remove_current_line = false;
+        }
+    }
+    if (ok && ferror(source)) {
+        ok = false;
+        error_code = current_errno_or_io();
+        stage = "copy_read";
+    }
+    if (fclose(source) != 0 && ok) {
+        ok = false;
+        error_code = current_errno_or_io();
+        stage = "close_source";
+    }
+    if (ok && fflush(target) != 0) {
+        ok = false;
+        error_code = current_errno_or_io();
+        stage = "flush_temp";
+    }
+    if (ok && fsync(fileno(target)) != 0) {
+        ok = false;
+        error_code = current_errno_or_io();
+        stage = "sync_temp";
+    }
+    if (fclose(target) != 0 && ok) {
+        ok = false;
+        error_code = current_errno_or_io();
+        stage = "close_temp";
+    }
+
+    if (ok && removed_any) {
+        ok = replaceWithTempLocked(final_path, tmp_path, kOperation);
+    } else {
+        ok = purge_sidecar(tmp_path,
+                           "stat_temp_cleanup",
+                           "remove_temp_cleanup",
+                           "verify_temp_cleanup");
+    }
+    if (!ok) {
+        const int operation_error = error_code != 0 ? error_code : current_errno_or_io();
+        errno = 0;
+        remove(tmp_path.c_str());
+        if (error_code != 0) {
+            recordFailure(kOperation,
+                          stage,
+                          operation_error,
+                          classifyErrno(operation_error),
+                          true);
+        }
+        unlock();
+        return false;
+    }
+
+    // replaceWithTempLocked deliberately treats a committed final as success
+    // even when backup cleanup fails. Tighten that contract for journaled CSV
+    // pruning: success here requires that no stale atomic artifact can later
+    // restore rows on or after the cutoff.
+    if (!purge_sidecar(tmp_path,
+                       "stat_final_temp",
+                       "remove_final_temp",
+                       "verify_final_temp") ||
+        !purge_sidecar(backup_path,
+                       "stat_final_backup",
+                       "remove_final_backup",
+                       "verify_final_backup")) {
+        unlock();
+        return false;
+    }
+
+    if (removed_any) {
+        updateSpaceInfoLocked();
+    }
+    recordSuccess(kOperation, removed_any);
+    unlock();
+    return true;
+}
+
 bool SdCardManager::readBinary(const char *path, void *out, size_t len, size_t &out_len) const {
     out_len = 0;
     if (!mounted_ || !path || !out) {
@@ -948,15 +1191,68 @@ bool SdCardManager::removeFile(const char *path) {
         recordFailure("remove", "lock", EBUSY, DailyStorageFailureKind::Busy, false);
         return false;
     }
-    const String full = fullPath(path);
-    errno = 0;
-    const bool ok = remove(full.c_str()) == 0;
-    const int error_code = ok ? 0 : current_errno_or_io();
+    const String final_path = fullPath(path);
+    const String backup_path = final_path + ".bak";
+    const String tmp_path = final_path + ".tmp";
+    bool any_existed = false;
+
+    const auto remove_if_present = [&](const String &candidate,
+                                       const char *stat_stage,
+                                       const char *remove_stage,
+                                       const char *verify_stage) {
+        struct stat st = {};
+        errno = 0;
+        if (stat(candidate.c_str(), &st) != 0) {
+            if (errno == ENOENT) {
+                return true;
+            }
+            const int error_code = current_errno_or_io();
+            recordFailure("remove",
+                          stat_stage,
+                          error_code,
+                          classifyErrno(error_code),
+                          true);
+            return false;
+        }
+        any_existed = true;
+        errno = 0;
+        if (remove(candidate.c_str()) != 0) {
+            const int error_code = current_errno_or_io();
+            recordFailure("remove",
+                          remove_stage,
+                          error_code,
+                          classifyErrno(error_code),
+                          true);
+            return false;
+        }
+        errno = 0;
+        if (stat(candidate.c_str(), &st) != 0 && errno == ENOENT) {
+            return true;
+        }
+        const int error_code = errno == 0 ? EIO : current_errno_or_io();
+        recordFailure("remove",
+                      verify_stage,
+                      error_code,
+                      classifyErrno(error_code),
+                      true);
+        return false;
+    };
+
+    // An explicit logical-file delete must also purge atomic-write artifacts.
+    // Delete sidecars first and the committed file last so an
+    // intermediate failure cannot make an old backup become authoritative.
+    const bool ok =
+        remove_if_present(tmp_path, "stat_temp", "remove_temp", "verify_temp") &&
+        remove_if_present(backup_path,
+                          "stat_backup",
+                          "remove_backup",
+                          "verify_backup") &&
+        remove_if_present(final_path, "stat_final", "remove_final", "verify_final");
     if (ok) {
-        updateSpaceInfoLocked();
-        recordSuccess("remove", true);
-    } else {
-        recordFailure("remove", "remove", error_code, classifyErrno(error_code), true);
+        if (any_existed) {
+            updateSpaceInfoLocked();
+        }
+        recordSuccess("remove", any_existed);
     }
     unlock();
     return ok;

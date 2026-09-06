@@ -9,9 +9,13 @@ Decision decide(bool board_ready,
                 bool lvgl_ready,
                 bool board_recovery_eligible,
                 bool auto_recovery_boot,
-                bool restart_task_ready) {
+                bool restart_task_ready,
+                bool automatic_recovery_enabled) {
     if (board_ready && lvgl_ready) {
         return Decision::NotNeeded;
+    }
+    if (!automatic_recovery_enabled) {
+        return Decision::SuppressPolicyDisabled;
     }
     if (auto_recovery_boot) {
         return Decision::SuppressAlreadyAttempted;
@@ -30,6 +34,7 @@ const char *decisionText(Decision decision) {
     switch (decision) {
         case Decision::NotNeeded: return "not_needed";
         case Decision::Restart: return "restart_requested";
+        case Decision::SuppressPolicyDisabled: return "policy_disabled";
         case Decision::SuppressAlreadyAttempted: return "already_attempted";
         case Decision::SuppressNotEligible: return "not_recovery_eligible";
         case Decision::SuppressRestartUnavailable: return "restart_task_unavailable";

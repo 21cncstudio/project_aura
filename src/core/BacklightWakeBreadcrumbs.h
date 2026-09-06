@@ -15,6 +15,8 @@ enum class Event : uint8_t {
     AlarmWake,
     WebWake,
     MqttWake,
+    // Append only: persisted event values and the retained-record layout stay stable.
+    StartupWake,
 };
 
 enum class Stage : uint8_t {
@@ -195,7 +197,7 @@ void corruptEvidenceStorage();
 void corruptLatestEvidenceMarker();
 void seedValidEmptyWithCorruptSibling();
 void seedTerminalWithCorruptSibling();
-void seedLegacyV2CompletedTrace();
+void seedLegacyV2CompletedTrace(Event event = Event::AlarmWake);
 size_t retainedRecordSize();
 }
 #endif

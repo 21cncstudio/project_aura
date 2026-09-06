@@ -35,7 +35,14 @@ public:
 
     void begin(DailyHistoryStorage &storage, bool initial_units_c);
     void setPreferredUnitsC(bool units_c);
-    void update(const SensorData &data, uint32_t now_ms);
+    void update(const SensorData &data,
+                uint32_t now_ms,
+                bool system_time_trusted);
+#ifdef UNIT_TEST
+    void update(const SensorData &data, uint32_t now_ms) {
+        update(data, now_ms, true);
+    }
+#endif
     void poll(uint32_t now_ms);
     void flush();
 
@@ -97,10 +104,48 @@ private:
         uint8_t pending_count = 0;
         uint8_t reserved[3] = {};
         uint32_t dropped_pending_days = 0;
+        uint32_t last_update_epoch = 0;
+        uint32_t csv_cleanup_day_key = 0;
         PersistedState current{};
         PersistedState pending[kMaxPendingDays] = {};
         uint32_t crc32 = 0;
     };
+
+    struct PersistedSnapshotV1 {
+        uint32_t magic = 0;
+        uint16_t version = 0;
+        uint16_t size = 0;
+        uint32_t generation = 0;
+        uint8_t pending_count = 0;
+        uint8_t reserved[3] = {};
+        uint32_t dropped_pending_days = 0;
+        PersistedState current{};
+        PersistedState pending[kMaxPendingDays] = {};
+        uint32_t crc32 = 0;
+    };
+
+    enum class StoredReadResult : uint8_t {
+        Missing = 0,
+        Valid,
+        Invalid,
+        RetryableError,
+    };
+
+    static_assert(sizeof(MetricState) == 24U,
+                  "Daily metric-state ABI changed; bump the format version");
+    static_assert(sizeof(PersistedState) == 352U &&
+                      offsetof(PersistedState, metrics) == 16U,
+                  "Daily persisted-state ABI changed; bump the format version");
+    static_assert(sizeof(PersistedSnapshotV1) == 2840U &&
+                      offsetof(PersistedSnapshotV1, current) == 20U &&
+                      offsetof(PersistedSnapshotV1, crc32) == 2836U,
+                  "Daily snapshot v1 disk ABI changed");
+    static_assert(sizeof(PersistedSnapshot) == 2848U &&
+                      offsetof(PersistedSnapshot, last_update_epoch) == 20U &&
+                      offsetof(PersistedSnapshot, csv_cleanup_day_key) == 24U &&
+                      offsetof(PersistedSnapshot, current) == 28U &&
+                      offsetof(PersistedSnapshot, crc32) == 2844U,
+                  "Daily snapshot v2 disk ABI changed");
 
     static time_t nowEpochRaw();
     static bool localDateFromEpoch(time_t epoch, uint32_t &day_key);
@@ -110,6 +155,7 @@ private:
     static void migratePersistedState(PersistedState &state);
     static uint32_t snapshotCrc32(const PersistedSnapshot &snapshot);
     static bool validSnapshot(const PersistedSnapshot &snapshot);
+    static bool validSnapshotV1Bytes(const void *data, size_t size);
     static bool generationNewer(uint32_t lhs, uint32_t rhs);
     static const MetricDef &metricDef(uint8_t index);
 
@@ -129,12 +175,19 @@ private:
     bool lock(uint32_t timeout_ms = 1000) const;
     void unlock() const;
     uint32_t currentSampleCountLocked() const;
-    bool ensureDay(uint32_t day_key);
+    bool ensureDay(uint32_t day_key, time_t current_epoch);
+    bool shouldHoldBackwardDay(time_t current_epoch,
+                               uint32_t current_day_key,
+                               uint32_t stored_day_key) const;
+    void discardPendingDaysAtOrAfter(uint32_t day_key);
+    void resetForTemporalGeneration(uint32_t day_key);
+    bool cleanupFutureCsvIfNeeded(uint32_t now_ms, bool force);
     void resetForDay(uint32_t day_key);
     void resetMetric(ChartsHistory::Metric metric);
-    bool restoreStoredState(uint32_t current_day_key);
-    bool readSnapshotFile(const char *path, PersistedSnapshot &snapshot) const;
-    bool readLegacyState(PersistedState &state) const;
+    bool restoreStoredState(uint32_t current_day_key, time_t current_epoch);
+    StoredReadResult readSnapshotFile(const char *path,
+                                      PersistedSnapshot &snapshot) const;
+    StoredReadResult readLegacyState(PersistedState &state) const;
     bool enqueuePendingDay(const PersistedState &state);
     void removeOldestPendingDay();
     bool removeAllStateFiles(bool &existed);
@@ -156,6 +209,13 @@ private:
     uint32_t state_generation_ = 0;
     uint32_t dropped_pending_days_ = 0;
     bool restored_ = false;
+    bool backward_day_hold_ = false;
+    time_t last_update_epoch_ = 0;
+    uint32_t csv_cleanup_day_key_ = 0;
+    uint32_t last_csv_cleanup_attempt_ms_ = 0;
+    bool csv_cleanup_retry_pending_ = false;
+    bool csv_cleanup_clear_pending_ = false;
+    bool csv_cleanup_intent_durable_ = false;
     bool dirty_ = false;
     bool last_write_ok_ = true;
     bool preferred_units_c_ = true;

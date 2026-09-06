@@ -28,6 +28,7 @@ void StateMachine::setEnabled(bool enabled, bool touch_released, uint32_t now_ms
 
     enabled_ = enabled;
     pending_wake_ = false;
+    fast_retry_pending_ = false;
     armed_ = enabled ? touch_released : true;
     last_probe_ms_ = enabled ? now_ms : 0;
 }
@@ -46,17 +47,27 @@ bool StateMachine::shouldProbe(bool interrupt_gated,
            FALLBACK_PROBE_INTERVAL_MS;
 }
 
-void StateMachine::recordProbe(Sample sample, uint32_t now_ms) {
+void StateMachine::recordProbe(Sample sample,
+                               uint32_t now_ms,
+                               bool selected_by_fresh_interrupt) {
     if (!enabled_) {
         return;
     }
 
     last_probe_ms_ = now_ms;
+    fast_retry_pending_ =
+        selected_by_fresh_interrupt && sample == Sample::NoData;
     if (sample == Sample::Released) {
         armed_ = true;
     } else if (sample == Sample::Pressed && armed_) {
         pending_wake_ = true;
     }
+}
+
+bool StateMachine::takeFastRetry() {
+    const bool pending = fast_retry_pending_;
+    fast_retry_pending_ = false;
+    return pending;
 }
 
 bool StateMachine::takePendingWake() {

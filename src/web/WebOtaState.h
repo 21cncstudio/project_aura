@@ -23,6 +23,7 @@ struct WebOtaSnapshot {
     size_t slot_size = 0;
     size_t written_size = 0;
     String error;
+    String error_code;
     uint32_t upload_start_ms = 0;
     uint32_t first_chunk_ms = 0;
     uint32_t last_chunk_ms = 0;
@@ -53,7 +54,10 @@ public:
     }
 
     void reset();
-    void beginUpload(uint32_t now_ms);
+    void beginUpload(uint32_t now_ms, uint32_t validated_confirm_id = 0);
+    uint32_t sessionId() const { return session_id_; }
+    bool rejectedUploadMatches(uint32_t confirm_id, size_t expected_size,
+                               uint32_t now_ms) const;
     bool isActive() const;
     bool isBusy() const;
     bool hasError() const;
@@ -70,7 +74,7 @@ public:
     void markFinalizeDuration(uint32_t finalize_ms);
     void markSuccess(uint32_t now_ms);
     void markRebootPending();
-    void setErrorOnce(const String &error, uint32_t now_ms);
+    void setErrorOnce(const String &error, uint32_t now_ms, const char *error_code = nullptr);
     void clearBusy();
     WebOtaSnapshot snapshot() const;
 
@@ -84,12 +88,14 @@ private:
     bool reboot_pending_ = false;
     bool size_known_ = false;
     uint32_t session_id_ = 0;
+    uint32_t validated_confirm_id_ = 0;
     uint32_t next_session_id_ = 1;
     uint32_t total_timeout_ms_ = 0;
     size_t expected_size_ = 0;
     size_t slot_size_ = 0;
     size_t written_size_ = 0;
     String error_;
+    String error_code_;
     uint32_t upload_start_ms_ = 0;
     uint32_t first_chunk_ms_ = 0;
     uint32_t last_chunk_ms_ = 0;

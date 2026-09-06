@@ -406,6 +406,7 @@ public:
     };
 
     void begin(httpd_req_t *req) {
+        resetUploadResponseState();
         req_ = req;
         response_storage_.reset();
         args_.clear();
@@ -419,6 +420,7 @@ public:
     }
 
     void reset() {
+        resetUploadResponseState();
         req_ = nullptr;
         response_storage_.reset();
         args_.clear();
@@ -982,10 +984,17 @@ bool EspHttpServerBackend::prepareRequest(RouteRegistration &route, void *raw_re
                         request_->setUpload(write);
                         route.upload_handler();
                         uploaded_size += size;
-                        return true;
+                        return !request_->uploadRejected();
                     },
                     final_boundary);
 
+                if (request_->uploadRejected()) {
+                    // A prefix/identity rejection is terminal. Preserve its
+                    // reason and reach the route's final response + cleanup
+                    // without reading the rest of the rejected file.
+                    request_->setPendingBodyBytes(reader.remainingBytesOnSocket());
+                    return true;
+                }
                 if (!stream_ok) {
                     request_->setPendingBodyBytes(reader.remainingBytesOnSocket());
                     WebUpload aborted{};
@@ -1114,6 +1123,9 @@ void EspHttpServerBackend::begin() {
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.server_port = port_;
     config.stack_size = 12288;
+    // Keep HTTP handlers on the network core instead of allowing an
+    // unpinned/FPU-using server task to settle on the Arduino/LVGL core.
+    config.core_id = 0;
     config.max_open_sockets = kHttpServerMaxOpenSockets;
     config.lru_purge_enable = true;
     config.max_uri_handlers = WebServerLimits::kHttpServerMaxUriHandlers;

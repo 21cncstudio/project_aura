@@ -18,6 +18,18 @@
 #define APP_BUILD_ID "nogit"
 #endif
 
+#ifndef APP_HARDWARE_PROFILE
+#define APP_HARDWARE_PROFILE "unknown"
+#endif
+
+#ifndef APP_HARDWARE_TARGET
+#define APP_HARDWARE_TARGET "unknown"
+#endif
+
+#ifndef APP_FIRMWARE_FLAVOR
+#define APP_FIRMWARE_FLAVOR "unknown"
+#endif
+
 namespace {
 
 bool isNumeric(char c) {
@@ -54,6 +66,18 @@ const char *shortVersion() {
 
 const char *buildId() {
     return APP_BUILD_ID;
+}
+
+const char *hardwareProfile() {
+    return APP_HARDWARE_PROFILE;
+}
+
+const char *hardwareTarget() {
+    return APP_HARDWARE_TARGET;
+}
+
+const char *firmwareFlavor() {
+    return APP_FIRMWARE_FLAVOR;
 }
 
 const char *fullVersion() {

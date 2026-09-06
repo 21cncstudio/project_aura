@@ -48,13 +48,104 @@ namespace Config {
     constexpr i2c_port_t I2C_PORT = I2C_NUM_0;
     constexpr uint32_t I2C_FREQ_HZ = 100000;
     constexpr uint32_t I2C_TIMEOUT_MS = 50;
+
+    // The Waveshare panel keeps its vendor I2C0 wiring on both hardware
+    // profiles. The 7-inch Aura profile moves only the external sensor chain
+    // to I2C1: SDA is H3 EX_RXD/GPIO44 and SCL is J8 Sensor AD/GPIO6. Keep
+    // GPIO43 disconnected: the old H3 EX_TXD SCL route failed under the
+    // combined sensor load. R107 (499 ohms) is the leading electrical
+    // explanation, but it was not isolated from the rest of that route.
+#ifndef AURA_HARDWARE_PROFILE_7
+#define AURA_HARDWARE_PROFILE_7 0
+#endif
+#if AURA_HARDWARE_PROFILE_7 != 0 && AURA_HARDWARE_PROFILE_7 != 1
+#error "AURA_HARDWARE_PROFILE_7 must be 0 or 1"
+#endif
+    constexpr bool SCREEN_FLIP_180_DEFAULT = AURA_HARDWARE_PROFILE_7 != 0;
+
+    constexpr bool resolveScreenFlip180(bool persisted_value_present,
+                                        bool persisted_value) {
+        return persisted_value_present ? persisted_value
+                                       : SCREEN_FLIP_180_DEFAULT;
+    }
+#if AURA_HARDWARE_PROFILE_7
+    constexpr bool SENSOR_I2C_SEPARATE = true;
+    constexpr i2c_port_t SENSOR_I2C_PORT = I2C_NUM_1;
+    constexpr uint8_t SENSOR_I2C_SDA_PIN = 44;
+    constexpr uint8_t SENSOR_I2C_SCL_PIN = 6;
+    constexpr bool SENSOR_I2C_INTERNAL_PULLUPS = false;
+#else
+    constexpr bool SENSOR_I2C_SEPARATE = false;
+    constexpr i2c_port_t SENSOR_I2C_PORT = I2C_PORT;
+    constexpr uint8_t SENSOR_I2C_SDA_PIN = I2C_SDA_PIN;
+    constexpr uint8_t SENSOR_I2C_SCL_PIN = I2C_SCL_PIN;
+    constexpr bool SENSOR_I2C_INTERNAL_PULLUPS = true;
+#endif
+    constexpr uint32_t SENSOR_I2C_FREQ_HZ = 100000;
+    constexpr uint32_t SENSOR_I2C_TIMEOUT_MS = I2C_TIMEOUT_MS;
+    static_assert(I2C_PORT == I2C_NUM_0,
+                  "Panel I2C must remain on the vendor I2C0 host");
+    static_assert(I2C_SDA_PIN == 8 && I2C_SCL_PIN == 9,
+                  "Panel I2C must remain on GPIO8/GPIO9");
+#if AURA_HARDWARE_PROFILE_7
+    static_assert(SENSOR_I2C_PORT == I2C_NUM_1,
+                  "The 7-inch sensor bus must use I2C1");
+    static_assert(SENSOR_I2C_SDA_PIN == 44 && SENSOR_I2C_SCL_PIN == 6,
+                  "The 7-inch sensor bus must use GPIO44/GPIO6");
+    static_assert(SENSOR_I2C_SDA_PIN != I2C_SDA_PIN &&
+                      SENSOR_I2C_SDA_PIN != I2C_SCL_PIN &&
+                      SENSOR_I2C_SCL_PIN != I2C_SDA_PIN &&
+                      SENSOR_I2C_SCL_PIN != I2C_SCL_PIN,
+                  "Panel and sensor buses must not share pins");
+    static_assert(!SENSOR_I2C_INTERNAL_PULLUPS,
+                  "The 7-inch sensor chain provides its own pull-ups");
+#endif
+    static_assert(SENSOR_I2C_FREQ_HZ == 100000,
+                  "Validated sensor I2C frequency is 100 kHz");
+
+    // Keep production startup on the vendor-owned panel path. Earlier COM7
+    // experiments added an extra CH422G host/write sequence and GPIO clock
+    // recovery before Board::begin(); neither action stabilized the physical
+    // fault, and both can change panel power/reset state before vendor init.
+    // The implementations remain available for controlled diagnostic work.
+    constexpr bool PANEL_CH422G_STARTUP_PREFLIGHT_ENABLED = false;
+    constexpr bool PANEL_PREINIT_BUS_RECOVERY_ENABLED = false;
+
+    // Touch-offline and startup failures remain health and diagnostic signals,
+    // but do not authorize CH422G hard recovery, shared-bus shutdown, or
+    // restart through these paths. Raw GPIO samples taken while normal panel
+    // owners are active are not proof of a stuck bus: they can land inside a
+    // valid I2C transaction. Keep them unqualified until a future monitor can
+    // close owner admission, drain the fault domain, and sample a quiet window.
+    // The guarded UI display-sync/stall policy is separate and remains
+    // unchanged pending a dedicated product decision.
+    constexpr bool PANEL_RUNTIME_GT911_HARD_RECOVERY_ENABLED = false;
+    constexpr bool PANEL_RUNTIME_TOUCH_AUTO_RESTART_ENABLED = false;
+    constexpr bool PANEL_RUNTIME_STUCK_LINE_CONFIRMATION_QUALIFIED = false;
+    constexpr bool PANEL_RUNTIME_STUCK_BUS_AUTO_RECOVERY_ENABLED = false;
+    constexpr bool PANEL_STARTUP_AUTO_RESTART_ENABLED = false;
+    static_assert(!PANEL_RUNTIME_STUCK_BUS_AUTO_RECOVERY_ENABLED ||
+                      PANEL_RUNTIME_STUCK_LINE_CONFIRMATION_QUALIFIED,
+                  "Stuck-bus recovery requires owner-qualified line confirmation");
     constexpr uint8_t LOG_LEVEL = 3; // 0=error, 1=warn, 2=info, 3=debug
     constexpr bool LOG_SERIAL_OUTPUT = true;
     constexpr bool LOG_SERIAL_SENSORS_OUTPUT = false;
-    constexpr uint32_t MEM_LOG_INTERVAL_MS = 15UL * 60UL * 1000UL;
+#ifndef AURA_PERIODIC_MEMORY_MONITOR_ENABLED
+// Full heap walks are opt-in. Production records the boot snapshot only.
+#define AURA_PERIODIC_MEMORY_MONITOR_ENABLED 0
+#endif
+#if AURA_PERIODIC_MEMORY_MONITOR_ENABLED != 0 && \
+    AURA_PERIODIC_MEMORY_MONITOR_ENABLED != 1
+#error "AURA_PERIODIC_MEMORY_MONITOR_ENABLED must be 0 or 1"
+#endif
+    constexpr uint32_t MEM_LOG_INTERVAL_MS =
+        AURA_PERIODIC_MEMORY_MONITOR_ENABLED ? 15UL * 60UL * 1000UL : 0UL;
     constexpr uint32_t SAFE_BOOT_STABLE_MS = 60UL * 1000UL;
     constexpr uint8_t SAFE_BOOT_MAX_REBOOTS = 5;
     constexpr uint32_t LAST_GOOD_COMMIT_DELAY_MS = 3UL * 60UL * 1000UL;
+    constexpr uint32_t LAST_GOOD_HEALTH_SAMPLE_MAX_GAP_MS = 5UL * 1000UL;
+    constexpr uint32_t LAST_GOOD_RETRY_INITIAL_DELAY_MS = 5UL * 1000UL;
+    constexpr uint32_t LAST_GOOD_RETRY_MAX_DELAY_MS = 5UL * 60UL * 1000UL;
 
     enum class Language : uint8_t {
         EN = 0,
@@ -254,6 +345,8 @@ namespace Config {
     constexpr uint16_t SFA40_CMD_STOP = 0x50D2;
     constexpr uint16_t SFA40_CMD_READ_VALUES = 0xC0EB;
     constexpr uint16_t SFA40_CMD_ID = 0x02CE;
+    constexpr uint16_t SFA40_B4_CMD_READ_VALUES = 0xE06D;
+    constexpr uint16_t SFA40_B4_CMD_ID = 0x0559;
     constexpr uint16_t SFA40_CMD_START_SELFTEST = 0x060A;
     constexpr uint16_t SFA40_CMD_READ_SELFTEST = 0xC0EB;
     constexpr uint16_t SFA40_SELFTEST_RUNNING_RAW = 0xFFFF;
@@ -419,11 +512,13 @@ namespace Config {
     constexpr uint32_t SFA3X_READ_DELAY_MS = 5;
     constexpr uint32_t SFA30_START_SETTLE_MS = 200;
     constexpr uint32_t SFA40_START_SETTLE_MS = 200;
-    constexpr uint32_t SFA3X_POLL_MS = 3000;
+    constexpr uint32_t SFA40_PROTOCOL_STOP_DELAY_MS = 700;
+    constexpr uint32_t SFA40_COMMAND_READ_DELAY_MS = 1;
+    constexpr uint32_t SFA3X_POLL_MS = 1000;
     constexpr uint32_t SFA30_POWERUP_SUPPRESS_MS = 10000;
-    constexpr uint32_t SFA40_POLL_MS = 700;
+    constexpr uint32_t SFA40_POLL_MS = 1000;
     constexpr uint32_t SFA3X_STALE_MS = 10000;
-    constexpr uint32_t SFA40_FIRST_READ_DELAY_MS = 700;
+    constexpr uint32_t SFA40_FIRST_READ_DELAY_MS = 1000;
     constexpr uint32_t DFR_GAS_CMD_DELAY_MS = 20;
     constexpr uint32_t DFR_GAS_POLL_MS = 3000;
     constexpr uint32_t DFR_GAS_STALE_MS = 18000;
@@ -432,6 +527,7 @@ namespace Config {
     constexpr uint8_t DFR_GAS_MAX_ABSENT_RETRIES = 3;
     constexpr uint8_t DFR_GAS_MAX_START_ATTEMPTS = 3;
     constexpr uint32_t DFR_GAS_I2C_TIMEOUT_MS = 50;
+    constexpr uint32_t SEN0466_RUNTIME_TRANSPORT_RETRY_DELAY_MS = 150;
     constexpr uint32_t DFR_GAS_FAIL_COOLDOWN_MS = 30UL * 1000UL;
     constexpr uint8_t DFR_GAS_MAX_COOLDOWN_RECOVERY_FAILS = 3;
     constexpr uint32_t DFR_GAS_WARMUP_MS = 300UL * 1000UL;
@@ -557,10 +653,9 @@ namespace Config {
     constexpr uint32_t UI_TICK_MS = 30;
     constexpr uint32_t BOOT_LOGO_MS = 5000;
     constexpr uint32_t BOOT_DIAG_MS = 3000;
-    // If the display board rejects its first cold initialization, finish the
-    // headless boot and use the normal controlled restart path once. This
-    // matches the web restart that successfully recovers the tested 7-inch
-    // board, instead of restarting directly from the middle of setup().
+    // If the display board rejects its first initialization, finish the
+    // headless boot and use the normal controlled restart path at most once.
+    // This is containment, not proof that restart repairs the hardware fault.
     constexpr uint32_t BOARD_RECOVERY_RESTART_DELAY_MS = 15UL * 1000UL;
     constexpr uint32_t WIFI_CONNECT_TIMEOUT_MS = 45000;
     constexpr uint32_t WIFI_CONNECT_RETRY_DELAY_MS = 1000;
@@ -600,7 +695,6 @@ namespace Config {
         (PRESSURE_HISTORY_STEP_MS / 1000UL) * PRESSURE_HISTORY_24H_SAMPLES;
     constexpr uint32_t PRESSURE_HISTORY_FILL_SHORT_S = 15UL * 60UL;
     constexpr uint32_t PRESSURE_HISTORY_FILL_LONG_S = 4UL * 60UL * 60UL;
-    constexpr uint32_t PRESSURE_HISTORY_RESTORE_TIME_WAIT_MS = 30UL * 1000UL;
     constexpr int16_t PRESSURE_ALTITUDE_MIN_M = -500;
     constexpr int16_t PRESSURE_ALTITUDE_MAX_M = 5000;
     constexpr int16_t PRESSURE_ALTITUDE_DEFAULT_M = 0;
@@ -660,7 +754,7 @@ namespace Config {
         bool header_status_enabled = true;
         bool led_indicators = true;
         bool alert_blink = true;
-        bool screen_flip_180 = false;
+        bool screen_flip_180 = SCREEN_FLIP_180_DEFAULT;
         bool asc_enabled = true;
         bool pressure_altitude_set = false;
         int16_t pressure_altitude_m = 0;

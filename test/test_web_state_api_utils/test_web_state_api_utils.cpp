@@ -238,6 +238,25 @@ void test_web_state_api_utils_reports_failed_ota_with_device_error_code() {
     TEST_ASSERT_EQUAL_UINT32(3713984, doc["ota"]["expected"].as<uint32_t>());
 }
 
+void test_web_state_api_utils_preserves_model_rejection_for_response_recovery() {
+    WebOtaState state;
+    state.beginUpload(100);
+    state.setSlotSize(6553600);
+    state.setExpectedSize(true, 4000000);
+    state.setErrorOnce("This firmware is for another model", 150, "HARDWARE_TARGET_MISMATCH");
+    state.clearBusy();
+    WebStateApiUtils::Payload payload{};
+    payload.timestamp_ms = 200;
+    payload.ota = state.snapshot();
+    ArduinoJson::JsonDocument doc;
+    WebStateApiUtils::fillJson(doc.to<ArduinoJson::JsonObject>(), payload);
+    TEST_ASSERT_EQUAL_STRING("failed", doc["ota"]["status"].as<const char *>());
+    TEST_ASSERT_EQUAL_STRING("HARDWARE_TARGET_MISMATCH", doc["ota"]["error_code"].as<const char *>());
+    TEST_ASSERT_EQUAL_UINT32(0, doc["ota"]["written"].as<uint32_t>());
+    TEST_ASSERT_FALSE(doc["ota"]["reboot_pending"].as<bool>());
+    TEST_ASSERT_FALSE(doc["ota_busy"].as<bool>());
+}
+
 int main(int, char **) {
     UNITY_BEGIN();
     RUN_TEST(test_web_state_api_utils_fill_json_populates_sensor_network_and_settings_fields);
@@ -246,5 +265,6 @@ int main(int, char **) {
     RUN_TEST(test_web_state_api_utils_hides_hcho_when_only_raw_sample_exists_from_sfa40_warmup_model);
     RUN_TEST(test_web_state_api_utils_exposes_o2_value_unit_and_compatibility_fields);
     RUN_TEST(test_web_state_api_utils_reports_failed_ota_with_device_error_code);
+    RUN_TEST(test_web_state_api_utils_preserves_model_rejection_for_response_recovery);
     return UNITY_END();
 }

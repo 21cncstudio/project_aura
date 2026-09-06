@@ -9,8 +9,15 @@ bool operational(bool board_ready, bool lvgl_ready) {
     return board_ready && lvgl_ready;
 }
 
-bool canConfirmOta(bool board_ready, bool lvgl_ready, bool lvgl_runtime_healthy) {
-    return operational(board_ready, lvgl_ready) && lvgl_runtime_healthy;
+bool canConfirmOta(bool board_ready,
+                   bool lvgl_ready,
+                   bool sensor_bus_ready,
+                   bool lvgl_runtime_healthy) {
+    // A 7-inch image is not valid if its independent sensor host failed to
+    // install. On the 4.3-inch profile this signal follows the panel host.
+    return operational(board_ready, lvgl_ready) &&
+           sensor_bus_ready &&
+           lvgl_runtime_healthy;
 }
 
 bool canManageLvglRuntime(bool shared_i2c_ready,

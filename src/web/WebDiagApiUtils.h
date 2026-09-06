@@ -16,6 +16,68 @@
 
 namespace WebDiagApiUtils {
 
+struct DevicePayload {
+    const char *firmware = "unknown";
+    const char *build_id = "unknown";
+    const char *hardware_profile = "unknown";
+    const char *hardware_target = "unknown";
+};
+
+// Compile-time routing supplied by the handler, not a live bus measurement.
+struct I2cBusPayload {
+    int port = -1;
+    int sda_gpio = -1;
+    int scl_gpio = -1;
+};
+
+struct TouchPollingPayload {
+    const char *mode = "unknown";
+    bool irq_registered = false;
+    bool irq_armed = false;
+    bool irq_config_verified = false;
+    int8_t irq_config_mode = -1;
+    bool idle_enabled = false;
+    bool idle_active = false;
+    bool fail_safe = false;
+    uint32_t status_reads = 0;
+    uint32_t full_reads = 0;
+    uint32_t skipped_callbacks = 0;
+    uint32_t idle_entries = 0;
+    uint32_t irq_exits = 0;
+    uint32_t fallback_probes = 0;
+    uint32_t missed_irq_presses = 0;
+    uint32_t irq_arm_failures = 0;
+    uint32_t irq_no_frame = 0;
+};
+
+// Runtime LVGL/RGB observations. The refresh callback name is supplied by the
+// firmware so a bounce-buffer completion is never presented as physical VSYNC.
+struct DisplayPayload {
+    bool available = false;
+    uint32_t sample_ms = 0;
+    uint32_t timer_handler_count = 0;
+    uint32_t timer_handler_age_ms = UINT32_MAX;
+    uint32_t flush_count = 0;
+    uint32_t flush_age_ms = UINT32_MAX;
+    const char *refresh_callback_semantics = "unknown";
+    uint32_t refresh_callback_count = 0;
+    uint32_t refresh_callback_age_ms = UINT32_MAX;
+    uint32_t refresh_callback_max_gap_ms = 0;
+    uint32_t framebuffer_handoff_count = 0;
+    uint32_t framebuffer_wait_timeout_count = 0;
+    bool display_sync_fault = false;
+    uint32_t runtime_lock_failures = 0;
+    uint32_t startup_logo_lock_misses = 0;
+    uint32_t touch_read_errors = 0;
+    bool touch_offline = false;
+    TouchPollingPayload touch_polling{};
+    bool screen_flip_180 = false;
+    bool rotation_pipeline_active = false;
+    uint32_t rotated_copy_switch_count = 0;
+    uint32_t framebuffer_ownership_violation_count = 0;
+    bool paused = false;
+};
+
 struct BootPayload {
     const char *reset_reason = "UNKNOWN";
     bool auto_recovery_boot = false;
@@ -80,6 +142,11 @@ struct BootPayload {
 };
 
 struct Payload {
+    DevicePayload device{};
+    I2cBusPayload panel_i2c{};
+    I2cBusPayload sensor_i2c{};
+    bool sensor_i2c_shared_with_panel = false;
+    DisplayPayload display{};
     uint32_t uptime_s = 0;
     bool ota_busy = false;
     uint32_t heap_free = 0;

@@ -36,6 +36,8 @@ WebHandlerContext *g_ctx = nullptr;
 OtaDeferredRestart::Controller g_restart_controller;
 WebDeferredActionsState g_deferred_actions;
 WebOtaState g_ota_state;
+// Owned by the HTTP server task, like the non-atomic fields of g_ota_state.
+OtaImageIdentity::PrefixValidator g_ota_image_validator;
 WebStreamState g_web_stream_state;
 OtaRestartGate g_ota_restart_gate;
 bool g_ota_wifi_ps_saved = false;
@@ -144,8 +146,8 @@ uint32_t ota_take_due_preflight_ui(uint32_t now_ms) {
 
 void ota_restore_wifi_power_save();
 
-void ota_set_error(const String &error) {
-    g_ota_state.setErrorOnce(error, millis());
+void ota_set_error(const String &error, const char *error_code) {
+    g_ota_state.setErrorOnce(error, millis(), error_code);
 }
 
 OtaPhysicalConfirm::PrepareDecision ota_prepare_physical_confirm(size_t expected_size,
@@ -390,6 +392,7 @@ WebOtaHandlers::Runtime otaRuntime(WebHandlerContext &context) {
         g_ota_state,
         g_restart_controller,
         g_ota_upload_confirm_id,
+        g_ota_image_validator,
         kDeferredRestartDelayMs,
         ota_upload_timeout_ms,
         ota_disable_wifi_power_save_for_upload,

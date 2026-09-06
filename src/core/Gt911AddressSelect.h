@@ -10,10 +10,11 @@ namespace Gt911AddressSelect {
 enum class Failure : uint8_t {
     None = 0,
     InvalidOps,
+    InvalidAddress,
     IntOutput,
     IntLow,
     ResetLow,
-    IntHigh,
+    IntSelect,
     ResetHigh,
     IntRelease,
 };
@@ -33,9 +34,10 @@ struct Ops {
     void (*delay_ms)(void *context, uint32_t delay_ms) = nullptr;
 };
 
-// Select the GT911 backup I2C address (0x14) by holding INT high while reset
-// is released. The caller owns the shared I2C bus for the whole sequence.
-Result selectBackupAddress(const Ops &ops);
+// INT high selects 0x14; INT low selects 0x5D when RESET is released.
+// The caller owns the panel I2C bus for the whole sequence. Delays are identical
+// for both supported addresses; only the configured strap level differs.
+Result selectAddress(const Ops &ops, uint8_t address);
 
 const char *failureText(Failure failure);
 

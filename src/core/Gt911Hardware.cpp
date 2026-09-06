@@ -47,7 +47,7 @@ void delayMs(void *, uint32_t delay_ms) {
 
 } // namespace
 
-bool selectBackupAddress(esp_panel::board::Board *board) {
+bool selectConfiguredAddress(esp_panel::board::Board *board) {
     if (board == nullptr || board->getIO_Expander() == nullptr) {
         LOGE("GT911", "address select unavailable: board/expander missing");
         return false;
@@ -72,7 +72,7 @@ bool selectBackupAddress(esp_panel::board::Board *board) {
         delayMs,
     };
     const Gt911AddressSelect::Result result =
-        Gt911AddressSelect::selectBackupAddress(ops);
+        Gt911AddressSelect::selectAddress(ops, ESP_PANEL_BOARD_TOUCH_I2C_ADDRESS);
     if (!result.ok()) {
         LOGE("GT911",
              "address select failed at %s",

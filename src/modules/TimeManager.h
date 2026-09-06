@@ -58,6 +58,10 @@ public:
     int currentUtcOffsetMinutes() const;
 
     bool isSystemTimeValid() const;
+    // Stronger boot-local provenance boundary for decisions that may delete
+    // or rewrite persisted history. A plausible process epoch is not trusted
+    // until this boot verifies it through RTC, NTP, or a manual set.
+    bool isSystemTimeTrusted() const { return system_time_trusted_; }
     bool getLocalTime(tm &out);
     bool syncInputsFromSystem(int &hour, int &minute, int &day, int &month, int &year);
 
@@ -214,6 +218,7 @@ private:
 
     bool wifi_enabled_ = false;
     bool wifi_connected_ = false;
+    bool system_time_trusted_ = false;
 
     int tz_index_ = 0;
 };

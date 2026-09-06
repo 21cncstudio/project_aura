@@ -45,11 +45,13 @@ void WebOtaState::reset() {
     reboot_pending_ = false;
     size_known_ = false;
     session_id_ = 0;
+    validated_confirm_id_ = 0;
     total_timeout_ms_ = 0;
     expected_size_ = 0;
     slot_size_ = 0;
     written_size_ = 0;
     error_ = "";
+    error_code_ = "";
     upload_start_ms_ = 0;
     first_chunk_ms_ = 0;
     last_chunk_ms_ = 0;
@@ -65,16 +67,25 @@ void WebOtaState::reset() {
     result_ttl_ms_ = 0;
 }
 
-void WebOtaState::beginUpload(uint32_t now_ms) {
+void WebOtaState::beginUpload(uint32_t now_ms, uint32_t validated_confirm_id) {
     reset();
     upload_seen_ = true;
     active_.store(true, std::memory_order_release);
     busy_.store(true, std::memory_order_release);
     session_id_ = next_session_id_++;
+    validated_confirm_id_ = validated_confirm_id;
     if (next_session_id_ == 0) {
         next_session_id_ = 1;
     }
     upload_start_ms_ = now_ms;
+}
+
+bool WebOtaState::rejectedUploadMatches(uint32_t confirm_id, size_t expected_size,
+                                       uint32_t now_ms) const {
+    return confirm_id != 0 && confirm_id == validated_confirm_id_ &&
+           size_known_ && expected_size == expected_size_ &&
+           error_.length() > 0 && !success_ &&
+           snapshot().hasTerminalResult(now_ms);
 }
 
 bool WebOtaState::isActive() const {
@@ -173,13 +184,14 @@ void WebOtaState::markRebootPending() {
     reboot_pending_ = true;
 }
 
-void WebOtaState::setErrorOnce(const String &error, uint32_t now_ms) {
+void WebOtaState::setErrorOnce(const String &error, uint32_t now_ms, const char *error_code) {
     if (error_.length() == 0) {
         error_ = error;
+        error_code_ = error_code ? error_code : "";
+        setTerminalResultDeadline(now_ms);
     }
     success_ = false;
     reboot_pending_ = false;
-    setTerminalResultDeadline(now_ms);
     active_.store(false, std::memory_order_release);
 }
 
@@ -199,6 +211,7 @@ WebOtaSnapshot WebOtaState::snapshot() const {
     snapshot.slot_size = slot_size_;
     snapshot.written_size = written_size_;
     snapshot.error = error_;
+    snapshot.error_code = error_code_;
     snapshot.upload_start_ms = upload_start_ms_;
     snapshot.first_chunk_ms = first_chunk_ms_;
     snapshot.last_chunk_ms = last_chunk_ms_;
