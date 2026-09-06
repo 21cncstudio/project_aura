@@ -138,7 +138,7 @@ String build_report(WebHandlerContext &context) {
     out.reserve(4096);
     out += "Project Aura SFA40 Diagnostics\n";
     out += "================================\n\n";
-    append_line(out, "Firmware", AppVersion::fullVersion());
+    append_line(out, "Firmware", AppVersion::displayVersion());
     append_line(out, "Uptime", seconds_text(millis()));
     append_line(out, "HCHO sensor label", manager.hchoSensorLabel());
     append_line(out, "HCHO sensor type", hcho_type_text(hcho_type));
@@ -250,7 +250,7 @@ void fill_json(ArduinoJson::JsonObject root, WebHandlerContext &context) {
     const Sfa40::Diagnostics diag = manager.sfa40Diagnostics();
 
     root["success"] = true;
-    root["firmware"] = AppVersion::fullVersion();
+    root["firmware"] = AppVersion::displayVersion();
     root["uptime_s"] = millis() / 1000UL;
     root["hcho_sensor_label"] = manager.hchoSensorLabel();
     root["hcho_sensor_type"] = hcho_type_text(hcho_type);

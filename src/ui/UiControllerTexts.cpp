@@ -40,7 +40,7 @@ void UiController::update_settings_texts() {
         char about_text[256];
         snprintf(about_text, sizeof(about_text),
                  "Project Aura\nVersion: v%s\n(c) Volodymyr Papush (21CNCStudio)\nOpen-source firmware (GPL-3.0-or-later)\naura-aq.com",
-                 AppVersion::fullVersion());
+                 AppVersion::displayVersion());
         safe_label_set_text(objects.container_about_text, about_text);
     }
     update_web_page_panel();

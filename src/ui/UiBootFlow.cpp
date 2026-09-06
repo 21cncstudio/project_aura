@@ -205,7 +205,7 @@ void UiBootFlow::updateBootDiag(UiController &owner, uint32_t now_ms) {
                                                             owner.sensorManager.isSen66StartupProbePending());
 
     if (objects.lbl_diag_app_ver) {
-        snprintf(buf, sizeof(buf), "v%s", AppVersion::fullVersion());
+        snprintf(buf, sizeof(buf), "v%s", AppVersion::displayVersion());
         owner.safe_label_set_text(objects.lbl_diag_app_ver, buf);
     }
     if (objects.lbl_diag_mac) {

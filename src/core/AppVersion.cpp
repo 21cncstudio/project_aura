@@ -6,6 +6,8 @@
 
 #include "AppVersion.h"
 
+#include <string.h>
+
 #if __has_include("AppBuildId.generated.h")
 #include "AppBuildId.generated.h"
 #endif
@@ -85,6 +87,18 @@ const char *fullVersion() {
         return APP_VERSION;
     }
     return APP_VERSION "-" APP_BUILD_ID;
+}
+
+const char *displayVersion() {
+    if (isStableRelease()) {
+        if (strcmp(APP_HARDWARE_PROFILE, "4_3") == 0) {
+            return APP_VERSION " - 4.3";
+        }
+        if (strcmp(APP_HARDWARE_PROFILE, "7_dual_i2c") == 0) {
+            return APP_VERSION " - 7-dual-i2c";
+        }
+    }
+    return fullVersion();
 }
 
 } // namespace AppVersion

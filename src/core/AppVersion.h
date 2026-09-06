@@ -15,5 +15,6 @@ const char *hardwareProfile();
 const char *hardwareTarget();
 const char *firmwareFlavor();
 const char *fullVersion();
+const char *displayVersion();
 
 } // namespace AppVersion

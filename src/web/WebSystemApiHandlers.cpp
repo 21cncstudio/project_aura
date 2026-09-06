@@ -101,7 +101,7 @@ void handleDiagData(WebHandlerContext &context,
     const size_t event_count = Logger::copyRecentAlerts(g_events_snapshot, kEventsApiMaxEntries);
     WebDiagApiUtils::Payload payload{};
     const BootDiagnostics::Snapshot &boot = BootDiagnostics::state;
-    payload.device.firmware = AppVersion::fullVersion();
+    payload.device.firmware = AppVersion::displayVersion();
     payload.device.build_id = AppVersion::buildId();
     payload.device.hardware_profile = AppVersion::hardwareProfile();
     payload.device.hardware_target = AppVersion::hardwareTarget();
@@ -310,7 +310,7 @@ void handleStateData(WebHandlerContext &context, bool ota_busy, const WebOtaSnap
     payload.dac_available = runtime.fan.available;
     payload.ota_busy = ota_busy;
     payload.ota = ota_snapshot;
-    payload.firmware = AppVersion::fullVersion();
+    payload.firmware = AppVersion::displayVersion();
     payload.build_date = __DATE__;
     payload.build_time = __TIME__;
     WebStateApiUtils::fillJson(doc.to<ArduinoJson::JsonObject>(), payload);

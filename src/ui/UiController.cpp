@@ -943,7 +943,7 @@ bool UiController::begin() {
     sync_display_threshold_labels();
     if (objects.label_boot_ver) {
         char version_text[32];
-        snprintf(version_text, sizeof(version_text), "v%s", AppVersion::fullVersion());
+        snprintf(version_text, sizeof(version_text), "v%s", AppVersion::displayVersion());
         safe_label_set_text(objects.label_boot_ver, version_text);
     }
     current_screen_id = SCREEN_ID_PAGE_MAIN_PRO;
