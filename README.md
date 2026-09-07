@@ -158,7 +158,7 @@ Useful API routes used by the dashboard:
 - `GET /api/state`
 - `GET /api/charts?group=core|gases|pm&window=1h|3h|24h`
 - `GET /api/events`
-- `GET /api/diag` (AP setup mode only)
+- `GET /api/diag` (available in AP mode and while Aura is connected to Wi-Fi)
 - `POST /api/settings`
 - `POST /api/ota`
 
@@ -422,7 +422,7 @@ MQTT stays idle until configured and enabled.
 
 Quick diagnostics for support:
 - `GET /api/state` should return live JSON with `network.mode`, `network.ip`, and sensor payload.
-- `GET /api/diag` (available in AP setup mode) shows Wi-Fi state, IP/hostname, heap, OTA busy state, and recent warnings/errors.
+- `GET /api/diag` (available in AP mode and while Aura is connected to Wi-Fi) shows Wi-Fi state, IP/hostname, heap, OTA busy state, and recent warnings/errors.
   When `boot.expander_probe_status` is `not_run`, its detailed probe fields are present as `null`
   because no CH422G probe result exists for that boot.
 
