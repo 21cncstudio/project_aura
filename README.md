@@ -35,7 +35,33 @@ This repository contains the firmware source code and configuration needed to fl
 - **First flash:** easiest through the browser-based web installer; developers can build from source with PlatformIO.
 - **Works without internet:** AP setup mode and the local dashboard are fully offline.
 
+## Stable Firmware and v1.2.0 Update
+
+Aura AQ 4.3-inch and Aura AQ 7-inch now use separate firmware builds. The
+current stable builds are marked explicitly:
+
+- Aura AQ 4.3-inch: `1.2.0 - 4.3`
+- Aura AQ 7-inch: `1.2.0 - 7-dual-i2c`
+
+**Read the [Aura AQ v1.2.0 update guide](https://aura-aq.com/blog/aura-aq-1-2-0)
+before updating either board.** The 4.3-inch model does not need internal
+sensor rewiring, but v1.2.0 changes its update and USB-C instructions too.
+
+> **STOP: DO NOT UPDATE AURA 7-INCH THROUGH OTA. UPDATING A 7-INCH BOARD
+> WITHOUT FOLLOWING THE COMPLETE PROCEDURE IN THE GUIDE WILL DAMAGE YOUR
+> BOARD.** Use the Aura AQ Web Installer and complete every 7-inch step in the
+> published order.
+
+The [GitHub Release for v1.2.0](https://github.com/21cncstudio/project_aura/releases/tag/v1.2.0)
+contains one OTA file, `project_aura_4_3_1.2.0_ota_firmware.bin`, and it is for
+Aura AQ 4.3-inch only. No 7-inch OTA file is published on GitHub.
+
+For extended diagnostics, open `http://<your-aura-ip>/diag` and select
+**Download report**. If a problem is active, save the JSON report before
+restarting or unplugging Aura.
+
 ## Table of Contents
+- [Stable Firmware and v1.2.0 Update](#stable-firmware-and-v120-update)
 - [Videos](#videos)
 - [Highlights](#highlights)
 - [Gallery](#gallery)
@@ -332,9 +358,10 @@ For most builders, the first flash is easiest through the browser-based Aura Web
 [Open the Aura AQ Web Installer](https://aura-aq.com/installer/aura-aq)
 
 Connect the Waveshare board through its data USB-C port, open the installer in a compatible browser,
-sign in with the Aura Account that has Installer access, and follow the build guide. After first flash
-and Wi-Fi setup, normal firmware updates can be done from Aura's local dashboard using OTA `.bin`
-files from GitHub releases.
+sign in with the Aura Account that has Installer access, and follow the build guide. Firmware is
+board-specific, so always verify the display-size label before installing. Do not assume that an OTA
+file is compatible with both boards. In particular, the first 7-inch migration to v1.2.0 must follow
+the complete [v1.2.0 update guide](https://aura-aq.com/blog/aura-aq-1-2-0) and must not use OTA.
 
 For development builds, use PlatformIO CLI or VSCode + PlatformIO extension.
 The firmware is built with Arduino ESP32 core 3.1.1 (ESP-IDF 5.3.x).
