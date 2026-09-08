@@ -13,6 +13,7 @@
 #include <ESPmDNS.h>
 #include <WiFi.h>
 #include <esp_heap_caps.h>
+#include <esp_mac.h>
 #include <esp_wifi.h>
 #if __has_include("esp_eap_client.h")
 #include "esp_eap_client.h"
@@ -20,6 +21,7 @@
 #include "core/BootState.h"
 #include "core/NetworkCommandQueue.h"
 #include "core/Logger.h"
+#include "core/NetworkIdentity.h"
 #include "config/AppConfig.h"
 #include "ui/ThemeManager.h"
 #include "web/WebHandlers.h"
@@ -106,7 +108,11 @@ int to_ttls_phase2_type(Config::WifiTtlsPhase2 phase2) {
 }
 
 uint32_t mac_suffix_24bit() {
-    return static_cast<uint32_t>(ESP.getEfuseMac() & 0xFFFFFFULL);
+    uint8_t mac[6] = {};
+    if (esp_efuse_mac_get_default(mac) != ESP_OK) {
+        return 0;
+    }
+    return NetworkIdentity::macSuffix24(mac);
 }
 
 String build_wifi_hostname() {
