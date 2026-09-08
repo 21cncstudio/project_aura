@@ -315,6 +315,13 @@ void AuraNetworkManager::begin(StorageManager &storage) {
     if (hostname_.isEmpty()) {
         hostname_ = "aura";
     }
+    // Arduino-ESP32 copies this staged hostname into the STA esp-netif when
+    // WIFI_STA is enabled. Calling WiFi.setHostname() after WiFi.mode() only
+    // changes the value used for a future interface start, leaving DHCP option
+    // 12 on the current interface at the default "esp32s3-*" hostname.
+    if (!WiFi.setHostname(hostname_.c_str())) {
+        LOGW("WiFi", "failed to stage hostname before interface start");
+    }
     ap_ssid_ = build_ap_ssid();
     if (ap_ssid_.isEmpty()) {
         ap_ssid_ = Config::WIFI_AP_SSID;
@@ -1069,8 +1076,20 @@ void AuraNetworkManager::startSta() {
     // Clear any previous association state before a fresh begin(), but keep config intact.
     WiFi.disconnect(false, false);
     delay(50);
-    if (!hostname_.isEmpty() && !WiFi.setHostname(hostname_.c_str())) {
-        LOGW("WiFi", "setHostname failed");
+    // Apply the hostname to the live STA esp-netif before WiFi.begin() starts
+    // DHCP. This also covers a STA interface created earlier for cold-boot
+    // warmup, where the staged value alone would not update the live netif.
+    if (!hostname_.isEmpty()) {
+        if (!WiFi.STA.setHostname(hostname_.c_str())) {
+            LOGW("WiFi", "failed to apply hostname to STA interface");
+        }
+        const char *sta_hostname = WiFi.STA.getHostname();
+        if (sta_hostname == nullptr || std::strcmp(sta_hostname, hostname_.c_str()) != 0) {
+            Logger::log(Logger::Warn, "WiFi",
+                        "STA hostname mismatch (expected=%s actual=%s)",
+                        hostname_.c_str(),
+                        sta_hostname ? sta_hostname : "null");
+        }
     }
 
     bool targeted_connect = false;
