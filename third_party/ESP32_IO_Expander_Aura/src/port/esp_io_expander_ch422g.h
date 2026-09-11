@@ -8,7 +8,7 @@
 
 #include <stdint.h>
 
-#include "driver/i2c.h"
+#include "AuraI2c.h"
 #include "esp_err.h"
 
 #include "esp_io_expander.h"
@@ -47,6 +47,10 @@ esp_err_t esp_io_expander_ch422g_set_oc_push_pull(esp_io_expander_handle_t handl
 esp_err_t esp_io_expander_ch422g_set_all_input(esp_io_expander_handle_t handle);
 
 esp_err_t esp_io_expander_ch422g_set_all_output(esp_io_expander_handle_t handle);
+
+esp_err_t esp_io_expander_ch422g_enter_sleep(esp_io_expander_handle_t handle);
+
+esp_err_t esp_io_expander_ch422g_exit_sleep(esp_io_expander_handle_t handle);
 
 #ifdef __cplusplus
 }

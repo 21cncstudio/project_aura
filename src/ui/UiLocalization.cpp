@@ -37,7 +37,7 @@ void replace_font_recursive(lv_obj_t *obj, const lv_font_t *from, const lv_font_
         return;
     }
 
-    const lv_font_t *current = lv_obj_get_style_text_font(obj, LV_PART_MAIN | LV_STATE_DEFAULT);
+    const lv_font_t *current = lv_obj_get_style_text_font(obj, LV_PART_MAIN);
     if (current == from) {
         lv_obj_set_style_text_font(obj, to, LV_PART_MAIN | LV_STATE_DEFAULT);
     }

@@ -32,7 +32,7 @@ def main():
     table = subprocess.check_output([objdump, "-t", "-C", str(elf)], text=True)
     from idf_i2c_linkage import validate_i2c_linkage
     validate_i2c_linkage(table)
-    print("[i2c-linkage] verified one legacy driver, runtime conflict guard and LCD adapter")
+    print("[i2c-linkage] verified new master driver and native LCD IO; no legacy driver")
     if "__wrap_esp_restart_noos" in table:
         raise RuntimeError("The IDF 5.3.2 restart backport leaked into the IDF 6.1 build")
     symbol = helpers["_read_symbol"](objdump, elf, "esp_restart_noos")

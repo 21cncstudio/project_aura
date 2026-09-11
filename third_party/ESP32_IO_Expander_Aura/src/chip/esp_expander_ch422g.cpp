@@ -104,4 +104,34 @@ bool CH422G::enableAllIO_Output(void)
     return true;
 }
 
+bool CH422G::enterSleep(void)
+{
+    ESP_UTILS_LOG_TRACE_ENTER_WITH_THIS();
+
+    ESP_UTILS_CHECK_FALSE_RETURN(isOverState(State::BEGIN), false, "Not begun");
+
+    ESP_UTILS_CHECK_ERROR_RETURN(
+        esp_io_expander_ch422g_enter_sleep(device_handle), false, "Enter sleep failed"
+    );
+
+    ESP_UTILS_LOG_TRACE_EXIT_WITH_THIS();
+
+    return true;
+}
+
+bool CH422G::exitSleep(void)
+{
+    ESP_UTILS_LOG_TRACE_ENTER_WITH_THIS();
+
+    ESP_UTILS_CHECK_FALSE_RETURN(isOverState(State::BEGIN), false, "Not begun");
+
+    ESP_UTILS_CHECK_ERROR_RETURN(
+        esp_io_expander_ch422g_exit_sleep(device_handle), false, "Exit sleep failed"
+    );
+
+    ESP_UTILS_LOG_TRACE_EXIT_WITH_THIS();
+
+    return true;
+}
+
 } // namespace esp_expander

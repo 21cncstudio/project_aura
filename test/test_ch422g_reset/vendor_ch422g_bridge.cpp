@@ -4,7 +4,7 @@
 #define I2C_NUM_MAX 2
 #endif
 
-inline void vTaskDelay(TickType_t) {}
+#include "freertos/FreeRTOS.h"
 
 esp_err_t aura_ch422g_test_write(i2c_port_t,
                                  uint8_t,

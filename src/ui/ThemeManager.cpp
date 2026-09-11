@@ -9,19 +9,18 @@
 #include "core/Logger.h"
 #include "ui/ui.h"
 #include "ui/styles.h"
+#include "ui/ThemeColorStorage.h"
 
 namespace {
 
 constexpr size_t kIndustrialAmberSwatchIndex = 0;
 
 uint32_t themeColorToU32(lv_color_t color) {
-    return static_cast<uint32_t>(color.full);
+    return ThemeColorStorage::encode(color);
 }
 
 lv_color_t themeColorFromU32(uint32_t value) {
-    lv_color_t color;
-    color.full = value;
-    return color;
+    return ThemeColorStorage::decode(value);
 }
 
 } // namespace
@@ -351,26 +350,26 @@ void ThemeManager::setSelectedSwatch(const ThemeSwatch *selected) {
 }
 
 bool ThemeManager::colorsEqual(const ThemeColors &a, const ThemeColors &b) const {
-    if (a.screen_bg.full != b.screen_bg.full ||
-        a.card_bg.full != b.card_bg.full ||
-        a.card_border.full != b.card_border.full ||
-        a.text_primary.full != b.text_primary.full ||
+    if (ThemeColorStorage::encode(a.screen_bg) != ThemeColorStorage::encode(b.screen_bg) ||
+        ThemeColorStorage::encode(a.card_bg) != ThemeColorStorage::encode(b.card_bg) ||
+        ThemeColorStorage::encode(a.card_border) != ThemeColorStorage::encode(b.card_border) ||
+        ThemeColorStorage::encode(a.text_primary) != ThemeColorStorage::encode(b.text_primary) ||
         a.shadow_enabled != b.shadow_enabled ||
         a.gradient_enabled != b.gradient_enabled ||
         a.screen_gradient_enabled != b.screen_gradient_enabled) {
         return false;
     }
-    if (a.shadow_enabled && a.shadow_color.full != b.shadow_color.full) {
+    if (a.shadow_enabled && ThemeColorStorage::encode(a.shadow_color) != ThemeColorStorage::encode(b.shadow_color)) {
         return false;
     }
     if (a.gradient_enabled) {
-        if (a.gradient_color.full != b.gradient_color.full ||
+        if (ThemeColorStorage::encode(a.gradient_color) != ThemeColorStorage::encode(b.gradient_color) ||
             a.gradient_direction != b.gradient_direction) {
             return false;
         }
     }
     if (a.screen_gradient_enabled) {
-        if (a.screen_gradient_color.full != b.screen_gradient_color.full ||
+        if (ThemeColorStorage::encode(a.screen_gradient_color) != ThemeColorStorage::encode(b.screen_gradient_color) ||
             a.screen_gradient_direction != b.screen_gradient_direction) {
             return false;
         }

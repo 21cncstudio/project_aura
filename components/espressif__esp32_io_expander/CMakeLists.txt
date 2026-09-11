@@ -6,4 +6,4 @@ file(GLOB_RECURSE sources ${aura_glob_options}
     "${aura_vendor_dir}/src/*.c" "${aura_vendor_dir}/src/*.cpp")
 idf_component_register(SRCS ${sources}
     INCLUDE_DIRS "${aura_vendor_dir}/src" "../../include"
-    REQUIRES esp-lib-utils driver)
+    REQUIRES esp-lib-utils aura_i2c)

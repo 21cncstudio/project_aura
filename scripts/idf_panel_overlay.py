@@ -1,6 +1,6 @@
-"""Build an IDF 6.1 adaptation without modifying managed Display Panel sources.
+"""Build an IDF 6.1 adaptation without modifying vendored Display Panel sources.
 
-The four changed upstream files are SHA-256 pinned after newline normalization.
+The seven changed upstream files are SHA-256 pinned after newline normalization.
 Any dependency update requires reviewing these adaptations, not silently applying
 them to a different library. Only generated build-directory copies are changed.
 """
@@ -8,9 +8,13 @@ them to a different library. Only generated build-directory copies are changed.
 import argparse
 import hashlib
 from pathlib import Path
+from idf_i2c_adapt import adapt_panel_i2c
 
 
 HASHES = {
+    "drivers/bus/esp_panel_bus_i2c.hpp": "4f41eef5b1f9b7bec079cda78c55c182ad562d3e59f97a28e05313ca33c5774d",
+    "drivers/host/esp_panel_host_i2c.hpp": "0301b81b9d8a906e0cf39e8c4e3b43786f1e9e6dbc19d0bda82a411cfd30dbcf",
+    "drivers/host/esp_panel_host_i2c.cpp": "b0419f7b1a479bfa4dc5e2f7827bb5c3b90865ee1ef955a1bf6bab18d3a23dbd",
     "drivers/bus/esp_panel_bus_rgb.hpp": "d048d65af1b15cf741590ef029bfea55d4119ecc8b28e98c75dd6ae4187a236c",
     "drivers/bus/esp_panel_bus_rgb.cpp": "8518dba1a02d1ede33425f11f1be123e9e92ad57196c03112b7e79b9540b036b",
     "drivers/bus/esp_panel_bus_i2c.cpp": "65bcc7640810106b065f3194ab29cefd7109503ca40793609d9aad4608361b72",
@@ -28,15 +32,8 @@ def adapt(name, text):
     digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
     if digest != HASHES[name]:
         raise ValueError(f"Upstream Display Panel changed: {name}, SHA256={digest}")
-    if name.endswith("esp_panel_bus_i2c.cpp"):
-        text = replace_once(text, '#include "esp_panel_bus_i2c.hpp"',
-                            '#include "esp_panel_bus_i2c.hpp"\n#include "aura_lcd_i2c_legacy.h"')
-        for pin in ("sda", "scl"):
-            text = replace_once(text, f".{pin}_io_num = config.{pin}_io_num,",
-                                f".{pin}_io_num = static_cast<gpio_num_t>(config.{pin}_io_num),")
-        text = replace_once(text, "esp_lcd_new_panel_io_i2c_v1(", "aura_lcd_new_panel_io_i2c_legacy(")
-        text = replace_once(text, "static_cast<esp_lcd_i2c_bus_handle_t>(host_id)",
-                            "static_cast<uint32_t>(host_id)")
+    if "_i2c." in name:
+        text = adapt_panel_i2c(name, text)
     elif name.endswith("esp_panel_bus_rgb.hpp"):
         text = replace_once(text, "#ifdef SOC_LCDCAM_RGB_DATA_WIDTH",
                             "// Aura's ESP32-S3 uses a 16-line RGB bus. IDF 6 removed the old SoC macro.\n"
@@ -89,7 +86,7 @@ def main():
     source = args.source.resolve()
     destination = args.destination.resolve()
     if destination == source or source in destination.parents or destination in source.parents:
-        raise ValueError("The overlay must be separate from the managed component")
+        raise ValueError("The overlay must be separate from the vendored component")
     # Validate all patch inputs before writing any output.
     patches = {name: adapt(name, (source / "src" / name).read_text(encoding="utf-8"))
                for name in HASHES}

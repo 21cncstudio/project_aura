@@ -221,15 +221,15 @@ dependencies:
       type: service
     version: 1.8.2
   espressif/esp-lib-utils:
-    component_hash: 9e81fa27e3a8292bed95d91754ebcb8f27f47117328b0b646446f29fc5a847fb
+    component_hash: 4ea629fce1e7e8a92d347d94b0e9dbb854ca3ecdf384ca6aa02677df9b4db735
     dependencies:
     - name: idf
       require: private
-      version: '>=5.1'
+      version: '>=5.4'
     source:
       registry_url: https://components.espressif.com/
       type: service
-    version: 0.2.3
+    version: 0.3.0
   espressif/esp-modbus:
     component_hash: a52eabcf5e1f81f16f730c70981e69338ea33aee9c44fa512c644d1d8942aa16
     dependencies:
@@ -261,27 +261,17 @@ dependencies:
       type: service
     version: 1.6.8
   espressif/esp32_display_panel:
-    component_hash: af23d566fe3c1d10aed131c88cf5a0c3d38ccad59ed10a6b107dcb370b42685d
-    dependencies:
-    - name: idf
-      version: '>=5.1'
-    - name: espressif/esp-lib-utils
-      public: true
-      version: 0.2.*
-    - name: espressif/esp32_io_expander
-      public: true
-      version: 1.*
+    dependencies: []
     source:
-      git: https://github.com/esp-arduino-libs/ESP32_Display_Panel.git
-      path: .
-      type: git
-    version: 92b790ed6d24b0678e2f45b1fc85f0abd2d41b33
+      path: components/espressif__esp32_display_panel
+      type: local
+    version: 1.0.5
   espressif/esp32_io_expander:
     dependencies: []
     source:
       path: components/espressif__esp32_io_expander
       type: local
-    version: 1.1.0
+    version: 1.1.1
   espressif/esp_modem:
     component_hash: 06abed971065e9cb88039e011fd85ec1412c7416d3a3d84541a7a432e8d3f94d
     dependencies:
@@ -363,12 +353,12 @@ dependencies:
       type: service
     version: 1.22.3
   lvgl/lvgl:
-    component_hash: d7c1ac037ae6e85d94897f807d6e7ba0946a83e720074fc95a4f6241da9f9f53
+    component_hash: 184e532558c1c45fefed631f3e235423d22582aafb4630f3e8885c35281a49ae
     dependencies: []
     source:
       registry_url: https://components.espressif.com/
       type: service
-    version: 8.4.0
+    version: 9.5.0
 direct_dependencies:
 - bblanchon/arduinojson
 - espressif/arduino-esp32
@@ -378,6 +368,6 @@ direct_dependencies:
 - espressif/mqtt
 - idf
 - lvgl/lvgl
-manifest_hash: 98c8b1cdee799fd1790b62b6f868bfa3ac3d323a37639ac613a313920cf72cc2
+manifest_hash: 9959fb078fe7877db3445a126353a1bffc2d7bee231c2bd4bf76b9e7f878e1e0
 target: esp32s3
 version: 3.0.0

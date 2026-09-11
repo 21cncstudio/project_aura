@@ -3,11 +3,14 @@
 ## Authorized IDF migration (2026-09-11)
 
 - The user authorized gradual ESP-IDF 6.1 migration on
-  `codex/idf-6.1-migration`, based on committed main `78f4e9ba`.
+  `idf-6.1-migration`, based on committed main `78f4e9ba`.
 - Work in `D:\21cncstudio\project_aura\tmp\worktrees\aura-idf61` for this
   migration. This overrides the main-only source-work location below for this task.
-- Preserve the existing LVGL 8 UI and both hardware profiles during the first
-  build-system stage. Keep PlatformIO as the old baseline and native-test path.
+- The user subsequently authorized native I2C, LVGL 9.5, and remaining library
+  updates, including EEZ source edits after a full backup. Keep both profiles.
+- Canonical EEZ source is `ui/aura-lvgl.eez-project`; run its generation and the
+  postprocessor together. PlatformIO remains the host-test/identity metadata
+  path. Build firmware with `scripts/build_idf.ps1` in this branch.
 - This is local source/build work. Hardware actions and publication are separate.
 
 ## Local Main Preparation (2026-08-30)

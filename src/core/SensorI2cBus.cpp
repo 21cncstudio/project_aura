@@ -32,6 +32,15 @@ Result begin() {
          static_cast<unsigned long>(Config::SENSOR_I2C_FREQ_HZ),
          Config::SENSOR_I2C_INTERNAL_PULLUPS ? "internal" : "external");
 
+#if AURA_NATIVE_IDF
+    const aura_i2c_host_config_t config{
+        Config::SENSOR_I2C_SDA_PIN, Config::SENSOR_I2C_SCL_PIN,
+        Config::SENSOR_I2C_INTERNAL_PULLUPS, Config::SENSOR_I2C_INTERNAL_PULLUPS,
+        Config::SENSOR_I2C_FREQ_HZ};
+    result.configuration_attempted = true;
+    result.installation_attempted = true;
+    result.installation_error = aura_i2c_start(Config::SENSOR_I2C_PORT, &config);
+#else
     i2c_config_t config{};
     config.mode = I2C_MODE_MASTER;
     config.sda_io_num =
@@ -62,6 +71,7 @@ Result begin() {
     result.installation_attempted = true;
     result.installation_error = i2c_driver_install(
         Config::SENSOR_I2C_PORT, config.mode, 0, 0, 0);
+#endif
     if (result.installation_error != ESP_OK) {
         LOGE("I2C",
              "sensor bus driver install failed: port=%d error=%s (%d)",

@@ -1,3 +1,6 @@
+#if AURA_NATIVE_IDF
+#include "lv_conf_idf9.h"
+#else
 // SPDX-FileCopyrightText: 2025-2026 Volodymyr Papush (21CNCStudio)
 // SPDX-License-Identifier: GPL-3.0-or-later
 // GPL-3.0-or-later: https://www.gnu.org/licenses/gpl-3.0.html
@@ -790,3 +793,5 @@
 #endif /*LV_CONF_H*/
 
 #endif /*End of "Content enable"*/
+
+#endif // AURA_NATIVE_IDF

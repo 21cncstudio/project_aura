@@ -50,7 +50,7 @@ void set_checked(lv_obj_t *btn, bool checked) {
 }
 
 uint32_t graph_color_token(lv_color_t color) {
-    return static_cast<uint32_t>(color.full);
+    return lv_color_to_u32(color);
 }
 
 void hide_graph_zone_bands(lv_obj_t **bands, uint8_t band_count) {
@@ -301,7 +301,7 @@ void UiController::apply_standard_info_chart_theme(lv_obj_t *chart, uint8_t hori
     lv_obj_set_style_line_color(chart, line_color, LV_PART_ITEMS | LV_STATE_DEFAULT);
     lv_obj_set_style_line_width(chart, 3, LV_PART_ITEMS | LV_STATE_DEFAULT);
     lv_obj_set_style_line_opa(chart, LV_OPA_COVER, LV_PART_ITEMS | LV_STATE_DEFAULT);
-    lv_obj_set_style_size(chart, 0, LV_PART_INDICATOR | LV_STATE_DEFAULT);
+    lv_obj_set_style_size(chart, 0, 0, LV_PART_INDICATOR | LV_STATE_DEFAULT);
 }
 
 lv_chart_series_t *UiController::ensure_info_chart_series(lv_obj_t *chart, uint16_t points) {
@@ -324,7 +324,7 @@ lv_chart_series_t *UiController::ensure_info_chart_series(lv_obj_t *chart, uint1
         return nullptr;
     }
 
-    series->color = lv_obj_get_style_line_color(chart, LV_PART_ITEMS);
+    lv_chart_set_series_color(chart, series, lv_obj_get_style_line_color(chart, LV_PART_ITEMS));
     lv_chart_set_all_value(chart, series, LV_CHART_POINT_NONE);
     return series;
 }
@@ -539,7 +539,7 @@ void UiController::ensure_graph_time_labels(lv_obj_t *graph_container,
     auto ensure_label = [graph_container](lv_obj_t *&label) {
         if (!label || !lv_obj_is_valid(label) || lv_obj_get_parent(label) != graph_container) {
             label = lv_label_create(graph_container);
-            lv_obj_clear_flag(label, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
+            lv_obj_clear_flag(label, static_cast<lv_obj_flag_t>(LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE));
             lv_obj_set_style_text_font(label, &ui_font_jet_reg_14, LV_PART_MAIN | LV_STATE_DEFAULT);
             lv_obj_set_style_bg_opa(label, LV_OPA_TRANSP, LV_PART_MAIN | LV_STATE_DEFAULT);
             lv_obj_set_style_border_width(label, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
@@ -687,7 +687,7 @@ void UiController::ensure_graph_stat_overlays(lv_obj_t *chart,
     auto ensure_label = [chart](lv_obj_t *&label, lv_align_t align, lv_coord_t x_ofs, lv_coord_t y_ofs) {
         if (!label || !lv_obj_is_valid(label) || lv_obj_get_parent(label) != chart) {
             label = lv_label_create(chart);
-            lv_obj_clear_flag(label, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
+            lv_obj_clear_flag(label, static_cast<lv_obj_flag_t>(LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE));
             lv_obj_set_style_text_font(label, &ui_font_jet_reg_14, LV_PART_MAIN | LV_STATE_DEFAULT);
             lv_obj_set_style_pad_left(label, 8, LV_PART_MAIN | LV_STATE_DEFAULT);
             lv_obj_set_style_pad_right(label, 8, LV_PART_MAIN | LV_STATE_DEFAULT);
@@ -784,7 +784,7 @@ void UiController::ensure_graph_zone_overlay(lv_obj_t *graph_container,
 
     if (!overlay || !lv_obj_is_valid(overlay) || lv_obj_get_parent(overlay) != graph_container) {
         overlay = lv_obj_create(graph_container);
-        lv_obj_clear_flag(overlay, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_clear_flag(overlay, static_cast<lv_obj_flag_t>(LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE));
         lv_obj_set_style_bg_opa(overlay, LV_OPA_TRANSP, LV_PART_MAIN | LV_STATE_DEFAULT);
         lv_obj_set_style_border_width(overlay, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
         lv_obj_set_style_pad_left(overlay, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
@@ -809,7 +809,7 @@ void UiController::ensure_graph_zone_overlay(lv_obj_t *graph_container,
         lv_obj_t *&band = bands[i];
         if (!band || !lv_obj_is_valid(band) || lv_obj_get_parent(band) != overlay) {
             band = lv_obj_create(overlay);
-            lv_obj_clear_flag(band, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
+            lv_obj_clear_flag(band, static_cast<lv_obj_flag_t>(LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE));
             lv_obj_set_style_border_width(band, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
             lv_obj_set_style_radius(band, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
             lv_obj_set_style_pad_left(band, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
@@ -955,7 +955,7 @@ void UiController::sync_info_graph_button_state() {
     if (graph_supported) {
         set_visible(objects.btn_info_graph, true);
         lv_obj_clear_state(objects.btn_info_graph, LV_STATE_DISABLED);
-        lv_obj_add_flag(objects.btn_info_graph, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_CHECKABLE);
+        lv_obj_add_flag(objects.btn_info_graph, static_cast<lv_obj_flag_t>(LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_CHECKABLE));
         lv_obj_move_foreground(objects.btn_info_graph);
     } else {
         lv_obj_clear_state(objects.btn_info_graph, LV_STATE_CHECKED);
@@ -1020,19 +1020,19 @@ void UiController::set_temperature_info_mode(bool graph_mode) {
         invalidate_active_graph_refresh_cache();
     }
     if (objects.btn_info_graph) {
-        lv_obj_add_flag(objects.btn_info_graph, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_CHECKABLE);
+        lv_obj_add_flag(objects.btn_info_graph, static_cast<lv_obj_flag_t>(LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_CHECKABLE));
         lv_obj_set_ext_click_area(objects.btn_info_graph, 18);
     }
     if (objects.btn_temp_range_1h) {
-        lv_obj_add_flag(objects.btn_temp_range_1h, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_CHECKABLE);
+        lv_obj_add_flag(objects.btn_temp_range_1h, static_cast<lv_obj_flag_t>(LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_CHECKABLE));
         lv_obj_set_ext_click_area(objects.btn_temp_range_1h, 12);
     }
     if (objects.btn_temp_range_3h) {
-        lv_obj_add_flag(objects.btn_temp_range_3h, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_CHECKABLE);
+        lv_obj_add_flag(objects.btn_temp_range_3h, static_cast<lv_obj_flag_t>(LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_CHECKABLE));
         lv_obj_set_ext_click_area(objects.btn_temp_range_3h, 12);
     }
     if (objects.btn_temp_range_24h) {
-        lv_obj_add_flag(objects.btn_temp_range_24h, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_CHECKABLE);
+        lv_obj_add_flag(objects.btn_temp_range_24h, static_cast<lv_obj_flag_t>(LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_CHECKABLE));
         lv_obj_set_ext_click_area(objects.btn_temp_range_24h, 12);
     }
     if (objects.btn_info_graph) {
@@ -1058,15 +1058,15 @@ void UiController::set_rh_info_mode(bool graph_mode) {
         invalidate_active_graph_refresh_cache();
     }
     if (objects.btn_rh_range_1h) {
-        lv_obj_add_flag(objects.btn_rh_range_1h, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_CHECKABLE);
+        lv_obj_add_flag(objects.btn_rh_range_1h, static_cast<lv_obj_flag_t>(LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_CHECKABLE));
         lv_obj_set_ext_click_area(objects.btn_rh_range_1h, 12);
     }
     if (objects.btn_rh_range_3h) {
-        lv_obj_add_flag(objects.btn_rh_range_3h, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_CHECKABLE);
+        lv_obj_add_flag(objects.btn_rh_range_3h, static_cast<lv_obj_flag_t>(LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_CHECKABLE));
         lv_obj_set_ext_click_area(objects.btn_rh_range_3h, 12);
     }
     if (objects.btn_rh_range_24h) {
-        lv_obj_add_flag(objects.btn_rh_range_24h, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_CHECKABLE);
+        lv_obj_add_flag(objects.btn_rh_range_24h, static_cast<lv_obj_flag_t>(LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_CHECKABLE));
         lv_obj_set_ext_click_area(objects.btn_rh_range_24h, 12);
     }
     set_visible(objects.rh_info_thresholds, !graph_mode);
@@ -1086,15 +1086,15 @@ void UiController::set_voc_info_mode(bool graph_mode) {
         invalidate_active_graph_refresh_cache();
     }
     if (objects.btn_voc_range_1h) {
-        lv_obj_add_flag(objects.btn_voc_range_1h, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_CHECKABLE);
+        lv_obj_add_flag(objects.btn_voc_range_1h, static_cast<lv_obj_flag_t>(LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_CHECKABLE));
         lv_obj_set_ext_click_area(objects.btn_voc_range_1h, 12);
     }
     if (objects.btn_voc_range_3h) {
-        lv_obj_add_flag(objects.btn_voc_range_3h, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_CHECKABLE);
+        lv_obj_add_flag(objects.btn_voc_range_3h, static_cast<lv_obj_flag_t>(LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_CHECKABLE));
         lv_obj_set_ext_click_area(objects.btn_voc_range_3h, 12);
     }
     if (objects.btn_voc_range_24h) {
-        lv_obj_add_flag(objects.btn_voc_range_24h, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_CHECKABLE);
+        lv_obj_add_flag(objects.btn_voc_range_24h, static_cast<lv_obj_flag_t>(LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_CHECKABLE));
         lv_obj_set_ext_click_area(objects.btn_voc_range_24h, 12);
     }
     if (objects.btn_info_graph) {
@@ -1120,15 +1120,15 @@ void UiController::set_nox_info_mode(bool graph_mode) {
         invalidate_active_graph_refresh_cache();
     }
     if (objects.btn_nox_range_1h) {
-        lv_obj_add_flag(objects.btn_nox_range_1h, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_CHECKABLE);
+        lv_obj_add_flag(objects.btn_nox_range_1h, static_cast<lv_obj_flag_t>(LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_CHECKABLE));
         lv_obj_set_ext_click_area(objects.btn_nox_range_1h, 12);
     }
     if (objects.btn_nox_range_3h) {
-        lv_obj_add_flag(objects.btn_nox_range_3h, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_CHECKABLE);
+        lv_obj_add_flag(objects.btn_nox_range_3h, static_cast<lv_obj_flag_t>(LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_CHECKABLE));
         lv_obj_set_ext_click_area(objects.btn_nox_range_3h, 12);
     }
     if (objects.btn_nox_range_24h) {
-        lv_obj_add_flag(objects.btn_nox_range_24h, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_CHECKABLE);
+        lv_obj_add_flag(objects.btn_nox_range_24h, static_cast<lv_obj_flag_t>(LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_CHECKABLE));
         lv_obj_set_ext_click_area(objects.btn_nox_range_24h, 12);
     }
     if (objects.btn_info_graph) {
@@ -1154,15 +1154,15 @@ void UiController::set_optional_gas_info_mode(bool graph_mode) {
         invalidate_active_graph_refresh_cache();
     }
     if (objects.btn_optional_gas_range_1h) {
-        lv_obj_add_flag(objects.btn_optional_gas_range_1h, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_CHECKABLE);
+        lv_obj_add_flag(objects.btn_optional_gas_range_1h, static_cast<lv_obj_flag_t>(LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_CHECKABLE));
         lv_obj_set_ext_click_area(objects.btn_optional_gas_range_1h, 12);
     }
     if (objects.btn_optional_gas_range_3h) {
-        lv_obj_add_flag(objects.btn_optional_gas_range_3h, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_CHECKABLE);
+        lv_obj_add_flag(objects.btn_optional_gas_range_3h, static_cast<lv_obj_flag_t>(LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_CHECKABLE));
         lv_obj_set_ext_click_area(objects.btn_optional_gas_range_3h, 12);
     }
     if (objects.btn_optional_gas_range_24h) {
-        lv_obj_add_flag(objects.btn_optional_gas_range_24h, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_CHECKABLE);
+        lv_obj_add_flag(objects.btn_optional_gas_range_24h, static_cast<lv_obj_flag_t>(LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_CHECKABLE));
         lv_obj_set_ext_click_area(objects.btn_optional_gas_range_24h, 12);
     }
     if (objects.btn_info_graph) {
@@ -1188,15 +1188,15 @@ void UiController::set_hcho_info_mode(bool graph_mode) {
         invalidate_active_graph_refresh_cache();
     }
     if (objects.btn_hcho_range_1h) {
-        lv_obj_add_flag(objects.btn_hcho_range_1h, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_CHECKABLE);
+        lv_obj_add_flag(objects.btn_hcho_range_1h, static_cast<lv_obj_flag_t>(LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_CHECKABLE));
         lv_obj_set_ext_click_area(objects.btn_hcho_range_1h, 12);
     }
     if (objects.btn_hcho_range_3h) {
-        lv_obj_add_flag(objects.btn_hcho_range_3h, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_CHECKABLE);
+        lv_obj_add_flag(objects.btn_hcho_range_3h, static_cast<lv_obj_flag_t>(LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_CHECKABLE));
         lv_obj_set_ext_click_area(objects.btn_hcho_range_3h, 12);
     }
     if (objects.btn_hcho_range_24h) {
-        lv_obj_add_flag(objects.btn_hcho_range_24h, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_CHECKABLE);
+        lv_obj_add_flag(objects.btn_hcho_range_24h, static_cast<lv_obj_flag_t>(LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_CHECKABLE));
         lv_obj_set_ext_click_area(objects.btn_hcho_range_24h, 12);
     }
     if (objects.btn_info_graph) {
@@ -1222,15 +1222,15 @@ void UiController::set_co2_info_mode(bool graph_mode) {
         invalidate_active_graph_refresh_cache();
     }
     if (objects.btn_co2_range_1h) {
-        lv_obj_add_flag(objects.btn_co2_range_1h, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_CHECKABLE);
+        lv_obj_add_flag(objects.btn_co2_range_1h, static_cast<lv_obj_flag_t>(LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_CHECKABLE));
         lv_obj_set_ext_click_area(objects.btn_co2_range_1h, 12);
     }
     if (objects.btn_co2_range_3h) {
-        lv_obj_add_flag(objects.btn_co2_range_3h, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_CHECKABLE);
+        lv_obj_add_flag(objects.btn_co2_range_3h, static_cast<lv_obj_flag_t>(LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_CHECKABLE));
         lv_obj_set_ext_click_area(objects.btn_co2_range_3h, 12);
     }
     if (objects.btn_co2_range_24h) {
-        lv_obj_add_flag(objects.btn_co2_range_24h, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_CHECKABLE);
+        lv_obj_add_flag(objects.btn_co2_range_24h, static_cast<lv_obj_flag_t>(LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_CHECKABLE));
         lv_obj_set_ext_click_area(objects.btn_co2_range_24h, 12);
     }
     if (objects.btn_info_graph) {
@@ -1256,15 +1256,15 @@ void UiController::set_pm05_info_mode(bool graph_mode) {
         invalidate_active_graph_refresh_cache();
     }
     if (objects.btn_pm05_range_1h) {
-        lv_obj_add_flag(objects.btn_pm05_range_1h, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_CHECKABLE);
+        lv_obj_add_flag(objects.btn_pm05_range_1h, static_cast<lv_obj_flag_t>(LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_CHECKABLE));
         lv_obj_set_ext_click_area(objects.btn_pm05_range_1h, 12);
     }
     if (objects.btn_pm05_range_3h) {
-        lv_obj_add_flag(objects.btn_pm05_range_3h, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_CHECKABLE);
+        lv_obj_add_flag(objects.btn_pm05_range_3h, static_cast<lv_obj_flag_t>(LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_CHECKABLE));
         lv_obj_set_ext_click_area(objects.btn_pm05_range_3h, 12);
     }
     if (objects.btn_pm05_range_24h) {
-        lv_obj_add_flag(objects.btn_pm05_range_24h, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_CHECKABLE);
+        lv_obj_add_flag(objects.btn_pm05_range_24h, static_cast<lv_obj_flag_t>(LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_CHECKABLE));
         lv_obj_set_ext_click_area(objects.btn_pm05_range_24h, 12);
     }
     if (objects.btn_info_graph) {
@@ -1291,15 +1291,15 @@ void UiController::set_pm25_4_info_mode(bool graph_mode) {
         invalidate_active_graph_refresh_cache();
     }
     if (objects.btn_pm25_4_range_1h) {
-        lv_obj_add_flag(objects.btn_pm25_4_range_1h, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_CHECKABLE);
+        lv_obj_add_flag(objects.btn_pm25_4_range_1h, static_cast<lv_obj_flag_t>(LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_CHECKABLE));
         lv_obj_set_ext_click_area(objects.btn_pm25_4_range_1h, 12);
     }
     if (objects.btn_pm25_4_range_3h) {
-        lv_obj_add_flag(objects.btn_pm25_4_range_3h, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_CHECKABLE);
+        lv_obj_add_flag(objects.btn_pm25_4_range_3h, static_cast<lv_obj_flag_t>(LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_CHECKABLE));
         lv_obj_set_ext_click_area(objects.btn_pm25_4_range_3h, 12);
     }
     if (objects.btn_pm25_4_range_24h) {
-        lv_obj_add_flag(objects.btn_pm25_4_range_24h, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_CHECKABLE);
+        lv_obj_add_flag(objects.btn_pm25_4_range_24h, static_cast<lv_obj_flag_t>(LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_CHECKABLE));
         lv_obj_set_ext_click_area(objects.btn_pm25_4_range_24h, 12);
     }
     if (objects.btn_info_graph) {
@@ -1343,15 +1343,15 @@ void UiController::set_pm1_10_info_mode(bool graph_mode) {
         invalidate_active_graph_refresh_cache();
     }
     if (objects.btn_pm1_10_range_1h) {
-        lv_obj_add_flag(objects.btn_pm1_10_range_1h, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_CHECKABLE);
+        lv_obj_add_flag(objects.btn_pm1_10_range_1h, static_cast<lv_obj_flag_t>(LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_CHECKABLE));
         lv_obj_set_ext_click_area(objects.btn_pm1_10_range_1h, 12);
     }
     if (objects.btn_pm1_10_range_3h) {
-        lv_obj_add_flag(objects.btn_pm1_10_range_3h, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_CHECKABLE);
+        lv_obj_add_flag(objects.btn_pm1_10_range_3h, static_cast<lv_obj_flag_t>(LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_CHECKABLE));
         lv_obj_set_ext_click_area(objects.btn_pm1_10_range_3h, 12);
     }
     if (objects.btn_pm1_10_range_24h) {
-        lv_obj_add_flag(objects.btn_pm1_10_range_24h, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_CHECKABLE);
+        lv_obj_add_flag(objects.btn_pm1_10_range_24h, static_cast<lv_obj_flag_t>(LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_CHECKABLE));
         lv_obj_set_ext_click_area(objects.btn_pm1_10_range_24h, 12);
     }
     if (objects.btn_info_graph) {
@@ -1397,15 +1397,15 @@ void UiController::set_co_info_mode(bool graph_mode) {
         invalidate_active_graph_refresh_cache();
     }
     if (objects.btn_co_range_1h) {
-        lv_obj_add_flag(objects.btn_co_range_1h, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_CHECKABLE);
+        lv_obj_add_flag(objects.btn_co_range_1h, static_cast<lv_obj_flag_t>(LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_CHECKABLE));
         lv_obj_set_ext_click_area(objects.btn_co_range_1h, 12);
     }
     if (objects.btn_co_range_3h) {
-        lv_obj_add_flag(objects.btn_co_range_3h, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_CHECKABLE);
+        lv_obj_add_flag(objects.btn_co_range_3h, static_cast<lv_obj_flag_t>(LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_CHECKABLE));
         lv_obj_set_ext_click_area(objects.btn_co_range_3h, 12);
     }
     if (objects.btn_co_range_24h) {
-        lv_obj_add_flag(objects.btn_co_range_24h, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_CHECKABLE);
+        lv_obj_add_flag(objects.btn_co_range_24h, static_cast<lv_obj_flag_t>(LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_CHECKABLE));
         lv_obj_set_ext_click_area(objects.btn_co_range_24h, 12);
     }
     if (objects.btn_info_graph) {
@@ -1432,15 +1432,15 @@ void UiController::set_pressure_info_mode(bool graph_mode) {
     }
 
     if (objects.btn_pressure_range_1h) {
-        lv_obj_add_flag(objects.btn_pressure_range_1h, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_CHECKABLE);
+        lv_obj_add_flag(objects.btn_pressure_range_1h, static_cast<lv_obj_flag_t>(LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_CHECKABLE));
         lv_obj_set_ext_click_area(objects.btn_pressure_range_1h, 12);
     }
     if (objects.btn_pressure_range_3h) {
-        lv_obj_add_flag(objects.btn_pressure_range_3h, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_CHECKABLE);
+        lv_obj_add_flag(objects.btn_pressure_range_3h, static_cast<lv_obj_flag_t>(LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_CHECKABLE));
         lv_obj_set_ext_click_area(objects.btn_pressure_range_3h, 12);
     }
     if (objects.btn_pressure_range_24h) {
-        lv_obj_add_flag(objects.btn_pressure_range_24h, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_CHECKABLE);
+        lv_obj_add_flag(objects.btn_pressure_range_24h, static_cast<lv_obj_flag_t>(LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_CHECKABLE));
         lv_obj_set_ext_click_area(objects.btn_pressure_range_24h, 12);
     }
 

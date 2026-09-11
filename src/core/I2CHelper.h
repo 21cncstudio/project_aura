@@ -5,7 +5,7 @@
 // Purchase a Commercial License: see COMMERCIAL_LICENSE_SUMMARY.md
 
 #pragma once
-#include <driver/i2c.h>
+#include "AuraI2c.h"
 #include <stddef.h>
 
 namespace I2C {

@@ -1,6 +1,6 @@
 # Gradual ESP-IDF 6.1 migration
 
-Branch: `codex/idf-6.1-migration`, based on committed main `78f4e9ba`.
+Branch: `idf-6.1-migration`, based on committed main `78f4e9ba`.
 The root archive worktree and the `dual-profile-release` checkpoint are preserved.
 Main preparation was committed separately as `a75ae870` (sensor divider theme)
 and `78f4e9ba` (dependency audit). Migration changes belong only to this branch.
@@ -12,9 +12,15 @@ and `78f4e9ba` (dependency audit). Migration changes belong only to this branch.
 3. Verify the exact artifacts on hardware under a separately agreed test scope.
 4. Replace the temporary LCD/legacy-I2C adapter with a coordinated migration
    of all shared-bus users to the new I2C master API.
-5. Migrate LVGL 8.4 to LVGL 9 as a later coordinated UI change.
+5. Migrate LVGL 8.4 to LVGL 9.5 together with EEZ generation.
 
-The PlatformIO firmware build remains the old Arduino 3.1.1 / IDF 5.3.2 baseline.
+Stages 4 and 5 are now implemented locally. Current versions, EEZ backup,
+validation and the remaining hardware qualification are recorded in
+[IDF61_REMAINING_UPDATES_20260911.md](IDF61_REMAINING_UPDATES_20260911.md).
+
+The old PlatformIO firmware configuration is retained as profile metadata;
+its firmware build is explicitly blocked after the LVGL 9 source migration.
+The usable old firmware baseline remains in Git history and clean main.
 Native tests continue to use `scripts/run_native_tests.py`. Do not describe a
 passing PlatformIO build as evidence for the new IDF build.
 
@@ -87,8 +93,8 @@ The IDF 5.3.2 restart backport is excluded only from the native-IDF build; the
 old PlatformIO baseline still includes it. The restart disassembly validator
 can check the upstream `esp_restart_noos` symbol as well as the old wrapper.
 The native check rejects accidental linkage of the old wrapper.
-It also verifies the compiled build ID and rejects linking the new I2C driver
-alongside the legacy driver. The SDK's own startup conflict check stays enabled.
+It also verifies the compiled build ID, requires the new I2C master driver
+and native LCD IO, and rejects linkage of the legacy I2C driver. The SDK's own startup conflict check stays enabled.
 The PowerShell wrapper refreshes generated identity before Ninja evaluates its
 dependency graph, including immediately after a Git commit.
 
@@ -97,9 +103,9 @@ the migration if its RTC layout, restart path or OTA descriptor checks fail.
 
 ## Driver and source adaptation
 
-`scripts/idf_panel_overlay.py` verifies four upstream source hashes and creates
+`scripts/idf_panel_overlay.py` verifies seven upstream source hashes and creates
 build-directory copies of Display Panel. CMake compiles those copies and exports
-their headers. Managed components are never patched in place; an upstream
+their headers. Pinned vendor inputs are never patched in place; an upstream
 change to a patched file fails configuration and requires review.
 
 The native adaptation is limited to Aura's ESP32-S3 / 16-line RGB565 profiles.
@@ -108,19 +114,20 @@ LCD configuration ordering. Original panel geometry and timing values are kept.
 The application objects are available to the linker even when the display
 library is the only caller of a board callback; function-section GC remains on.
 
-`components/aura_lcd_i2c_legacy` contains the unmodified Espressif v5.5.5 LCD IO
-adapter, compiled against IDF 6.1 with an Aura-specific exported name. Its README
-records source, license, hash and lifetime. It preserves the existing numeric
-port, synchronous transfers, repeated START behavior, timeout and bus ownership
-used by GT911, CH422G, sensors and recovery. It is explicitly a temporary adapter,
-not a conversion of those users to the new I2C master API.
+The temporary `components/aura_lcd_i2c_legacy` adapter has been removed.
+`components/aura_i2c` owns the new IDF master buses and cached sensor/expander
+device handles. Display Panel borrows the appropriate bus for native LCD I2C IO.
+See the remaining-updates report for framing, lifetime and fault-path checks.
 
 Other source fixes use standard C++ math names, typed printf formats, bounded
 date formatting and explicit enum conversions. Wi-Fi inactivity still maps to
 reason code 4, and no retry timing or sensor threshold is changed. CMake declares
 the LEDC and Wi-Fi provisioning header dependencies explicitly.
 
-## Validation
+## First-stage validation (before native I2C and LVGL 9)
+
+These results describe the earlier LVGL 8 / legacy I2C checkpoint. They are
+not hardware evidence for the subsequent native-I2C/LVGL-9 update.
 
 - Python checks: 107 passed (`tmp\idf61-sdk\python-stage2.log`).
 - Full canonical native test launcher: 1044 tests passed across 10 invocations,

@@ -99,6 +99,20 @@ public:
      * @return true if success, otherwise false
      */
     bool enableAllIO_Output(void);
+
+    /**
+     * @brief Enter sleep mode
+     *
+     * @return true if success, otherwise false
+     */
+    bool enterSleep(void);
+
+    /**
+     * @brief Exit sleep mode
+     *
+     * @return true if success, otherwise false
+     */
+    bool exitSleep(void);
 };
 
 } // namespace esp_expander

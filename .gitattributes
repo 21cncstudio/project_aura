@@ -1,0 +1,2 @@
+# Preserve reviewed upstream bytes, including original whitespace; verify by SHA-256.
+components/espressif__esp32_display_panel/** -text -whitespace

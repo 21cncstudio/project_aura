@@ -1,7 +1,7 @@
 #pragma once
 #include <Arduino.h>
 #include <ctype.h>
-#include <driver/i2c.h>
+#include "AuraI2c.h"
 #include <string.h>
 #include <time.h>
 

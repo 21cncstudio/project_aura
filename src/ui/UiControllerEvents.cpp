@@ -49,7 +49,7 @@ void brief_action_feedback_timer_cb(lv_timer_t *timer) {
         return;
     }
 
-    lv_obj_t *btn = static_cast<lv_obj_t *>(timer->user_data);
+    lv_obj_t *btn = static_cast<lv_obj_t *>(lv_timer_get_user_data(timer));
     if (btn && lv_obj_is_valid(btn)) {
         lv_obj_clear_state(btn, LV_STATE_CHECKED);
         lv_obj_invalidate(btn);
@@ -492,7 +492,7 @@ void UiController::on_theme_tab_event(lv_event_t *e) {
     if (lv_event_get_code(e) != LV_EVENT_VALUE_CHANGED) {
         return;
     }
-    lv_obj_t *btn = lv_event_get_target(e);
+    lv_obj_t *btn = static_cast<lv_obj_t*>(lv_event_get_target(e));
     bool presets = (btn == objects.btn_theme_presets);
     if (objects.btn_theme_presets) {
         if (presets) lv_obj_add_state(objects.btn_theme_presets, LV_STATE_CHECKED);
@@ -551,7 +551,7 @@ void UiController::on_wifi_toggle_event(lv_event_t *e) {
     if (wifi_toggle_syncing_) {
         return;
     }
-    lv_obj_t *btn = lv_event_get_target(e);
+    lv_obj_t *btn = static_cast<lv_obj_t*>(lv_event_get_target(e));
     bool enabled = lv_obj_has_state(btn, LV_STATE_CHECKED);
     setWifiEnabledFromUi(enabled);
 }
@@ -563,7 +563,7 @@ void UiController::on_mqtt_toggle_event(lv_event_t *e) {
     if (mqtt_toggle_syncing_) {
         return;
     }
-    lv_obj_t *btn = lv_event_get_target(e);
+    lv_obj_t *btn = static_cast<lv_obj_t*>(lv_event_get_target(e));
     bool enabled = lv_obj_has_state(btn, LV_STATE_CHECKED);
     setMqttUserEnabledFromUi(enabled);
 }
@@ -579,7 +579,7 @@ void UiController::on_wifi_reconnect_event(lv_event_t *e) {
     if (lv_event_get_code(e) != LV_EVENT_CLICKED) {
         return;
     }
-    lv_obj_t *btn = lv_event_get_target(e);
+    lv_obj_t *btn = static_cast<lv_obj_t*>(lv_event_get_target(e));
     show_brief_action_feedback(btn);
     requestWifiReconnectFromUi();
 }
@@ -595,7 +595,7 @@ void UiController::on_wifi_forget_event(lv_event_t *e) {
     if (lv_event_get_code(e) != LV_EVENT_CLICKED) {
         return;
     }
-    lv_obj_t *btn = lv_event_get_target(e);
+    lv_obj_t *btn = static_cast<lv_obj_t*>(lv_event_get_target(e));
     if (btn) {
         lv_obj_clear_state(btn, LV_STATE_CHECKED);
     }
@@ -607,7 +607,7 @@ void UiController::on_head_status_event(lv_event_t *e) {
     if (lv_event_get_code(e) != LV_EVENT_VALUE_CHANGED) {
         return;
     }
-    lv_obj_t *btn = lv_event_get_target(e);
+    lv_obj_t *btn = static_cast<lv_obj_t*>(lv_event_get_target(e));
     header_status_enabled = lv_obj_has_state(btn, LV_STATE_CHECKED);
     storage.config().header_status_enabled = header_status_enabled;
     if (!storage.saveConfig(true)) {
@@ -621,7 +621,7 @@ void UiController::on_auto_night_settings_event(lv_event_t *e) {
     if (lv_event_get_code(e) != LV_EVENT_CLICKED) {
         return;
     }
-    lv_obj_t *btn = lv_event_get_target(e);
+    lv_obj_t *btn = static_cast<lv_obj_t*>(lv_event_get_target(e));
     if (btn) {
         lv_obj_clear_state(btn, LV_STATE_CHECKED);
     }
@@ -644,7 +644,7 @@ void UiController::on_auto_night_toggle_event(lv_event_t *e) {
     if (nightModeManager.isToggleSyncing()) {
         return;
     }
-    lv_obj_t *btn = lv_event_get_target(e);
+    lv_obj_t *btn = static_cast<lv_obj_t*>(lv_event_get_target(e));
     bool enabled = lv_obj_has_state(btn, LV_STATE_CHECKED);
     if (enabled == nightModeManager.isAutoEnabled()) {
         return;
@@ -768,7 +768,7 @@ void UiController::on_night_mode_event(lv_event_t *e) {
         sync_night_mode_toggle_ui();
         return;
     }
-    lv_obj_t *btn = lv_event_get_target(e);
+    lv_obj_t *btn = static_cast<lv_obj_t*>(lv_event_get_target(e));
     bool enabled = lv_obj_has_state(btn, LV_STATE_CHECKED);
     set_night_mode_state(enabled, true);
 }
@@ -777,7 +777,7 @@ void UiController::on_units_c_f_event(lv_event_t *e) {
     if (lv_event_get_code(e) != LV_EVENT_VALUE_CHANGED) {
         return;
     }
-    lv_obj_t *btn = lv_event_get_target(e);
+    lv_obj_t *btn = static_cast<lv_obj_t*>(lv_event_get_target(e));
     bool use_c = lv_obj_has_state(btn, LV_STATE_CHECKED);
     if (use_c == temp_units_c) {
         return;
@@ -798,7 +798,7 @@ void UiController::on_time_format_toggle_event(lv_event_t *e) {
     if (lv_event_get_code(e) != LV_EVENT_VALUE_CHANGED) {
         return;
     }
-    lv_obj_t *btn = lv_event_get_target(e);
+    lv_obj_t *btn = static_cast<lv_obj_t*>(lv_event_get_target(e));
     const bool use_24h = lv_obj_has_state(btn, LV_STATE_CHECKED);
     if (use_24h == time_format_24h_) {
         return;
@@ -913,7 +913,7 @@ void UiController::on_card_voc_nox_event(lv_event_t *e) {
         return;
     }
 
-    lv_obj_t *target = lv_event_get_target(e);
+    lv_obj_t *target = static_cast<lv_obj_t*>(lv_event_get_target(e));
     if (!target) {
         return;
     }
@@ -1783,7 +1783,7 @@ void UiController::on_led_indicators_event(lv_event_t *e) {
     if (lv_event_get_code(e) != LV_EVENT_VALUE_CHANGED) {
         return;
     }
-    lv_obj_t *btn = lv_event_get_target(e);
+    lv_obj_t *btn = static_cast<lv_obj_t*>(lv_event_get_target(e));
     bool enabled = lv_obj_has_state(btn, LV_STATE_CHECKED);
     if (enabled == led_indicators_enabled) {
         return;
@@ -1820,7 +1820,7 @@ void UiController::on_diag_event(lv_event_t *e) {
     if (lv_event_get_code(e) != LV_EVENT_CLICKED) {
         return;
     }
-    lv_obj_t *btn = lv_event_get_target(e);
+    lv_obj_t *btn = static_cast<lv_obj_t*>(lv_event_get_target(e));
     if (btn) {
         lv_obj_clear_state(btn, LV_STATE_CHECKED);
     }
@@ -1833,7 +1833,7 @@ void UiController::on_diag_clear_event(lv_event_t *e) {
     if (lv_event_get_code(e) != LV_EVENT_CLICKED) {
         return;
     }
-    lv_obj_t *btn = lv_event_get_target(e);
+    lv_obj_t *btn = static_cast<lv_obj_t*>(lv_event_get_target(e));
     if (btn) {
         lv_obj_clear_state(btn, LV_STATE_CHECKED);
     }
@@ -1855,7 +1855,7 @@ void UiController::on_co2_calib_asc_event(lv_event_t *e) {
     if (lv_event_get_code(e) != LV_EVENT_VALUE_CHANGED) {
         return;
     }
-    lv_obj_t *btn = lv_event_get_target(e);
+    lv_obj_t *btn = static_cast<lv_obj_t*>(lv_event_get_target(e));
     const bool requested_enabled = lv_obj_has_state(btn, LV_STATE_CHECKED);
     if (requested_enabled == co2_asc_enabled) {
         return;
@@ -1913,7 +1913,7 @@ void UiController::on_co2_calib_start_event(lv_event_t *e) {
     if (lv_event_get_code(e) != LV_EVENT_CLICKED) {
         return;
     }
-    lv_obj_t *btn = lv_event_get_target(e);
+    lv_obj_t *btn = static_cast<lv_obj_t*>(lv_event_get_target(e));
     show_brief_action_feedback(btn);
     set_co2_calib_confirm_visible(true);
 }
@@ -1973,7 +1973,7 @@ void UiController::on_backlight_settings_event(lv_event_t *e) {
     if (lv_event_get_code(e) != LV_EVENT_CLICKED) {
         return;
     }
-    lv_obj_t *btn = lv_event_get_target(e);
+    lv_obj_t *btn = static_cast<lv_obj_t*>(lv_event_get_target(e));
     if (btn) {
         lv_obj_clear_state(btn, LV_STATE_CHECKED);
     }
@@ -1997,7 +1997,7 @@ void UiController::on_backlight_schedule_toggle_event(lv_event_t *e) {
     if (backlightManager.isScheduleSyncing()) {
         return;
     }
-    lv_obj_t *btn = lv_event_get_target(e);
+    lv_obj_t *btn = static_cast<lv_obj_t*>(lv_event_get_target(e));
     bool enabled = lv_obj_has_state(btn, LV_STATE_CHECKED);
     backlightManager.setScheduleEnabled(enabled);
     sync_backlight_settings_button_state();
@@ -2010,7 +2010,7 @@ void UiController::on_backlight_alarm_wake_event(lv_event_t *e) {
     if (backlightManager.isAlarmWakeSyncing()) {
         return;
     }
-    lv_obj_t *btn = lv_event_get_target(e);
+    lv_obj_t *btn = static_cast<lv_obj_t*>(lv_event_get_target(e));
     bool enabled = lv_obj_has_state(btn, LV_STATE_CHECKED);
     backlightManager.setAlarmWakeEnabled(enabled);
 }
@@ -2182,7 +2182,7 @@ void UiController::on_ntp_toggle_event(lv_event_t *e) {
     if (ntp_toggle_syncing) {
         return;
     }
-    lv_obj_t *btn = lv_event_get_target(e);
+    lv_obj_t *btn = static_cast<lv_obj_t*>(lv_event_get_target(e));
     bool enabled = lv_obj_has_state(btn, LV_STATE_CHECKED);
     if (enabled == timeManager.isNtpEnabledPref()) {
         return;
@@ -2368,7 +2368,7 @@ void UiController::on_alert_blink_event(lv_event_t *e) {
     if (alert_blink_syncing) {
         return;
     }
-    lv_obj_t *btn = lv_event_get_target(e);
+    lv_obj_t *btn = static_cast<lv_obj_t*>(lv_event_get_target(e));
     bool enabled = lv_obj_has_state(btn, LV_STATE_CHECKED);
     if (enabled == alert_blink_enabled) {
         return;

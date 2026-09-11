@@ -352,7 +352,7 @@ void UiController::on_dac_manual_level_event(lv_event_t *e) {
     if (lv_event_get_code(e) != LV_EVENT_VALUE_CHANGED) {
         return;
     }
-    const uint8_t level = manual_level_from_target(lv_event_get_target(e));
+    const uint8_t level = manual_level_from_target(static_cast<lv_obj_t*>(lv_event_get_target(e)));
     if (level == 0) {
         return;
     }
@@ -364,7 +364,7 @@ void UiController::on_dac_manual_timer_event(lv_event_t *e) {
     if (lv_event_get_code(e) != LV_EVENT_VALUE_CHANGED) {
         return;
     }
-    lv_obj_t *target = lv_event_get_target(e);
+    lv_obj_t *target = static_cast<lv_obj_t*>(lv_event_get_target(e));
     const uint32_t timer_s = timer_seconds_from_target(target);
     if (timer_s == 0) {
         return;

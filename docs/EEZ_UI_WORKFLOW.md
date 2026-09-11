@@ -14,8 +14,8 @@ python tools/eez_ui_postprocess.py --check
 
 The first command applies the Project Aura generated-UI contract. The second
 command is a non-mutating verification and must report that the contract is
-already satisfied. A normal PlatformIO firmware build also invokes the same
-post-processor before compilation as a final safety net.
+already satisfied. The native IDF build also invokes the same post-processor before compilation.
+Firmware on this migration branch is built with `scripts/build_idf.ps1`.
 
 The post-processor currently preserves:
 
@@ -40,3 +40,30 @@ python -m unittest discover -s tools/tests -p "test_*.py"
 Do not commit `src/ui/.eez-project-build`; it is EEZ build metadata. Review the
 remaining generated diff before committing because the post-processor only
 protects known Project Aura invariants.
+
+## LVGL 9 source and backup
+
+The canonical project is `ui/aura-lvgl.eez-project`, targeting LVGL 9.5.0 with
+output `../src/ui`. Source TTFs and licenses are in `ui/fonts`; bitmaps and
+fonts are embedded as well. The installed EEZ Studio 0.27.1 can generate this
+version. Always retain and check the independently maintained font C subsets,
+including Japanese, after generation. The headless builder emits screens,
+styles and images but not the font C files.
+
+The original file in `release-assets/EEZ` was updated after a verified full
+backup. Exact paths, hashes and migration changes are documented in
+[IDF61_REMAINING_UPDATES_20260911.md](IDF61_REMAINING_UPDATES_20260911.md).
+
+For an offline rendering check after native dependencies are resolved, with
+CMake, Ninja and a host GCC/G++ on PATH:
+
+```powershell
+cmake -S tools/tests/lvgl9_ui -B .pio/lvgl9-ui -G Ninja
+cmake --build .pio/lvgl9-ui -j 6
+.pio/lvgl9-ui/aura_ui_check.exe .pio/lvgl9-ui/rendered
+python tools/check_ui_font_coverage.py
+```
+
+The renderer checks the actual generated C resources and writes 15 PPM images.
+It is a resource/API check, not a substitute for testing firmware runtime UI,
+touch, rotation or sleep/wake on both physical profiles.

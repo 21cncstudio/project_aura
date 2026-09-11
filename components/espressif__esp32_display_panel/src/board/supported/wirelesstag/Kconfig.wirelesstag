@@ -1,0 +1,4 @@
+config BOARD_WIRELESSTAG_WTP4C5MP07S
+    bool "Wireless-Tag WTP4C5MP07S (with 7-inch 1024x600 LCD)"
+    help
+        https://shop.wireless-tag.com/products/7inch-lcd-touch-screen-1024x600-mipi-smart-displays-wtp4c5mp07s-esp32-lcd-board-used-with-esp32-p4-and-esp32-c5-dev-board

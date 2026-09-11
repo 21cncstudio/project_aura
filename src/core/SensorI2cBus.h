@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include <driver/i2c.h>
+#include "AuraI2c.h"
 
 namespace SensorI2cBus {
 

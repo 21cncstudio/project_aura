@@ -4,7 +4,7 @@
 #pragma once
 
 #include <driver/gpio.h>
-#include <driver/i2c.h>
+#include "AuraI2c.h"
 #include <stdint.h>
 
 #include "Ch422gBoardPolicy.h"

@@ -2,12 +2,12 @@ dependencies:
   idf: "==6.1"
   espressif/arduino-esp32: "==3.3.11"
   espressif/esp32_display_panel:
-    git: https://github.com/esp-arduino-libs/ESP32_Display_Panel.git
-    version: 92b790ed6d24b0678e2f45b1fc85f0abd2d41b33
+    version: "==1.0.5"
+    override_path: ../components/espressif__esp32_display_panel
   espressif/esp32_io_expander:
-    version: "==1.1.0"
+    version: "==1.1.1"
     override_path: ../components/espressif__esp32_io_expander
-  espressif/esp-lib-utils: "==0.2.3"
-  lvgl/lvgl: "==8.4.0"
+  espressif/esp-lib-utils: "==0.3.0"
+  lvgl/lvgl: "==9.5.0"
   bblanchon/arduinojson: "==7.4.3"
   espressif/mqtt: "^1.0.0"

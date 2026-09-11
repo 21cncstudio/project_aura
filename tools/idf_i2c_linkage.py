@@ -1,8 +1,9 @@
-"""Reject native-IDF images that mix Aura's legacy I2C with the new driver."""
+"""Require the new I2C master/LCD API and reject every legacy driver entry."""
 
-REQUIRED = {"i2c_driver_install", "check_i2c_driver_conflict", "aura_lcd_new_panel_io_i2c_legacy"}
-FORBIDDEN = {"i2c_acquire_bus_handle", "i2c_new_master_bus", "i2c_master_bus_add_device",
-             "esp_lcd_new_panel_io_i2c"}
+REQUIRED = {"i2c_new_master_bus", "i2c_master_bus_add_device", "i2c_master_transmit",
+            "i2c_master_transmit_receive", "i2c_master_probe", "esp_lcd_new_panel_io_i2c"}
+FORBIDDEN = {"i2c_driver_install", "i2c_driver_delete", "i2c_param_config", "i2c_master_cmd_begin",
+             "aura_lcd_new_panel_io_i2c_legacy", "esp_lcd_new_panel_io_i2c_v1"}
 
 
 def validate_i2c_linkage(symbol_table):
@@ -15,4 +16,4 @@ def validate_i2c_linkage(symbol_table):
     conflicts = FORBIDDEN & defined
     if missing or conflicts:
         raise ValueError(f"Invalid native I2C linkage: missing={sorted(missing)}, "
-                         f"new-driver symbols={sorted(conflicts)}")
+                         f"legacy-driver symbols={sorted(conflicts)}")

@@ -1,0 +1,17 @@
+cmake_minimum_required(VERSION 3.20)
+project(aura_lvgl9_ui_check LANGUAGES C CXX)
+get_filename_component(AURA_ROOT "${CMAKE_CURRENT_LIST_DIR}/../../.." ABSOLUTE)
+set(LV_BUILD_CONF_PATH "${CMAKE_CURRENT_LIST_DIR}/lv_conf.h" CACHE PATH "" FORCE)
+set(CONFIG_LV_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+set(CONFIG_LV_BUILD_DEMOS OFF CACHE BOOL "" FORCE)
+set(CONFIG_LV_USE_THORVG_INTERNAL OFF CACHE BOOL "" FORCE)
+add_subdirectory("${AURA_ROOT}/managed_components/lvgl__lvgl" lvgl)
+file(GLOB fonts "${AURA_ROOT}/src/ui/ui_font_*.c")
+file(GLOB images "${AURA_ROOT}/src/ui/ui_image_*.c")
+list(FILTER images EXCLUDE REGEX "ui_image_project_aura_logo[.]c$")
+add_executable(aura_ui_check ui_check.cpp ${fonts} ${images}
+    "${AURA_ROOT}/src/ui/screens.c" "${AURA_ROOT}/src/ui/styles.c"
+    "${AURA_ROOT}/src/ui/images.c")
+target_include_directories(aura_ui_check PRIVATE "${AURA_ROOT}/src")
+target_link_libraries(aura_ui_check PRIVATE lvgl::lvgl)
+target_compile_features(aura_ui_check PRIVATE cxx_std_17)

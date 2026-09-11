@@ -450,7 +450,7 @@ void UiController::update_sensor_cards(const AirQuality &aq, bool gas_warmup, bo
             unit_font = &ui_font_noto_sans_jp_reg_14;
         }
         const lv_font_t *current_font =
-            lv_obj_get_style_text_font(objects.label_co_unit, LV_PART_MAIN | LV_STATE_DEFAULT);
+            lv_obj_get_style_text_font(objects.label_co_unit, LV_PART_MAIN);
         if (current_font != unit_font) {
             lv_obj_set_style_text_font(objects.label_co_unit, unit_font, LV_PART_MAIN | LV_STATE_DEFAULT);
         }
