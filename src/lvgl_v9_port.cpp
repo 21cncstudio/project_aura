@@ -95,6 +95,7 @@ static TouchWakePolicy::RecoveryStateMachine lvgl_touch_recovery;
 static std::atomic<bool> lvgl_touch_offline{false};
 static volatile uint32_t lvgl_diag_timer_handler_count = 0;
 static volatile uint32_t lvgl_diag_timer_handler_last_ms = 0;
+static std::atomic<uint32_t> lvgl_diag_stack_min_free_bytes{0};
 static volatile uint32_t lvgl_diag_flush_count = 0;
 static volatile uint32_t lvgl_diag_flush_last_ms = 0;
 static volatile uint32_t lvgl_diag_vsync_count = 0;
@@ -1848,6 +1849,7 @@ static void lvgl_port_task(void *arg)
     ESP_UTILS_LOGD("Starting LVGL task");
 
     uint32_t task_delay_ms = LVGL_PORT_TASK_MAX_DELAY_MS;
+    uint32_t stack_sample_ms = 0;
     while (1) {
         if (lvgl_pause_requested.load(std::memory_order_acquire)) {
             if (!lvgl_port_paused.load(std::memory_order_acquire)) {
@@ -1912,6 +1914,15 @@ static void lvgl_port_task(void *arg)
                 task_delay_ms = LVGL_PORT_TASK_MIN_DELAY_MS;
             }
             lvgl_port_unlock();
+        }
+        const uint32_t now_ms = get_rtos_ms();
+        if (stack_sample_ms == 0 || now_ms - stack_sample_ms >= 1000) {
+            // IDF reports the task's lifetime minimum in bytes. Sample from
+            // this task after rendering, outside the UI lock; HTTP only reads
+            // the cached value and never walks a live task's stack.
+            lvgl_diag_stack_min_free_bytes.store(
+                uxTaskGetStackHighWaterMark(nullptr), std::memory_order_relaxed);
+            stack_sample_ms = now_ms;
         }
         if (task_delay_ms > LVGL_PORT_TASK_MAX_DELAY_MS) {
             task_delay_ms = LVGL_PORT_TASK_MAX_DELAY_MS;
@@ -2527,6 +2538,8 @@ bool lvgl_port_get_diagnostics(lvgl_port_diagnostics_t *out)
     out->sample_ms = now_ms;
     out->timer_handler_count = lvgl_diag_timer_handler_count;
     out->timer_handler_age_ms = lvgl_diag_age_ms(now_ms, timer_last_ms);
+    out->task_stack_size_bytes = LVGL_PORT_TASK_STACK_SIZE;
+    out->task_stack_min_free_bytes = lvgl_diag_stack_min_free_bytes.load(std::memory_order_relaxed);
     out->flush_count = lvgl_diag_flush_count;
     out->flush_age_ms = lvgl_diag_age_ms(now_ms, flush_last_ms);
     out->vsync_count = lvgl_diag_vsync_count;

@@ -41,6 +41,8 @@ void test_web_diag_api_utils_names_refresh_callback_and_rotation_ownership() {
     payload.display.sample_ms = 1234;
     payload.display.timer_handler_count = 88;
     payload.display.timer_handler_age_ms = 4;
+    payload.display.task_stack_size_bytes = 16384;
+    payload.display.task_stack_min_free_bytes = 7168;
     payload.display.flush_count = 21;
     payload.display.flush_age_ms = 15;
     payload.display.refresh_callback_semantics = "bounce_frame_finish";
@@ -72,6 +74,8 @@ void test_web_diag_api_utils_names_refresh_callback_and_rotation_ownership() {
         display["refresh_callback_semantics"].as<const char *>());
     TEST_ASSERT_EQUAL_UINT32(63,
                              display["refresh_callback_count"].as<uint32_t>());
+    TEST_ASSERT_EQUAL_UINT32(16384, display["task_stack_size_bytes"].as<uint32_t>());
+    TEST_ASSERT_EQUAL_UINT32(7168, display["task_stack_min_free_bytes"].as<uint32_t>());
     TEST_ASSERT_EQUAL_UINT32(20,
                              display["framebuffer_handoff_count"].as<uint32_t>());
     TEST_ASSERT_TRUE(display["screen_flip_180"].as<bool>());

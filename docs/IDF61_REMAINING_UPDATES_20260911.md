@@ -2,8 +2,8 @@
 
 This is local work on `idf-6.1-migration`, following the tested first-stage
 ESP-IDF 6.1 checkpoint. It is not merged to main or published. The firmware
-currently on the two boards is the earlier `c52e193` checkpoint; none of the
-native-I2C/LVGL-9 candidates in this report has been flashed.
+on the boards was initially the earlier `c52e193` checkpoint. The subsequent
+`427fb475` hardware trial below failed and must not be used for a soak test.
 
 ## Resolved versions
 
@@ -130,3 +130,34 @@ Firmware builds in this branch use `scripts/build_idf.ps1`. The old PlatformIO
 firmware entry point is explicitly blocked after the LVGL 9 migration; its
 configuration is retained for profile identity and host tests. The earlier
 working baseline remains in Git and clean main.
+
+## Hardware failure and stack correction
+
+The user authorized sequential installation on both boards. Both `427fb475`
+images passed complete flash readback SHA-256 and preservation of every other
+partition. On 4.3-inch, the boot capture contains `A stack overflow in task
+lvgl has been detected`, matching the candidate ELF SHA. HTTP observations
+reported PANIC boot reasons and repeated uptime resets; the user independently
+reported a boot error and reboot. This is a failed hardware qualification.
+The bounded 7-inch boot capture subsequently recorded the same LVGL task stack
+overflow. Both profile images are rejected. The diagnostics API unit suite
+passes all nine cases with the added stack fields.
+
+The first review looked at the tail of the serial log and missed the panic at
+its beginning. Future acceptance must scan the entire boot capture for fatal
+messages and check the reset reason from the first HTTP sample, even when the
+display and sensors subsequently initialize. A successful write and a healthy
+individual API response do not establish successful runtime operation.
+
+The new renderer had retained LVGL 8's 6 KiB timer-task stack. The correction
+allocates 16 KiB for LVGL 9 and publishes the configured size plus the lifetime
+minimum free stack bytes in `/api/diag`. The LVGL task samples its own FreeRTOS
+watermark at most once per second, outside the UI mutex. HTTP reads the cached
+value. ESP-IDF's watermark units are bytes. Stack-overflow protection stays on.
+This consumes an additional 10 KiB of internal RAM, so both stack headroom and
+remaining internal heap must be checked on hardware during real UI interaction.
+
+Failure evidence and installation records:
+`D:\21cncstudio\project_aura\logs\idf61_lvgl9_hardware_20260911T201613Z`.
+The correction requires new commit-linked images, fresh exact readback checks,
+full boot-log review, closed-port interaction and a separate overnight result.
