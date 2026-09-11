@@ -1,8 +1,10 @@
 # IDF 6.1 USB logging backpressure regression, 2026-09-11
 
 Status: `c52e193` is installed on both boards and passed the bounded closed-port
-observations below. Physical touch-response confirmation for these new images
-is still pending, so full hardware qualification remains open. The preceding `0eadb70`
+observations below. In the subsequent physical check, the user reported that
+everything appears okay on both boards. This is a provisional positive result;
+long-term stability, cold power cycles and OTA round trips remain untested.
+The preceding `0eadb70`
 trial passed installation integrity and initial API checks, but failed the user's
 physical test. Initial IRQ registration, zero error counters and healthy API
 samples were insufficient to qualify real touch interaction.
@@ -39,7 +41,8 @@ emits nine write fragments for a tagged line, so one line can take approximately
 other logging tasks can also wait on the output path. Two warning timestamps in
 the failing 7-inch snapshot are 36 seconds apart, consistent with two such lines.
 The source mechanism and the read-only open-port recovery support USB logging
-backpressure as the cause; the forthcoming test must validate the correction.
+backpressure as the cause. The subsequent closed-port observations and user
+feedback below support the correction under the tested conditions.
 
 Immediately after `Serial.begin`, native USB Serial/JTAG now sets
 `Serial.setTxTimeoutMs(0)`. Diagnostic writes therefore use nonblocking queue
@@ -102,9 +105,16 @@ bounded samples, not a guarantee against every short transient or a soak test.
 The touch full-read counters remained at the three boot reads throughout both
 observations. Thus these observations did not exercise fresh physical taps.
 The user was asked to repeat Settings/Back actions with COM10/COM11 closed;
-that final-image feedback has not yet arrived. Earlier confirmation that 7-inch
-worked with a serial reader open belongs to `0eadb70` and is not transferred to
-`c52e193` as a completed physical test.
+after the observation sessions ended, the user replied: "да вроде бы ок все"
+(everything seems okay). Record this as provisional physical confirmation for
+both `c52e193` images. Exact tap counts and measured response latency were not
+provided; do not attach that later feedback to the earlier automated counters.
+Earlier confirmation that 7-inch worked with a serial reader open belongs to
+`0eadb70` and remains separate.
+
+The dated follow-up is `USER_FEEDBACK_20260911T1854Z.json` in the regression root.
+It supersedes the pending-feedback field in the original `SUMMARY.json` without
+rewriting that earlier observation record.
 
 Evidence index: `SUMMARY.json` in the regression root. Per-profile
 `*-nonblocking-flash/RESULT.json` records writes/preservation and
