@@ -4,8 +4,10 @@ This records the user-authorized app-only trial on the two identified Aura AQ
 boards. It is separate from the earlier local build qualification. No release
 publication, remote Git update, cold power cycle or OTA round trip is included.
 
-Result: both final images passed write/readback integrity, preservation, boot and
-runtime checks. Final-build physical display/touch confirmation is pending.
+Superseded by a user-reported runtime regression: `0eadb70` is NOT hardware
+qualified. The write/readback and initial boot/API observations below remain
+valid, but subsequent touches had severe delays and sensor readings became stale.
+See [IDF61_USB_BACKPRESSURE_20260911.md](IDF61_USB_BACKPRESSURE_20260911.md).
 The local evidence index is `SUMMARY.json` in the evidence root below.
 
 ## Source and immutable candidates

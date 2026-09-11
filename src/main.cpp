@@ -525,6 +525,12 @@ void setup()
         static_cast<gpio_num_t>(I2C_SCL_PIN));
     delay(3000);
     Serial.begin(115200);
+#if ARDUINO_USB_CDC_ON_BOOT && ARDUINO_USB_MODE
+    // Diagnostic USB output must not wait for a host to drain the TX buffer.
+    // Arduino 3.3.11 can otherwise wait 20 x 100 ms per write fragment,
+    // stalling touch callbacks and sensor polling when no monitor is reading.
+    Serial.setTxTimeoutMs(0);
+#endif
     Logger::begin(Serial, static_cast<Logger::Level>(Config::LOG_LEVEL));
     Logger::setSerialOutputEnabled(Config::LOG_SERIAL_OUTPUT);
     Logger::setSensorsSerialOutputEnabled(Config::LOG_SERIAL_SENSORS_OUTPUT);
