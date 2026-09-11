@@ -1,6 +1,8 @@
 # IDF 6.1 USB logging backpressure regression, 2026-09-11
 
-Status: fix prepared; hardware qualification is pending. The preceding `0eadb70`
+Status: `c52e193` is installed on both boards and passed the bounded closed-port
+observations below. Physical touch-response confirmation for these new images
+is still pending, so full hardware qualification remains open. The preceding `0eadb70`
 trial passed installation integrity and initial API checks, but failed the user's
 physical test. Initial IRQ registration, zero error counters and healthy API
 samples were insufficient to qualify real touch interaction.
@@ -54,3 +56,58 @@ available. The UART console and upstream managed sources are unchanged.
   lock failures with no host application reading COM10/COM11.
 - Include the user in the final physical display/touch check. Do not transfer a
   healthy serial-connected test to unattended/closed-port operation.
+
+## Candidate and installation records
+
+Firmware commit: `c52e1934659c51bce62ad7fc4b5f9bbf207cdb04`.
+Both builds passed identity, RTC layout, OTA integrity, I2C linkage and upstream
+restart-order checks. `setup()` disassembly for each ELF confirms an argument
+of zero to `HWCDC::setTxTimeoutMs` between `HWCDC::begin` and `Logger::begin`.
+The disassembly files and immutable candidates are in the regression evidence root.
+
+| Profile | Build ID | BIN bytes | SHA256 |
+| --- | --- | --- | --- |
+| 4.3-inch | `c52e193` | 4032672 | `6cdfeafe78cc45b21fb2c77e5f229dab04e6f6aba5caae474515b39ab1445d27` |
+| 7-inch | `c52e193-7-dual-i2c` | 4033072 | `ac9ff4977e7653ee106cf1783aed084a1ed9ffdd7972864e938e9b310b6d2839` |
+
+Exact previous `0eadb70` readbacks are reused as backups only after comparing
+their digests with the current app in flash. The original full IDF 5.3 partition
+backups remain preserved. Installers retain all existing USB/MAC/target/partition
+guards, write only the already-selected active app and verify full readback SHA256
+plus outside-app preservation before the normal return from USB download.
+
+Each boot capture is limited to 30 seconds and closed before a separate GET-only
+observer starts. The observer records every sample and flags sensor invalidation,
+new lock errors, delayed LVGL handlers and resets. Static settings screens may
+legitimately have no new flush, so a quiet flush counter alone is not classified
+as a stall. Physical action/response evidence is tracked separately.
+
+## Closed-port results
+
+Both app-only installations passed exact readback SHA256 and outside-app
+preservation. Both 30-second boot captures were closed before observation.
+No serial port was opened during the following GET-only checks.
+
+| Profile | Observation | Samples | Uptime range | Flagged issues | Largest sampled LVGL handler age | Slowest API request |
+| --- | --- | --- | --- | --- | --- | --- |
+| 4.3-inch | 10 minutes | 270 | 58-657 seconds | 0 | 320 ms | 250 ms |
+| 7-inch | 6 minutes | 163 | 52-410 seconds | 0 | 356 ms | 328 ms |
+
+Temperature, humidity, CO2, PM2.5 and pressure remained available in every sample.
+VOC/NOx became available after the existing gas warmup on both boards; HCHO was
+available after its warmup on 4.3-inch. No reset, new LVGL lock failure, touch-read
+error, framebuffer wait timeout or ownership violation was observed. These are
+bounded samples, not a guarantee against every short transient or a soak test.
+
+The touch full-read counters remained at the three boot reads throughout both
+observations. Thus these observations did not exercise fresh physical taps.
+The user was asked to repeat Settings/Back actions with COM10/COM11 closed;
+that final-image feedback has not yet arrived. Earlier confirmation that 7-inch
+worked with a serial reader open belongs to `0eadb70` and is not transferred to
+`c52e193` as a completed physical test.
+
+Evidence index: `SUMMARY.json` in the regression root. Per-profile
+`*-nonblocking-flash/RESULT.json` records writes/preservation and
+`*-closed-port-observation/RESULT.json` plus `samples.jsonl` records runtime.
+All flash, serial-capture and observation processes have completed. Main and
+the release checkpoint remain unchanged; no publication was performed.
