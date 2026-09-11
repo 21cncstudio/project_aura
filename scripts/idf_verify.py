@@ -1,6 +1,7 @@
 """Apply Aura's existing binary gates to a native-IDF firmware build."""
 
 import argparse
+import json
 from pathlib import Path
 import subprocess
 
@@ -14,6 +15,11 @@ def main():
     parser.add_argument("--size-tool", default="xtensa-esp-elf-size")
     args = parser.parse_args()
     env = BuildEnv(args.profile, args.build_dir, args.size_tool)
+    identity = json.loads((args.build_dir / "generated/build-identity.json").read_text(encoding="utf-8"))
+    image = (args.build_dir / "aura_aq.bin").read_bytes()
+    if identity["build_id"].encode("ascii") + b"\0" not in image:
+        raise RuntimeError("The BIN does not contain the current generated build ID")
+    print(f"[build-identity] verified compiled build ID {identity['build_id']}")
     env.run("check_rtc_noinit_abi.py")
     env.run("check_ota_image_identity.py")
     for target, action in env.actions:
@@ -24,6 +30,9 @@ def main():
     objdump = helpers["_find_objdump"](env)
     elf = args.build_dir / "aura_aq.elf"
     table = subprocess.check_output([objdump, "-t", "-C", str(elf)], text=True)
+    from idf_i2c_linkage import validate_i2c_linkage
+    validate_i2c_linkage(table)
+    print("[i2c-linkage] verified one legacy driver, runtime conflict guard and LCD adapter")
     if "__wrap_esp_restart_noos" in table:
         raise RuntimeError("The IDF 5.3.2 restart backport leaked into the IDF 6.1 build")
     symbol = helpers["_read_symbol"](objdump, elf, "esp_restart_noos")

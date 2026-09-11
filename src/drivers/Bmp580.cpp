@@ -7,7 +7,7 @@
 #include "drivers/Bmp580.h"
 
 #include <driver/i2c.h>
-#include <math.h>
+#include <cmath>
 
 #include "config/AppConfig.h"
 #include "core/Logger.h"
@@ -431,7 +431,7 @@ void Bmp580::poll() {
         return;
     }
 
-    if (!isfinite(pressure_hpa) || pressure_hpa <= 0.0f) {
+    if (!std::isfinite(pressure_hpa) || pressure_hpa <= 0.0f) {
         handleNoData(now, "invalid");
         return;
     }

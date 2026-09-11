@@ -30,12 +30,15 @@ add_compile_definitions(${AURA_DEFINITIONS}
     LV_CONF_INCLUDE_SIMPLE LV_LVGL_H_INCLUDE_SIMPLE LV_COLOR_16_SWAP=0)
 
 project(aura_aq)
+include("${CMAKE_SOURCE_DIR}/idf/panel_overlay.cmake")
 get_filename_component(aura_toolchain_dir "${CMAKE_C_COMPILER}" DIRECTORY)
 find_program(AURA_SIZE_TOOL NAMES xtensa-esp32s3-elf-size
     HINTS "${aura_toolchain_dir}" NO_DEFAULT_PATH REQUIRED)
 # Display Panel's public headers include LEDC even for a custom backlight.
 # IDF 6 no longer exposes all peripheral headers through the driver component.
 target_link_libraries(__idf_espressif__esp32_display_panel PUBLIC idf::esp_driver_ledc)
+# WiFiGeneric.h exposes the provisioning types when this SDK option is enabled.
+target_link_libraries(__idf_espressif__arduino-esp32 PUBLIC idf::espressif__network_provisioning)
 # Arduino's Esp.cpp includes an IDF 6.1 HAL header with partially initialized
 # register unions. Zero-initialization is intentional; keep the warning visible
 # without promoting this one upstream diagnostic to an error.

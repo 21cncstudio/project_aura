@@ -10,7 +10,9 @@ and `78f4e9ba` (dependency audit). Migration changes belong only to this branch.
 1. Add native CMake/IDF build integration with Arduino 3.3.11 as a component.
 2. Resolve source/driver incompatibilities and build both hardware profiles.
 3. Verify the exact artifacts on hardware under a separately agreed test scope.
-4. Migrate LVGL 8.4 to LVGL 9 as a later coordinated UI change.
+4. Replace the temporary LCD/legacy-I2C adapter with a coordinated migration
+   of all shared-bus users to the new I2C master API.
+5. Migrate LVGL 8.4 to LVGL 9 as a later coordinated UI change.
 
 The PlatformIO firmware build remains the old Arduino 3.1.1 / IDF 5.3.2 baseline.
 Native tests continue to use `scripts/run_native_tests.py`. Do not describe a
@@ -53,6 +55,14 @@ The panel Kconfig switches explicitly allow the project board header and
 `idf/include/esp_panel_drivers_conf.h`; otherwise the library defaults skip
 Aura's board configuration. Only the ST7262/GT911/CH422G/custom-backlight
 selection is enabled in the native build.
+LVGL also explicitly uses `include/lv_conf.h`, including its PSRAM allocator,
+fonts and 40 ms input/display periods. The application keeps C++17; the SDK
+builds its components with its own language defaults.
+
+The old Arduino SDK enabled the FSM ULP component and reserved 512 bytes of
+RTC slow memory. The native defaults restore that reservation. No ULP program
+is loaded or started by this change. Omitting the reservation shifts all Aura
+RTC_NOINIT symbols by 512 bytes and fails the existing absolute-address gate.
 
 ## Dependencies and preserved checks
 
@@ -73,54 +83,61 @@ The IDF 5.3.2 restart backport is excluded only from the native-IDF build; the
 old PlatformIO baseline still includes it. The restart disassembly validator
 can check the upstream `esp_restart_noos` symbol as well as the old wrapper.
 The native check rejects accidental linkage of the old wrapper.
+It also verifies the compiled build ID and rejects linking the new I2C driver
+alongside the legacy driver. The SDK's own startup conflict check stays enabled.
+The PowerShell wrapper refreshes generated identity before Ninja evaluates its
+dependency graph, including immediately after a Git commit.
 
 The binary checks are fail-closed: an ELF/BIN existing on disk does not qualify
 the migration if its RTC layout, restart path or OTA descriptor checks fail.
 
-## Current evidence
+## Driver and source adaptation
 
-- Both profile preparation runs pass EEZ and sensor-routing checks and generate
-  their own target/address metadata and web resources.
-- CMake configuration succeeds for both `4_3` and `7_dual_i2c`, using IDF 6.1
-  and GCC 15.2.0. The 7-inch generated identity is `aura-aq-7-v1`, GT911 `0x5d`;
-  the 4.3-inch identity is `aura-aq-v1`, GT911 `0x14`.
-- `python -m unittest discover -s tools/tests`: 103 tests passed.
-- `scripts/run_native_tests.py -e native_test_ch422g_4_3_profile
-  -e native_test_ch422g_7_profile`: 48 tests passed, 24 per profile. Report:
-  `.pio/native-tests/reports/20260911T154558Z-b526364e/launcher.json`.
-- EEZ postprocess check and `git diff --check` pass.
-- Full 4.3-inch firmware compilation is blocked in the pinned Display Panel
-  library. No completed firmware ELF/BIN exists. The final RTC, restart and
-  OTA binary gates have therefore not run against an IDF 6.1 artifact.
-- The 7-inch profile has configuration evidence only, not a full firmware build.
-- No hardware test, flash, serial-open, reset, release package or publication
-  was performed.
+`scripts/idf_panel_overlay.py` verifies four upstream source hashes and creates
+build-directory copies of Display Panel. CMake compiles those copies and exports
+their headers. Managed components are never patched in place; an upstream
+change to a patched file fails configuration and requires review.
 
-## Next stage: Display Panel and shared I2C compatibility
+The native adaptation is limited to Aura's ESP32-S3 / 16-line RGB565 profiles.
+It uses IDF 6's explicit RGB input/output formats, typed GPIO fields and updated
+LCD configuration ordering. Original panel geometry and timing values are kept.
+The application objects are available to the linker even when the display
+library is the only caller of a board callback; function-section GC remains on.
 
-The real compiler errors are recorded in
-`D:\21cncstudio\project_aura\tmp\idf61-sdk\build-4_3-08.log`:
+`components/aura_lcd_i2c_legacy` contains the unmodified Espressif v5.5.5 LCD IO
+adapter, compiled against IDF 6.1 with an Aura-specific exported name. Its README
+records source, license, hash and lifetime. It preserves the existing numeric
+port, synchronous transfers, repeated START behavior, timeout and bus ownership
+used by GT911, CH422G, sensors and recovery. It is explicitly a temporary adapter,
+not a conversion of those users to the new I2C master API.
 
-- `BusI2C` assigns integer pins to IDF 6's typed `gpio_num_t` fields.
-- `esp_lcd_i2c_bus_handle_t` and `esp_lcd_new_panel_io_i2c_v1` are absent in
-  IDF 6.1. The new LCD factory takes a new-driver I2C master-bus handle, while
-  Aura's sensors, bus recovery and IO expander still use the legacy driver.
-- The RGB header expects SoC width macros removed in IDF 6; its fallback emits
-  a warning that IDF promotes to a build error.
-- An unconditional Display Panel public header includes `driver/ledc.h`.
-  The native CMake integration now explicitly adds the `esp_driver_ledc`
-  dependency rather than relying on the old umbrella `driver` component.
+Other source fixes use standard C++ math names, typed printf formats, bounded
+date formatting and explicit enum conversions. Wi-Fi inactivity still maps to
+reason code 4, and no retry timing or sensor threshold is changed. CMake declares
+the LEDC and Wi-Fi provisioning header dependencies explicitly.
 
-The follow-up `build-4_3-09.log` confirms configuration and tool discovery pass
-after the LEDC fix; compilation still stops at the RGB width diagnostic.
-Earlier I2C errors remain unresolved in the unchanged library sources.
+## Validation
 
-The upstream managed component has not been edited in place. The next stage
-must provide a reproducible library adaptation and coordinate I2C ownership
-across panel, touch, sensors, IO expander and recovery. Simply passing an old
-numeric I2C port to the new pointer-based factory is invalid. Retain both
-profile policies and the artifact gates while making that change.
+- Python checks: 107 passed (`tmp\idf61-sdk\python-stage2.log`).
+- Full canonical native test launcher: 1044 tests passed across 10 invocations,
+  with zero failures/errors/skipped cases. Report:
+  `.pio/native-tests/reports/20260911T162253Z-fcfe8f08/launcher.json`.
+- After date-log formatting changed, the existing TimeManager/NTP suites were
+  rerun: 51 passed. Report:
+  `.pio/native-tests/reports/20260911T163926Z-0acba4ee/launcher.json`.
+- EEZ postprocess and whitespace checks pass.
+- Both native-IDF builds pass: `4_3` / `aura-aq-v1` and
+  `7_dual_i2c` / `aura-aq-7-v1`. Each image passes compiled build identity,
+  the unchanged RTC layout gate, OTA descriptor/checksum/hash, upstream restart
+  order and legacy-only I2C linkage checks. Both leave 38% of the app partition
+  free. Logs before the source commit: `tmp\idf61-sdk\build-4_3-18.log` and
+  `tmp\idf61-sdk\build-7_dual_i2c-01.log`.
+- The RTC gate initially caught an omitted 512-byte reserve. Restoring the old
+  SDK reservation fixed the layout; the gate and its expected addresses were
+  not relaxed.
+- Commit-linked rebuild logs and exact artifact hashes are recorded locally in
+  `D:\21cncstudio\project_aura\tmp\idf61-sdk\final-build-manifest.json`.
 
-This is an experimental source-build checkpoint, not a buildable firmware
-release. Passing configuration or host tests must not be treated as evidence
-that IDF 6.1 firmware boots or operates on either board.
+Configuration and host tests do not prove that firmware boots or operates on
+either board. Hardware checks, flash/serial/reset, signing, release packaging and
+publication are outside this local migration step and have not been performed.

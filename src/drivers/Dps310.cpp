@@ -6,7 +6,7 @@
 
 #include "Dps310.h"
 #include <driver/i2c.h>
-#include <math.h>
+#include <cmath>
 #include "core/Logger.h"
 
 namespace {
@@ -568,7 +568,7 @@ void Dps310::poll() {
         return;
     }
 
-    if (!isfinite(pressure_hpa) || pressure_hpa <= 0.0f) {
+    if (!std::isfinite(pressure_hpa) || pressure_hpa <= 0.0f) {
         handleNoData(now, "invalid");
         return;
     }

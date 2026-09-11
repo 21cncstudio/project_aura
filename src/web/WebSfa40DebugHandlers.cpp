@@ -6,7 +6,7 @@
 
 #include "web/WebSfa40DebugHandlers.h"
 
-#include <math.h>
+#include <cmath>
 
 #include <ArduinoJson.h>
 
@@ -83,7 +83,7 @@ String seconds_after_start_text(uint32_t start_ms, uint32_t event_ms) {
 }
 
 String float_text(bool valid, float value, unsigned decimals, const char *unit) {
-    if (!valid || !isfinite(value)) {
+    if (!valid || !std::isfinite(value)) {
         return "n/a";
     }
     String out(value, decimals);

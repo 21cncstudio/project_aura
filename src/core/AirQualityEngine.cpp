@@ -1,6 +1,6 @@
 #include "core/AirQualityEngine.h"
 
-#include <math.h>
+#include <cmath>
 
 #include "config/AppConfig.h"
 
@@ -102,7 +102,7 @@ MetricEvaluation evaluateMetric(Metric metric, const SensorData &data, bool gas_
     switch (metric) {
         case Metric::PM05:
             result.group = Group::Particulates;
-            if (data.pm05_valid && isfinite(data.pm05) && data.pm05 >= 0.0f) {
+            if (data.pm05_valid && std::isfinite(data.pm05) && data.pm05 >= 0.0f) {
                 result.valid = true;
                 result.score = score_from_thresholds(data.pm05,
                                                      0.0f,
@@ -113,7 +113,7 @@ MetricEvaluation evaluateMetric(Metric metric, const SensorData &data, bool gas_
             break;
         case Metric::PM1:
             result.group = Group::Particulates;
-            if (data.pm1_valid && isfinite(data.pm1) && data.pm1 >= 0.0f) {
+            if (data.pm1_valid && std::isfinite(data.pm1) && data.pm1 >= 0.0f) {
                 result.valid = true;
                 result.score = score_from_thresholds(data.pm1,
                                                      0.0f,
@@ -124,7 +124,7 @@ MetricEvaluation evaluateMetric(Metric metric, const SensorData &data, bool gas_
             break;
         case Metric::PM25:
             result.group = Group::Particulates;
-            if (data.pm25_valid && isfinite(data.pm25) && data.pm25 >= 0.0f) {
+            if (data.pm25_valid && std::isfinite(data.pm25) && data.pm25 >= 0.0f) {
                 result.valid = true;
                 result.score = score_from_thresholds(data.pm25,
                                                      0.0f,
@@ -135,7 +135,7 @@ MetricEvaluation evaluateMetric(Metric metric, const SensorData &data, bool gas_
             break;
         case Metric::PM4:
             result.group = Group::Particulates;
-            if (data.pm4_valid && isfinite(data.pm4) && data.pm4 >= 0.0f) {
+            if (data.pm4_valid && std::isfinite(data.pm4) && data.pm4 >= 0.0f) {
                 result.valid = true;
                 result.score = score_from_thresholds(data.pm4,
                                                      0.0f,
@@ -146,7 +146,7 @@ MetricEvaluation evaluateMetric(Metric metric, const SensorData &data, bool gas_
             break;
         case Metric::PM10:
             result.group = Group::Particulates;
-            if (data.pm10_valid && isfinite(data.pm10) && data.pm10 >= 0.0f) {
+            if (data.pm10_valid && std::isfinite(data.pm10) && data.pm10 >= 0.0f) {
                 result.valid = true;
                 result.score = score_from_thresholds(data.pm10,
                                                      0.0f,
@@ -190,7 +190,7 @@ MetricEvaluation evaluateMetric(Metric metric, const SensorData &data, bool gas_
             break;
         case Metric::HCHO:
             result.group = Group::ToxicGas;
-            if (data.hcho_valid && isfinite(data.hcho) && data.hcho >= 0.0f) {
+            if (data.hcho_valid && std::isfinite(data.hcho) && data.hcho >= 0.0f) {
                 result.valid = true;
                 result.score = score_from_thresholds(data.hcho,
                                                      0.0f,
@@ -203,7 +203,7 @@ MetricEvaluation evaluateMetric(Metric metric, const SensorData &data, bool gas_
             result.group = Group::ToxicGas;
             if (data.co_sensor_present &&
                 data.co_valid &&
-                isfinite(data.co_ppm) &&
+                std::isfinite(data.co_ppm) &&
                 data.co_ppm >= 0.0f) {
                 result.valid = true;
                 result.score = score_from_co(data.co_ppm);

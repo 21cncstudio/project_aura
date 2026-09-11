@@ -6,7 +6,7 @@
 
 #include "Sfa30.h"
 
-#include <math.h>
+#include <cmath>
 
 #include "config/AppConfig.h"
 #include "core/BootState.h"
@@ -255,7 +255,7 @@ void Sfa30::poll() {
     fail_count_ = 0;
     status_ = Status::Ok;
     last_error_cause_ = ErrorCause::None;
-    if (isfinite(hcho_ppb) && hcho_ppb >= 0.0f) {
+    if (std::isfinite(hcho_ppb) && hcho_ppb >= 0.0f) {
         last_hcho_ppb_ = hcho_ppb;
         data_valid_ = true;
         has_new_data_ = true;

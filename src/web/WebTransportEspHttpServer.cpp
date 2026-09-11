@@ -508,7 +508,7 @@ public:
     }
 
     String uri() const override {
-        return (req_ && req_->uri) ? String(req_->uri) : String();
+        return req_ ? String(req_->uri) : String();
     }
 
     void sendHeader(const char *name, const String &value, bool) override {

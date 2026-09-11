@@ -7,7 +7,7 @@
 #include "ui/UiController.h"
 
 #include <float.h>
-#include <math.h>
+#include <cmath>
 #include <string.h>
 #include <time.h>
 
@@ -149,7 +149,7 @@ void UiController::update_voc_info_graph() {
     update_voc_zone_overlay(axis.y_min_display, axis.y_max_display);
 
     if (has_values) {
-        if (!isfinite(latest_voc)) {
+        if (!std::isfinite(latest_voc)) {
             latest_voc = max_voc;
         }
         update_voc_graph_overlays(true, min_voc, max_voc, latest_voc);
@@ -285,7 +285,7 @@ void UiController::update_nox_info_graph() {
     update_nox_zone_overlay(axis.y_min_display, axis.y_max_display);
 
     if (has_values) {
-        if (!isfinite(latest_nox)) {
+        if (!std::isfinite(latest_nox)) {
             latest_nox = max_nox;
         }
         update_nox_graph_overlays(true, min_nox, max_nox, latest_nox);
@@ -502,7 +502,7 @@ void UiController::update_optional_gas_info_graph() {
     update_optional_gas_zone_overlay(axis.y_min_display, axis.y_max_display);
 
     if (has_values) {
-        if (!isfinite(latest_ppm)) {
+        if (!std::isfinite(latest_ppm)) {
             latest_ppm = max_ppm;
         }
         update_optional_gas_graph_overlays(true, min_ppm, max_ppm, latest_ppm);
@@ -639,7 +639,7 @@ void UiController::update_hcho_info_graph() {
     update_hcho_zone_overlay(axis.y_min_display, axis.y_max_display);
 
     if (has_values) {
-        if (!isfinite(latest_hcho)) {
+        if (!std::isfinite(latest_hcho)) {
             latest_hcho = max_hcho;
         }
         update_hcho_graph_overlays(true, min_hcho, max_hcho, latest_hcho);
@@ -775,7 +775,7 @@ void UiController::update_co2_info_graph() {
     update_co2_zone_overlay(axis.y_min_display, axis.y_max_display);
 
     if (has_values) {
-        if (!isfinite(latest_co2)) {
+        if (!std::isfinite(latest_co2)) {
             latest_co2 = max_co2;
         }
         update_co2_graph_overlays(true, min_co2, max_co2, latest_co2);
@@ -913,7 +913,7 @@ void UiController::update_co_info_graph() {
     update_co_zone_overlay(axis.y_min_display, axis.y_max_display);
 
     if (has_values) {
-        if (!isfinite(latest_co)) {
+        if (!std::isfinite(latest_co)) {
             latest_co = max_co;
         }
         update_co_graph_overlays(true, min_co, max_co, latest_co);

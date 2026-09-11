@@ -1379,16 +1379,10 @@ TimeManager::PollResult TimeManager::ntpPoll(uint32_t now_ms,
                 if (!localtimeInto(epoch, local_tm)) {
                     return result;
                 }
-                char buf[32];
-                snprintf(buf,
-                         sizeof(buf),
-                         "%04d-%02d-%02d %02d:%02d:%02d",
-                         local_tm.tm_year + 1900,
-                         local_tm.tm_mon + 1,
-                         local_tm.tm_mday,
-                         local_tm.tm_hour,
-                         local_tm.tm_min,
-                         local_tm.tm_sec);
+                char buf[32] = {};
+                if (strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M:%S", &local_tm) == 0) {
+                    strcpy(buf, "unavailable");
+                }
                 LOGI("Time", "NTP sync completed, local time=%s", buf);
                 system_time_trusted_ = true;
                 ntp_syncing_ = false;

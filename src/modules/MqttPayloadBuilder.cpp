@@ -6,7 +6,7 @@
 
 #include "modules/MqttPayloadBuilder.h"
 
-#include <math.h>
+#include <cmath>
 #include <stdio.h>
 #include <stdarg.h>
 #include <string.h>
@@ -143,7 +143,7 @@ void append_slug_component(String &out, const char *text) {
 }
 
 float compute_dew_point_c(float temp_c, float rh) {
-    if (!isfinite(temp_c) || !isfinite(rh) || rh <= 0.0f) {
+    if (!std::isfinite(temp_c) || !std::isfinite(rh) || rh <= 0.0f) {
         return NAN;
     }
     float rh_clamped = fminf(fmaxf(rh, 1.0f), 100.0f);
@@ -200,15 +200,15 @@ bool pressure_altitude_configured(bool pressure_altitude_set) {
 }
 
 float pressure_absolute_to_msl_hpa(float pressure_hpa, int altitude_m) {
-    if (!isfinite(pressure_hpa)) {
+    if (!std::isfinite(pressure_hpa)) {
         return pressure_hpa;
     }
     const float base = 1.0f - (static_cast<float>(altitude_m) / 44330.0f);
-    if (!isfinite(base) || base <= 0.0f) {
+    if (!std::isfinite(base) || base <= 0.0f) {
         return pressure_hpa;
     }
     const float corrected = pressure_hpa / powf(base, 5.255f);
-    return isfinite(corrected) ? corrected : pressure_hpa;
+    return std::isfinite(corrected) ? corrected : pressure_hpa;
 }
 
 float pressure_to_publish(float pressure_hpa, bool pressure_altitude_set, int altitude_m) {
@@ -383,7 +383,7 @@ bool optional_gas_value_valid(const SensorData &data) {
     return data.optional_gas_sensor_present &&
            data.optional_gas_valid &&
            optional_gas_type_from_data(data) != OptionalGasType::None &&
-           isfinite(data.optional_gas_ppm) &&
+           std::isfinite(data.optional_gas_ppm) &&
            data.optional_gas_ppm >= 0.0f;
 }
 
@@ -406,7 +406,7 @@ const char *optional_gas_unit_text(const SensorData &data) {
 
 int optional_gas_ppm_decimals(const SensorData &data, float value) {
     const int decimals = data.optional_gas_ppm_decimals <= 2 ? data.optional_gas_ppm_decimals : 1;
-    if (decimals == 2 && isfinite(value) && value >= 1.0f) {
+    if (decimals == 2 && std::isfinite(value) && value >= 1.0f) {
         return 1;
     }
     return decimals;
@@ -691,13 +691,13 @@ size_t buildStatePayload(char *out,
     bool dew_valid = data.temp_valid && data.hum_valid;
     if (dew_valid) {
         dew_c = compute_dew_point_c(data.temperature, data.humidity);
-        dew_valid = isfinite(dew_c);
+        dew_valid = std::isfinite(dew_c);
     }
     float ah_gm3 = NAN;
     bool ah_valid = data.temp_valid && data.hum_valid;
     if (ah_valid) {
         ah_gm3 = MathUtils::compute_absolute_humidity_gm3(data.temperature, data.humidity);
-        ah_valid = isfinite(ah_gm3);
+        ah_valid = std::isfinite(ah_gm3);
     }
     const AirQualityEngine::Result aqi = AirQualityEngine::evaluate(data, gas_warmup);
     const float pressure_published =
@@ -721,7 +721,7 @@ size_t buildStatePayload(char *out,
     }
     const bool co_valid = data.co_sensor_present &&
                           data.co_valid &&
-                          isfinite(data.co_ppm) &&
+                          std::isfinite(data.co_ppm) &&
                           data.co_ppm >= 0.0f;
     const bool nh3_valid = optional_gas_value_valid_for_type(data, OptionalGasType::NH3);
     const bool so2_valid = optional_gas_value_valid_for_type(data, OptionalGasType::SO2);

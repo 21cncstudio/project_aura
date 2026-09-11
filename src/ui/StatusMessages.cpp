@@ -8,7 +8,7 @@
 #include "ui/UiStrings.h"
 #include "core/MathUtils.h"
 
-#include <math.h>
+#include <cmath>
 
 namespace StatusMessages {
 
@@ -40,7 +40,7 @@ StatusSeverity classify_range_severity(float value, const DisplayThresholds::Ran
 }
 
 bool is_low_side(float value, const DisplayThresholds::Range &thresholds) {
-    return isfinite(value) && value < thresholds.good_min;
+    return std::isfinite(value) && value < thresholds.good_min;
 }
 
 } // namespace
@@ -93,7 +93,7 @@ StatusMessageResult build_status_messages(const SensorData &data,
 
     if (data.co_sensor_present &&
         data.co_valid &&
-        isfinite(data.co_ppm) &&
+        std::isfinite(data.co_ppm) &&
         data.co_ppm >= 0.0f) {
         result.has_valid = true;
         co_sev = classify_high_severity(data.co_ppm, thresholds.co);
@@ -113,7 +113,7 @@ StatusMessageResult build_status_messages(const SensorData &data,
         return result;
     }
 
-    if (data.pm25_valid && isfinite(data.pm25) && data.pm25 >= 0.0f) {
+    if (data.pm25_valid && std::isfinite(data.pm25) && data.pm25 >= 0.0f) {
         result.has_valid = true;
         if (data.pm25 >= 55.0f) {
             pm25_sev = STATUS_RED;
@@ -127,7 +127,7 @@ StatusMessageResult build_status_messages(const SensorData &data,
         }
     }
 
-    if (data.pm1_valid && isfinite(data.pm1) && data.pm1 >= 0.0f) {
+    if (data.pm1_valid && std::isfinite(data.pm1) && data.pm1 >= 0.0f) {
         result.has_valid = true;
         if (data.pm1 >= 50.0f) {
             pm1_sev = STATUS_RED;
@@ -141,7 +141,7 @@ StatusMessageResult build_status_messages(const SensorData &data,
         }
     }
 
-    if (data.pm10_valid && isfinite(data.pm10) && data.pm10 >= 0.0f) {
+    if (data.pm10_valid && std::isfinite(data.pm10) && data.pm10 >= 0.0f) {
         result.has_valid = true;
         if (data.pm10 >= 254.0f) {
             pm10_sev = STATUS_RED;
@@ -155,7 +155,7 @@ StatusMessageResult build_status_messages(const SensorData &data,
         }
     }
 
-    if (data.hcho_valid && isfinite(data.hcho) && data.hcho >= 0.0f) {
+    if (data.hcho_valid && std::isfinite(data.hcho) && data.hcho >= 0.0f) {
         result.has_valid = true;
         hcho_sev = classify_high_severity(data.hcho, thresholds.hcho);
         if (hcho_sev == STATUS_RED) {
@@ -191,7 +191,7 @@ StatusMessageResult build_status_messages(const SensorData &data,
         }
     }
 
-    if (data.temp_valid && isfinite(data.temperature)) {
+    if (data.temp_valid && std::isfinite(data.temperature)) {
         result.has_valid = true;
         const float t = data.temperature;
         temp_sev = classify_range_severity(t, thresholds.temp);
@@ -210,7 +210,7 @@ StatusMessageResult build_status_messages(const SensorData &data,
     bool dp_high = false;
     if (data.temp_valid && data.hum_valid) {
         dew_c = MathUtils::compute_dew_point_c(data.temperature, data.humidity);
-        if (isfinite(dew_c)) {
+        if (std::isfinite(dew_c)) {
             dp_sev = classify_range_severity(dew_c, thresholds.dew_point);
             dp_low = dp_sev != STATUS_NONE && is_low_side(dew_c, thresholds.dew_point);
             dp_high = dp_sev != STATUS_NONE && !dp_low;
@@ -228,7 +228,7 @@ StatusMessageResult build_status_messages(const SensorData &data,
         }
     }
 
-    if (data.hum_valid && isfinite(data.humidity)) {
+    if (data.hum_valid && std::isfinite(data.humidity)) {
         result.has_valid = true;
         const float h = data.humidity;
         hum_sev = classify_range_severity(h, thresholds.rh);
@@ -244,7 +244,7 @@ StatusMessageResult build_status_messages(const SensorData &data,
 
     if (data.temp_valid && data.hum_valid) {
         const float ah_gm3 = MathUtils::compute_absolute_humidity_gm3(data.temperature, data.humidity);
-        if (isfinite(ah_gm3)) {
+        if (std::isfinite(ah_gm3)) {
             result.has_valid = true;
             ah_sev = classify_range_severity(ah_gm3, thresholds.ah);
             const bool low = is_low_side(ah_gm3, thresholds.ah);

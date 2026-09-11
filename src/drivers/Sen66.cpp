@@ -5,7 +5,7 @@
 // Purchase a Commercial License: see COMMERCIAL_LICENSE_SUMMARY.md
 
 #include "Sen66.h"
-#include <math.h>
+#include <cmath>
 #include <string.h>
 #include "core/BootState.h"
 #include "core/Logger.h"
@@ -366,7 +366,7 @@ bool Sen66::readValues(SensorData &out) {
     out.hum_valid = (rh_raw != 0x7FFF);
     if (out.hum_valid) {
         out.humidity = (rh_raw / 100.0f) + hum_offset_;
-        if (!isfinite(out.humidity)) {
+        if (!std::isfinite(out.humidity)) {
             out.hum_valid = false;
             out.humidity = 0.0f;
         }
@@ -550,7 +550,7 @@ void Sen66::updatePressure(float pressure_hpa) {
     if (!ok_ || busy_) {
         return;
     }
-    if (!isfinite(pressure_hpa)) {
+    if (!std::isfinite(pressure_hpa)) {
         return;
     }
     uint32_t now = millis();
@@ -1018,7 +1018,7 @@ bool Sen66::calibrateFRC(uint16_t ref_ppm, bool has_pressure, float pressure_hpa
         return false;
     }
 
-    if (has_pressure && isfinite(pressure_hpa)) {
+    if (has_pressure && std::isfinite(pressure_hpa)) {
         uint16_t hpa = static_cast<uint16_t>(lroundf(pressure_hpa));
         if (hpa < Config::SEN66_PRESSURE_MIN_HPA) {
             hpa = Config::SEN66_PRESSURE_MIN_HPA;

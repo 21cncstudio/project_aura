@@ -6,7 +6,7 @@
 
 #include "web/WebStateApiUtils.h"
 
-#include <math.h>
+#include <cmath>
 
 #include "core/MathUtils.h"
 #include "drivers/DfrOptionalGasSensor.h"
@@ -123,7 +123,7 @@ void fillJson(ArduinoJson::JsonObject root, const Payload &payload) {
     const bool optional_gas_valid =
         optional_gas_present &&
         data.optional_gas_valid &&
-        isfinite(data.optional_gas_ppm) &&
+        std::isfinite(data.optional_gas_ppm) &&
         data.optional_gas_ppm >= 0.0f;
     WebJsonUtils::jsonSetFloatOrNull(sensors, "optional_gas", optional_gas_valid, data.optional_gas_ppm);
     if (optional_gas_present) {

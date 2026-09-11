@@ -148,7 +148,7 @@ void UiController::update_datetime_ui() {
                                     LV_PART_MAIN | LV_STATE_DEFAULT);
     }
 
-    char buf[8];
+    char buf[16];
     const int display_hour = time_format_24h_ ? set_hour : format_hour_12h(set_hour);
     snprintf(buf, sizeof(buf), "%02d", display_hour);
     if (objects.label_set_time_hours_value) safe_label_set_text(objects.label_set_time_hours_value, buf);

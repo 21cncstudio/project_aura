@@ -81,3 +81,11 @@ CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y
 # Reuse Aura's board header and the native-build driver selection.
 # CONFIG_ESP_PANEL_DRIVERS_FILE_SKIP is not set
 # CONFIG_ESP_PANEL_BOARD_FILE_SKIP is not set
+# Use Aura's LVGL memory, font and 40 ms input/display settings.
+# CONFIG_LV_CONF_SKIP is not set
+# CONFIG_LV_BUILD_EXAMPLES is not set
+# Match the old Arduino SDK's RTC slow-memory reservation. This keeps the
+# retained OTA/restart diagnostics at their existing absolute addresses.
+CONFIG_ULP_COPROC_ENABLED=y
+CONFIG_ULP_COPROC_TYPE_FSM=y
+CONFIG_ULP_COPROC_RESERVE_MEM=512

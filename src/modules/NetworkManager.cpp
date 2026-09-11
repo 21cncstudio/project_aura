@@ -15,6 +15,7 @@
 #include <esp_heap_caps.h>
 #include <esp_mac.h>
 #include <esp_wifi.h>
+#include <esp_idf_version.h>
 #if __has_include("esp_eap_client.h")
 #include "esp_eap_client.h"
 #endif
@@ -48,12 +49,18 @@ constexpr uint32_t kWifiColdBootWarmupMs = 2500UL;
 constexpr uint8_t kWifiColdBootSoftConnectAttempts = 3;
 constexpr uint32_t kWifiRecoveryRetryDelayMs = 30000UL;
 constexpr wifi_ps_type_t kWifiStaDefaultPowerSaveMode = WIFI_PS_NONE;
+#if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(6, 0, 0)
+constexpr wifi_err_reason_t kWifiInactiveReason = WIFI_REASON_DISASSOC_DUE_TO_INACTIVITY;
+#else
+constexpr wifi_err_reason_t kWifiInactiveReason = WIFI_REASON_ASSOC_EXPIRE;
+#endif
+static_assert(kWifiInactiveReason == 4, "Preserve the existing inactivity retry policy");
 
 bool is_retryable_connect_reason(wifi_err_reason_t reason) {
     return reason == WIFI_REASON_AUTH_EXPIRE ||
            reason == WIFI_REASON_AUTH_LEAVE ||
            reason == WIFI_REASON_NO_AP_FOUND ||
-           reason == WIFI_REASON_ASSOC_EXPIRE;
+           reason == kWifiInactiveReason;
 }
 
 bool has_internal_heap_for_wifi_start(uint32_t &free_bytes, uint32_t &largest_block_bytes) {

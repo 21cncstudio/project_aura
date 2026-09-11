@@ -7,7 +7,7 @@
 #include "ui/UiController.h"
 
 #include <float.h>
-#include <math.h>
+#include <cmath>
 #include <string.h>
 #include <time.h>
 
@@ -20,7 +20,7 @@
 
 namespace {
 bool format_pm05_count(float value, char *buf, size_t buf_size) {
-    if (!isfinite(value) || value < 0.0f || !buf || buf_size == 0) {
+    if (!std::isfinite(value) || value < 0.0f || !buf || buf_size == 0) {
         return false;
     }
     if (value >= 1000.0f) {
@@ -120,7 +120,7 @@ void UiController::update_sensor_info_ui() {
             const bool warmup = present && currentData.optional_gas_warmup;
             const bool valid = present &&
                                currentData.optional_gas_valid &&
-                               isfinite(currentData.optional_gas_ppm) &&
+                               std::isfinite(currentData.optional_gas_ppm) &&
                                currentData.optional_gas_ppm >= 0.0f;
 
             if (objects.label_sensor_info_title) {
@@ -261,7 +261,7 @@ void UiController::update_sensor_info_ui() {
             if (currentData.temp_valid && currentData.hum_valid) {
                 ah_gm3 = MathUtils::compute_absolute_humidity_gm3(currentData.temperature, currentData.humidity);
             }
-            if (isfinite(ah_gm3)) {
+            if (std::isfinite(ah_gm3)) {
                 char buf[16];
                 snprintf(buf, sizeof(buf), "%.0f", ah_gm3);
                 safe_label_set_text(objects.label_sensor_value, buf);
@@ -316,7 +316,7 @@ void UiController::update_sensor_info_ui() {
             if (currentData.temp_valid && currentData.hum_valid) {
                 dew_c = MathUtils::compute_dew_point_c(currentData.temperature, currentData.humidity);
             }
-            if (isfinite(dew_c)) {
+            if (std::isfinite(dew_c)) {
                 float dew_display = dew_c;
                 if (!temp_units_c) {
                     dew_display = (dew_display * 9.0f / 5.0f) + 32.0f;
@@ -361,8 +361,8 @@ void UiController::update_sensor_info_ui() {
             const bool pm4_selected = info_sensor == INFO_PM4;
             const float value = pm4_selected ? currentData.pm4 : currentData.pm25;
             const bool value_valid = pm4_selected
-                ? (currentData.pm4_valid && isfinite(currentData.pm4) && currentData.pm4 >= 0.0f)
-                : (currentData.pm25_valid && isfinite(currentData.pm25) && currentData.pm25 >= 0.0f);
+                ? (currentData.pm4_valid && std::isfinite(currentData.pm4) && currentData.pm4 >= 0.0f)
+                : (currentData.pm25_valid && std::isfinite(currentData.pm25) && currentData.pm25 >= 0.0f);
             if (value_valid) {
                 char buf[16];
                 if (value < 10.0f) snprintf(buf, sizeof(buf), "%.1f", value);
@@ -415,7 +415,7 @@ void UiController::update_sensor_info_ui() {
             break;
         }
         case INFO_PM1: {
-            const bool pm1_available = currentData.pm1_valid && isfinite(currentData.pm1) && currentData.pm1 >= 0.0f;
+            const bool pm1_available = currentData.pm1_valid && std::isfinite(currentData.pm1) && currentData.pm1 >= 0.0f;
             if (pm1_available) {
                 char buf[16];
                 if (currentData.pm1 < 10.0f) snprintf(buf, sizeof(buf), "%.1f", currentData.pm1);
@@ -438,7 +438,7 @@ void UiController::update_sensor_info_ui() {
             break;
         }
         case INFO_CO: {
-            const bool co_valid = currentData.co_valid && isfinite(currentData.co_ppm) && currentData.co_ppm >= 0.0f;
+            const bool co_valid = currentData.co_valid && std::isfinite(currentData.co_ppm) && currentData.co_ppm >= 0.0f;
             if (co_valid) {
                 char buf[16];
                 if (currentData.co_ppm > 0.0f && currentData.co_ppm < 10.0f) {

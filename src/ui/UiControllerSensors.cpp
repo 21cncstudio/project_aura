@@ -12,7 +12,7 @@
 #include "ui/fonts.h"
 #include "core/MathUtils.h"
 
-#include <math.h>
+#include <cmath>
 #include <stdio.h>
 #include <string.h>
 
@@ -25,7 +25,7 @@ bool has_co_sensor_data(const SensorData &data) {
 bool has_valid_co_sensor_data(const SensorData &data) {
     return data.co_sensor_present &&
            data.co_valid &&
-           isfinite(data.co_ppm) &&
+           std::isfinite(data.co_ppm) &&
            data.co_ppm >= 0.0f;
 }
 
@@ -44,7 +44,7 @@ bool has_valid_optional_gas_sensor_data(const SensorData &data) {
     return data.optional_gas_sensor_present &&
            data.optional_gas_valid &&
            get_optional_gas_type(data) != OptionalGasType::None &&
-           isfinite(data.optional_gas_ppm) &&
+           std::isfinite(data.optional_gas_ppm) &&
            data.optional_gas_ppm >= 0.0f;
 }
 
@@ -75,7 +75,7 @@ float get_co_ppm_value(const SensorData &data) {
 }
 
 bool format_pm05_count(float value, char *buf, size_t buf_size) {
-    if (!isfinite(value) || value < 0.0f || !buf || buf_size == 0) {
+    if (!std::isfinite(value) || value < 0.0f || !buf || buf_size == 0) {
         return false;
     }
     if (value >= 1000.0f) {
@@ -174,16 +174,16 @@ void UiController::update_sensor_cards(const AirQuality &aq, bool gas_warmup, bo
     float ah_gm3 = NAN;
     if (currentData.temp_valid && currentData.hum_valid) {
         dew_c = MathUtils::compute_dew_point_c(currentData.temperature, currentData.humidity);
-        if (isfinite(dew_c)) {
+        if (std::isfinite(dew_c)) {
             dew_c_rounded = roundf(dew_c);
         }
         ah_gm3 = MathUtils::compute_absolute_humidity_gm3(currentData.temperature, currentData.humidity);
     }
-    if (isfinite(dew_c)) {
+    if (std::isfinite(dew_c)) {
         float dew_display = dew_c;
         if (!temp_units_c) {
             dew_display = (dew_display * 9.0f / 5.0f) + 32.0f;
-        } else if (isfinite(dew_c_rounded)) {
+        } else if (std::isfinite(dew_c_rounded)) {
             dew_display = dew_c_rounded;
         }
         snprintf(buf, sizeof(buf), "%.0f", dew_display);
@@ -194,12 +194,12 @@ void UiController::update_sensor_cards(const AirQuality &aq, bool gas_warmup, bo
     if (objects.label_dew_unit_1) {
         safe_label_set_text_static(objects.label_dew_unit_1, temp_units_c ? UiText::UnitC() : UiText::UnitF());
     }
-    float dp_color_c = isfinite(dew_c_rounded) ? dew_c_rounded : dew_c;
+    float dp_color_c = std::isfinite(dew_c_rounded) ? dew_c_rounded : dew_c;
     lv_color_t dp_col = getDewPointColor(dp_color_c);
     if (objects.dot_dp_1) {
         set_dot_color(objects.dot_dp_1, alert_color_for_mode(dp_col));
     }
-    if (isfinite(ah_gm3)) {
+    if (std::isfinite(ah_gm3)) {
         snprintf(buf, sizeof(buf), "%.0f", ah_gm3);
         safe_label_set_text(objects.label_ah_value_1, buf);
     } else {
@@ -264,7 +264,7 @@ void UiController::update_sensor_cards(const AirQuality &aq, bool gas_warmup, bo
     lv_color_t pm05_col = currentData.pm05_valid ? getPM05Color(currentData.pm05) : color_inactive();
     set_dot_color(objects.dot_pm05, alert_color_for_mode(pm05_col));
 
-    const bool pm1_available = currentData.pm1_valid && isfinite(currentData.pm1) && currentData.pm1 >= 0.0f;
+    const bool pm1_available = currentData.pm1_valid && std::isfinite(currentData.pm1) && currentData.pm1 >= 0.0f;
     const bool co_sensor_present = has_co_sensor_data(currentData);
     const bool show_pm1_in_pm10_card = co_sensor_present;
     set_visible(objects.label_pm1_title, show_pm1_in_pm10_card);

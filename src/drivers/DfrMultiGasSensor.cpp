@@ -7,7 +7,7 @@
 #include "drivers/DfrMultiGasSensor.h"
 
 #include <driver/i2c.h>
-#include <math.h>
+#include <cmath>
 #include <string.h>
 
 #include "config/AppConfig.h"
@@ -269,7 +269,7 @@ void DfrMultiGasSensor::poll() {
         return;
     }
 
-    if (!isfinite(ppm) || ppm < config_.min_ppm) {
+    if (!std::isfinite(ppm) || ppm < config_.min_ppm) {
         if (config_.defer_semantic_invalidation_until_failure_limit) {
             notePollFailure(now, FailureReason::InvalidConcentration);
         } else {
@@ -325,7 +325,7 @@ void DfrMultiGasSensor::clampPpm(float min_ppm, float max_ppm) {
     if (!data_valid_) {
         return;
     }
-    if (!isfinite(ppm_) || ppm_ < min_ppm) {
+    if (!std::isfinite(ppm_) || ppm_ < min_ppm) {
         data_valid_ = false;
         ppm_ = 0.0f;
         return;

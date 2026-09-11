@@ -6,7 +6,7 @@
 
 #include "modules/ChartsHistory.h"
 
-#include <math.h>
+#include <cmath>
 #include <string.h>
 #include "core/Logger.h"
 #include "modules/StorageManager.h"
@@ -218,7 +218,7 @@ ChartsHistory::Sample ChartsHistory::makeSample(const SensorData &data, bool gas
     if (data.optional_gas_sensor_present &&
         data.optional_gas_valid &&
         data.optional_gas_type != 0 &&
-        isfinite(data.optional_gas_ppm) &&
+        std::isfinite(data.optional_gas_ppm) &&
         data.optional_gas_ppm >= 0.0f) {
         sample.valid_mask |= metricBit(METRIC_OPTIONAL_GAS);
         sample.values[METRIC_OPTIONAL_GAS] = data.optional_gas_ppm;
@@ -264,7 +264,7 @@ void ChartsHistory::appendGapPoints(uint32_t gap_points, const Sample &current_s
     for (uint32_t i = 1; i <= gap_points; ++i) {
         Sample gap = {};
         if (pressure_start_valid && pressure_end_valid &&
-            isfinite(pressure_start) && isfinite(pressure_end)) {
+            std::isfinite(pressure_start) && std::isfinite(pressure_end)) {
             float ratio = static_cast<float>(i) / static_cast<float>(gap_points + 1);
             gap.valid_mask |= metricBit(METRIC_PRESSURE);
             gap.values[METRIC_PRESSURE] =

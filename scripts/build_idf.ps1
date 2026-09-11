@@ -23,6 +23,9 @@ $pythonExe = Join-Path $env:IDF_PYTHON_ENV_PATH 'Scripts\python.exe'
 $buildDir = Join-Path $projectRoot ('build-idf-' + $Profile)
 Push-Location -LiteralPath $projectRoot
 try {
+    # Refresh identity before Ninja evaluates header dependencies after a commit.
+    & $pythonExe (Join-Path $projectRoot 'scripts\idf_prepare.py') --profile $Profile --build-dir $buildDir
+    if ($LASTEXITCODE -ne 0) { throw 'Aura native build preparation failed.' }
     & $pythonExe (Join-Path $idfRoot 'tools\idf.py') -B $buildDir `
         -D ('AURA_PROFILE=' + $Profile) -D ('Python3_EXECUTABLE=' + $pythonExe) $Action
     if ($LASTEXITCODE -ne 0) { throw "ESP-IDF $Action failed with exit code $LASTEXITCODE" }

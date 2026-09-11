@@ -6,12 +6,12 @@
 
 #include "web/WebJsonUtils.h"
 
-#include <math.h>
+#include <cmath>
 
 namespace WebJsonUtils {
 
 void jsonSetFloatOrNull(ArduinoJson::JsonObject obj, const char *key, bool valid, float value) {
-    if (valid && isfinite(value)) {
+    if (valid && std::isfinite(value)) {
         obj[key] = value;
     } else {
         obj[key] = nullptr;

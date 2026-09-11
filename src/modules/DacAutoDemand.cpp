@@ -6,7 +6,7 @@
 
 #include "modules/DacAutoDemand.h"
 
-#include <math.h>
+#include <cmath>
 #include <stdio.h>
 
 #include "config/AppConfig.h"
@@ -72,7 +72,7 @@ Result evaluate(const DacAutoConfig &config,
 
     const bool co_valid = data.co_sensor_present &&
                           data.co_valid &&
-                          isfinite(data.co_ppm) &&
+                          std::isfinite(data.co_ppm) &&
                           data.co_ppm >= 0.0f;
     consider(result,
              percent_for_high(config.co, co_valid, data.co_ppm, thresholds.co),
@@ -84,7 +84,7 @@ Result evaluate(const DacAutoConfig &config,
         Config::AQ_PM05_YELLOW_MAX_PPCM3,
         Config::AQ_PM05_ORANGE_MAX_PPCM3,
     };
-    const bool pm05_valid = data.pm05_valid && isfinite(data.pm05) && data.pm05 >= 0.0f;
+    const bool pm05_valid = data.pm05_valid && std::isfinite(data.pm05) && data.pm05 >= 0.0f;
     consider(result,
              percent_for_high(config.pm05, pm05_valid, data.pm05, pm05_thresholds),
              Sensor::PM05,
@@ -95,7 +95,7 @@ Result evaluate(const DacAutoConfig &config,
         Config::AQ_PM1_YELLOW_MAX_UGM3,
         Config::AQ_PM1_ORANGE_MAX_UGM3,
     };
-    const bool pm1_valid = data.pm1_valid && isfinite(data.pm1) && data.pm1 >= 0.0f;
+    const bool pm1_valid = data.pm1_valid && std::isfinite(data.pm1) && data.pm1 >= 0.0f;
     consider(result,
              percent_for_high(config.pm1, pm1_valid, data.pm1, pm1_thresholds),
              Sensor::PM1,
@@ -106,7 +106,7 @@ Result evaluate(const DacAutoConfig &config,
         Config::AQ_PM4_YELLOW_MAX_UGM3,
         Config::AQ_PM4_ORANGE_MAX_UGM3,
     };
-    const bool pm4_valid = data.pm4_valid && isfinite(data.pm4) && data.pm4 >= 0.0f;
+    const bool pm4_valid = data.pm4_valid && std::isfinite(data.pm4) && data.pm4 >= 0.0f;
     consider(result,
              percent_for_high(config.pm4, pm4_valid, data.pm4, pm4_thresholds),
              Sensor::PM4,
@@ -117,7 +117,7 @@ Result evaluate(const DacAutoConfig &config,
         Config::AQ_PM25_YELLOW_MAX_UGM3,
         Config::AQ_PM25_ORANGE_MAX_UGM3,
     };
-    const bool pm25_valid = data.pm25_valid && isfinite(data.pm25) && data.pm25 >= 0.0f;
+    const bool pm25_valid = data.pm25_valid && std::isfinite(data.pm25) && data.pm25 >= 0.0f;
     consider(result,
              percent_for_high(config.pm25, pm25_valid, data.pm25, pm25_thresholds),
              Sensor::PM25,
@@ -128,13 +128,13 @@ Result evaluate(const DacAutoConfig &config,
         Config::AQ_PM10_YELLOW_MAX_UGM3,
         Config::AQ_PM10_ORANGE_MAX_UGM3,
     };
-    const bool pm10_valid = data.pm10_valid && isfinite(data.pm10) && data.pm10 >= 0.0f;
+    const bool pm10_valid = data.pm10_valid && std::isfinite(data.pm10) && data.pm10 >= 0.0f;
     consider(result,
              percent_for_high(config.pm10, pm10_valid, data.pm10, pm10_thresholds),
              Sensor::PM10,
              data.pm10);
 
-    const bool hcho_valid = data.hcho_valid && isfinite(data.hcho) && data.hcho >= 0.0f;
+    const bool hcho_valid = data.hcho_valid && std::isfinite(data.hcho) && data.hcho >= 0.0f;
     consider(result,
              percent_for_high(config.hcho, hcho_valid, data.hcho, thresholds.hcho),
              Sensor::HCHO,

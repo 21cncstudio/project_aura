@@ -6,12 +6,12 @@
 
 #pragma once
 
-#include <math.h>
+#include <cmath>
 
 namespace MathUtils {
 
 inline float compute_dew_point_c(float temp_c, float rh) {
-    if (!isfinite(temp_c) || !isfinite(rh) || rh <= 0.0f) {
+    if (!std::isfinite(temp_c) || !std::isfinite(rh) || rh <= 0.0f) {
         return NAN;
     }
     float rh_clamped = fminf(fmaxf(rh, 1.0f), 100.0f);
@@ -22,7 +22,7 @@ inline float compute_dew_point_c(float temp_c, float rh) {
 }
 
 inline float compute_absolute_humidity_gm3(float temp_c, float rh) {
-    if (!isfinite(temp_c) || !isfinite(rh) || rh <= 0.0f) {
+    if (!std::isfinite(temp_c) || !std::isfinite(rh) || rh <= 0.0f) {
         return NAN;
     }
     float rh_clamped = fminf(fmaxf(rh, 1.0f), 100.0f);
@@ -34,7 +34,7 @@ inline float compute_absolute_humidity_gm3(float temp_c, float rh) {
 }
 
 inline int compute_mold_risk_index(float temp_c, float rh) {
-    if (!isfinite(temp_c) || !isfinite(rh) || rh < 0.0f || rh > 100.0f) {
+    if (!std::isfinite(temp_c) || !std::isfinite(rh) || rh < 0.0f || rh > 100.0f) {
         return -1;
     }
 

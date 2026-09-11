@@ -7,7 +7,7 @@
 #include "ui/UiController.h"
 
 #include <float.h>
-#include <math.h>
+#include <cmath>
 #include <string.h>
 #include <time.h>
 
@@ -359,12 +359,12 @@ UiController::GraphSeriesStats UiController::populate_info_chart_series(lv_obj_t
             float raw_value = 0.0f;
             bool valid = false;
             if (chartsHistory.metricValueFromOldest(offset, metric, raw_value, valid) &&
-                valid && isfinite(raw_value)) {
+                valid && std::isfinite(raw_value)) {
                 float display_value = raw_value;
                 if (convert_temperature_to_display) {
                     display_value = temperature_to_display(raw_value, temp_units_c);
                 }
-                if (isfinite(display_value) && (!require_non_negative || display_value >= 0.0f)) {
+                if (std::isfinite(display_value) && (!require_non_negative || display_value >= 0.0f)) {
                     if (!stats.has_values) {
                         stats.min_value = display_value;
                         stats.max_value = display_value;
@@ -393,24 +393,24 @@ UiController::GraphAxisRange UiController::compute_standard_graph_axis(float sca
                                                                        float latest_value,
                                                                        const GraphAxisConfig &config) const {
     GraphAxisRange range{};
-    const float min_span = (isfinite(config.min_span) && config.min_span > 0.0f) ? config.min_span : 1.0f;
-    const float fallback_half_span = (isfinite(config.fallback_half_span) && config.fallback_half_span > 0.0f)
+    const float min_span = (std::isfinite(config.min_span) && config.min_span > 0.0f) ? config.min_span : 1.0f;
+    const float fallback_half_span = (std::isfinite(config.fallback_half_span) && config.fallback_half_span > 0.0f)
         ? config.fallback_half_span
         : min_span;
 
     float scale_span = scale_max - scale_min;
-    if (!isfinite(scale_span) || scale_span < min_span) {
+    if (!std::isfinite(scale_span) || scale_span < min_span) {
         scale_span = min_span;
     }
 
     float step = graph_nice_step(scale_span / 4.0f);
-    if (!isfinite(step) || step <= 0.0f) {
+    if (!std::isfinite(step) || step <= 0.0f) {
         step = config.fallback_step;
     }
-    if (!isfinite(step) || step <= 0.0f) {
+    if (!std::isfinite(step) || step <= 0.0f) {
         step = config.last_resort_step;
     }
-    if (!isfinite(step) || step <= 0.0f) {
+    if (!std::isfinite(step) || step <= 0.0f) {
         step = 1.0f;
     }
 
@@ -420,8 +420,8 @@ UiController::GraphAxisRange UiController::compute_standard_graph_axis(float sca
         y_min_f -= step;
         y_max_f += step;
     }
-    if (!isfinite(y_min_f) || !isfinite(y_max_f) || y_max_f <= y_min_f) {
-        const float center = isfinite(latest_value) ? latest_value : config.fallback_center;
+    if (!std::isfinite(y_min_f) || !std::isfinite(y_max_f) || y_max_f <= y_min_f) {
+        const float center = std::isfinite(latest_value) ? latest_value : config.fallback_center;
         y_min_f = center - fallback_half_span;
         y_max_f = center + fallback_half_span;
     }
@@ -432,7 +432,7 @@ UiController::GraphAxisRange UiController::compute_standard_graph_axis(float sca
         y_max_f = y_min_f + step;
     }
 
-    const float coord_scale = (isfinite(config.point_scale) && config.point_scale > 0.0f) ? config.point_scale : 1.0f;
+    const float coord_scale = (std::isfinite(config.point_scale) && config.point_scale > 0.0f) ? config.point_scale : 1.0f;
     lv_coord_t y_min = static_cast<lv_coord_t>(floorf(y_min_f * coord_scale));
     lv_coord_t y_max = static_cast<lv_coord_t>(ceilf(y_max_f * coord_scale));
     if (y_max <= y_min) {
@@ -839,7 +839,7 @@ void UiController::update_graph_zone_overlay(lv_obj_t *chart,
 
     const lv_coord_t width = lv_obj_get_width(overlay);
     const lv_coord_t height = lv_obj_get_height(overlay);
-    if (width <= 0 || height <= 0 || !isfinite(y_min_display) || !isfinite(y_max_display) || y_max_display <= y_min_display ||
+    if (width <= 0 || height <= 0 || !std::isfinite(y_min_display) || !std::isfinite(y_max_display) || y_max_display <= y_min_display ||
         !zone_bounds || !zone_tones) {
         hide_graph_zone_bands(bands, band_count);
         return;
@@ -868,7 +868,7 @@ void UiController::update_graph_zone_overlay(lv_obj_t *chart,
 
         const float zone_low = zone_bounds[i];
         const float zone_high = zone_bounds[i + 1];
-        if (!isfinite(zone_low) || !isfinite(zone_high) || zone_high <= zone_low) {
+        if (!std::isfinite(zone_low) || !std::isfinite(zone_high) || zone_high <= zone_low) {
             lv_obj_add_flag(band, LV_OBJ_FLAG_HIDDEN);
             continue;
         }

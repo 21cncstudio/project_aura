@@ -12,7 +12,7 @@
 #include "ui/UiText.h"
 
 #include <ctype.h>
-#include <math.h>
+#include <cmath>
 #include <string.h>
 #include <time.h>
 #include <esp_wifi.h>
@@ -2160,7 +2160,7 @@ lv_color_t UiController::getOptionalGasColor(DfrOptionalGasSensor::OptionalGasTy
 }
 
 lv_color_t UiController::getHCHOColor(float hcho_ppb, bool valid) {
-    if (!valid || !isfinite(hcho_ppb) || hcho_ppb < 0.0f) return color_inactive();
+    if (!valid || !std::isfinite(hcho_ppb) || hcho_ppb < 0.0f) return color_inactive();
     const DisplayThresholds::Config thresholds = displayThresholds.snapshot();
     return color_for_display_band(DisplayThresholds::classifyHigh(hcho_ppb, thresholds.hcho));
 }
@@ -2205,11 +2205,11 @@ AirQuality UiController::getAirQuality(const SensorData &data) {
 bool UiController::has_poor_gas_background_alert() {
     const DisplayThresholds::Config thresholds = displayThresholds.snapshot();
     const bool hcho_valid = currentData.hcho_valid &&
-                            isfinite(currentData.hcho) &&
+                            std::isfinite(currentData.hcho) &&
                             currentData.hcho >= 0.0f;
     const bool co_valid = currentData.co_sensor_present &&
                           currentData.co_valid &&
-                          isfinite(currentData.co_ppm) &&
+                          std::isfinite(currentData.co_ppm) &&
                           currentData.co_ppm >= 0.0f;
 
     if (!poor_gas_background_alert_active_) {
@@ -2361,16 +2361,16 @@ int UiController::pressure_altitude_meters() const {
 }
 
 float UiController::pressure_absolute_to_msl_hpa(float pressure_hpa, int altitude_m) const {
-    if (!isfinite(pressure_hpa)) {
+    if (!std::isfinite(pressure_hpa)) {
         return pressure_hpa;
     }
     const float altitude = static_cast<float>(altitude_m);
     const float base = 1.0f - (altitude / 44330.0f);
-    if (!isfinite(base) || base <= 0.0f) {
+    if (!std::isfinite(base) || base <= 0.0f) {
         return pressure_hpa;
     }
     const float corrected = pressure_hpa / powf(base, 5.255f);
-    return isfinite(corrected) ? corrected : pressure_hpa;
+    return std::isfinite(corrected) ? corrected : pressure_hpa;
 }
 
 float UiController::pressure_delta_to_msl_hpa(float pressure_delta_hpa) const {
@@ -2383,7 +2383,7 @@ float UiController::pressure_delta_to_msl_hpa(float pressure_delta_hpa) const {
 }
 
 float UiController::pressure_hpa_to_display_units(float pressure_hpa) const {
-    if (!isfinite(pressure_hpa)) {
+    if (!std::isfinite(pressure_hpa)) {
         return pressure_hpa;
     }
     if (!pressure_display_uses_inhg()) {
@@ -2448,7 +2448,7 @@ void UiController::update_pressure_altitude_preview() {
     safe_label_set_text(objects.abs_pressure_unit, unit);
     safe_label_set_text(objects.msl_pressure_unit, unit);
 
-    if (!currentData.pressure_valid || !isfinite(currentData.pressure)) {
+    if (!currentData.pressure_valid || !std::isfinite(currentData.pressure)) {
         safe_label_set_text_static(objects.abs_pressure_value, UiText::ValueMissing());
         safe_label_set_text_static(objects.msl_pressure_value, UiText::ValueMissing());
         return;
@@ -2696,26 +2696,20 @@ void UiController::update_clock_labels() {
         safe_label_set_text(objects.label_time_ampm_title_2, show_ampm ? ampm_buf : "");
         set_label_hidden(objects.label_time_ampm_title_2, !show_ampm);
     }
+    const char *date_pattern = "%d.%m.%Y";
     switch (date_format_) {
         case Config::DateFormat::MDY:
-            snprintf(buf, sizeof(buf), "%02d/%02d/%04d",
-                     local_tm.tm_mon + 1,
-                     local_tm.tm_mday,
-                     local_tm.tm_year + 1900);
+            date_pattern = "%m/%d/%Y";
             break;
         case Config::DateFormat::ISO:
-            snprintf(buf, sizeof(buf), "%04d-%02d-%02d",
-                     local_tm.tm_year + 1900,
-                     local_tm.tm_mon + 1,
-                     local_tm.tm_mday);
+            date_pattern = "%Y-%m-%d";
             break;
         case Config::DateFormat::DMY:
         default:
-            snprintf(buf, sizeof(buf), "%02d.%02d.%04d",
-                     local_tm.tm_mday,
-                     local_tm.tm_mon + 1,
-                     local_tm.tm_year + 1900);
             break;
+    }
+    if (strftime(buf, sizeof(buf), date_pattern, &local_tm) == 0) {
+        snprintf(buf, sizeof(buf), "%s", UiText::DateMissing());
     }
     if (objects.label_date_value_1) safe_label_set_text(objects.label_date_value_1, buf);
     if (objects.label_date_value_2) safe_label_set_text(objects.label_date_value_2, buf);

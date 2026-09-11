@@ -6,7 +6,7 @@
 
 #include "web/WebChartsApiUtils.h"
 
-#include <math.h>
+#include <cmath>
 
 #include "config/AppConfig.h"
 #include "web/WebChartsUtils.h"
@@ -20,7 +20,7 @@ constexpr uint32_t kChartStepS = Config::CHART_HISTORY_STEP_MS / 1000UL;
 bool history_latest_metric(const HistoryView &history,
                            ChartsHistory::Metric metric,
                            float &out_value) {
-    if (!history.latestMetric(metric, out_value) || !isfinite(out_value)) {
+    if (!history.latestMetric(metric, out_value) || !std::isfinite(out_value)) {
         return false;
     }
     return true;
@@ -93,7 +93,7 @@ void fillJson(ArduinoJson::JsonObject root,
             float value = 0.0f;
             bool valid = false;
             if (!history.metricValueFromOldest(offset, spec.metric, value, valid) || !valid ||
-                !isfinite(value)) {
+                !std::isfinite(value)) {
                 values.add(nullptr);
                 continue;
             }

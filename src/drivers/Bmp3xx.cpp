@@ -8,7 +8,7 @@
 #include "drivers/Bmp3xxProbe.h"
 
 #include <driver/i2c.h>
-#include <math.h>
+#include <cmath>
 
 #include "config/AppConfig.h"
 #include "core/Logger.h"
@@ -275,7 +275,7 @@ bool Bmp3xx::compute(float &pressure_hpa, float &temperature_c) {
 
     temperature_c = static_cast<float>(temp);
     pressure_hpa = static_cast<float>(comp_press / 100.0);
-    return isfinite(temperature_c) && isfinite(pressure_hpa);
+    return std::isfinite(temperature_c) && std::isfinite(pressure_hpa);
 }
 
 const char *Bmp3xx::variantLabel() const {
@@ -606,7 +606,7 @@ void Bmp3xx::poll() {
         return;
     }
 
-    if (!isfinite(pressure_hpa) || pressure_hpa <= 0.0f) {
+    if (!std::isfinite(pressure_hpa) || pressure_hpa <= 0.0f) {
         handleNoData(now, "invalid");
         return;
     }

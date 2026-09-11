@@ -7,7 +7,7 @@
 #include "modules/SensorManager.h"
 
 #include <float.h>
-#include <math.h>
+#include <cmath>
 #include <stdio.h>
 #include "core/BootState.h"
 #include "core/Logger.h"
@@ -54,7 +54,7 @@ float ppm_resolution(uint8_t decimals) {
 }
 
 bool ppm_value_changed(float current, float next, float resolution) {
-    if (!isfinite(current)) {
+    if (!std::isfinite(current)) {
         return true;
     }
     const float magnitude = fmaxf(1.0f, fmaxf(fabsf(current), fabsf(next)));
@@ -78,7 +78,7 @@ bool sync_ppm_sensor_fields(bool sensor_present,
         sensor_warmup = false;
         sensor_valid = false;
         sensor_ppm = 0.0f;
-    } else if (!sensor_valid || !isfinite(sensor_ppm) || sensor_ppm < min_ppm) {
+    } else if (!sensor_valid || !std::isfinite(sensor_ppm) || sensor_ppm < min_ppm) {
         sensor_valid = false;
         sensor_ppm = 0.0f;
     } else if (sensor_ppm > max_ppm) {
@@ -176,7 +176,7 @@ bool apply_sanity_filters(SensorData &data, float hcho_min_ppb, float hcho_max_p
     bool changed = false;
 
     if (data.temp_valid &&
-        (!isfinite(data.temperature) ||
+        (!std::isfinite(data.temperature) ||
          data.temperature < Config::SEN66_TEMP_MIN_C ||
          data.temperature > Config::SEN66_TEMP_MAX_C)) {
         data.temp_valid = false;
@@ -185,7 +185,7 @@ bool apply_sanity_filters(SensorData &data, float hcho_min_ppb, float hcho_max_p
     }
 
     if (data.hum_valid &&
-        (!isfinite(data.humidity) ||
+        (!std::isfinite(data.humidity) ||
          data.humidity < Config::SEN66_HUM_MIN ||
          data.humidity > Config::SEN66_HUM_MAX)) {
         data.hum_valid = false;
@@ -218,7 +218,7 @@ bool apply_sanity_filters(SensorData &data, float hcho_min_ppb, float hcho_max_p
     }
 
     if (data.pm25_valid) {
-        if (!isfinite(data.pm25)) {
+        if (!std::isfinite(data.pm25)) {
             data.pm25_valid = false;
             data.pm25 = 0.0f;
             changed = true;
@@ -232,7 +232,7 @@ bool apply_sanity_filters(SensorData &data, float hcho_min_ppb, float hcho_max_p
     }
 
     if (data.pm4_valid) {
-        if (!isfinite(data.pm4)) {
+        if (!std::isfinite(data.pm4)) {
             data.pm4_valid = false;
             data.pm4 = 0.0f;
             changed = true;
@@ -246,7 +246,7 @@ bool apply_sanity_filters(SensorData &data, float hcho_min_ppb, float hcho_max_p
     }
 
     if (data.pm10_valid) {
-        if (!isfinite(data.pm10)) {
+        if (!std::isfinite(data.pm10)) {
             data.pm10_valid = false;
             data.pm10 = 0.0f;
             changed = true;
@@ -260,7 +260,7 @@ bool apply_sanity_filters(SensorData &data, float hcho_min_ppb, float hcho_max_p
     }
 
     if (data.pm05_valid) {
-        if (!isfinite(data.pm05)) {
+        if (!std::isfinite(data.pm05)) {
             data.pm05_valid = false;
             data.pm05 = 0.0f;
             changed = true;
@@ -274,7 +274,7 @@ bool apply_sanity_filters(SensorData &data, float hcho_min_ppb, float hcho_max_p
     }
 
     if (data.pm1_valid) {
-        if (!isfinite(data.pm1)) {
+        if (!std::isfinite(data.pm1)) {
             data.pm1_valid = false;
             data.pm1 = 0.0f;
             changed = true;
@@ -294,7 +294,7 @@ bool apply_sanity_filters(SensorData &data, float hcho_min_ppb, float hcho_max_p
     data.pm_valid = data.pm1_valid || data.pm25_valid || data.pm4_valid || data.pm10_valid;
 
     if (data.hcho_valid) {
-        if (!isfinite(data.hcho)) {
+        if (!std::isfinite(data.hcho)) {
             data.hcho_valid = false;
             data.hcho = 0.0f;
             changed = true;
@@ -413,7 +413,7 @@ void log_air_metric_transition(const char *name,
                                bool good_inclusive,
                                const char *value_fmt,
                                AlertBand &previous_band) {
-    if (!valid || !isfinite(value)) {
+    if (!valid || !std::isfinite(value)) {
         previous_band = AlertBand::Unknown;
         return;
     }
@@ -853,7 +853,7 @@ SensorManager::PollResult SensorManager::poll(SensorData &data,
         pressure_valid = dps310_.isPressureValid();
     }
     if (pressure_new) {
-        if (!isfinite(pressure_hpa) ||
+        if (!std::isfinite(pressure_hpa) ||
             pressure_hpa < pressure_min_hpa ||
             pressure_hpa > pressure_max_hpa) {
             data.pressure = 0.0f;
