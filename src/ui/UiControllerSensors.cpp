@@ -515,6 +515,10 @@ void UiController::update_sensor_cards(const AirQuality &aq, bool gas_warmup, bo
         lv_obj_set_style_line_color(objects.line_2, divider_col, LV_PART_MAIN | LV_STATE_DEFAULT);
         lv_obj_set_style_shadow_opa(objects.line_2, LV_OPA_TRANSP, LV_PART_MAIN | LV_STATE_DEFAULT);
     }
+    if (objects.line_3) {
+        lv_obj_set_style_line_color(objects.line_3, divider_col, LV_PART_MAIN | LV_STATE_DEFAULT);
+        lv_obj_set_style_shadow_opa(objects.line_3, LV_OPA_TRANSP, LV_PART_MAIN | LV_STATE_DEFAULT);
+    }
 
     const bool pressure_prompt_altitude =
         currentData.pressure_valid && !pressure_altitude_is_set();
