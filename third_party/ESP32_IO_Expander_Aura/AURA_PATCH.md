@@ -1,5 +1,9 @@
 # Project Aura native-USB CH422G patch
 
+Native IDF 6.1 migration additionally casts the two configured I2C pin numbers
+to `gpio_num_t` in `Base::Config::convertPartialToFull()`, matching IDF 6's typed
+fields. The pin values, reset policy and I2C transactions are unchanged.
+
 This directory contains the runtime sources from Espressif
 `ESP32_IO_Expander` v1.1.0, upstream commit
 `e79a63876a1d8a834cf8ec8f8b698ff9d9374579`.

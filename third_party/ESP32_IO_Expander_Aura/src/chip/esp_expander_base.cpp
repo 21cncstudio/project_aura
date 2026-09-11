@@ -25,8 +25,8 @@ void Base::Config::convertPartialToFull(void)
         auto &config = std::get<HostPartialConfig>(host.value());
         host = HostFullConfig{
             .mode = I2C_MODE_MASTER,
-            .sda_io_num = config.sda_io_num,
-            .scl_io_num = config.scl_io_num,
+            .sda_io_num = static_cast<gpio_num_t>(config.sda_io_num),
+            .scl_io_num = static_cast<gpio_num_t>(config.scl_io_num),
             .sda_pullup_en = config.sda_pullup_en,
             .scl_pullup_en = config.scl_pullup_en,
             .master = {
