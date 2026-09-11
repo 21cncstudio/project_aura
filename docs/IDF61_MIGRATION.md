@@ -139,9 +139,13 @@ the LEDC and Wi-Fi provisioning header dependencies explicitly.
 - The RTC gate initially caught an omitted 512-byte reserve. Restoring the old
   SDK reservation fixed the layout; the gate and its expected addresses were
   not relaxed.
-- Commit-linked rebuild logs and exact artifact hashes are recorded locally in
+- The pre-hardware `2cbd213` rebuild logs and artifact hashes are recorded in
   `D:\21cncstudio\project_aura\tmp\idf61-sdk\final-build-manifest.json`.
+  The subsequent `0eadb70` hardware candidates are recorded in the linked
+  hardware report below, with immutable artifact paths.
 
-Configuration and host tests do not prove that firmware boots or operates on
-either board. Hardware checks, flash/serial/reset, signing, release packaging and
-publication are outside this local migration step and have not been performed.
+Configuration and host tests are separate from device evidence. The subsequent
+user-authorized app-only hardware trial, its socket-limit correction, exact
+candidate hashes, preserved partitions and remaining checks are recorded in
+[IDF61_HARDWARE_VALIDATION_20260911.md](IDF61_HARDWARE_VALIDATION_20260911.md).
+Signing, release packaging and publication have not been performed.
