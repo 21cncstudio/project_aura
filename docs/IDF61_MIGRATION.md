@@ -51,6 +51,10 @@ The new configuration explicitly uses octal PSRAM, QIO/80 MHz flash, PSRAM XIP,
 1 kHz FreeRTOS tick, and native USB Serial/JTAG. The IPC task stack is explicitly
 4096 bytes, making the earlier requested setting effective in a source build.
 These settings require hardware verification; compilation alone is insufficient.
+The lwIP socket limit is 16, matching the old Arduino SDK. Aura's HTTP server
+requires ten client sockets plus three internal sockets; its source now checks
+this at compile time. The initial IDF default of ten total sockets prevented
+the HTTP server from starting on the first 4.3-inch hardware test.
 The panel Kconfig switches explicitly allow the project board header and
 `idf/include/esp_panel_drivers_conf.h`; otherwise the library defaults skip
 Aura's board configuration. Only the ST7262/GT911/CH422G/custom-backlight
