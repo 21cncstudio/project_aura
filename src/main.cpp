@@ -541,10 +541,9 @@ void setup()
     LOGI("Main", "Arduino loop task stack size: %u bytes",
          static_cast<unsigned>(getArduinoLoopTaskStackSize()));
 
-    // Log IPC task stack size to verify CONFIG_IPC_TASK_STACK_SIZE is applied
+    // Log the configured IPC task stack size.
     #ifdef CONFIG_ESP_IPC_TASK_STACK_SIZE
         LOGI("Main", "IPC task stack size: %d bytes", CONFIG_ESP_IPC_TASK_STACK_SIZE);
-        if (CONFIG_ESP_IPC_TASK_STACK_SIZE > 1024) LOGW("Main", "Warning: If using precompiled libs, actual IPC stack might still be 1024!");
     #else
         LOGI("Main", "IPC task stack size: using default (CONFIG_ESP_IPC_TASK_STACK_SIZE not defined)");
     #endif
