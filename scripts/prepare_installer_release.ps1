@@ -150,5 +150,12 @@ try {
   Write-Host "Upload this ZIP in Aura Admin -> Firmware & Installers."
 } finally {
   Remove-Item -LiteralPath $tempPrivate -Force -ErrorAction SilentlyContinue
-  Remove-Item -LiteralPath $stagingDir -Recurse -Force -ErrorAction SilentlyContinue
+  $tempRoot = [System.IO.Path]::GetFullPath([System.IO.Path]::GetTempPath()).TrimEnd('\') + '\'
+  $resolvedStaging = [System.IO.Path]::GetFullPath($stagingDir)
+  if ($resolvedStaging.StartsWith($tempRoot, [System.StringComparison]::OrdinalIgnoreCase) -and
+      (Split-Path -Leaf $resolvedStaging) -match '^aura-release-[a-f0-9-]{36}$') {
+    Remove-Item -LiteralPath $resolvedStaging -Recurse -Force -ErrorAction SilentlyContinue
+  } else {
+    throw "Refusing to clean an unexpected staging path: $resolvedStaging"
+  }
 }
