@@ -3,6 +3,7 @@
 #include <lvgl.h>
 #include "ui/screens.h"
 #include "ui/ThemeColorStorage.h"
+#include "ui/UiCo2CardPresentation.h"
 #include <cassert>
 #include <cstdio>
 #include <cstdlib>
@@ -43,14 +44,23 @@ int main(int argc, char **argv) {
                            LV_DISPLAY_RENDER_MODE_DIRECT);
     lv_display_set_flush_cb(display, flush);
     create_screens();
+    assert(objects.label_co2_warmup);
+    assert(lv_obj_has_flag(objects.label_co2_warmup, LV_OBJ_FLAG_HIDDEN));
     lv_obj_t *screens[] = {objects.page_boot_logo, objects.page_boot_diag,
         objects.page_main_pro, objects.page_settings, objects.page_wifi,
         objects.page_theme, objects.page_clock, objects.page_co2_calib,
         objects.page_auto_night_mode, objects.page_backlight, objects.page_mqtt,
         objects.page_sensors_info, objects.page_dac_settings,
-        objects.page_fw_update, objects.page_diag};
+        objects.page_fw_update, objects.page_diag, objects.page_main_pro};
     for (size_t index = 0; index < sizeof(screens) / sizeof(*screens); ++index) {
         assert(screens[index]);
+        if (index == 15) {
+            const auto co2 = UiCo2CardPresentation::resolve(false, true);
+            assert(co2.warmup && !co2.show_value && !co2.show_unit);
+            lv_obj_remove_flag(objects.label_co2_warmup, LV_OBJ_FLAG_HIDDEN);
+            lv_obj_add_flag(objects.label_co2_value_1, LV_OBJ_FLAG_HIDDEN);
+            lv_obj_add_flag(objects.label_co2_unit_1, LV_OBJ_FLAG_HIDDEN);
+        }
         lv_screen_load(screens[index]);
         lv_refr_now(display);
         assert(presented && flushed > 0);
@@ -67,5 +77,5 @@ int main(int argc, char **argv) {
     }
     lv_display_delete(display);
     lv_deinit();
-    std::puts("All 15 generated screens rendered; all 65536 saved RGB565 colors round-trip.");
+    std::puts("All 15 generated screens and CO2 warmup rendered; all 65536 saved RGB565 colors round-trip.");
 }

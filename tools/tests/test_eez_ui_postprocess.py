@@ -44,6 +44,19 @@ BASE_SCREENS = """void generated() {
 
 
 class EezUiPostprocessTests(unittest.TestCase):
+    def test_co2_warmup_starts_hidden_after_editor_regeneration(self) -> None:
+        generated = (BASE_SCREENS + "\n// label_co2_warmup\n"
+                     "    objects.label_co2_warmup = obj;\n"
+                     '    lv_label_set_text_static(obj, "WARMUP");\n'
+                     "// card_pressure_pro\n")
+        project = self.make_project(screens=generated)
+        postprocess_project(project)
+        target = project / "src/ui/screens.c"
+        self.assertIn("lv_obj_add_flag(obj, LV_OBJ_FLAG_HIDDEN);", target.read_text())
+        first = target.read_bytes()
+        self.assertEqual((), postprocess_project(project))
+        self.assertEqual(first, target.read_bytes())
+
     def make_project(
         self,
         fonts_header: str = BASE_FONTS_HEADER,

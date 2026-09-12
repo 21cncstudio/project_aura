@@ -683,6 +683,8 @@ bool SensorManager::stopHchoForRestart() {
         case HCHO_SENSOR_SFA40:
             Logger::log(Logger::Info, "Restart", "stopping SFA40 measurement");
             return sfa40_.stop();
+        case HCHO_SENSOR_SEN69C:
+            return sen6x_.stop();
         case HCHO_SENSOR_NONE:
         default:
             return true;
@@ -698,9 +700,9 @@ void SensorManager::begin(StorageManager &storage, float temp_offset, float hum_
     late_probe_kind_ = LateProbeKind::None;
     late_driver_started_ = false;
     late_probe_cursor_ = 0;
-    sen66_.begin();
-    sen66_.setOffsets(temp_offset, hum_offset);
-    sen66_.loadVocState(storage);
+    sen6x_.begin();
+    sen6x_.setOffsets(temp_offset, hum_offset);
+    sen6x_.loadVocState(storage);
 
     bmp580_.begin();
     bmp3xx_.begin();
@@ -712,7 +714,9 @@ void SensorManager::begin(StorageManager &storage, float temp_offset, float hum_
     sfa30_.begin();
     sfa40_.begin();
     hcho_probe_.reset(millis());
-    hcho_probe_.recordAttempt(detectHchoSensor());
+    // Resolve the main module before probing external HCHO sensors.
+    if (sen6x_.model() == Sen6x::Model::Sen66)
+        hcho_probe_.recordAttempt(detectHchoSensor());
     sfa_warmup_active_last_ = currentHchoWarmupActive();
     sfa_status_last_ = currentHchoStatus();
 
@@ -763,6 +767,7 @@ SensorManager::PollResult SensorManager::poll(SensorData &data,
     } else {
         startNextLateProbe(probe_now, co2_asc_enabled);
     }
+    if (sen6x_.isSen69c()) hcho_sensor_type_ = HCHO_SENSOR_SEN69C;
     const bool pressure_late_this_poll =
         late_probe_at_entry == LateProbeKind::Pressure ||
         late_probe_kind_ == LateProbeKind::Pressure;
@@ -775,13 +780,24 @@ SensorManager::PollResult SensorManager::poll(SensorData &data,
 
     bool sen66_changed = false;
     if (!sen66_late_this_poll) {
-        sen66_.poll(data, sen66_changed);
+        sen6x_.poll(data, sen66_changed);
     }
     if (sen66_changed) {
         result.data_changed = true;
     }
     if (!sen66_late_this_poll) {
-        sen66_.saveVocState(storage);
+        sen6x_.saveVocState(storage);
+    }
+
+    const bool co2_warmup = sen6x_.isCo2WarmupActive();
+    if (data.co2_warmup != co2_warmup) {
+        data.co2_warmup = co2_warmup;
+        result.data_changed = true;
+    }
+    if (co2_warmup && data.co2_valid) {
+        data.co2_valid = false;
+        data.co2 = 0;
+        result.data_changed = true;
     }
 
     if (!hcho_late_this_poll && hcho_sensor_type_ == HCHO_SENSOR_SFA40) {
@@ -865,7 +881,7 @@ SensorManager::PollResult SensorManager::poll(SensorData &data,
             data.pressure_valid = true;
             pressure_history.update(
                 pressure_hpa, data, storage, system_time_trusted);
-            sen66_.updatePressure(pressure_hpa);
+            sen6x_.updatePressure(pressure_hpa);
         }
         result.data_changed = true;
     }
@@ -877,7 +893,7 @@ SensorManager::PollResult SensorManager::poll(SensorData &data,
         result.data_changed = true;
     }
 
-    bool warmup_now = sen66_.isWarmupActive();
+    bool warmup_now = sen6x_.isWarmupActive();
     if (warmup_now != warmup_active_last_) {
         warmup_active_last_ = warmup_now;
         result.warmup_changed = true;
@@ -891,9 +907,10 @@ SensorManager::PollResult SensorManager::poll(SensorData &data,
     }
 
     const uint32_t freshness_now = millis();
-    const uint32_t sen66_last_ms = sen66_.lastDataMs();
-    if (sen66_last_ms != 0 &&
-        (freshness_now - sen66_last_ms > Config::SEN66_STALE_MS)) {
+    const uint32_t sen66_last_ms = sen6x_.lastDataMs();
+    if ((sen6x_.isSen69c() && !sen6x_.isOk()) ||
+        (sen66_last_ms != 0 &&
+         freshness_now - sen66_last_ms > Config::SEN66_STALE_MS)) {
         if (invalidate_sen66_fields(data)) {
             result.data_changed = true;
         }
@@ -980,8 +997,11 @@ bool SensorManager::detectHchoSensor() {
 void SensorManager::startNextLateProbe(uint32_t now_ms, bool co2_asc_enabled) {
     const bool due[3] = {
         pressure_sensor_ == PRESSURE_NONE && pressure_probe_.shouldAttempt(now_ms),
-        hcho_sensor_type_ == HCHO_SENSOR_NONE && hcho_probe_.shouldAttempt(now_ms),
-        !sen66_.isOk() && !sen66_.isBusy() && sen66_probe_.shouldAttempt(now_ms),
+        hcho_sensor_type_ == HCHO_SENSOR_NONE && !sen6x_.isSen69c() &&
+            (sen6x_.model() == Sen6x::Model::Sen66 ||
+             sen6x_.model() == Sen6x::Model::Unsupported || sen66_probe_.exhausted()) &&
+            hcho_probe_.shouldAttempt(now_ms),
+        !sen6x_.isOk() && !sen6x_.isBusy() && sen66_probe_.shouldAttempt(now_ms),
     };
 
     for (uint8_t offset = 0; offset < 3U; ++offset) {
@@ -1027,7 +1047,7 @@ void SensorManager::pollActiveLateProbe(uint32_t now_ms, PollResult &result) {
                 }
                 break;
             case LateProbeKind::Sen66:
-                sen66_.beginLateStart(late_sen66_asc_enabled_);
+                sen6x_.beginLateStart(late_sen66_asc_enabled_);
                 break;
             case LateProbeKind::None:
             default:
@@ -1124,7 +1144,7 @@ void SensorManager::pollActiveLateProbe(uint32_t now_ms, PollResult &result) {
     }
 
     if (late_probe_kind_ == LateProbeKind::Sen66) {
-        start_result = sen66_.pollLateStart(now_ms);
+        start_result = sen6x_.pollLateStart(now_ms);
         if (start_result == CooperativeStart::Result::InProgress) {
             return;
         }
@@ -1169,16 +1189,16 @@ void SensorManager::finishSen66LateProbe(bool success, PollResult &result) {
     late_driver_started_ = false;
     if (success) {
         result.data_changed = true;
-        LOGI("Sensors", "SEN66 OK");
+        LOGI("Sensors", "%s OK", sen6x_.label());
         return;
     }
 
-    LOGW("Sensors", "SEN66 not found (%u/%u)",
+    LOGW("Sensors", "%s initialization failed (%u/%u)", sen6x_.label(),
          static_cast<unsigned>(sen66_probe_.attempts()),
          static_cast<unsigned>(StartupProbePolicy::kMaxAttempts));
     if (!sen66_probe_.pending()) {
         result.data_changed = true;
-        LOGW("Sensors", "SEN66 start attempts exhausted, stop probing until reboot");
+        LOGW("Sensors", "SEN6x start attempts exhausted, stop probing until reboot");
     }
 }
 
@@ -1199,6 +1219,8 @@ bool SensorManager::isPressureOk() const {
 }
 
 SensorManager::SfaStatus SensorManager::currentHchoStatus() const {
+    if (hcho_sensor_type_ == HCHO_SENSOR_SEN69C)
+        return sen6x_.hasHchoFault() ? SfaStatus::Fault : SfaStatus::Ok;
     if (hcho_sensor_type_ == HCHO_SENSOR_SFA40) {
         return sfa40_.status();
     }
@@ -1212,6 +1234,7 @@ SensorManager::SfaStatus SensorManager::currentHchoStatus() const {
 }
 
 bool SensorManager::currentHchoWarmupActive() const {
+    if (hcho_sensor_type_ == HCHO_SENSOR_SEN69C) return sen6x_.isHchoWarmupActive();
     if (hcho_sensor_type_ == HCHO_SENSOR_SFA40) {
         return sfa40_.isWarmupActive();
     }
@@ -1222,6 +1245,7 @@ bool SensorManager::currentHchoWarmupActive() const {
 }
 
 bool SensorManager::currentHchoTakeNewData(float &hcho_ppb) {
+    if (hcho_sensor_type_ == HCHO_SENSOR_SEN69C) return sen6x_.takeHcho(hcho_ppb);
     if (hcho_sensor_type_ == HCHO_SENSOR_SFA40) {
         return sfa40_.takeNewData(hcho_ppb);
     }
@@ -1232,6 +1256,7 @@ bool SensorManager::currentHchoTakeNewData(float &hcho_ppb) {
 }
 
 void SensorManager::currentHchoInvalidate() {
+    if (hcho_sensor_type_ == HCHO_SENSOR_SEN69C) { sen6x_.invalidateHcho(); return; }
     if (hcho_sensor_type_ == HCHO_SENSOR_SFA40) {
         sfa40_.invalidate();
     } else if (hcho_sensor_type_ == HCHO_SENSOR_SFA30) {
@@ -1240,6 +1265,7 @@ void SensorManager::currentHchoInvalidate() {
 }
 
 uint32_t SensorManager::currentHchoLastDataMs() const {
+    if (hcho_sensor_type_ == HCHO_SENSOR_SEN69C) return sen6x_.hchoLastDataMs();
     if (hcho_sensor_type_ == HCHO_SENSOR_SFA40) {
         return sfa40_.lastDataMs();
     }
@@ -1250,12 +1276,15 @@ uint32_t SensorManager::currentHchoLastDataMs() const {
 }
 
 float SensorManager::currentHchoMinPpb() const {
+    if (hcho_sensor_type_ == HCHO_SENSOR_SEN69C) return 0.0f;
     return hcho_sensor_type_ == HCHO_SENSOR_SFA30
                ? Config::SFA30_HCHO_MIN_PPB
                : Config::SFA40_HCHO_MIN_PPB;
 }
 
 float SensorManager::currentHchoMaxPpb() const {
+    // Protocol representable range, not a claim of calibrated accuracy.
+    if (hcho_sensor_type_ == HCHO_SENSOR_SEN69C) return 6553.4f;
     return hcho_sensor_type_ == HCHO_SENSOR_SFA30
                ? Config::SFA30_HCHO_MAX_PPB
                : Config::SFA40_HCHO_MAX_PPB;
@@ -1289,6 +1318,7 @@ const char *SensorManager::pressureSensorLabel() const {
 }
 
 const char *SensorManager::hchoSensorLabel() const {
+    if (hcho_sensor_type_ == HCHO_SENSOR_SEN69C) return "SEN69C HCHO";
     switch (hcho_sensor_type_) {
         case HCHO_SENSOR_SFA30:
             return sfa30_.label();
@@ -1316,7 +1346,7 @@ void SensorManager::setOffsets(float temp_offset, float hum_offset) {
     if (!shared_i2c) {
         return;
     }
-    sen66_.setOffsets(temp_offset, hum_offset);
+    sen6x_.setOffsets(temp_offset, hum_offset);
 }
 
 bool SensorManager::deviceReset() {
@@ -1324,7 +1354,10 @@ bool SensorManager::deviceReset() {
         return false;
     }
     SharedI2cLease shared_i2c(*this, COMMAND_ACQUIRE_TIMEOUT_MS);
-    return shared_i2c && sen66_.deviceReset();
+    if (!shared_i2c) return false;
+    const bool success = sen6x_.deviceReset();
+    recoverMainAfterControlFailure(success);
+    return success;
 }
 
 void SensorManager::scheduleRetry(uint32_t delay_ms) {
@@ -1343,7 +1376,7 @@ bool SensorManager::start(bool asc_enabled) {
         return false;
     }
     SharedI2cLease shared_i2c(*this, COMMAND_ACQUIRE_TIMEOUT_MS);
-    return shared_i2c && sen66_.start(asc_enabled);
+    return shared_i2c && sen6x_.start(asc_enabled);
 }
 
 bool SensorManager::setAscEnabled(bool enabled) {
@@ -1351,7 +1384,10 @@ bool SensorManager::setAscEnabled(bool enabled) {
         return false;
     }
     SharedI2cLease shared_i2c(*this, COMMAND_ACQUIRE_TIMEOUT_MS);
-    return shared_i2c && sen66_.setAscEnabled(enabled);
+    if (!shared_i2c) return false;
+    const bool success = sen6x_.setAscEnabled(enabled);
+    recoverMainAfterControlFailure(success);
+    return success;
 }
 
 bool SensorManager::calibrateFrc(uint16_t ref_ppm,
@@ -1362,8 +1398,20 @@ bool SensorManager::calibrateFrc(uint16_t ref_ppm,
         return false;
     }
     SharedI2cLease shared_i2c(*this, COMMAND_ACQUIRE_TIMEOUT_MS);
-    return shared_i2c &&
-           sen66_.calibrateFRC(ref_ppm, has_pressure, pressure_hpa, correction);
+    if (!shared_i2c) return false;
+    const bool success = sen6x_.calibrateFRC(ref_ppm, has_pressure, pressure_hpa, correction);
+    recoverMainAfterControlFailure(success);
+    return success;
+}
+
+void SensorManager::recoverMainAfterControlFailure(bool success) {
+    // Only an explicit control operation rearms this finite attempt budget.
+    // Poll failures alone must not create an endless reset/probe loop.
+    if (!success && sen6x_.isSen69c() && !sen6x_.isOk() && !sen6x_.isBusy() &&
+        sen66_probe_.succeeded()) {
+        sen66_probe_.reset(millis() + 1000);
+        LOGW("Sensors", "SEN69C control failed; scheduling bounded reinitialization");
+    }
 }
 
 bool SensorManager::resetVocState(StorageManager &storage,
@@ -1372,13 +1420,14 @@ bool SensorManager::resetVocState(StorageManager &storage,
         return false;
     }
     SharedI2cLease shared_i2c(*this, COMMAND_ACQUIRE_TIMEOUT_MS);
-    if (!shared_i2c || !sen66_.isOk()) {
+    if (!shared_i2c || !sen6x_.isOk()) {
         return false;
     }
-    if (!sen66_.deviceReset()) {
+    if (!sen6x_.deviceReset()) {
+        recoverMainAfterControlFailure(false);
         return false;
     }
-    sen66_.clearVocState(storage);
+    sen6x_.clearVocState(storage);
     sen66_probe_.reset(millis() + retry_delay_ms);
     return true;
 }

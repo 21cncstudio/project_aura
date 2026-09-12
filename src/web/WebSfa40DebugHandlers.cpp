@@ -37,6 +37,8 @@ const char *status_text(Sfa40::Status status) {
 
 const char *hcho_type_text(SensorManager::HchoSensorType type) {
     switch (type) {
+        case SensorManager::HCHO_SENSOR_SEN69C:
+            return "SEN69C";
         case SensorManager::HCHO_SENSOR_SFA30:
             return "SFA30";
         case SensorManager::HCHO_SENSOR_SFA40:

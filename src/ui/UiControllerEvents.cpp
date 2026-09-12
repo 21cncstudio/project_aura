@@ -735,13 +735,13 @@ void UiController::on_confirm_ok_event(lv_event_t *e) {
     if (action == CONFIRM_VOC_RESET) {
         LOGI("UI", "VOC state reset requested");
         if (!sensorManager.resetVocState(storage, SEN66_START_RETRY_MS)) {
-            LOGW("UI", "SEN66 VOC state reset failed or sensor is busy");
+            LOGW("UI", "SEN6x VOC state reset failed or sensor is busy");
             return;
         }
         currentData.voc_valid = false;
         currentData.nox_valid = false;
         data_dirty = true;
-        LOGI("UI", "SEN66 device reset done");
+        LOGI("UI", "SEN6x device reset done");
     } else if (action == CONFIRM_RESTART) {
         LOGW("UI", "restart requested");
         WebHandlersRequestRestart();
@@ -1876,7 +1876,7 @@ void UiController::on_co2_calib_asc_event(lv_event_t *e) {
             data_dirty = true;
         }
         sync_co2_asc_toggle_ui();
-        LOGI("UI", "CO2 ASC %s saved; will apply when SEN66 is ready",
+        LOGI("UI", "CO2 ASC %s saved; will apply when the sensor is ready",
              requested_enabled ? "enabled" : "disabled");
         return;
     }
@@ -1924,7 +1924,7 @@ void UiController::on_co2_calib_confirm_ok_event(lv_event_t *e) {
     }
     if (!sensorManager.isOk()) {
         set_co2_calib_confirm_visible(false);
-        LOGW("UI", "CO2 calibration requested but SEN66 is not ready");
+        LOGW("UI", "CO2 calibration requested but the sensor is not ready");
         return;
     }
 

@@ -31,6 +31,7 @@ struct SensorData {
     bool pm4_valid = false;
     bool pm10_valid = false;
     bool co2_valid = false;
+    bool co2_warmup = false;
     bool voc_valid = false;
     bool nox_valid = false;
     bool hcho_valid = false;

@@ -15,7 +15,7 @@
 #include "drivers/DfrOptionalGasSensor.h"
 #include "drivers/Dps310.h"
 #include "drivers/Sen0466.h"
-#include "drivers/Sen66.h"
+#include "drivers/Sen6x.h"
 #include "drivers/Sfa30.h"
 #include "drivers/Sfa40.h"
 
@@ -39,7 +39,8 @@ public:
     enum HchoSensorType : uint8_t {
         HCHO_SENSOR_NONE = 0,
         HCHO_SENSOR_SFA30,
-        HCHO_SENSOR_SFA40
+        HCHO_SENSOR_SFA40,
+        HCHO_SENSOR_SEN69C
     };
 
     void begin(StorageManager &storage, float temp_offset, float hum_offset);
@@ -77,8 +78,8 @@ public:
 
     void setOffsets(float temp_offset, float hum_offset);
     bool isInitialized() const { return initialized_; }
-    bool isOk() const { return initialized_ && sen66_.isOk(); }
-    bool isBusy() const { return initialized_ && sen66_.isBusy(); }
+    bool isOk() const { return initialized_ && sen6x_.isOk(); }
+    bool isBusy() const { return initialized_ && sen6x_.isBusy(); }
     bool isDpsOk() const { return isPressureOk(); }
     bool isSfaOk() const { return currentHchoStatus() == SfaStatus::Ok; }
     bool isSfaPresent() const { return currentHchoStatus() != SfaStatus::Absent; }
@@ -114,20 +115,22 @@ public:
     PressureSensorType pressureSensorType() const { return pressure_sensor_; }
     const char *pressureSensorLabel() const;
     const char *hchoSensorLabel() const;
+    const char *mainSensorLabel() const { return sen6x_.label(); }
+    const char *mainSensorSerial() const { return sen6x_.serial(); }
     HchoSensorType hchoSensorType() const { return hcho_sensor_type_; }
     Sfa40::Diagnostics sfa40Diagnostics() const { return sfa40_.diagnostics(); }
     bool deviceReset();
     void scheduleRetry(uint32_t delay_ms);
     bool start(bool asc_enabled);
-    bool isWarmupActive() const { return initialized_ && sen66_.isWarmupActive(); }
+    bool isWarmupActive() const { return initialized_ && sen6x_.isWarmupActive(); }
     bool isSen66Detecting() const {
-        return initialized_ && !sen66_.isOk() &&
+        return initialized_ && !sen6x_.isOk() &&
                (sen66_probe_.pending() || late_probe_kind_ == LateProbeKind::Sen66);
     }
     bool isSen66StartupProbePending() const {
-        return initialized_ && !sen66_.isOk() && sen66_probe_.pending();
+        return initialized_ && !sen6x_.isOk() && sen66_probe_.pending();
     }
-    uint32_t lastDataMs() const { return initialized_ ? sen66_.lastDataMs() : 0; }
+    uint32_t lastDataMs() const { return initialized_ ? sen6x_.lastDataMs() : 0; }
     bool setAscEnabled(bool enabled);
     bool calibrateFrc(uint16_t ref_ppm, bool has_pressure, float pressure_hpa,
                       uint16_t &correction);
@@ -183,6 +186,7 @@ private:
     float currentHchoMaxPpb() const;
     bool acquireSharedI2c(uint32_t wait_ms);
     void releaseSharedI2c();
+    void recoverMainAfterControlFailure(bool success);
 
     static constexpr uint32_t COMMAND_ACQUIRE_TIMEOUT_MS = 500U;
 
@@ -193,7 +197,7 @@ private:
     Sfa40 sfa40_;
     Sen0466 sen0466_;
     DfrOptionalGasSensor optional_gas_;
-    Sen66 sen66_;
+    Sen6x sen6x_;
     HchoSensorType hcho_sensor_type_ = HCHO_SENSOR_NONE;
     bool warmup_active_last_ = false;
     bool sfa_warmup_active_last_ = false;

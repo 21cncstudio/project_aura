@@ -5,6 +5,7 @@
 // Purchase a Commercial License: see COMMERCIAL_LICENSE_SUMMARY.md
 
 #include "ui/UiController.h"
+#include "ui/UiCo2CardPresentation.h"
 #include "ui/UiHchoCardPresentation.h"
 #include "ui/UiOptionalGasProfile.h"
 #include "ui/UiText.h"
@@ -91,6 +92,11 @@ bool format_pm05_count(float value, char *buf, size_t buf_size) {
 void UiController::update_sensor_cards(const AirQuality &aq, bool gas_warmup, bool show_co2_bar) {
     char buf[16];
 
+    const auto co2_card = UiCo2CardPresentation::resolve(currentData.co2_valid, currentData.co2_warmup);
+    const bool co2_warmup = co2_card.warmup;
+    set_visible(objects.label_co2_warmup, co2_warmup);
+    set_visible(objects.label_co2_value_1, co2_card.show_value);
+    set_visible(objects.label_co2_unit_1, co2_card.show_unit);
     if (currentData.co2_valid) {
         snprintf(buf, sizeof(buf), "%d", currentData.co2);
         safe_label_set_text(objects.label_co2_value_1, buf);
@@ -101,7 +107,7 @@ void UiController::update_sensor_cards(const AirQuality &aq, bool gas_warmup, bo
         show_co2_bar ? lv_obj_clear_flag(objects.co2_bar_wrap_1, LV_OBJ_FLAG_HIDDEN)
                      : lv_obj_add_flag(objects.co2_bar_wrap_1, LV_OBJ_FLAG_HIDDEN);
     }
-    lv_color_t co2_col = currentData.co2_valid ? getCO2Color(currentData.co2) : color_inactive();
+    lv_color_t co2_col = co2_warmup ? color_blue() : currentData.co2_valid ? getCO2Color(currentData.co2) : color_inactive();
     set_dot_color(objects.dot_co2_1, alert_color_for_mode(co2_col));
     if (show_co2_bar) {
         set_dot_color(objects.co2_marker_1, co2_col);

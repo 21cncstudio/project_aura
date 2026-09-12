@@ -108,6 +108,7 @@ typedef struct _objects_t {
     lv_obj_t *co2_value_unit;
     lv_obj_t *label_co2_value_1;
     lv_obj_t *label_co2_unit_1;
+    lv_obj_t *label_co2_warmup;
     lv_obj_t *card_pressure_pro;
     lv_obj_t *label_pressure_title_1;
     lv_obj_t *label_pressure_value_1;

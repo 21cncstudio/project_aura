@@ -24,6 +24,9 @@ static void resetDriverStates() {
     Bmp580::state() = Bmp580TestState();
     Bmp580::variant_state() = Bmp580::Variant::BMP580_581;
     Sen66::state() = Sen66TestState();
+    Sen6x::selectedModel() = Sen6x::Model::Sen66;
+    Sen6x::co2Warmup() = false;
+    Sen6x::controlStartFailure() = false;
     Dps310::state() = Dps310TestState();
     Sfa30::state() = Sfa30TestState();
     Sfa40::state() = Sfa40TestState();
@@ -1427,8 +1430,126 @@ void test_sensor_manager_late_probes_are_serialized_round_robin() {
     TEST_ASSERT_EQUAL_UINT8(1, Sfa40::state().late_start_begin_count);
 }
 
+void test_sensor_manager_sen69c_uses_integrated_hcho_without_sfa_probes() {
+    Sen6x::selectedModel() = Sen6x::Model::Sen69c;
+    StorageManager storage; storage.begin();
+    PressureHistory history; SensorManager manager; SensorData data;
+    manager.begin(storage, 0, 0);
+    Sen66::state().poll_data.hcho = 43.2f;
+    Sen66::state().poll_data.hcho_valid = true;
+    Sen66::state().last_data_ms = 1000;
+    setMillis(1000);
+    manager.poll(data,storage,history,true);
+    TEST_ASSERT_EQUAL(SensorManager::HCHO_SENSOR_SEN69C,manager.hchoSensorType());
+    TEST_ASSERT_EQUAL_STRING("SEN69C",manager.mainSensorLabel());
+    TEST_ASSERT_TRUE(data.hcho_sensor_present);
+    TEST_ASSERT_TRUE(data.hcho_valid);
+    TEST_ASSERT_FLOAT_WITHIN(.01f,43.2f,data.hcho);
+    TEST_ASSERT_FALSE(Sfa40::state().start_called);
+    TEST_ASSERT_FALSE(Sfa30::state().start_called);
+    TEST_ASSERT_EQUAL(0,Sfa40::state().late_start_begin_count);
+    TEST_ASSERT_EQUAL(0,Sfa30::state().late_start_begin_count);
+}
+void test_sensor_manager_co2_warmup_does_not_depend_on_gas_warmup() {
+    Sen6x::selectedModel() = Sen6x::Model::Sen69c;
+    Sen6x::co2Warmup() = true;
+    StorageManager storage; storage.begin();
+    PressureHistory history; SensorManager manager; SensorData data;
+    manager.begin(storage,0,0);
+    data.co2_valid=true; data.co2=900;
+    auto result=manager.poll(data,storage,history,true);
+    TEST_ASSERT_FALSE(data.co2_valid);
+    TEST_ASSERT_TRUE(result.data_changed); TEST_ASSERT_TRUE(data.co2_warmup);
+    TEST_ASSERT_FALSE(manager.isWarmupActive());
+    Sen6x::co2Warmup() = false; Sen66::state().warmup = true;
+    result=manager.poll(data,storage,history,true);
+    TEST_ASSERT_TRUE(result.data_changed); TEST_ASSERT_FALSE(data.co2_warmup);
+    TEST_ASSERT_TRUE(manager.isWarmupActive());
+}
+void test_sensor_manager_sen69c_fault_does_not_switch_to_sfa() {
+    Sen6x::selectedModel() = Sen6x::Model::Sen69c;
+    StorageManager storage; storage.begin();
+    PressureHistory history; SensorManager manager; SensorData data;
+    manager.begin(storage,0,0);
+    manager.poll(data,storage,history,true);
+    Sen66::state().ok=false; data.hcho_valid=true;
+    manager.poll(data,storage,history,true);
+    TEST_ASSERT_FALSE(data.hcho_valid); TEST_ASSERT_TRUE(manager.hasSfaFault());
+    TEST_ASSERT_EQUAL(SensorManager::HCHO_SENSOR_SEN69C,manager.hchoSensorType());
+    TEST_ASSERT_FALSE(Sfa40::state().start_called);
+    TEST_ASSERT_FALSE(Sfa30::state().start_called);
+}
+
+static void start_sen69c_manager(SensorManager &manager, StorageManager &storage,
+                                PressureHistory &history, SensorData &data) {
+    Sen6x::selectedModel() = Sen6x::Model::Sen69c;
+    Sen66::state().ok = false;
+    manager.begin(storage, 0, 0);
+    setMillis(Config::SEN66_STARTUP_GRACE_MS + 1000);
+    for (unsigned i=0; i<100 && !manager.isOk(); ++i) {
+        manager.poll(data, storage, history, true); advanceMillis(20);
+    }
+    TEST_ASSERT_TRUE(manager.isOk());
+    TEST_ASSERT_EQUAL(1, Sen66::state().late_start_begin_count);
+}
+void test_sensor_manager_recovers_after_failed_asc_restart() {
+    StorageManager storage; storage.begin(); PressureHistory history;
+    SensorManager manager; SensorData data;
+    start_sen69c_manager(manager, storage, history, data);
+    Sen6x::controlStartFailure() = true;
+    TEST_ASSERT_FALSE(manager.setAscEnabled(false));
+    TEST_ASSERT_FALSE(manager.isOk());
+    data.co2_valid = true; data.co2 = 900;
+    manager.poll(data, storage, history, true);
+    TEST_ASSERT_FALSE(data.co2_valid); // Also works when lastDataMs() is zero.
+    Sen6x::controlStartFailure() = false;
+    for (unsigned i=0; i<100 && !manager.isOk(); ++i) {
+        advanceMillis(20); manager.poll(data, storage, history, true);
+    }
+    TEST_ASSERT_TRUE(manager.isOk());
+    TEST_ASSERT_EQUAL(2, Sen66::state().late_start_begin_count);
+    TEST_ASSERT_EQUAL(0, Sfa40::state().late_start_begin_count);
+}
+void test_sensor_manager_recovers_after_failed_frc_restart() {
+    StorageManager storage; storage.begin(); PressureHistory history;
+    SensorManager manager; SensorData data;
+    start_sen69c_manager(manager, storage, history, data);
+    Sen6x::controlStartFailure() = true;
+    uint16_t correction;
+    TEST_ASSERT_FALSE(manager.calibrateFrc(420, false, 0, correction));
+    Sen6x::controlStartFailure() = false;
+    for (unsigned i=0; i<100 && !manager.isOk(); ++i) {
+        advanceMillis(20); manager.poll(data, storage, history, true);
+    }
+    TEST_ASSERT_TRUE(manager.isOk());
+    TEST_ASSERT_EQUAL(2, Sen66::state().late_start_begin_count);
+}
+void test_sensor_manager_control_recovery_stops_after_five_attempts() {
+    StorageManager storage; storage.begin(); PressureHistory history;
+    SensorManager manager; SensorData data;
+    start_sen69c_manager(manager, storage, history, data);
+    Sen6x::controlStartFailure() = true;
+    TEST_ASSERT_FALSE(manager.setAscEnabled(false));
+    Sen66::state().start_ok = false;
+    for (unsigned i=0; i<120; ++i) {
+        advanceMillis(1000); manager.poll(data, storage, history, true);
+    }
+    TEST_ASSERT_EQUAL(1 + StartupProbePolicy::kMaxAttempts, Sen66::state().late_start_begin_count);
+    TEST_ASSERT_FALSE(manager.setAscEnabled(false));
+    for (unsigned i=0; i<120; ++i) {
+        advanceMillis(1000); manager.poll(data, storage, history, true);
+    }
+    TEST_ASSERT_EQUAL(1 + StartupProbePolicy::kMaxAttempts, Sen66::state().late_start_begin_count);
+    TEST_ASSERT_FALSE(manager.isOk());
+}
 int main(int, char **) {
     UNITY_BEGIN();
+    RUN_TEST(test_sensor_manager_recovers_after_failed_asc_restart);
+    RUN_TEST(test_sensor_manager_recovers_after_failed_frc_restart);
+    RUN_TEST(test_sensor_manager_control_recovery_stops_after_five_attempts);
+    RUN_TEST(test_sensor_manager_sen69c_uses_integrated_hcho_without_sfa_probes);
+    RUN_TEST(test_sensor_manager_co2_warmup_does_not_depend_on_gas_warmup);
+    RUN_TEST(test_sensor_manager_sen69c_fault_does_not_switch_to_sfa);
     RUN_TEST(test_sensor_manager_initializes_both_dfr_drivers);
     RUN_TEST(test_sensor_manager_sen0466_start_log_does_not_claim_valid_measurement);
     RUN_TEST(test_sensor_manager_poll_updates_data);

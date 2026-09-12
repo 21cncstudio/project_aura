@@ -25,6 +25,9 @@ The post-processor currently preserves:
 - the fail-safe `UNVERIFIED FW` initial trust label when that settings block is
   present in the generated UI;
 - the ambient O2 description on the optional gas information screen.
+- the initial hidden state of `label_co2_warmup`; `hiddenInEditor` alone does
+  not hide a widget at runtime. Its visibility follows `SensorData.co2_warmup`
+  independently of the VOC/NOx and HCHO warmups.
 
 The script is intentionally strict. If EEZ changes an expected object name or
 emits an unknown value, it exits with an error instead of editing a possibly

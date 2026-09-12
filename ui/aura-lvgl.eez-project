@@ -3519,6 +3519,59 @@
                       },
                       "group": "",
                       "groupIndex": 0
+                    },
+                    {
+                      "objID": "90a07326-9882-45e6-f201-1a4791aebc81",
+                      "type": "LVGLLabelWidget",
+                      "left": 96,
+                      "top": 47,
+                      "width": 120,
+                      "height": 20,
+                      "customInputs": [],
+                      "customOutputs": [],
+                      "style": {
+                        "objID": "9aee54c2-8cc1-4b0e-899a-8ef03fae6536",
+                        "useStyle": "default",
+                        "conditionalStyles": [],
+                        "childStyles": []
+                      },
+                      "hiddenInEditor": true,
+                      "timeline": [],
+                      "eventHandlers": [],
+                      "identifier": "label_co2_warmup",
+                      "leftUnit": "px",
+                      "topUnit": "px",
+                      "widthUnit": "px",
+                      "heightUnit": "content",
+                      "children": [],
+                      "widgetFlags": "HIDDEN",
+                      "hiddenFlagType": "literal",
+                      "clickableFlagType": "literal",
+                      "flagScrollbarMode": "",
+                      "flagScrollDirection": "",
+                      "scrollSnapX": "",
+                      "scrollSnapY": "",
+                      "checkedStateType": "literal",
+                      "disabledStateType": "literal",
+                      "states": "",
+                      "useStyle": "style_text_primary",
+                      "localStyles": {
+                        "objID": "db104ac0-82a0-45fb-adf0-13b0e17169c9",
+                        "definition": {
+                          "MAIN": {
+                            "DEFAULT": {
+                              "text_font": "jet_reg_18",
+                              "text_align": "CENTER"
+                            }
+                          }
+                        }
+                      },
+                      "group": "",
+                      "groupIndex": 0,
+                      "text": "WARMUP",
+                      "textType": "literal",
+                      "longMode": "WRAP",
+                      "recolor": false
                     }
                   ],
                   "widgetFlags": "",
@@ -6288,8 +6341,8 @@
                       "type": "LVGLLineWidget",
                       "left": -1,
                       "top": 55,
-                      "width": 141,
-                      "height": 1,
+                      "width": 140,
+                      "height": 0,
                       "customInputs": [],
                       "customOutputs": [],
                       "style": {
@@ -7369,8 +7422,8 @@
                       "type": "LVGLLineWidget",
                       "left": 0,
                       "top": 55,
-                      "width": 141,
-                      "height": 1,
+                      "width": 140,
+                      "height": 0,
                       "customInputs": [],
                       "customOutputs": [],
                       "style": {

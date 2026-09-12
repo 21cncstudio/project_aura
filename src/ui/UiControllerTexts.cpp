@@ -59,6 +59,7 @@ void UiController::update_main_texts() {
     if (objects.label_time_title_2) safe_label_set_text(objects.label_time_title_2, UiText::LabelTimeCard());
     if (objects.label_voc_warmup_1) safe_label_set_text(objects.label_voc_warmup_1, UiText::LabelWarmup());
     if (objects.label_nox_warmup_1) safe_label_set_text(objects.label_nox_warmup_1, UiText::LabelWarmup());
+    if (objects.label_co2_warmup) safe_label_set_text(objects.label_co2_warmup, UiText::LabelWarmup());
     if (objects.label_hcho_warmup) safe_label_set_text(objects.label_hcho_warmup, UiText::LabelWarmup());
     if (objects.label_co_warmup) safe_label_set_text(objects.label_co_warmup, UiText::LabelWarmup());
     if (objects.label_voc_unit_1) safe_label_set_text(objects.label_voc_unit_1, UiText::UnitIndex());
@@ -315,7 +316,7 @@ void UiController::update_boot_diag_texts() {
     if (objects.lbl_diag_storage_label) safe_label_set_text(objects.lbl_diag_storage_label, UiText::LabelBootDiagStorageLabel());
     if (objects.lbl_diag_i2c_label) safe_label_set_text(objects.lbl_diag_i2c_label, UiText::LabelBootDiagI2cLabel());
     if (objects.lbl_diag_touch_label) safe_label_set_text(objects.lbl_diag_touch_label, UiText::LabelBootDiagTouchLabel());
-    if (objects.lbl_diag_sen_label) safe_label_set_text(objects.lbl_diag_sen_label, UiText::LabelBootDiagSenLabel());
+    if (objects.lbl_diag_sen_label) safe_label_set_text(objects.lbl_diag_sen_label, sensorManager.mainSensorLabel());
     if (objects.lbl_diag_sfa_label) {
         char hcho_label[16];
         snprintf(hcho_label, sizeof(hcho_label), "%s:", sensorManager.hchoSensorLabel());
