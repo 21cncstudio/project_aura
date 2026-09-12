@@ -30,6 +30,9 @@ add_compile_definitions(${AURA_DEFINITIONS}
     LV_CONF_INCLUDE_SIMPLE LV_LVGL_H_INCLUDE_SIMPLE LV_COLOR_16_SWAP=0)
 
 project(aura_aq)
+# Produce the installer filesystem with the same LittleFS component as firmware.
+# Do not add it to normal flash: an app update must preserve user filesystem data.
+littlefs_create_partition_image(littlefs "${CMAKE_SOURCE_DIR}/data")
 include("${CMAKE_SOURCE_DIR}/idf/panel_overlay.cmake")
 get_filename_component(aura_toolchain_dir "${CMAKE_C_COMPILER}" DIRECTORY)
 find_program(AURA_SIZE_TOOL NAMES xtensa-esp32s3-elf-size

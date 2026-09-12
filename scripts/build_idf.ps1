@@ -29,6 +29,17 @@ try {
     & $pythonExe (Join-Path $idfRoot 'tools\idf.py') -B $buildDir `
         -D ('AURA_PROFILE=' + $Profile) -D ('Python3_EXECUTABLE=' + $pythonExe) $Action
     if ($LASTEXITCODE -ne 0) { throw "ESP-IDF $Action failed with exit code $LASTEXITCODE" }
+    if ($Action -eq 'build') {
+        # Only a successful complete build can bind the five installer assets.
+        # Packaging with -SkipBuild verifies this stamp; it never recreates it.
+        . (Join-Path $PSScriptRoot 'release_identity.ps1')
+        $environment = if ($Profile -eq '4_3') { 'project_aura' } else { 'project_aura_7' }
+        $layout = Get-AuraReleaseBuildLayout -RepositoryRoot $projectRoot -Environment $environment
+        $identity = Read-AuraBuildIdentity -IdentityPath $layout.IdentityPath `
+            -Environment $environment -RepositoryRoot $projectRoot
+        Write-AuraReleaseArtifactStamp -StampPath $layout.StampPath `
+            -Identity $identity -ArtifactInputs $layout.ArtifactInputs
+    }
 } finally {
     Pop-Location
 }

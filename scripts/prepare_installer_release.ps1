@@ -4,6 +4,10 @@ param(
   [ValidateSet("stable", "beta", "recovery")][string]$Channel = "stable",
   [string]$KeyDirectory = (Join-Path $env:USERPROFILE ".project_aura\signing"),
   [string]$OutputRoot = "release-assets",
+  [ValidateSet("idf", "platformio")][string]$BuildSystem = "idf",
+  [string]$IdfPath = $env:IDF_PATH,
+  [string]$ToolsPath = $env:IDF_TOOLS_PATH,
+  [ValidateRange(1, 32)][int]$Jobs = 4,
   [string]$NodePath,
   [string]$RecoveryBinary,
   [string]$RecoveryIdentityPath,
@@ -91,13 +95,18 @@ try {
     Version = $Version
     OutputRoot = $OutputRoot
     SkipWebInstallerSync = $true
+    BuildSystem = $BuildSystem
+    IdfPath = $IdfPath
+    ToolsPath = $ToolsPath
+    Jobs = $Jobs
   }
   if ($SkipBuild) {
     $assetPreparation["SkipBuild"] = $true
   }
   & (Join-Path $PSScriptRoot "prepare_release_assets.ps1") @assetPreparation
+  $layout = Get-AuraReleaseBuildLayout -RepositoryRoot $root -Environment $Env -BuildSystem $BuildSystem
   $identity = Read-AuraBuildIdentity `
-    -IdentityPath (Join-Path $root (".pio\build\{0}\generated\build-identity.json" -f $Env)) `
+    -IdentityPath $layout.IdentityPath `
     -Environment $Env `
     -RepositoryRoot $root
 
