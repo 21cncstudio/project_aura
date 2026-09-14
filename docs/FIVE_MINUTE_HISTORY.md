@@ -107,3 +107,14 @@ and checksum checks. EEZ postprocess check and Git whitespace check passed. Exac
 source hashes, test/build logs, and retained candidate BINs are recorded in
 `C:/Users/user/AppData/Local/Temp/aura-history-20260914/verification.json`. These candidates
 have not been installed on hardware.
+
+## Hub relay integration, 2026-09-14
+
+The export also includes device_id (the stable aura_ EFUSE identity). A consumer
+must compare it with the paired device before storing a response from its current
+LAN address. Optional limit=1..8 bounds the page; the default remains eight.
+The Hub requests limit=2 to bound temporary parser memory during backfill.
+This metadata does not enable pairing in main: Aura-to-Hub pairing currently
+exists on the separate feature/aura-link branch. A combined firmware candidate
+is required before a physical end-to-end test; that older branch is not merged
+into main by this history integration.

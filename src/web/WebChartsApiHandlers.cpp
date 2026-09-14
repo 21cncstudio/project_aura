@@ -7,6 +7,7 @@
 #include "web/WebChartsApiHandlers.h"
 
 #include <ArduinoJson.h>
+#include <Esp.h>
 #include <stdlib.h>
 #include <errno.h>
 
@@ -101,7 +102,22 @@ void handleData(WebHandlerContext &context, bool ota_busy) {
             }
             after = static_cast<uint32_t>(parsed);
         }
-        WebChartsApiUtils::fillHistoryJson(doc.to<ArduinoJson::JsonObject>(), history_view, after);
+        const String limit_arg = server.arg("limit");
+        uint16_t limit = 8;
+        if (limit_arg.length()) {
+            if (limit_arg.length() != 1 || limit_arg[0] < '1' || limit_arg[0] > '8') {
+                WebResponseUtils::sendNoStoreHeaders(server);
+                server.send(400, "application/json", "{\"success\":false,\"error\":\"Invalid history limit\"}");
+                return;
+            }
+            limit = static_cast<uint16_t>(limit_arg[0] - '0');
+        }
+        WebChartsApiUtils::fillHistoryJson(doc.to<ArduinoJson::JsonObject>(), history_view, after, limit);
+        const uint64_t mac = ESP.getEfuseMac();
+        char device_id[24];
+        snprintf(device_id, sizeof(device_id), "aura_%04X%08X",
+                 static_cast<uint16_t>(mac >> 32), static_cast<uint32_t>(mac));
+        doc["device_id"] = device_id;
     } else WebChartsApiUtils::fillJson(
         doc.to<ArduinoJson::JsonObject>(),
         history_view,
