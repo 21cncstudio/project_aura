@@ -77,6 +77,7 @@ public:
     }
     bool isOk() const { return state().ok; }
     bool isPressureValid() const { return state().pressure_valid; }
+    float acquiredPressure() const { return state().pressure; }
     uint32_t lastDataMs() const { return state().last_data_ms; }
     Variant variant() const { return variant_state(); }
     const char *variantLabel() const {

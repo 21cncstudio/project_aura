@@ -13,6 +13,7 @@
 #include "core/Logger.h"
 #include "config/AppConfig.h"
 #include "modules/PressureHistory.h"
+#include "modules/ChartsHistory.h"
 #include "modules/StorageManager.h"
 
 namespace {
@@ -773,6 +774,10 @@ SensorManager::PollResult SensorManager::poll(SensorData &data,
         late_probe_at_entry == LateProbeKind::Sen66 ||
         late_probe_kind_ == LateProbeKind::Sen66;
 
+    const uint32_t previous_sen66_ms = sen66_.lastDataMs();
+    const uint32_t previous_co_ms = sen0466_.lastDataMs();
+    const uint32_t previous_optional_ms = optional_gas_.lastDataMs();
+    bool hcho_new = false;
     bool sen66_changed = false;
     if (!sen66_late_this_poll) {
         sen66_.poll(data, sen66_changed);
@@ -817,6 +822,7 @@ SensorManager::PollResult SensorManager::poll(SensorData &data,
     }
     float hcho_ppb = 0.0f;
     if (currentHchoTakeNewData(hcho_ppb)) {
+        hcho_new = true;
         data.hcho = hcho_ppb;
         data.hcho_valid = !sfa_warmup_now;
         result.data_changed = true;
@@ -910,6 +916,27 @@ SensorManager::PollResult SensorManager::poll(SensorData &data,
         result.data_changed = true;
     }
     log_soft_warnings(data, warmup_now);
+
+    result.history_data = data;
+    if (sen66_.lastDataMs() != previous_sen66_ms) {
+        result.history_data.co2 = sen66_.acquiredCo2();
+        for (const auto metric : {ChartsHistory::METRIC_CO2, ChartsHistory::METRIC_TEMPERATURE,
+            ChartsHistory::METRIC_HUMIDITY, ChartsHistory::METRIC_VOC, ChartsHistory::METRIC_NOX,
+            ChartsHistory::METRIC_PM05, ChartsHistory::METRIC_PM1, ChartsHistory::METRIC_PM25,
+            ChartsHistory::METRIC_PM4, ChartsHistory::METRIC_PM10})
+            result.history_fresh_mask |= ChartsHistory::metricBit(metric);
+    }
+    if (hcho_new) result.history_fresh_mask |= ChartsHistory::metricBit(ChartsHistory::METRIC_HCHO);
+    if (pressure_new) {
+        result.history_data.pressure = pressure_sensor_ == PRESSURE_BMP58X ? bmp580_.acquiredPressure() :
+            pressure_sensor_ == PRESSURE_BMP3XX ? bmp3xx_.acquiredPressure() : dps310_.acquiredPressure();
+        result.history_fresh_mask |= ChartsHistory::metricBit(ChartsHistory::METRIC_PRESSURE);
+    }
+    if (sen0466_.lastDataMs() != previous_co_ms)
+        result.history_fresh_mask |= ChartsHistory::metricBit(ChartsHistory::METRIC_CO);
+    if (optional_gas_.lastDataMs() != previous_optional_ms)
+        result.history_fresh_mask |= ChartsHistory::metricBit(ChartsHistory::METRIC_OPTIONAL_GAS);
+    apply_sanity_filters(result.history_data, currentHchoMinPpb(), currentHchoMaxPpb());
 
     return result;
 }

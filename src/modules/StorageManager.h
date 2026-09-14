@@ -77,6 +77,9 @@ public:
     static constexpr const char *kLastGoodPath = "/config.last_good.json";
     static constexpr const char *kVocStatePath = "/voc_state.bin";
     static constexpr const char *kPressurePath = "/pressure.bin";
+    static constexpr int kChartsSegmentCount = 25;
+    static void chartsSegmentPath(int slot, char *out, size_t length);
+    void clearChartsHistory();
     static constexpr const char *kChartsPath = "/charts.bin";
     static constexpr const char *kDacAutoPath = "/dac_auto.json";
     static constexpr const char *kDisplayThresholdsPath = "/display_thresholds.json";

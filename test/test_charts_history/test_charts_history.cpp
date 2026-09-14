@@ -1,586 +1,214 @@
 #include <unity.h>
-
 #include <atomic>
 #include <thread>
-
+#include <math.h>
 #include "ArduinoMock.h"
-#include "core/ChartsRuntimeState.h"
 #include "TimeMock.h"
-#include "config/AppConfig.h"
-#include "drivers/DfrOptionalGasSensor.h"
+#include "core/ChartsRuntimeState.h"
 #include "modules/ChartsHistory.h"
 #include "modules/StorageManager.h"
+#include "web/WebChartsApiUtils.h"
 
-namespace {
-
-constexpr uint32_t kStepMs = Config::CHART_HISTORY_STEP_MS;
-constexpr uint32_t kStepS = Config::CHART_HISTORY_STEP_MS / 1000UL;
-constexpr uint32_t kChartsHistoryMagic = 0x43524849; // "CRHI"
-constexpr uint16_t kChartsHistoryVersion = 2;
-
-std::atomic<bool> snapshot_copy_hook_entered{false};
-std::atomic<bool> snapshot_writer_blocked_in_take{false};
-
-void record_blocked_semaphore_take(SemaphoreHandle_t) {
-    snapshot_writer_blocked_in_take.store(true);
-}
-
-void block_snapshot_copy_until_writer_is_blocked_in_take() {
-    snapshot_copy_hook_entered.store(true);
-    while (!snapshot_writer_blocked_in_take.load()) {
-        std::this_thread::yield();
-    }
-}
-
-struct ChartsHistoryBlob {
-    uint32_t magic;
-    uint16_t version;
-    uint16_t reserved;
-    uint8_t optional_gas_type;
-    uint8_t reserved2;
-    uint32_t epoch;
-    uint16_t index;
-    uint16_t count;
-    uint16_t valid_mask[ChartsHistory::kCapacity];
-    float values[ChartsHistory::kMetricCount][ChartsHistory::kCapacity];
-};
-
-uint16_t metric_bit(ChartsHistory::Metric metric) {
-    return static_cast<uint16_t>(1U << static_cast<uint8_t>(metric));
-}
-
-void advanceStep() {
-    advanceMillis(kStepMs);
-    advanceEpoch(kStepS);
-}
-
-void set_temp_pressure(SensorData &data, float temp, float pressure) {
-    data = SensorData();
-    data.temp_valid = true;
-    data.temperature = temp;
-    data.pressure_valid = true;
-    data.pressure = pressure;
-}
-
-void set_optional_gas(SensorData &data,
-                      DfrOptionalGasSensor::OptionalGasType type,
-                      float ppm) {
-    data = SensorData();
-    data.optional_gas_sensor_present = true;
-    data.optional_gas_valid = true;
-    data.optional_gas_type = static_cast<uint8_t>(type);
-    data.optional_gas_ppm = ppm;
-}
-
-} // namespace
-
+constexpr uint32_t base_epoch = 1767225600; // UTC hour boundary
+constexpr auto TEMP = ChartsHistory::METRIC_TEMPERATURE;
+constexpr auto CO2 = ChartsHistory::METRIC_CO2;
+constexpr auto GAS = ChartsHistory::METRIC_OPTIONAL_GAS;
+constexpr uint16_t temp_mask = ChartsHistory::metricBit(TEMP);
+void at(uint32_t s) { setMillis(s * 1000); setNowEpoch(base_epoch + s); }
 void setUp() {
+    at(0); ChartsHistory::setNowEpochFn(&mockNow);
     StorageManager::setTestForceSaveFailure(false);
-    setMillis(0);
-    setNowEpoch(Config::TIME_VALID_EPOCH + 1000);
-    ChartsHistory::setNowEpochFn(&mockNow);
-    ChartsRuntimeState::setSnapshotCopyHook(nullptr);
-    FreeRtosSemaphoreMock::resetBlockedTakeHook();
-    snapshot_copy_hook_entered.store(false);
-    snapshot_writer_blocked_in_take.store(false);
-}
-
-void tearDown() {
-    StorageManager::setTestForceSaveFailure(false);
-    ChartsHistory::setNowEpochFn(nullptr);
     ChartsRuntimeState::setSnapshotCopyHook(nullptr);
     FreeRtosSemaphoreMock::resetBlockedTakeHook();
 }
-
-void test_charts_history_gap_marks_null_and_fills_pressure() {
-    StorageManager storage;
-    storage.begin();
-    ChartsHistory history;
-    history.load(storage);
-
-    SensorData data;
-    set_temp_pressure(data, 20.0f, 1000.0f);
-    advanceStep();
-    history.update(data, storage, false, true);
-
-    // 4 steps elapsed since last sample => 3 gap points + 1 current sample.
-    advanceMillis(kStepMs * 4);
-    advanceEpoch(kStepS * 4);
-    set_temp_pressure(data, 24.0f, 1010.0f);
-    history.update(data, storage, false, true);
-
-    TEST_ASSERT_EQUAL_UINT16(5, history.count());
-
-    ChartsHistory::Entry entry = {};
-    TEST_ASSERT_TRUE(history.entryFromOldest(0, entry));
-    TEST_ASSERT_TRUE((entry.valid_mask & metric_bit(ChartsHistory::METRIC_TEMPERATURE)) != 0);
-    TEST_ASSERT_TRUE((entry.valid_mask & metric_bit(ChartsHistory::METRIC_PRESSURE)) != 0);
-    TEST_ASSERT_FLOAT_WITHIN(0.01f, 1000.0f, entry.values[ChartsHistory::METRIC_PRESSURE]);
-
-    TEST_ASSERT_TRUE(history.entryFromOldest(1, entry));
-    TEST_ASSERT_FALSE((entry.valid_mask & metric_bit(ChartsHistory::METRIC_TEMPERATURE)) != 0);
-    TEST_ASSERT_TRUE((entry.valid_mask & metric_bit(ChartsHistory::METRIC_PRESSURE)) != 0);
-    TEST_ASSERT_FLOAT_WITHIN(0.01f, 1002.5f, entry.values[ChartsHistory::METRIC_PRESSURE]);
-
-    TEST_ASSERT_TRUE(history.entryFromOldest(2, entry));
-    TEST_ASSERT_FALSE((entry.valid_mask & metric_bit(ChartsHistory::METRIC_TEMPERATURE)) != 0);
-    TEST_ASSERT_TRUE((entry.valid_mask & metric_bit(ChartsHistory::METRIC_PRESSURE)) != 0);
-    TEST_ASSERT_FLOAT_WITHIN(0.01f, 1005.0f, entry.values[ChartsHistory::METRIC_PRESSURE]);
-
-    TEST_ASSERT_TRUE(history.entryFromOldest(3, entry));
-    TEST_ASSERT_FALSE((entry.valid_mask & metric_bit(ChartsHistory::METRIC_TEMPERATURE)) != 0);
-    TEST_ASSERT_TRUE((entry.valid_mask & metric_bit(ChartsHistory::METRIC_PRESSURE)) != 0);
-    TEST_ASSERT_FLOAT_WITHIN(0.01f, 1007.5f, entry.values[ChartsHistory::METRIC_PRESSURE]);
-
-    TEST_ASSERT_TRUE(history.entryFromOldest(4, entry));
-    TEST_ASSERT_TRUE((entry.valid_mask & metric_bit(ChartsHistory::METRIC_TEMPERATURE)) != 0);
-    TEST_ASSERT_TRUE((entry.valid_mask & metric_bit(ChartsHistory::METRIC_PRESSURE)) != 0);
-    TEST_ASSERT_FLOAT_WITHIN(0.01f, 24.0f, entry.values[ChartsHistory::METRIC_TEMPERATURE]);
-    TEST_ASSERT_FLOAT_WITHIN(0.01f, 1010.0f, entry.values[ChartsHistory::METRIC_PRESSURE]);
+void tearDown() { StorageManager::setTestForceSaveFailure(false); ChartsHistory::setNowEpochFn(nullptr); }
+SensorData temp(float v) { SensorData d; d.temperature=v; d.temp_valid=true; return d; }
+void observe(ChartsHistory &h, StorageManager &s, uint32_t second, float value, uint16_t mask=temp_mask) {
+    at(second); h.update(temp(value),s,false,true,mask);
+}
+ChartsHistory::Entry entry(ChartsHistory &h, uint16_t n=0) {
+    ChartsHistory::Entry e; TEST_ASSERT_TRUE(h.entryFromOldest(n,e)); return e;
+}
+class View : public WebChartsApiUtils::HistoryView {
+public:
+    explicit View(const ChartsRuntimeState::Snapshot &s): s_(s) {}
+    uint16_t count() const override { return s_.count(); }
+    uint32_t latestEpoch() const override { return s_.latestEpoch(); }
+    bool latestMetric(ChartsHistory::Metric m,float &v) const override { return s_.latestMetric(m,v); }
+    bool entryFromOldest(uint16_t n,ChartsHistory::Entry &e) const override { return s_.entryFromOldest(n,e); }
+    bool metricValueFromOldest(uint16_t n,ChartsHistory::Metric m,float &v,bool &b) const override { return s_.metricValueFromOldest(n,m,v,b); }
+private: const ChartsRuntimeState::Snapshot &s_;
+};
+void test_summary_counts_new_equal_values_and_preserves_peak() {
+    StorageManager s; s.begin(); ChartsHistory h; h.load(s);
+    observe(h,s,0,20); observe(h,s,10,20); observe(h,s,20,80);
+    for(uint32_t n=21;n<300;++n) observe(h,s,n,999,0); // repeated cached data is not acquired
+    observe(h,s,300,10);
+    TEST_ASSERT_EQUAL(1,h.count()); const auto e=entry(h);
+    TEST_ASSERT_FLOAT_WITHIN(.001,40,e.values[TEMP]);
+    TEST_ASSERT_FLOAT_WITHIN(.001,20,e.minimum[TEMP]); TEST_ASSERT_FLOAT_WITHIN(.001,80,e.maximum[TEMP]);
+    TEST_ASSERT_EQUAL(3,e.samples[TEMP]); TEST_ASSERT_EQUAL(0,e.first_second[TEMP]); TEST_ASSERT_EQUAL(20,e.last_second[TEMP]);
+    TEST_ASSERT_TRUE(e.persisted); TEST_ASSERT_EQUAL(base_epoch,e.start_epoch);
+    observe(h,s,600,0,0); TEST_ASSERT_FLOAT_WITHIN(.001,10,entry(h,1).values[TEMP]);
+}
+void test_validity_warmup_and_metric_counts_are_independent() {
+    StorageManager s; s.begin(); ChartsHistory h; h.load(s);
+    SensorData d=temp(20); d.co2_valid=true; d.co2=700; d.voc_valid=true; d.voc_index=40;
+    h.update(d,s,true,true,0x3fff);
+    at(10); d.temperature=NAN; d.co2=900; h.update(d,s,false,true,ChartsHistory::metricBit(CO2)|temp_mask);
+    at(300); h.update(d,s,false,true,0);
+    auto e=entry(h); TEST_ASSERT_EQUAL(1,e.samples[TEMP]); TEST_ASSERT_EQUAL(2,e.samples[CO2]);
+    TEST_ASSERT_FLOAT_WITHIN(.001,800,e.values[CO2]); TEST_ASSERT_EQUAL(0,e.samples[ChartsHistory::METRIC_VOC]);
+}
+void test_gaps_are_not_pressure_measurements() {
+    StorageManager s; s.begin(); ChartsHistory h; h.load(s);
+    SensorData d=temp(20); d.pressure_valid=true; d.pressure=1000;
+    h.update(d,s,false,true,0x3fff); at(1200); h.update(d,s,false,true,0);
+    TEST_ASSERT_EQUAL(4,h.count());
+    for(int n=1;n<4;++n) { auto e=entry(h,n); TEST_ASSERT_EQUAL(ChartsHistory::Gap,e.kind); TEST_ASSERT_EQUAL(0,e.valid_mask); }
+}
+void test_save_retry_and_reboot_do_not_claim_unsaved_records() {
+    StorageManager s; s.begin(); ChartsHistory h; h.load(s); observe(h,s,0,22);
+    StorageManager::setTestForceSaveFailure(true); observe(h,s,300,0,0);
+    TEST_ASSERT_FALSE(entry(h).persisted); ChartsHistory reboot; reboot.load(s); TEST_ASSERT_EQUAL(0,reboot.count());
+    StorageManager::setTestForceSaveFailure(false); observe(h,s,311,0,0);
+    TEST_ASSERT_TRUE(entry(h).persisted); reboot.load(s); TEST_ASSERT_EQUAL(1,reboot.count());
+    TEST_ASSERT_FLOAT_WITHIN(.001,22,entry(reboot).values[TEMP]);
+    at(312); reboot.update(temp(24),s,false,true,temp_mask); observe(reboot,s,600,0,0);
+    TEST_ASSERT_EQUAL(2,reboot.count()); TEST_ASSERT_EQUAL(1,entry(reboot,1).samples[TEMP]);
+    TEST_ASSERT_EQUAL(12,entry(reboot,1).first_second[TEMP]);
+}
+void test_retention_ring_and_blocks_restore_last_day() {
+    StorageManager s; s.begin(); ChartsHistory h; h.load(s);
+    for(uint32_t n=0;n<=300;++n) observe(h,s,n*300,static_cast<float>(n));
+    TEST_ASSERT_EQUAL(288,h.count()); TEST_ASSERT_EQUAL(base_epoch+12*300,entry(h).start_epoch);
+    ChartsHistory r; r.load(s); TEST_ASSERT_EQUAL(288,r.count());
+    TEST_ASSERT_EQUAL(base_epoch+299*300,r.latestEpoch()); TEST_ASSERT_EQUAL(base_epoch+12*300,entry(r).start_epoch);
+    TEST_ASSERT_FLOAT_WITHIN(.001,299,entry(r,287).values[TEMP]);
+}
+void test_clock_rollback_never_rewrites_completed_summary() {
+    StorageManager s; s.begin(); ChartsHistory h; h.load(s);
+    observe(h,s,0,20); observe(h,s,300,30); observe(h,s,310,40);
+    observe(h,s,250,999); TEST_ASSERT_EQUAL(1,h.count());
+    observe(h,s,315,50); observe(h,s,600,0,0);
+    TEST_ASSERT_EQUAL(2,h.count()); TEST_ASSERT_FLOAT_WITHIN(.001,20,entry(h).values[TEMP]);
+    TEST_ASSERT_FLOAT_WITHIN(.001,50,entry(h,1).values[TEMP]);
+}
+void test_untrusted_time_keeps_ram_history_out_of_export() {
+    StorageManager s; s.begin(); ChartsHistory h; h.load(s);
+    h.update(temp(20),s,false,false,temp_mask); at(300); h.update(temp(30),s,false,false,temp_mask);
+    TEST_ASSERT_EQUAL(1,h.count()); TEST_ASSERT_EQUAL(0,entry(h).start_epoch); TEST_ASSERT_FALSE(entry(h).persisted);
+    at(301); h.update(temp(40),s,false,true,temp_mask); observe(h,s,600,0,0);
+    TEST_ASSERT_EQUAL(1,h.count()); TEST_ASSERT_EQUAL(base_epoch+300,entry(h).start_epoch);
+}
+struct Legacy {
+    uint32_t magic=0x43524849; uint16_t version=2,reserved=0; uint8_t gas=0,reserved2=0;
+    uint32_t epoch=base_epoch-10; uint16_t index=1,count=1;
+    uint16_t masks[288]{}; float values[14][288]{};
+};
+void test_legacy_snapshot_is_preserved_without_invented_statistics() {
+    StorageManager s; s.begin(); Legacy old; old.masks[0]=temp_mask; old.values[TEMP][0]=19;
+    TEST_ASSERT_TRUE(s.saveBlobAtomic(StorageManager::kChartsPath,&old,sizeof(old)));
+    ChartsHistory h; h.load(s); auto e=entry(h);
+    TEST_ASSERT_EQUAL(ChartsHistory::LegacySnapshot,e.kind); TEST_ASSERT_EQUAL(old.epoch,e.start_epoch);
+    TEST_ASSERT_FLOAT_WITHIN(.001,19,e.values[TEMP]); TEST_ASSERT_EQUAL(0,e.samples[TEMP]);
+    h.update(temp(500),s,false,false,temp_mask); TEST_ASSERT_EQUAL(1,h.count());
+    observe(h,s,0,20); observe(h,s,300,0,0); TEST_ASSERT_EQUAL(2,h.count());
+    ChartsHistory r; r.load(s); TEST_ASSERT_EQUAL(2,r.count());
+}
+void test_optional_gas_keeps_record_identity_and_filters_current_chart() {
+    StorageManager s; s.begin(); ChartsHistory h; h.load(s); SensorData d;
+    d.optional_gas_sensor_present=d.optional_gas_valid=true; d.optional_gas_type=1; d.optional_gas_ppm=12;
+    h.update(d,s,false,true,ChartsHistory::metricBit(GAS)); at(300); h.update(d,s,false,true,0);
+    d.optional_gas_type=5; d.optional_gas_ppm=.1; at(301); h.update(d,s,false,true,ChartsHistory::metricBit(GAS));
+    at(600); h.update(d,s,false,true,0);
+    auto old=entry(h); TEST_ASSERT_EQUAL(1,old.optional_gas_type); TEST_ASSERT_EQUAL(1,old.samples[GAS]);
+    float v; bool valid; h.metricValueFromOldest(0,GAS,v,valid); TEST_ASSERT_FALSE(valid);
+    h.metricValueFromOldest(1,GAS,v,valid); TEST_ASSERT_TRUE(valid); TEST_ASSERT_FLOAT_WITHIN(.001,.1,v);
+}
+void test_clear_removes_legacy_and_segment_history() {
+    StorageManager s; s.begin(); ChartsHistory h; h.load(s);
+    observe(h,s,0,20); observe(h,s,300,30); h.clear(s);
+    TEST_ASSERT_EQUAL(0,h.count()); ChartsHistory r; r.load(s); TEST_ASSERT_EQUAL(0,r.count());
+}
+void test_chart_and_bounded_export_share_exact_summary_values() {
+    StorageManager s; s.begin(); ChartsHistory h; h.load(s);
+    for(uint32_t n=0;n<=12;++n) observe(h,s,n*300,20+n);
+    ChartsRuntimeState runtime; runtime.update(h); auto snap=runtime.copySnapshot(); TEST_ASSERT_NOT_NULL(snap.get());
+    View view(*snap); ArduinoJson::JsonDocument chart, batch;
+    WebChartsApiUtils::fillJson(chart.to<ArduinoJson::JsonObject>(),view,"1h","core","ppm",true);
+    WebChartsApiUtils::fillHistoryJson(batch.to<ArduinoJson::JsonObject>(),view);
+    TEST_ASSERT_EQUAL(8,batch["records"].size()); TEST_ASSERT_TRUE(batch["has_more"].as<bool>());
+    TEST_ASSERT_FLOAT_WITHIN(.001,20,batch["records"][0]["metrics"]["1"]["mean"].as<float>());
+    TEST_ASSERT_FLOAT_WITHIN(.001,20,chart["series"][1]["values"][0].as<float>());
+    TEST_ASSERT_EQUAL(1,chart["series"][1]["count"][0].as<int>());
+    auto cursor=batch["next_after"].as<uint32_t>(); batch.clear();
+    WebChartsApiUtils::fillHistoryJson(batch.to<ArduinoJson::JsonObject>(),view,cursor);
+    TEST_ASSERT_EQUAL(4,batch["records"].size()); TEST_ASSERT_FALSE(batch["has_more"].as<bool>());
+}
+std::atomic<bool> copying{false}, waiting{false};
+void blocked(SemaphoreHandle_t) { waiting=true; }
+void copying_hook() { copying=true; while(!waiting.load()) std::this_thread::yield(); }
+void test_snapshot_remains_one_generation_during_concurrent_update() {
+    StorageManager s; s.begin(); ChartsHistory h; h.load(s); observe(h,s,0,20); observe(h,s,300,30);
+    ChartsRuntimeState runtime; runtime.update(h); observe(h,s,600,0,0);
+    copying=false; waiting=false; FreeRtosSemaphoreMock::setBlockedTakeHook(&blocked);
+    ChartsRuntimeState::setSnapshotCopyHook(&copying_hook);
+    std::thread writer([&] { while(!copying.load()) std::this_thread::yield(); runtime.update(h); });
+    auto old=runtime.copySnapshot(); writer.join();
+    ChartsRuntimeState::setSnapshotCopyHook(nullptr); FreeRtosSemaphoreMock::resetBlockedTakeHook();
+    TEST_ASSERT_EQUAL(1,old->count()); auto current=runtime.copySnapshot(); TEST_ASSERT_EQUAL(2,current->count());
+    ChartsHistory::Entry e; old->entryFromOldest(0,e); TEST_ASSERT_FLOAT_WITHIN(.001,20,e.values[TEMP]);
 }
 
-void test_charts_history_quarantines_untrusted_time_until_reconcile() {
-    StorageManager storage;
-    storage.begin();
-
-    ChartsHistory writer;
-    writer.load(storage);
-
-    SensorData data;
-    set_temp_pressure(data, 21.0f, 1005.0f);
-
-    // >= 30 min to trigger autosave.
-    for (int i = 0; i < 8; ++i) {
-        advanceStep();
-        writer.update(data, storage, false, true);
-    }
-    TEST_ASSERT_TRUE(writer.count() > 0);
-    ChartsHistory durable_before;
-    durable_before.load(storage);
-    const uint16_t saved_count = durable_before.count();
-    const uint32_t saved_epoch = durable_before.latestEpoch();
-    TEST_ASSERT_TRUE(saved_count > 0);
-
-    // A plausible process epoch is not enough to delete a restored generation.
-    advanceEpoch(Config::CHART_HISTORY_MAX_AGE_S + 5);
-
-    ChartsHistory restored;
-    restored.load(storage);
-    TEST_ASSERT_EQUAL_UINT16(saved_count, restored.count());
-    TEST_ASSERT_EQUAL_UINT32(saved_epoch, restored.latestEpoch());
-
-    set_temp_pressure(data, 30.0f, 1020.0f);
-    restored.update(data, storage, false, false);
-    TEST_ASSERT_EQUAL_UINT16(saved_count, restored.count());
-    TEST_ASSERT_EQUAL_UINT32(saved_epoch, restored.latestEpoch());
-
-    ChartsHistory durable_check;
-    durable_check.load(storage);
-    TEST_ASSERT_EQUAL_UINT16(saved_count, durable_check.count());
-    TEST_ASSERT_EQUAL_UINT32(saved_epoch, durable_check.latestEpoch());
-
-    restored.update(data, storage, false, true);
-    TEST_ASSERT_EQUAL_UINT16(1, restored.count());
-    TEST_ASSERT_EQUAL_UINT32(static_cast<uint32_t>(mockNow()),
-                             restored.latestEpoch());
-
-    ChartsHistoryBlob replacement = {};
-    TEST_ASSERT_TRUE(storage.loadBlob(
-        StorageManager::kChartsPath, &replacement, sizeof(replacement)));
-    TEST_ASSERT_EQUAL_UINT32(kChartsHistoryMagic, replacement.magic);
-    TEST_ASSERT_EQUAL_UINT16(kChartsHistoryVersion, replacement.version);
-    TEST_ASSERT_EQUAL_UINT16(1, replacement.count);
-    TEST_ASSERT_EQUAL_UINT32(static_cast<uint32_t>(mockNow()),
-                             replacement.epoch);
+void test_export_waits_for_durable_save_and_does_not_advance_cursor() {
+    StorageManager s; s.begin(); ChartsHistory h; h.load(s);
+    observe(h,s,0,20); StorageManager::setTestForceSaveFailure(true); observe(h,s,300,0,0);
+    ChartsRuntimeState runtime; runtime.update(h); auto snapshot=runtime.copySnapshot(); View view(*snapshot);
+    ArduinoJson::JsonDocument batch; WebChartsApiUtils::fillHistoryJson(batch.to<ArduinoJson::JsonObject>(),view);
+    TEST_ASSERT_EQUAL(0,batch["records"].size()); TEST_ASSERT_EQUAL(0,batch["next_after"].as<uint32_t>());
+    TEST_ASSERT_TRUE(batch["has_more"].as<bool>());
+    StorageManager::setTestForceSaveFailure(false); observe(h,s,311,0,0); runtime.update(h);
+    auto saved=runtime.copySnapshot(); View saved_view(*saved); batch.clear();
+    WebChartsApiUtils::fillHistoryJson(batch.to<ArduinoJson::JsonObject>(),saved_view);
+    TEST_ASSERT_EQUAL(1,batch["records"].size());
+}
+void test_retention_boundary_stays_stable_between_completed_intervals() {
+    StorageManager s; s.begin(); ChartsHistory h; h.load(s);
+    for(uint32_t n=0;n<=288;++n) observe(h,s,n*300,20);
+    observe(h,s,288*300+1,20); TEST_ASSERT_EQUAL(288,h.count());
+    TEST_ASSERT_EQUAL(base_epoch,entry(h).start_epoch);
+}
+void test_clear_all_removes_segment_files_too() {
+    StorageManager s; s.begin(); ChartsHistory h; h.load(s);
+    observe(h,s,0,20); observe(h,s,300,20); s.clearAll();
+    ChartsHistory reboot; reboot.load(s); TEST_ASSERT_EQUAL(0,reboot.count());
+}
+void test_corrupt_block_is_not_exported_as_valid_measurements() {
+    StorageManager s; s.begin(); ChartsHistory h; h.load(s);
+    observe(h,s,0,20); observe(h,s,300,20);
+    char path[32]; StorageManager::chartsSegmentPath((base_epoch/3600)%StorageManager::kChartsSegmentCount,path,sizeof(path));
+    const uint8_t garbage[3]={1,2,3}; TEST_ASSERT_TRUE(s.saveBlobAtomic(path,garbage,sizeof(garbage)));
+    ChartsHistory reboot; reboot.load(s); TEST_ASSERT_EQUAL(0,reboot.count());
 }
 
-void test_fresh_charts_history_samples_offline_without_trusted_time() {
-    StorageManager storage;
-    storage.begin();
-    ChartsHistory history;
-    history.load(storage);
-
-    SensorData data;
-    set_temp_pressure(data, 20.0f, 1000.0f);
-    history.update(data, storage, false, false);
-
-    TEST_ASSERT_EQUAL_UINT16(1, history.count());
-    TEST_ASSERT_EQUAL_UINT32(0, history.latestEpoch());
-}
-
-void test_charts_history_temporal_reset_preserves_old_blob_on_save_failure() {
-    StorageManager storage;
-    storage.begin();
-    ChartsHistory writer;
-    writer.load(storage);
-
-    SensorData data;
-    set_temp_pressure(data, 21.0f, 1005.0f);
-    for (int i = 0; i < 6; ++i) {
-        advanceStep();
-        writer.update(data, storage, false, true);
-    }
-
-    ChartsHistoryBlob original = {};
-    TEST_ASSERT_TRUE(storage.loadBlob(
-        StorageManager::kChartsPath, &original, sizeof(original)));
-    TEST_ASSERT_TRUE(original.count > 0);
-
-    advanceEpoch(Config::CHART_HISTORY_MAX_AGE_S + 5U);
-    ChartsHistory restored;
-    restored.load(storage);
-    StorageManager::setTestForceSaveFailure(true);
-    restored.update(data, storage, false, true);
-
-    ChartsHistoryBlob preserved = {};
-    TEST_ASSERT_TRUE(storage.loadBlob(
-        StorageManager::kChartsPath, &preserved, sizeof(preserved)));
-    TEST_ASSERT_EQUAL_MEMORY(&original, &preserved, sizeof(original));
-
-    StorageManager::setTestForceSaveFailure(false);
-    advanceStep();
-    restored.update(data, storage, false, true);
-    TEST_ASSERT_TRUE(storage.loadBlob(
-        StorageManager::kChartsPath, &preserved, sizeof(preserved)));
-    TEST_ASSERT_EQUAL_UINT16(2, preserved.count);
-    TEST_ASSERT_EQUAL_UINT32(static_cast<uint32_t>(mockNow()), preserved.epoch);
-}
-
-void test_unanchored_saved_history_starts_fresh_after_reboot_without_time() {
-    StorageManager storage;
-    storage.begin();
-    ChartsHistory writer;
-    writer.load(storage);
-
-    SensorData data;
-    set_temp_pressure(data, 20.0f, 1000.0f);
-    for (int i = 0; i < 6; ++i) {
-        advanceMillis(kStepMs);
-        writer.update(data, storage, false, false);
-    }
-
-    ChartsHistoryBlob unanchored = {};
-    TEST_ASSERT_TRUE(storage.loadBlob(
-        StorageManager::kChartsPath, &unanchored, sizeof(unanchored)));
-    TEST_ASSERT_TRUE(unanchored.count > 1);
-    TEST_ASSERT_EQUAL_UINT32(0, unanchored.epoch);
-
-    ChartsHistory rebooted;
-    rebooted.load(storage);
-    TEST_ASSERT_EQUAL_UINT16(0, rebooted.count());
-
-    set_temp_pressure(data, 30.0f, 1020.0f);
-    StorageManager::setTestForceSaveFailure(true);
-    rebooted.update(data, storage, false, false);
-    TEST_ASSERT_EQUAL_UINT16(1, rebooted.count());
-    TEST_ASSERT_EQUAL_UINT32(0, rebooted.latestEpoch());
-
-    ChartsHistoryBlob replacement = {};
-    TEST_ASSERT_TRUE(storage.loadBlob(
-        StorageManager::kChartsPath, &replacement, sizeof(replacement)));
-    TEST_ASSERT_EQUAL_MEMORY(&unanchored, &replacement, sizeof(unanchored));
-
-    StorageManager::setTestForceSaveFailure(false);
-    advanceMillis(kStepMs);
-    rebooted.update(data, storage, false, false);
-    TEST_ASSERT_TRUE(storage.loadBlob(
-        StorageManager::kChartsPath, &replacement, sizeof(replacement)));
-    TEST_ASSERT_EQUAL_UINT16(2, replacement.count);
-    TEST_ASSERT_EQUAL_UINT32(0, replacement.epoch);
-    TEST_ASSERT_FLOAT_WITHIN(
-        0.01f,
-        30.0f,
-        replacement.values[ChartsHistory::METRIC_TEMPERATURE][0]);
-}
-
-void test_charts_history_small_backward_correction_holds_until_catchup() {
-    StorageManager storage;
-    storage.begin();
-    ChartsHistory writer;
-    writer.load(storage);
-
-    SensorData data;
-    set_temp_pressure(data, 21.0f, 1005.0f);
-    for (int i = 0; i < 6; ++i) {
-        advanceStep();
-        writer.update(data, storage, false, true);
-    }
-
-    ChartsHistoryBlob original = {};
-    TEST_ASSERT_TRUE(storage.loadBlob(
-        StorageManager::kChartsPath, &original, sizeof(original)));
-
-    ChartsHistory restored;
-    restored.load(storage);
-    setNowEpoch(original.epoch - 1U);
-    restored.update(data, storage, false, true);
-    TEST_ASSERT_EQUAL_UINT16(original.count, restored.count());
-
-    ChartsHistoryBlob held = {};
-    TEST_ASSERT_TRUE(storage.loadBlob(
-        StorageManager::kChartsPath, &held, sizeof(held)));
-    TEST_ASSERT_EQUAL_MEMORY(&original, &held, sizeof(original));
-
-    setNowEpoch(original.epoch);
-    restored.update(data, storage, false, true);
-    TEST_ASSERT_EQUAL_UINT16(original.count + 1U, restored.count());
-
-    ChartsHistoryBlob resumed = {};
-    TEST_ASSERT_TRUE(storage.loadBlob(
-        StorageManager::kChartsPath, &resumed, sizeof(resumed)));
-    TEST_ASSERT_EQUAL_UINT16(original.count + 1U, resumed.count);
-    TEST_ASSERT_EQUAL_UINT32(original.epoch, resumed.epoch);
-}
-
-void test_charts_history_large_backward_correction_replaces_atomically() {
-    StorageManager storage;
-    storage.begin();
-    ChartsHistory writer;
-    writer.load(storage);
-
-    SensorData data;
-    set_temp_pressure(data, 21.0f, 1005.0f);
-    for (int i = 0; i < 6; ++i) {
-        advanceStep();
-        writer.update(data, storage, false, true);
-    }
-
-    ChartsHistoryBlob original = {};
-    TEST_ASSERT_TRUE(storage.loadBlob(
-        StorageManager::kChartsPath, &original, sizeof(original)));
-
-    ChartsHistory restored;
-    restored.load(storage);
-    const uint32_t corrected_epoch = original.epoch - kStepS - 1U;
-    setNowEpoch(corrected_epoch);
-    StorageManager::setTestForceSaveFailure(true);
-    restored.update(data, storage, false, true);
-    TEST_ASSERT_EQUAL_UINT16(1, restored.count());
-
-    ChartsHistoryBlob preserved = {};
-    TEST_ASSERT_TRUE(storage.loadBlob(
-        StorageManager::kChartsPath, &preserved, sizeof(preserved)));
-    TEST_ASSERT_EQUAL_MEMORY(&original, &preserved, sizeof(original));
-
-    StorageManager::setTestForceSaveFailure(false);
-    advanceStep();
-    restored.update(data, storage, false, true);
-    TEST_ASSERT_TRUE(storage.loadBlob(
-        StorageManager::kChartsPath, &preserved, sizeof(preserved)));
-    TEST_ASSERT_EQUAL_UINT16(2, preserved.count);
-    TEST_ASSERT_EQUAL_UINT32(corrected_epoch + kStepS, preserved.epoch);
-}
-
-void test_charts_history_records_optional_gas_metric() {
-    StorageManager storage;
-    storage.begin();
-    ChartsHistory history;
-    history.load(storage);
-
-    SensorData data;
-    set_optional_gas(data, DfrOptionalGasSensor::OptionalGasType::NH3, 12.5f);
-    advanceStep();
-    history.update(data, storage, false, true);
-
-    TEST_ASSERT_EQUAL_UINT16(1, history.count());
-
-    ChartsHistory::Entry entry = {};
-    TEST_ASSERT_TRUE(history.entryFromOldest(0, entry));
-    TEST_ASSERT_TRUE((entry.valid_mask & metric_bit(ChartsHistory::METRIC_OPTIONAL_GAS)) != 0);
-    TEST_ASSERT_FLOAT_WITHIN(0.01f, 12.5f, entry.values[ChartsHistory::METRIC_OPTIONAL_GAS]);
-}
-
-void test_charts_runtime_snapshot_tracks_optional_gas_history_type() {
-    StorageManager storage;
-    storage.begin();
-    ChartsHistory history;
-    history.load(storage);
-    ChartsRuntimeState runtime;
-    std::unique_ptr<const ChartsRuntimeState::Snapshot> snapshot =
-        runtime.copySnapshot();
-    TEST_ASSERT_NOT_NULL(snapshot.get());
-    TEST_ASSERT_EQUAL_UINT8(0, snapshot->optionalGasType());
-
-    SensorData data;
-    set_optional_gas(data, DfrOptionalGasSensor::OptionalGasType::NH3, 12.5f);
-    advanceStep();
-    history.update(data, storage, false, true);
-    runtime.update(history);
-    snapshot = runtime.copySnapshot();
-    TEST_ASSERT_NOT_NULL(snapshot.get());
-    TEST_ASSERT_EQUAL_UINT8(
-        static_cast<uint8_t>(DfrOptionalGasSensor::OptionalGasType::NH3),
-        snapshot->optionalGasType());
-
-    set_optional_gas(data, DfrOptionalGasSensor::OptionalGasType::SO2, 0.08f);
-    advanceStep();
-    history.update(data, storage, false, true);
-    runtime.update(history);
-    snapshot = runtime.copySnapshot();
-    TEST_ASSERT_NOT_NULL(snapshot.get());
-    TEST_ASSERT_EQUAL_UINT8(
-        static_cast<uint8_t>(DfrOptionalGasSensor::OptionalGasType::SO2),
-        snapshot->optionalGasType());
-}
-
-void test_charts_runtime_snapshot_stays_one_generation_when_update_interleaves() {
-    StorageManager storage_a;
-    storage_a.begin();
-    ChartsHistory history_a;
-    history_a.load(storage_a);
-    SensorData data_a;
-    set_optional_gas(data_a, DfrOptionalGasSensor::OptionalGasType::NH3, 12.5f);
-    advanceStep();
-    history_a.update(data_a, storage_a, false, true);
-    const uint32_t epoch_a = history_a.latestEpoch();
-
-    StorageManager storage_b;
-    storage_b.begin();
-    ChartsHistory history_b;
-    history_b.load(storage_b);
-    SensorData data_b;
-    set_optional_gas(data_b, DfrOptionalGasSensor::OptionalGasType::O2, 20.8f);
-    advanceStep();
-    history_b.update(data_b, storage_b, false, true);
-    set_optional_gas(data_b, DfrOptionalGasSensor::OptionalGasType::O2, 20.9f);
-    advanceStep();
-    history_b.update(data_b, storage_b, false, true);
-    const uint32_t epoch_b = history_b.latestEpoch();
-    TEST_ASSERT_EQUAL_UINT16(1, history_a.count());
-    TEST_ASSERT_EQUAL_UINT16(2, history_b.count());
-
-    ChartsRuntimeState runtime;
-    runtime.update(history_a);
-    FreeRtosSemaphoreMock::setBlockedTakeHook(&record_blocked_semaphore_take);
-    ChartsRuntimeState::setSnapshotCopyHook(
-        &block_snapshot_copy_until_writer_is_blocked_in_take);
-
-    std::thread writer([&runtime, &history_b]() {
-        while (!snapshot_copy_hook_entered.load()) {
-            std::this_thread::yield();
-        }
-        runtime.update(history_b);
-    });
-
-    const std::unique_ptr<const ChartsRuntimeState::Snapshot> snapshot_a =
-        runtime.copySnapshot();
-    writer.join();
-    ChartsRuntimeState::setSnapshotCopyHook(nullptr);
-    FreeRtosSemaphoreMock::resetBlockedTakeHook();
-
-    TEST_ASSERT_NOT_NULL(snapshot_a.get());
-    TEST_ASSERT_EQUAL_UINT16(1, snapshot_a->count());
-    TEST_ASSERT_EQUAL_UINT32(epoch_a, snapshot_a->latestEpoch());
-    TEST_ASSERT_EQUAL_UINT8(
-        static_cast<uint8_t>(DfrOptionalGasSensor::OptionalGasType::NH3),
-        snapshot_a->optionalGasType());
-    float value = 0.0f;
-    bool valid = false;
-    TEST_ASSERT_TRUE(snapshot_a->metricValueFromOldest(
-        0, ChartsHistory::METRIC_OPTIONAL_GAS, value, valid));
-    TEST_ASSERT_TRUE(valid);
-    TEST_ASSERT_FLOAT_WITHIN(0.01f, 12.5f, value);
-    TEST_ASSERT_TRUE(snapshot_a->latestMetric(
-        ChartsHistory::METRIC_OPTIONAL_GAS, value));
-    TEST_ASSERT_FLOAT_WITHIN(0.01f, 12.5f, value);
-
-    const std::unique_ptr<const ChartsRuntimeState::Snapshot> snapshot_b =
-        runtime.copySnapshot();
-    TEST_ASSERT_NOT_NULL(snapshot_b.get());
-    TEST_ASSERT_EQUAL_UINT16(2, snapshot_b->count());
-    TEST_ASSERT_EQUAL_UINT32(epoch_b, snapshot_b->latestEpoch());
-    TEST_ASSERT_EQUAL_UINT8(
-        static_cast<uint8_t>(DfrOptionalGasSensor::OptionalGasType::O2),
-        snapshot_b->optionalGasType());
-    TEST_ASSERT_TRUE(snapshot_b->metricValueFromOldest(
-        1, ChartsHistory::METRIC_OPTIONAL_GAS, value, valid));
-    TEST_ASSERT_TRUE(valid);
-    TEST_ASSERT_FLOAT_WITHIN(0.01f, 20.9f, value);
-}
-
-void test_charts_history_clears_optional_gas_metric_when_type_changes() {
-    StorageManager storage;
-    storage.begin();
-    ChartsHistory history;
-    history.load(storage);
-
-    SensorData data;
-    set_optional_gas(data, DfrOptionalGasSensor::OptionalGasType::NH3, 12.5f);
-    data.pressure_valid = true;
-    data.pressure = 1001.0f;
-    advanceStep();
-    history.update(data, storage, false, true);
-    TEST_ASSERT_EQUAL_UINT16(1, history.count());
-
-    set_optional_gas(data, DfrOptionalGasSensor::OptionalGasType::SO2, 0.08f);
-    data.pressure_valid = true;
-    data.pressure = 1002.0f;
-    advanceStep();
-    history.update(data, storage, false, true);
-
-    TEST_ASSERT_EQUAL_UINT16(2, history.count());
-
-    ChartsHistory::Entry entry = {};
-    TEST_ASSERT_TRUE(history.entryFromOldest(0, entry));
-    TEST_ASSERT_FALSE((entry.valid_mask & metric_bit(ChartsHistory::METRIC_OPTIONAL_GAS)) != 0);
-    TEST_ASSERT_TRUE((entry.valid_mask & metric_bit(ChartsHistory::METRIC_PRESSURE)) != 0);
-    TEST_ASSERT_FLOAT_WITHIN(0.001f, 1001.0f, entry.values[ChartsHistory::METRIC_PRESSURE]);
-
-    TEST_ASSERT_TRUE(history.entryFromOldest(1, entry));
-    TEST_ASSERT_TRUE((entry.valid_mask & metric_bit(ChartsHistory::METRIC_OPTIONAL_GAS)) != 0);
-    TEST_ASSERT_FLOAT_WITHIN(0.001f, 0.08f, entry.values[ChartsHistory::METRIC_OPTIONAL_GAS]);
-    TEST_ASSERT_TRUE((entry.valid_mask & metric_bit(ChartsHistory::METRIC_PRESSURE)) != 0);
-    TEST_ASSERT_FLOAT_WITHIN(0.001f, 1002.0f, entry.values[ChartsHistory::METRIC_PRESSURE]);
-}
-
-void test_charts_history_suppresses_reactive_gases_during_warmup() {
-    StorageManager storage;
-    storage.begin();
-    ChartsHistory history;
-    history.load(storage);
-
-    SensorData data;
-    data.co2_valid = true;
-    data.co2 = 725;
-    data.voc_valid = true;
-    data.voc_index = 140;
-    data.nox_valid = true;
-    data.nox_index = 35;
-
-    advanceStep();
-    history.update(data, storage, true, true);
-
-    ChartsHistory::Entry entry = {};
-    TEST_ASSERT_TRUE(history.entryFromOldest(0, entry));
-    TEST_ASSERT_TRUE((entry.valid_mask & metric_bit(ChartsHistory::METRIC_CO2)) != 0);
-    TEST_ASSERT_FALSE((entry.valid_mask & metric_bit(ChartsHistory::METRIC_VOC)) != 0);
-    TEST_ASSERT_FALSE((entry.valid_mask & metric_bit(ChartsHistory::METRIC_NOX)) != 0);
-
-    advanceStep();
-    history.update(data, storage, false, true);
-
-    TEST_ASSERT_TRUE(history.entryFromOldest(1, entry));
-    TEST_ASSERT_TRUE((entry.valid_mask & metric_bit(ChartsHistory::METRIC_CO2)) != 0);
-    TEST_ASSERT_TRUE((entry.valid_mask & metric_bit(ChartsHistory::METRIC_VOC)) != 0);
-    TEST_ASSERT_TRUE((entry.valid_mask & metric_bit(ChartsHistory::METRIC_NOX)) != 0);
-    TEST_ASSERT_FLOAT_WITHIN(0.01f, 140.0f, entry.values[ChartsHistory::METRIC_VOC]);
-    TEST_ASSERT_FLOAT_WITHIN(0.01f, 35.0f, entry.values[ChartsHistory::METRIC_NOX]);
-}
-
-int main(int, char **) {
+int main() {
     UNITY_BEGIN();
-    RUN_TEST(test_charts_history_gap_marks_null_and_fills_pressure);
-    RUN_TEST(test_charts_history_quarantines_untrusted_time_until_reconcile);
-    RUN_TEST(test_fresh_charts_history_samples_offline_without_trusted_time);
-    RUN_TEST(test_charts_history_temporal_reset_preserves_old_blob_on_save_failure);
-    RUN_TEST(test_unanchored_saved_history_starts_fresh_after_reboot_without_time);
-    RUN_TEST(test_charts_history_small_backward_correction_holds_until_catchup);
-    RUN_TEST(test_charts_history_large_backward_correction_replaces_atomically);
-    RUN_TEST(test_charts_history_records_optional_gas_metric);
-    RUN_TEST(test_charts_runtime_snapshot_tracks_optional_gas_history_type);
-    RUN_TEST(test_charts_runtime_snapshot_stays_one_generation_when_update_interleaves);
-    RUN_TEST(test_charts_history_clears_optional_gas_metric_when_type_changes);
-    RUN_TEST(test_charts_history_suppresses_reactive_gases_during_warmup);
+    RUN_TEST(test_export_waits_for_durable_save_and_does_not_advance_cursor);
+    RUN_TEST(test_retention_boundary_stays_stable_between_completed_intervals);
+    RUN_TEST(test_clear_all_removes_segment_files_too);
+    RUN_TEST(test_corrupt_block_is_not_exported_as_valid_measurements);
+    RUN_TEST(test_summary_counts_new_equal_values_and_preserves_peak);
+    RUN_TEST(test_validity_warmup_and_metric_counts_are_independent);
+    RUN_TEST(test_gaps_are_not_pressure_measurements);
+    RUN_TEST(test_save_retry_and_reboot_do_not_claim_unsaved_records);
+    RUN_TEST(test_retention_ring_and_blocks_restore_last_day);
+    RUN_TEST(test_clock_rollback_never_rewrites_completed_summary);
+    RUN_TEST(test_untrusted_time_keeps_ram_history_out_of_export);
+    RUN_TEST(test_legacy_snapshot_is_preserved_without_invented_statistics);
+    RUN_TEST(test_optional_gas_keeps_record_identity_and_filters_current_chart);
+    RUN_TEST(test_clear_removes_legacy_and_segment_history);
+    RUN_TEST(test_chart_and_bounded_export_share_exact_summary_values);
+    RUN_TEST(test_snapshot_remains_one_generation_during_concurrent_update);
     return UNITY_END();
 }
-

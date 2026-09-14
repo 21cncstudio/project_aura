@@ -439,6 +439,7 @@ void Bmp580::poll() {
     temperature_c_ = temperature_c;
     no_data_since_ms_ = 0;
 
+    acquired_pressure_ = pressure_hpa;
     if (!pressure_has_) {
         pressure_filtered_ = pressure_hpa;
         pressure_has_ = true;

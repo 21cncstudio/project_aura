@@ -25,6 +25,7 @@ public:
     bool takeNewData(float &pressure_hpa, float &temperature_c);
     bool isOk() const { return ok_; }
     bool isPressureValid() const { return pressure_valid_; }
+    float acquiredPressure() const { return acquired_pressure_; }
     uint32_t lastDataMs() const { return last_data_ms_; }
     Variant variant() const { return variant_; }
     const char *variantLabel() const;
@@ -61,6 +62,7 @@ private:
     bool ok_ = false;
     uint8_t addr_ = 0;
     bool pressure_has_ = false;
+    float acquired_pressure_ = 0.0f;
     float pressure_filtered_ = 0.0f;
     float temperature_c_ = 0.0f;
     int32_t raw_temperature_ = 0;

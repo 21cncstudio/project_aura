@@ -35,6 +35,7 @@ public:
     bool isBusy() const { return busy_; }
     bool isMeasuring() const { return measuring_; }
     bool isWarmupActive() const;
+    int acquiredCo2() const { return acquired_co2_; }
     uint32_t lastDataMs() const { return last_data_ms_; }
 
 private:
@@ -112,6 +113,7 @@ private:
 
     bool co2_invalid_logged_ = false;
     uint32_t co2_invalid_since_ms_ = 0;
+    int acquired_co2_ = 0;
     bool co2_first_ = true;
     int co2_readings_[5] = { 400, 400, 400, 400, 400 };
     int co2_idx_ = 0;

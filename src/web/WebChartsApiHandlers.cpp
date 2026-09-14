@@ -7,6 +7,8 @@
 #include "web/WebChartsApiHandlers.h"
 
 #include <ArduinoJson.h>
+#include <stdlib.h>
+#include <errno.h>
 
 #include "core/ChartsRuntimeState.h"
 #include "drivers/DfrOptionalGasSensor.h"
@@ -25,6 +27,9 @@ public:
     explicit ChartsRuntimeHistoryView(const ChartsRuntimeState::Snapshot &history)
         : history_(history) {}
 
+    bool entryFromOldest(uint16_t offset, ChartsHistory::Entry &out) const override {
+        return history_.entryFromOldest(offset, out);
+    }
     uint16_t count() const override { return history_.count(); }
 
     uint32_t latestEpoch() const override { return history_.latestEpoch(); }
@@ -80,12 +85,30 @@ void handleData(WebHandlerContext &context, bool ota_busy) {
         static_cast<DfrOptionalGasSensor::OptionalGasType>(
             snapshot->optionalGasType());
     ArduinoJson::JsonDocument doc;
-    WebChartsApiUtils::fillJson(
+    if (server.arg("format") == "history") {
+        const String after_arg = server.arg("after");
+        uint32_t after = 0;
+        if (after_arg.length()) {
+            bool digits = after_arg.length() <= 10;
+            for (size_t i = 0; i < after_arg.length(); ++i)
+                digits = digits && after_arg[i] >= '0' && after_arg[i] <= '9';
+            errno = 0;
+            const unsigned long long parsed = strtoull(after_arg.c_str(), nullptr, 10);
+            if (!digits || errno == ERANGE || parsed > UINT32_MAX) {
+                WebResponseUtils::sendNoStoreHeaders(server);
+                server.send(400, "application/json", "{\"success\":false,\"error\":\"Invalid history cursor\"}");
+                return;
+            }
+            after = static_cast<uint32_t>(parsed);
+        }
+        WebChartsApiUtils::fillHistoryJson(doc.to<ArduinoJson::JsonObject>(), history_view, after);
+    } else WebChartsApiUtils::fillJson(
         doc.to<ArduinoJson::JsonObject>(),
         history_view,
         server.arg("window"),
         server.arg("group"),
-        DfrOptionalGasSensor::unitForType(optional_gas_type));
+        DfrOptionalGasSensor::unitForType(optional_gas_type),
+        server.arg("stats") == "1");
 
     String json;
     serializeJson(doc, json);

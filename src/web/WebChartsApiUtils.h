@@ -17,6 +17,7 @@ class HistoryView {
 public:
     virtual ~HistoryView() = default;
 
+    virtual bool entryFromOldest(uint16_t, ChartsHistory::Entry &) const { return false; }
     virtual uint16_t count() const = 0;
     virtual uint32_t latestEpoch() const = 0;
     virtual bool latestMetric(ChartsHistory::Metric metric, float &out_value) const = 0;
@@ -26,10 +27,15 @@ public:
                                        bool &valid) const = 0;
 };
 
+// Bounded, durable records from exactly the same history as local charts.
+void fillHistoryJson(ArduinoJson::JsonObject root, const HistoryView &history,
+                     uint32_t after_epoch = 0, uint16_t limit = 8);
+
 void fillJson(ArduinoJson::JsonObject root,
               const HistoryView &history,
               const String &window_arg,
               const String &group_arg,
-              const char *optional_gas_unit = "ppm");
+              const char *optional_gas_unit = "ppm",
+              bool include_statistics = false);
 
 } // namespace WebChartsApiUtils

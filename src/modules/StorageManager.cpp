@@ -354,7 +354,7 @@ void StorageManager::clearAll() {
     removeBlob(kLastGoodPath);
     removeBlob(kVocStatePath);
     removeBlob(kPressurePath);
-    removeBlob(kChartsPath);
+    clearChartsHistory();
     removeBlob(kDacAutoPath);
     removeBlob(kDisplayThresholdsPath);
     removeBlob(kMqttCaCertPath);
@@ -628,6 +628,17 @@ bool StorageManager::saveVocState(const uint8_t *data, size_t len) {
 
 void StorageManager::clearVocState() {
     removeBlob(kVocStatePath);
+}
+
+void StorageManager::chartsSegmentPath(int slot, char *out, size_t length) {
+    snprintf(out, length, "/charts3_%02d.bin", slot);
+}
+void StorageManager::clearChartsHistory() {
+    removeBlob(kChartsPath);
+    for (int slot = 0; slot < kChartsSegmentCount; ++slot) {
+        char path[32]; chartsSegmentPath(slot, path, sizeof(path));
+        removeBlob(path);
+    }
 }
 
 bool StorageManager::loadBlob(const char *path, void *out, size_t len) const {

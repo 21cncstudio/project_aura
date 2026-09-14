@@ -23,8 +23,10 @@ void ChartsRuntimeState::update(const ChartsHistory &history) {
     const uint32_t source_epoch = history.latestEpoch();
     const uint8_t source_optional_gas_type = history.optionalGasType();
 
+    if (!entries_) entries_.reset(new (std::nothrow) ChartsHistory::Entry[ChartsHistory::kCapacity]());
+    if (!entries_) return;
     lock();
-    const bool unchanged = (count_ == source_count) &&
+    const bool unchanged = (source_revision_ == history.revision()) && (count_ == source_count) &&
                            (source_index_ == source_index) &&
                            (latest_epoch_ == source_epoch) &&
                            (optional_gas_type_ == source_optional_gas_type);
@@ -34,6 +36,7 @@ void ChartsRuntimeState::update(const ChartsHistory &history) {
     }
 
     lock();
+    source_revision_ = history.revision();
     count_ = source_count;
     source_index_ = source_index;
     latest_epoch_ = source_epoch;
@@ -50,11 +53,10 @@ void ChartsRuntimeState::update(const ChartsHistory &history) {
 }
 
 std::unique_ptr<const ChartsRuntimeState::Snapshot> ChartsRuntimeState::copySnapshot() const {
-    // Snapshot is about 17 KiB at the current capacity. Keep it off the web
-    // task stack and give each request exclusive ownership of its immutable
-    // generation. Allocation happens before taking the runtime mutex.
+    // Each request owns an immutable summary generation, allocated off the task stack.
     std::unique_ptr<Snapshot> snapshot(new (std::nothrow) Snapshot());
-    if (!snapshot) {
+    if (snapshot) snapshot->entries_.reset(new (std::nothrow) ChartsHistory::Entry[ChartsHistory::kCapacity]());
+    if (!snapshot || !snapshot->entries_) {
         return {};
     }
 
@@ -75,6 +77,12 @@ std::unique_ptr<const ChartsRuntimeState::Snapshot> ChartsRuntimeState::copySnap
     return std::unique_ptr<const Snapshot>(snapshot.release());
 }
 
+bool ChartsRuntimeState::Snapshot::entryFromOldest(uint16_t offset, ChartsHistory::Entry &out) const {
+    if (!entries_ || offset >= count_) return false;
+    out = entries_[offset];
+    return true;
+}
+
 bool ChartsRuntimeState::Snapshot::metricValueFromOldest(
     uint16_t offset,
     ChartsHistory::Metric metric,
@@ -86,7 +94,8 @@ bool ChartsRuntimeState::Snapshot::metricValueFromOldest(
     const ChartsHistory::Entry &entry = entries_[offset];
     value = entry.values[metric];
     valid = (entry.valid_mask &
-             static_cast<uint16_t>(1U << static_cast<uint8_t>(metric))) != 0;
+             static_cast<uint16_t>(1U << static_cast<uint8_t>(metric))) != 0 &&
+             (metric != ChartsHistory::METRIC_OPTIONAL_GAS || entry.optional_gas_type == optional_gas_type_);
     return true;
 }
 
@@ -101,7 +110,8 @@ bool ChartsRuntimeState::Snapshot::latestMetric(ChartsHistory::Metric metric,
         const bool valid =
             (entry.valid_mask & static_cast<uint16_t>(1U << static_cast<uint8_t>(metric))) != 0;
         const float value = entry.values[metric];
-        if (valid && isfinite(value)) {
+        if (valid && isfinite(value) &&
+            (metric != ChartsHistory::METRIC_OPTIONAL_GAS || entry.optional_gas_type == optional_gas_type_)) {
             out_value = value;
             return true;
         }

@@ -110,5 +110,6 @@ public:
     bool isBusy() const { return state().busy; }
     bool isMeasuring() const { return true; }
     bool isWarmupActive() const { return state().warmup; }
+    int acquiredCo2() const { return state().poll_data.co2; }
     uint32_t lastDataMs() const { return state().last_data_ms; }
 };

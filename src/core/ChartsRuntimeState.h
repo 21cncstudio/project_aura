@@ -24,6 +24,7 @@ public:
                                    ChartsHistory::Metric metric,
                                    float &value,
                                    bool &valid) const;
+        bool entryFromOldest(uint16_t offset, ChartsHistory::Entry &out) const;
         bool latestMetric(ChartsHistory::Metric metric, float &out_value) const;
 
     private:
@@ -33,7 +34,7 @@ public:
         uint16_t count_ = 0;
         uint32_t latest_epoch_ = 0;
         uint8_t optional_gas_type_ = 0;
-        ChartsHistory::Entry entries_[ChartsHistory::kCapacity]{};
+        std::unique_ptr<ChartsHistory::Entry[]> entries_;
     };
 
     ChartsRuntimeState();
@@ -56,7 +57,8 @@ private:
     uint16_t source_index_ = 0;
     uint32_t latest_epoch_ = 0;
     uint8_t optional_gas_type_ = 0;
-    ChartsHistory::Entry entries_[ChartsHistory::kCapacity]{};
+    std::unique_ptr<ChartsHistory::Entry[]> entries_;
+    uint32_t source_revision_ = 0;
 
 #ifdef UNIT_TEST
     static SnapshotCopyHook snapshot_copy_hook_;

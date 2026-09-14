@@ -1000,10 +1000,13 @@ void loop()
                                          co2_asc_enabled,
                                          system_time_trusted);
         uiController.onSensorPoll(sensor_poll);
-        chartsHistory.update(currentData,
+    }
+    if (!wake_background_paused) {
+        chartsHistory.update(sensor_poll.history_data,
                              storage,
                              sensorManager.isWarmupActive(),
-                             system_time_trusted);
+                             system_time_trusted,
+                             sensor_poll.history_fresh_mask);
     }
     chartsRuntimeState.update(chartsHistory);
     webRuntimeState.update(currentData, sensorManager.isWarmupActive(), fanControl);

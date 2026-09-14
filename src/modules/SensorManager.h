@@ -27,6 +27,9 @@ public:
     using SfaStatus = Sfa40::Status;
 
     struct PollResult {
+        // Snapshot contains only fresh, valid acquisitions in history_fresh_mask.
+        SensorData history_data{};
+        uint16_t history_fresh_mask = 0;
         bool data_changed = false;
         bool warmup_changed = false;
     };

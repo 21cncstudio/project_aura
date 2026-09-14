@@ -401,7 +401,8 @@ bool Sen66::readValues(SensorData &out) {
 
     out.co2_valid = (co2_raw != 0xFFFF);
     if (out.co2_valid) {
-        out.co2 = smoothCo2(static_cast<int>(co2_raw));
+        acquired_co2_ = static_cast<int>(co2_raw);
+        out.co2 = smoothCo2(acquired_co2_);
         co2_invalid_since_ms_ = 0;
         co2_invalid_logged_ = false;
     } else {

@@ -7,6 +7,7 @@
 #include "core/BootState.h"
 #include "core/Logger.h"
 #include "modules/PressureHistory.h"
+#include "modules/ChartsHistory.h"
 #include "modules/SensorManager.h"
 #include "modules/StorageManager.h"
 #include "drivers/Bmp3xx.h"
@@ -1427,8 +1428,27 @@ void test_sensor_manager_late_probes_are_serialized_round_robin() {
     TEST_ASSERT_EQUAL_UINT8(1, Sfa40::state().late_start_begin_count);
 }
 
+
+void test_history_freshness_counts_equal_new_acquisitions_once() {
+    StorageManager storage; storage.begin(); PressureHistory pressure; SensorManager manager; SensorData data;
+    manager.begin(storage,0,0);
+    auto &sen=Sen66::state(); sen.provide_data=true; sen.update_last_data_on_poll=true;
+    sen.poll_data.temp_valid=true; sen.poll_data.temperature=20;
+    sen.poll_data.co2_valid=true; sen.poll_data.co2=700;
+    setMillis(100000); auto first=manager.poll(data,storage,pressure,true,true);
+    TEST_ASSERT_TRUE(first.history_fresh_mask & ChartsHistory::metricBit(ChartsHistory::METRIC_TEMPERATURE));
+    sen.update_last_data_on_poll=false;
+    setMillis(100001); auto cached=manager.poll(data,storage,pressure,true,true);
+    TEST_ASSERT_FALSE(cached.history_fresh_mask & ChartsHistory::metricBit(ChartsHistory::METRIC_TEMPERATURE));
+    sen.update_last_data_on_poll=true;
+    setMillis(101000); auto equal=manager.poll(data,storage,pressure,true,true);
+    TEST_ASSERT_TRUE(equal.history_fresh_mask & ChartsHistory::metricBit(ChartsHistory::METRIC_TEMPERATURE));
+    TEST_ASSERT_FLOAT_WITHIN(.001,20,equal.history_data.temperature);
+}
+
 int main(int, char **) {
     UNITY_BEGIN();
+    RUN_TEST(test_history_freshness_counts_equal_new_acquisitions_once);
     RUN_TEST(test_sensor_manager_initializes_both_dfr_drivers);
     RUN_TEST(test_sensor_manager_sen0466_start_log_does_not_claim_valid_measurement);
     RUN_TEST(test_sensor_manager_poll_updates_data);
