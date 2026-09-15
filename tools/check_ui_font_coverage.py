@@ -124,7 +124,7 @@ def checks(root: Path) -> list[FontCheck]:
     fonts = root / "src/ui"
     latin_strings = tuple(
         strings / f"UiStrings.{locale}.inc"
-        for locale in ("en", "de", "es", "fr", "it", "ptbr", "nl")
+        for locale in ("en", "de", "es", "fr", "it", "ptbr", "nl", "fi")
     )
     return [
         FontCheck(fonts / f"ui_font_jet_reg_{size}.c", latin_strings)

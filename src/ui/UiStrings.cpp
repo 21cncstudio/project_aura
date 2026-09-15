@@ -74,6 +74,13 @@ static_assert(sizeof(kStringsJa) / sizeof(kStringsJa[0]) ==
               static_cast<size_t>(TextId::Count),
               "UiStrings: JA table size mismatch");
 
+constexpr const char *kStringsFi[] = {
+#include "ui/strings/UiStrings.fi.inc"
+};
+static_assert(sizeof(kStringsFi) / sizeof(kStringsFi[0]) ==
+              static_cast<size_t>(TextId::Count),
+              "UiStrings: FI table size mismatch");
+
 Language g_language = Language::EN;
 
 const char *const *tableFor(Language lang) {
@@ -86,6 +93,7 @@ const char *const *tableFor(Language lang) {
         case Language::NL: return kStringsNl;
         case Language::ZH: return kStringsZh;
         case Language::JA: return kStringsJa;
+        case Language::FI: return kStringsFi;
         case Language::EN:
         default:
             return kStringsEn;
