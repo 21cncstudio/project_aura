@@ -157,6 +157,7 @@ namespace Config {
         NL = 6,
         ZH = 7,
         JA = 8,
+        PL = 9,
         COUNT
     };
 

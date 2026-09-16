@@ -70,3 +70,22 @@ python tools/check_ui_font_coverage.py
 The renderer checks the actual generated C resources and writes 15 PPM images.
 It is a resource/API check, not a substitute for testing firmware runtime UI,
 touch, rotation or sleep/wake on both physical profiles.
+
+## Localized buttons and Polish
+
+All 186 `btn_*` containers in the EEZ source use Flex centering on both axes.
+Keep label height set to content so one-line and multiline translations stay
+centered. `btn_language` uses `ROW_REVERSE` because its serialized children are
+value, then title. The confirmation button contains three alternative labels;
+firmware shows only the label for the current action. Theme buttons center their
+preview card without changing its internal layout.
+
+The 14 px and 18 px JetBrains fonts include all Polish upper- and lowercase
+letters. When editing glyph sets, update the canonical source and the user's
+`release-assets/EEZ/aura-lvgl.eez-project` after a verified backup. Regenerate the
+font C subsets as well: the headless EEZ build does not emit those files.
+`tools/check_ui_font_coverage.py` includes Polish and checks every Latin-language
+string against the 18 px font, in addition to the existing status-font checks.
+
+See [POLISH_LOCALIZATION_20260916.md](POLISH_LOCALIZATION_20260916.md) for the local
+implementation, rendered layout checks and build evidence.

@@ -90,6 +90,24 @@ void format_mmss(uint32_t total_seconds, char *out, size_t out_len) {
 
 } // namespace
 
+void UiController::update_dac_texts() {
+    if (objects.label_btn_btn_dac_manual_on) safe_label_set_text(objects.label_btn_btn_dac_manual_on, UiText::LabelDacManual());
+    if (objects.label_btn_dak_auto_on_toggle) safe_label_set_text(objects.label_btn_dak_auto_on_toggle, UiText::LabelDacAutoOn());
+    if (objects.label_dac_timer) safe_label_set_text(objects.label_dac_timer, UiText::LabelDacTimer());
+    if (objects.label_dac_manual_timer) safe_label_set_text(objects.label_dac_manual_timer, UiText::LabelDacTimer());
+    if (objects.label_dac_manual_speed) safe_label_set_text(objects.label_dac_manual_speed, UiText::LabelDacSpeed());
+    if (objects.label_dac_manual_fan) safe_label_set_text(objects.label_dac_manual_fan, UiText::LabelDacFan());
+    if (objects.label_dac_rl_title) safe_label_set_text(objects.label_dac_rl_title, UiText::LabelDacReason());
+    if (objects.label_dac_qr_text) safe_label_set_text(objects.label_dac_qr_text, UiText::LabelDacAdvanced());
+    if (objects.label_dac_output) safe_label_set_text(objects.label_dac_output, UiText::LabelDacOutput());
+    if (objects.label_btn_dak_manual_timer_toggle_1hour) safe_label_set_text(objects.label_btn_dak_manual_timer_toggle_1hour, UiText::LabelDacOneHour());
+    if (objects.label_btn_dak_manual_timer_toggle_2hours) safe_label_set_text(objects.label_btn_dak_manual_timer_toggle_2hours, UiText::LabelDacTwoHours());
+    if (objects.label_btn_dak_manual_timer_toggle_4hours) safe_label_set_text(objects.label_btn_dak_manual_timer_toggle_4hours, UiText::LabelDacFourHours());
+    if (objects.label_btn_dak_manual_timer_toggle_8hours) safe_label_set_text(objects.label_btn_dak_manual_timer_toggle_8hours, UiText::LabelDacEightHours());
+    // Rebuild the language-dependent connection help even if Wi-Fi is unchanged.
+    dac_network_ui_signature_ = UINT32_MAX;
+}
+
 void UiController::update_dac_ui(uint32_t now_ms) {
     refreshConnectivitySnapshot();
     sync_back_button_label(objects.label_btn_dac_settings_back, false);
@@ -153,11 +171,11 @@ void UiController::update_dac_ui(uint32_t now_ms) {
     set_button_enabled(objects.btn_dak_manual_stop_1, available);
 
     if (objects.label_dac_status) {
-        const char *status_text = "OFFLINE";
+        const char *status_text = UiText::DacStatusOffline();
         if (faulted) {
-            status_text = "FAULT";
+            status_text = UiText::DacStatusFault();
         } else if (available) {
-            status_text = running ? "RUNNING" : "STOPPED";
+            status_text = running ? UiText::DacStatusRunning() : UiText::DacStatusStopped();
         }
         safe_label_set_text(objects.label_dac_status, status_text);
     }
@@ -175,7 +193,7 @@ void UiController::update_dac_ui(uint32_t now_ms) {
 
     if (objects.label_dac_output_value) {
         if (!fanControl.isOutputKnown()) {
-            safe_label_set_text(objects.label_dac_output_value, "UNKNOWN");
+            safe_label_set_text(objects.label_dac_output_value, UiText::DacOutputUnknown());
         } else {
             const uint16_t output_mv = fanControl.outputMillivolts();
             const uint8_t output_pct = fanControl.outputPercent();
@@ -268,7 +286,7 @@ void UiController::update_dac_ui(uint32_t now_ms) {
             if (!dac_url.isEmpty()) {
                 safe_label_set_text(objects.label_dac_qr_link, dac_url.c_str());
             } else {
-                safe_label_set_text(objects.label_dac_qr_link, "Enable AP or connect to Wi-Fi");
+                safe_label_set_text(objects.label_dac_qr_link, UiText::DacConnectNetwork());
             }
         }
         if (objects.label_dac_qr_text_ip_link) {

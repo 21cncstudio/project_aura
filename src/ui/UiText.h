@@ -10,6 +10,17 @@
 
 namespace UiText {
 
+inline const char *LabelUnitsButton() { return UiStrings::text(UiStrings::TextId::LabelUnitsButton); }
+inline const char *LabelWebPageButton() { return UiStrings::text(UiStrings::TextId::LabelWebPageButton); }
+inline const char *LabelLogsButton() { return UiStrings::text(UiStrings::TextId::LabelLogsButton); }
+inline const char *LabelLanguageTitle() { return UiStrings::text(UiStrings::TextId::LabelLanguageTitle); }
+inline const char *LabelFwUpdateTitle() { return UiStrings::text(UiStrings::TextId::LabelFwUpdateTitle); }
+inline const char *LabelFwUpdateAllow() { return UiStrings::text(UiStrings::TextId::LabelFwUpdateAllow); }
+inline const char *LabelFwUpdateDeny() { return UiStrings::text(UiStrings::TextId::LabelFwUpdateDeny); }
+inline const char *LabelFwUpdatePending() { return UiStrings::text(UiStrings::TextId::LabelFwUpdatePending); }
+inline const char *LabelFwUpdateAllowed() { return UiStrings::text(UiStrings::TextId::LabelFwUpdateAllowed); }
+inline const char *LabelFwUpdateDenied() { return UiStrings::text(UiStrings::TextId::LabelFwUpdateDenied); }
+
 inline const char *ValueMissing() { return UiStrings::text(UiStrings::TextId::ValueMissing); }
 inline const char *ValueMissingShort() { return UiStrings::text(UiStrings::TextId::ValueMissingShort); }
 inline const char *ValueZeroPercent() { return UiStrings::text(UiStrings::TextId::ValueZeroPercent); }
@@ -313,5 +324,25 @@ inline const char *LabelDiagTitle() { return UiStrings::text(UiStrings::TextId::
 inline const char *LabelDiagBack() { return UiStrings::text(UiStrings::TextId::LabelDiagBack); }
 inline const char *LabelDiagClearLog() { return UiStrings::text(UiStrings::TextId::LabelDiagClearLog); }
 inline const char *DiagNoWarningsOrErrors() { return UiStrings::text(UiStrings::TextId::DiagNoWarningsOrErrors); }
+
+inline const char *LabelDacManual() { return UiStrings::text(UiStrings::TextId::LabelDacManual); }
+inline const char *LabelDacAutoOn() { return UiStrings::text(UiStrings::TextId::LabelDacAutoOn); }
+inline const char *LabelDacTimer() { return UiStrings::text(UiStrings::TextId::LabelDacTimer); }
+inline const char *LabelDacSpeed() { return UiStrings::text(UiStrings::TextId::LabelDacSpeed); }
+inline const char *LabelDacFan() { return UiStrings::text(UiStrings::TextId::LabelDacFan); }
+inline const char *LabelDacReason() { return UiStrings::text(UiStrings::TextId::LabelDacReason); }
+inline const char *LabelDacAdvanced() { return UiStrings::text(UiStrings::TextId::LabelDacAdvanced); }
+inline const char *LabelDacOutput() { return UiStrings::text(UiStrings::TextId::LabelDacOutput); }
+inline const char *LabelDacOneHour() { return UiStrings::text(UiStrings::TextId::LabelDacOneHour); }
+inline const char *LabelDacTwoHours() { return UiStrings::text(UiStrings::TextId::LabelDacTwoHours); }
+inline const char *LabelDacFourHours() { return UiStrings::text(UiStrings::TextId::LabelDacFourHours); }
+inline const char *LabelDacEightHours() { return UiStrings::text(UiStrings::TextId::LabelDacEightHours); }
+inline const char *DacStatusOffline() { return UiStrings::text(UiStrings::TextId::DacStatusOffline); }
+inline const char *DacStatusFault() { return UiStrings::text(UiStrings::TextId::DacStatusFault); }
+inline const char *DacStatusRunning() { return UiStrings::text(UiStrings::TextId::DacStatusRunning); }
+inline const char *DacStatusStopped() { return UiStrings::text(UiStrings::TextId::DacStatusStopped); }
+inline const char *DacOutputUnknown() { return UiStrings::text(UiStrings::TextId::DacOutputUnknown); }
+inline const char *DacConnectNetwork() { return UiStrings::text(UiStrings::TextId::DacConnectNetwork); }
+inline const char *LabelAboutTextFormat() { return UiStrings::text(UiStrings::TextId::LabelAboutTextFormat); }
 
 } // namespace UiText

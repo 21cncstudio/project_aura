@@ -477,6 +477,7 @@ private:
     void update_diag_texts();
     void update_boot_diag_texts();
     void update_dac_ui(uint32_t now_ms);
+    void update_dac_texts();
     void update_led_indicators();
     void update_co2_bar(int co2, bool valid);
     void sync_co2_marker_border();

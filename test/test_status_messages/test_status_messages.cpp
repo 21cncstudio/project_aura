@@ -252,6 +252,25 @@ void test_status_messages_absolute_humidity_uses_display_thresholds() {
     assert_message_text(result.messages[0], "Absolute humidity very high");
 }
 
+void test_language_switch_localizes_co_danger_without_changing_severity() {
+    SensorData data{};
+    data.co_sensor_present = true;
+    data.co_valid = true;
+    data.co_ppm = 101.0f;
+    const auto thresholds = DisplayThresholds::defaults();
+    UiStrings::setLanguage(Config::Language::PL);
+    const auto polish = StatusMessages::build_status_messages(data, false, thresholds);
+    TEST_ASSERT_EQUAL_UINT(1, polish.count);
+    TEST_ASSERT_EQUAL_UINT8(StatusMessages::STATUS_SENSOR_CO, polish.messages[0].sensor);
+    TEST_ASSERT_EQUAL_UINT8(StatusMessages::STATUS_RED, polish.messages[0].severity);
+    assert_message_text(polish.messages[0], "Niebezpieczne CO - natychmiast wyjdź");
+
+    UiStrings::setLanguage(Config::Language::EN);
+    const auto english = StatusMessages::build_status_messages(data, false, thresholds);
+    TEST_ASSERT_EQUAL_UINT8(polish.messages[0].severity, english.messages[0].severity);
+    assert_message_text(english.messages[0], "CO danger - Leave now");
+}
+
 int main(int, char **) {
     UNITY_BEGIN();
     RUN_TEST(test_status_messages_temperature_uses_display_thresholds);
@@ -266,5 +285,6 @@ int main(int, char **) {
     RUN_TEST(test_status_messages_hot_dry_air_has_no_conflicting_commands);
     RUN_TEST(test_status_messages_hot_humid_air_omits_absolute_humidity_alert);
     RUN_TEST(test_status_messages_absolute_humidity_uses_display_thresholds);
+    RUN_TEST(test_language_switch_localizes_co_danger_without_changing_severity);
     return UNITY_END();
 }

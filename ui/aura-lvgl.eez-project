@@ -344,7 +344,7 @@
                       "type": "LVGLLabelWidget",
                       "left": 0,
                       "top": 18,
-                      "width": 200,
+                      "width": 198,
                       "height": 20,
                       "customInputs": [],
                       "customOutputs": [],
@@ -1916,7 +1916,7 @@
                       "type": "LVGLLabelWidget",
                       "left": 0,
                       "top": 18,
-                      "width": 200,
+                      "width": 198,
                       "height": 20,
                       "customInputs": [],
                       "customOutputs": [],
@@ -2732,7 +2732,7 @@
                           "type": "LVGLLabelWidget",
                           "left": 13,
                           "top": 6,
-                          "width": 70,
+                          "width": 90,
                           "height": 17,
                           "customInputs": [],
                           "customOutputs": [],
@@ -2799,7 +2799,12 @@
                           "MAIN": {
                             "DEFAULT": {
                               "radius": 15,
-                              "bg_opa": 255
+                              "bg_opa": 255,
+                              "layout": "FLEX",
+                              "flex_flow": "ROW",
+                              "flex_main_place": "CENTER",
+                              "flex_cross_place": "CENTER",
+                              "flex_track_place": "CENTER"
                             }
                           }
                         }
@@ -8550,7 +8555,8 @@
                             "definition": {
                               "MAIN": {
                                 "DEFAULT": {
-                                  "text_font": "jet_med_48"
+                                  "text_font": "jet_med_48",
+                                  "text_align": "CENTER"
                                 }
                               }
                             }
@@ -8585,7 +8591,12 @@
                               "bg_color": "#951212",
                               "bg_opa": 255,
                               "bg_grad_dir": "VER",
-                              "bg_grad_color": "#490808"
+                              "bg_grad_color": "#490808",
+                              "layout": "FLEX",
+                              "flex_flow": "ROW",
+                              "flex_main_place": "CENTER",
+                              "flex_cross_place": "CENTER",
+                              "flex_track_place": "CENTER"
                             }
                           }
                         }
@@ -8710,7 +8721,8 @@
                             "definition": {
                               "MAIN": {
                                 "DEFAULT": {
-                                  "text_font": "jet_med_48"
+                                  "text_font": "jet_med_48",
+                                  "text_align": "CENTER"
                                 }
                               }
                             }
@@ -8745,7 +8757,12 @@
                               "bg_color": "#0f8104",
                               "bg_opa": 255,
                               "bg_grad_color": "#0d4009",
-                              "bg_grad_dir": "VER"
+                              "bg_grad_dir": "VER",
+                              "layout": "FLEX",
+                              "flex_flow": "ROW",
+                              "flex_main_place": "CENTER",
+                              "flex_cross_place": "CENTER",
+                              "flex_track_place": "CENTER"
                             }
                           }
                         }
@@ -8920,7 +8937,7 @@
                       "type": "LVGLLabelWidget",
                       "left": 18,
                       "top": 18,
-                      "width": 82,
+                      "width": 106,
                       "height": 20,
                       "customInputs": [],
                       "customOutputs": [],
@@ -9692,7 +9709,8 @@
                             "definition": {
                               "MAIN": {
                                 "DEFAULT": {
-                                  "text_font": "jet_med_48"
+                                  "text_font": "jet_med_48",
+                                  "text_align": "CENTER"
                                 }
                               }
                             }
@@ -9727,7 +9745,12 @@
                               "bg_color": "#951212",
                               "bg_opa": 255,
                               "bg_grad_dir": "VER",
-                              "bg_grad_color": "#490808"
+                              "bg_grad_color": "#490808",
+                              "layout": "FLEX",
+                              "flex_flow": "ROW",
+                              "flex_main_place": "CENTER",
+                              "flex_cross_place": "CENTER",
+                              "flex_track_place": "CENTER"
                             }
                           }
                         }
@@ -9852,7 +9875,8 @@
                             "definition": {
                               "MAIN": {
                                 "DEFAULT": {
-                                  "text_font": "jet_med_48"
+                                  "text_font": "jet_med_48",
+                                  "text_align": "CENTER"
                                 }
                               }
                             }
@@ -9887,7 +9911,12 @@
                               "bg_color": "#0f8104",
                               "bg_opa": 255,
                               "bg_grad_color": "#0d4009",
-                              "bg_grad_dir": "VER"
+                              "bg_grad_dir": "VER",
+                              "layout": "FLEX",
+                              "flex_flow": "ROW",
+                              "flex_main_place": "CENTER",
+                              "flex_cross_place": "CENTER",
+                              "flex_track_place": "CENTER"
                             }
                           }
                         }
@@ -10731,7 +10760,7 @@
                       "type": "LVGLLabelWidget",
                       "left": 5,
                       "top": 8,
-                      "width": 136,
+                      "width": 144,
                       "height": 40,
                       "customInputs": [],
                       "customOutputs": [],
@@ -11042,7 +11071,8 @@
                         "definition": {
                           "MAIN": {
                             "DEFAULT": {
-                              "text_font": "jet_reg_18"
+                              "text_font": "jet_reg_18",
+                              "text_align": "CENTER"
                             }
                           }
                         }
@@ -11074,7 +11104,12 @@
                         "DEFAULT": {
                           "border_width": 2,
                           "radius": 15,
-                          "bg_opa": 255
+                          "bg_opa": 255,
+                          "layout": "FLEX",
+                          "flex_flow": "ROW_REVERSE",
+                          "flex_main_place": "CENTER",
+                          "flex_cross_place": "CENTER",
+                          "flex_track_place": "CENTER"
                         }
                       }
                     }
@@ -11692,7 +11727,12 @@
                             "DEFAULT": {
                               "border_width": 2,
                               "radius": 15,
-                              "bg_opa": 255
+                              "bg_opa": 255,
+                              "layout": "FLEX",
+                              "flex_flow": "ROW",
+                              "flex_main_place": "CENTER",
+                              "flex_cross_place": "CENTER",
+                              "flex_track_place": "CENTER"
                             }
                           }
                         }
@@ -11797,7 +11837,12 @@
                             "DEFAULT": {
                               "border_width": 2,
                               "radius": 15,
-                              "bg_opa": 255
+                              "bg_opa": 255,
+                              "layout": "FLEX",
+                              "flex_flow": "ROW",
+                              "flex_main_place": "CENTER",
+                              "flex_cross_place": "CENTER",
+                              "flex_track_place": "CENTER"
                             }
                           }
                         }
@@ -12425,7 +12470,12 @@
                             "DEFAULT": {
                               "border_width": 2,
                               "radius": 15,
-                              "bg_opa": 255
+                              "bg_opa": 255,
+                              "layout": "FLEX",
+                              "flex_flow": "ROW",
+                              "flex_main_place": "CENTER",
+                              "flex_cross_place": "CENTER",
+                              "flex_track_place": "CENTER"
                             }
                           }
                         }
@@ -12731,7 +12781,12 @@
                             "DEFAULT": {
                               "border_width": 2,
                               "radius": 15,
-                              "bg_opa": 255
+                              "bg_opa": 255,
+                              "layout": "FLEX",
+                              "flex_flow": "ROW",
+                              "flex_main_place": "CENTER",
+                              "flex_cross_place": "CENTER",
+                              "flex_track_place": "CENTER"
                             }
                           }
                         }
@@ -13076,7 +13131,12 @@
                         "DEFAULT": {
                           "border_width": 2,
                           "radius": 15,
-                          "bg_opa": 255
+                          "bg_opa": 255,
+                          "layout": "FLEX",
+                          "flex_flow": "ROW",
+                          "flex_main_place": "CENTER",
+                          "flex_cross_place": "CENTER",
+                          "flex_track_place": "CENTER"
                         }
                       }
                     }
@@ -13816,7 +13876,12 @@
                         "DEFAULT": {
                           "border_width": 2,
                           "radius": 15,
-                          "bg_opa": 255
+                          "bg_opa": 255,
+                          "layout": "FLEX",
+                          "flex_flow": "ROW",
+                          "flex_main_place": "CENTER",
+                          "flex_cross_place": "CENTER",
+                          "flex_track_place": "CENTER"
                         }
                       }
                     }
@@ -14040,7 +14105,12 @@
                             "DEFAULT": {
                               "border_width": 2,
                               "radius": 15,
-                              "bg_opa": 255
+                              "bg_opa": 255,
+                              "layout": "FLEX",
+                              "flex_flow": "ROW",
+                              "flex_main_place": "CENTER",
+                              "flex_cross_place": "CENTER",
+                              "flex_track_place": "CENTER"
                             }
                           }
                         }
@@ -14284,7 +14354,12 @@
                           "bg_color": "#790e0e",
                           "bg_opa": 255,
                           "bg_grad_dir": "VER",
-                          "bg_grad_color": "#490808"
+                          "bg_grad_color": "#490808",
+                          "layout": "FLEX",
+                          "flex_flow": "ROW",
+                          "flex_main_place": "CENTER",
+                          "flex_cross_place": "CENTER",
+                          "flex_track_place": "CENTER"
                         }
                       }
                     }
@@ -14754,7 +14829,12 @@
                         "DEFAULT": {
                           "border_width": 2,
                           "radius": 15,
-                          "bg_opa": 255
+                          "bg_opa": 255,
+                          "layout": "FLEX",
+                          "flex_flow": "ROW",
+                          "flex_main_place": "CENTER",
+                          "flex_cross_place": "CENTER",
+                          "flex_track_place": "CENTER"
                         }
                       }
                     }
@@ -14859,7 +14939,12 @@
                         "DEFAULT": {
                           "border_width": 2,
                           "radius": 15,
-                          "bg_opa": 255
+                          "bg_opa": 255,
+                          "layout": "FLEX",
+                          "flex_flow": "ROW",
+                          "flex_main_place": "CENTER",
+                          "flex_cross_place": "CENTER",
+                          "flex_track_place": "CENTER"
                         }
                       }
                     }
@@ -15149,7 +15234,12 @@
                             "DEFAULT": {
                               "radius": 15,
                               "bg_color": "#282828",
-                              "bg_opa": 255
+                              "bg_opa": 255,
+                              "layout": "FLEX",
+                              "flex_flow": "ROW",
+                              "flex_main_place": "CENTER",
+                              "flex_cross_place": "CENTER",
+                              "flex_track_place": "CENTER"
                             }
                           }
                         }
@@ -15314,7 +15404,12 @@
                             "DEFAULT": {
                               "radius": 15,
                               "bg_color": "#050505",
-                              "bg_opa": 255
+                              "bg_opa": 255,
+                              "layout": "FLEX",
+                              "flex_flow": "ROW",
+                              "flex_main_place": "CENTER",
+                              "flex_cross_place": "CENTER",
+                              "flex_track_place": "CENTER"
                             }
                           }
                         }
@@ -15478,7 +15573,12 @@
                             "DEFAULT": {
                               "radius": 15,
                               "bg_color": "#d5d5ce",
-                              "bg_opa": 255
+                              "bg_opa": 255,
+                              "layout": "FLEX",
+                              "flex_flow": "ROW",
+                              "flex_main_place": "CENTER",
+                              "flex_cross_place": "CENTER",
+                              "flex_track_place": "CENTER"
                             }
                           }
                         }
@@ -15642,7 +15742,12 @@
                             "DEFAULT": {
                               "radius": 15,
                               "bg_color": "#0F172A",
-                              "bg_opa": 255
+                              "bg_opa": 255,
+                              "layout": "FLEX",
+                              "flex_flow": "ROW",
+                              "flex_main_place": "CENTER",
+                              "flex_cross_place": "CENTER",
+                              "flex_track_place": "CENTER"
                             }
                           }
                         }
@@ -15807,7 +15912,12 @@
                             "DEFAULT": {
                               "radius": 15,
                               "bg_color": "#1e1a2e",
-                              "bg_opa": 255
+                              "bg_opa": 255,
+                              "layout": "FLEX",
+                              "flex_flow": "ROW",
+                              "flex_main_place": "CENTER",
+                              "flex_cross_place": "CENTER",
+                              "flex_track_place": "CENTER"
                             }
                           }
                         }
@@ -15972,7 +16082,12 @@
                             "DEFAULT": {
                               "radius": 15,
                               "bg_color": "#1c232b",
-                              "bg_opa": 255
+                              "bg_opa": 255,
+                              "layout": "FLEX",
+                              "flex_flow": "ROW",
+                              "flex_main_place": "CENTER",
+                              "flex_cross_place": "CENTER",
+                              "flex_track_place": "CENTER"
                             }
                           }
                         }
@@ -16137,7 +16252,12 @@
                             "DEFAULT": {
                               "radius": 15,
                               "bg_color": "#082026",
-                              "bg_opa": 255
+                              "bg_opa": 255,
+                              "layout": "FLEX",
+                              "flex_flow": "ROW",
+                              "flex_main_place": "CENTER",
+                              "flex_cross_place": "CENTER",
+                              "flex_track_place": "CENTER"
                             }
                           }
                         }
@@ -16302,7 +16422,12 @@
                             "DEFAULT": {
                               "radius": 15,
                               "bg_color": "#323232",
-                              "bg_opa": 255
+                              "bg_opa": 255,
+                              "layout": "FLEX",
+                              "flex_flow": "ROW",
+                              "flex_main_place": "CENTER",
+                              "flex_cross_place": "CENTER",
+                              "flex_track_place": "CENTER"
                             }
                           }
                         }
@@ -16467,7 +16592,12 @@
                             "DEFAULT": {
                               "radius": 15,
                               "bg_color": "#0f0c24",
-                              "bg_opa": 255
+                              "bg_opa": 255,
+                              "layout": "FLEX",
+                              "flex_flow": "ROW",
+                              "flex_main_place": "CENTER",
+                              "flex_cross_place": "CENTER",
+                              "flex_track_place": "CENTER"
                             }
                           }
                         }
@@ -16628,7 +16758,12 @@
                             "DEFAULT": {
                               "radius": 15,
                               "bg_color": "#071215",
-                              "bg_opa": 255
+                              "bg_opa": 255,
+                              "layout": "FLEX",
+                              "flex_flow": "ROW",
+                              "flex_main_place": "CENTER",
+                              "flex_cross_place": "CENTER",
+                              "flex_track_place": "CENTER"
                             }
                           }
                         }
@@ -16793,7 +16928,12 @@
                             "DEFAULT": {
                               "radius": 15,
                               "bg_color": "#0e0806",
-                              "bg_opa": 255
+                              "bg_opa": 255,
+                              "layout": "FLEX",
+                              "flex_flow": "ROW",
+                              "flex_main_place": "CENTER",
+                              "flex_cross_place": "CENTER",
+                              "flex_track_place": "CENTER"
                             }
                           }
                         }
@@ -16958,7 +17098,12 @@
                             "DEFAULT": {
                               "radius": 15,
                               "bg_color": "#0c1f14",
-                              "bg_opa": 255
+                              "bg_opa": 255,
+                              "layout": "FLEX",
+                              "flex_flow": "ROW",
+                              "flex_main_place": "CENTER",
+                              "flex_cross_place": "CENTER",
+                              "flex_track_place": "CENTER"
                             }
                           }
                         }
@@ -17304,7 +17449,12 @@
                             "DEFAULT": {
                               "border_width": 2,
                               "radius": 15,
-                              "bg_opa": 255
+                              "bg_opa": 255,
+                              "layout": "FLEX",
+                              "flex_flow": "ROW",
+                              "flex_main_place": "CENTER",
+                              "flex_cross_place": "CENTER",
+                              "flex_track_place": "CENTER"
                             }
                           }
                         }
@@ -17409,7 +17559,12 @@
                             "DEFAULT": {
                               "border_width": 2,
                               "radius": 15,
-                              "bg_opa": 255
+                              "bg_opa": 255,
+                              "layout": "FLEX",
+                              "flex_flow": "ROW",
+                              "flex_main_place": "CENTER",
+                              "flex_cross_place": "CENTER",
+                              "flex_track_place": "CENTER"
                             }
                           }
                         }
@@ -17514,7 +17669,12 @@
                             "DEFAULT": {
                               "border_width": 2,
                               "radius": 15,
-                              "bg_opa": 255
+                              "bg_opa": 255,
+                              "layout": "FLEX",
+                              "flex_flow": "ROW",
+                              "flex_main_place": "CENTER",
+                              "flex_cross_place": "CENTER",
+                              "flex_track_place": "CENTER"
                             }
                           }
                         }
@@ -17619,7 +17779,12 @@
                             "DEFAULT": {
                               "border_width": 2,
                               "radius": 15,
-                              "bg_opa": 255
+                              "bg_opa": 255,
+                              "layout": "FLEX",
+                              "flex_flow": "ROW",
+                              "flex_main_place": "CENTER",
+                              "flex_cross_place": "CENTER",
+                              "flex_track_place": "CENTER"
                             }
                           }
                         }
@@ -18680,7 +18845,8 @@
                             "definition": {
                               "MAIN": {
                                 "DEFAULT": {
-                                  "text_font": "jet_med_48"
+                                  "text_font": "jet_med_48",
+                                  "text_align": "CENTER"
                                 }
                               }
                             }
@@ -18715,7 +18881,12 @@
                               "bg_color": "#0f8104",
                               "bg_opa": 255,
                               "bg_grad_dir": "VER",
-                              "bg_grad_color": "#0d4009"
+                              "bg_grad_color": "#0d4009",
+                              "layout": "FLEX",
+                              "flex_flow": "ROW",
+                              "flex_main_place": "CENTER",
+                              "flex_cross_place": "CENTER",
+                              "flex_track_place": "CENTER"
                             }
                           }
                         }
@@ -18787,7 +18958,8 @@
                             "definition": {
                               "MAIN": {
                                 "DEFAULT": {
-                                  "text_font": "jet_med_48"
+                                  "text_font": "jet_med_48",
+                                  "text_align": "CENTER"
                                 }
                               }
                             }
@@ -18822,7 +18994,12 @@
                               "bg_color": "#790e0e",
                               "bg_opa": 255,
                               "bg_grad_dir": "VER",
-                              "bg_grad_color": "#490808"
+                              "bg_grad_color": "#490808",
+                              "layout": "FLEX",
+                              "flex_flow": "ROW",
+                              "flex_main_place": "CENTER",
+                              "flex_cross_place": "CENTER",
+                              "flex_track_place": "CENTER"
                             }
                           }
                         }
@@ -18964,7 +19141,7 @@
                           "type": "LVGLLabelWidget",
                           "left": 21,
                           "top": 9,
-                          "width": 88,
+                          "width": 110,
                           "height": 20,
                           "customInputs": [],
                           "customOutputs": [],
@@ -19032,7 +19209,12 @@
                             "DEFAULT": {
                               "border_width": 2,
                               "radius": 15,
-                              "bg_opa": 255
+                              "bg_opa": 255,
+                              "layout": "FLEX",
+                              "flex_flow": "ROW",
+                              "flex_main_place": "CENTER",
+                              "flex_cross_place": "CENTER",
+                              "flex_track_place": "CENTER"
                             }
                           }
                         }
@@ -19421,7 +19603,8 @@
                             "definition": {
                               "MAIN": {
                                 "DEFAULT": {
-                                  "text_font": "jet_med_48"
+                                  "text_font": "jet_med_48",
+                                  "text_align": "CENTER"
                                 }
                               }
                             }
@@ -19456,7 +19639,12 @@
                               "bg_color": "#790e0e",
                               "bg_opa": 255,
                               "bg_grad_dir": "VER",
-                              "bg_grad_color": "#490808"
+                              "bg_grad_color": "#490808",
+                              "layout": "FLEX",
+                              "flex_flow": "ROW",
+                              "flex_main_place": "CENTER",
+                              "flex_cross_place": "CENTER",
+                              "flex_track_place": "CENTER"
                             }
                           }
                         }
@@ -19528,7 +19716,8 @@
                             "definition": {
                               "MAIN": {
                                 "DEFAULT": {
-                                  "text_font": "jet_med_48"
+                                  "text_font": "jet_med_48",
+                                  "text_align": "CENTER"
                                 }
                               }
                             }
@@ -19563,7 +19752,12 @@
                               "bg_color": "#0f8104",
                               "bg_opa": 255,
                               "bg_grad_dir": "VER",
-                              "bg_grad_color": "#0d4009"
+                              "bg_grad_color": "#0d4009",
+                              "layout": "FLEX",
+                              "flex_flow": "ROW",
+                              "flex_main_place": "CENTER",
+                              "flex_cross_place": "CENTER",
+                              "flex_track_place": "CENTER"
                             }
                           }
                         }
@@ -19741,7 +19935,8 @@
                             "definition": {
                               "MAIN": {
                                 "DEFAULT": {
-                                  "text_font": "jet_med_48"
+                                  "text_font": "jet_med_48",
+                                  "text_align": "CENTER"
                                 }
                               }
                             }
@@ -19776,7 +19971,12 @@
                               "bg_color": "#790e0e",
                               "bg_opa": 255,
                               "bg_grad_dir": "VER",
-                              "bg_grad_color": "#490808"
+                              "bg_grad_color": "#490808",
+                              "layout": "FLEX",
+                              "flex_flow": "ROW",
+                              "flex_main_place": "CENTER",
+                              "flex_cross_place": "CENTER",
+                              "flex_track_place": "CENTER"
                             }
                           }
                         }
@@ -19848,7 +20048,8 @@
                             "definition": {
                               "MAIN": {
                                 "DEFAULT": {
-                                  "text_font": "jet_med_48"
+                                  "text_font": "jet_med_48",
+                                  "text_align": "CENTER"
                                 }
                               }
                             }
@@ -19883,7 +20084,12 @@
                               "bg_color": "#0f8104",
                               "bg_opa": 255,
                               "bg_grad_dir": "VER",
-                              "bg_grad_color": "#0d4009"
+                              "bg_grad_color": "#0d4009",
+                              "layout": "FLEX",
+                              "flex_flow": "ROW",
+                              "flex_main_place": "CENTER",
+                              "flex_cross_place": "CENTER",
+                              "flex_track_place": "CENTER"
                             }
                           }
                         }
@@ -20220,7 +20426,8 @@
                             "definition": {
                               "MAIN": {
                                 "DEFAULT": {
-                                  "text_font": "jet_med_48"
+                                  "text_font": "jet_med_48",
+                                  "text_align": "CENTER"
                                 }
                               }
                             }
@@ -20255,7 +20462,12 @@
                               "bg_color": "#790e0e",
                               "bg_opa": 255,
                               "bg_grad_dir": "VER",
-                              "bg_grad_color": "#490808"
+                              "bg_grad_color": "#490808",
+                              "layout": "FLEX",
+                              "flex_flow": "ROW",
+                              "flex_main_place": "CENTER",
+                              "flex_cross_place": "CENTER",
+                              "flex_track_place": "CENTER"
                             }
                           }
                         }
@@ -20327,7 +20539,8 @@
                             "definition": {
                               "MAIN": {
                                 "DEFAULT": {
-                                  "text_font": "jet_med_48"
+                                  "text_font": "jet_med_48",
+                                  "text_align": "CENTER"
                                 }
                               }
                             }
@@ -20362,7 +20575,12 @@
                               "bg_color": "#0f8104",
                               "bg_opa": 255,
                               "bg_grad_dir": "VER",
-                              "bg_grad_color": "#0d4009"
+                              "bg_grad_color": "#0d4009",
+                              "layout": "FLEX",
+                              "flex_flow": "ROW",
+                              "flex_main_place": "CENTER",
+                              "flex_cross_place": "CENTER",
+                              "flex_track_place": "CENTER"
                             }
                           }
                         }
@@ -20540,7 +20758,8 @@
                             "definition": {
                               "MAIN": {
                                 "DEFAULT": {
-                                  "text_font": "jet_med_48"
+                                  "text_font": "jet_med_48",
+                                  "text_align": "CENTER"
                                 }
                               }
                             }
@@ -20575,7 +20794,12 @@
                               "bg_color": "#790e0e",
                               "bg_opa": 255,
                               "bg_grad_dir": "VER",
-                              "bg_grad_color": "#490808"
+                              "bg_grad_color": "#490808",
+                              "layout": "FLEX",
+                              "flex_flow": "ROW",
+                              "flex_main_place": "CENTER",
+                              "flex_cross_place": "CENTER",
+                              "flex_track_place": "CENTER"
                             }
                           }
                         }
@@ -20647,7 +20871,8 @@
                             "definition": {
                               "MAIN": {
                                 "DEFAULT": {
-                                  "text_font": "jet_med_48"
+                                  "text_font": "jet_med_48",
+                                  "text_align": "CENTER"
                                 }
                               }
                             }
@@ -20682,7 +20907,12 @@
                               "bg_color": "#0f8104",
                               "bg_opa": 255,
                               "bg_grad_dir": "VER",
-                              "bg_grad_color": "#0d4009"
+                              "bg_grad_color": "#0d4009",
+                              "layout": "FLEX",
+                              "flex_flow": "ROW",
+                              "flex_main_place": "CENTER",
+                              "flex_cross_place": "CENTER",
+                              "flex_track_place": "CENTER"
                             }
                           }
                         }
@@ -20860,7 +21090,8 @@
                             "definition": {
                               "MAIN": {
                                 "DEFAULT": {
-                                  "text_font": "jet_med_48"
+                                  "text_font": "jet_med_48",
+                                  "text_align": "CENTER"
                                 }
                               }
                             }
@@ -20895,7 +21126,12 @@
                               "bg_color": "#790e0e",
                               "bg_opa": 255,
                               "bg_grad_dir": "VER",
-                              "bg_grad_color": "#490808"
+                              "bg_grad_color": "#490808",
+                              "layout": "FLEX",
+                              "flex_flow": "ROW",
+                              "flex_main_place": "CENTER",
+                              "flex_cross_place": "CENTER",
+                              "flex_track_place": "CENTER"
                             }
                           }
                         }
@@ -20967,7 +21203,8 @@
                             "definition": {
                               "MAIN": {
                                 "DEFAULT": {
-                                  "text_font": "jet_med_48"
+                                  "text_font": "jet_med_48",
+                                  "text_align": "CENTER"
                                 }
                               }
                             }
@@ -21002,7 +21239,12 @@
                               "bg_color": "#0f8104",
                               "bg_opa": 255,
                               "bg_grad_dir": "VER",
-                              "bg_grad_color": "#0d4009"
+                              "bg_grad_color": "#0d4009",
+                              "layout": "FLEX",
+                              "flex_flow": "ROW",
+                              "flex_main_place": "CENTER",
+                              "flex_cross_place": "CENTER",
+                              "flex_track_place": "CENTER"
                             }
                           }
                         }
@@ -21135,7 +21377,12 @@
                         "DEFAULT": {
                           "border_width": 2,
                           "radius": 15,
-                          "bg_opa": 255
+                          "bg_opa": 255,
+                          "layout": "FLEX",
+                          "flex_flow": "ROW",
+                          "flex_main_place": "CENTER",
+                          "flex_cross_place": "CENTER",
+                          "flex_track_place": "CENTER"
                         }
                       }
                     }
@@ -21240,7 +21487,12 @@
                         "DEFAULT": {
                           "border_width": 2,
                           "radius": 15,
-                          "bg_opa": 255
+                          "bg_opa": 255,
+                          "layout": "FLEX",
+                          "flex_flow": "ROW",
+                          "flex_main_place": "CENTER",
+                          "flex_cross_place": "CENTER",
+                          "flex_track_place": "CENTER"
                         }
                       }
                     }
@@ -21638,7 +21890,12 @@
                       "bg_opa": 255,
                       "bg_color": "#0f8104",
                       "bg_grad_dir": "VER",
-                      "bg_grad_color": "#0d4009"
+                      "bg_grad_color": "#0d4009",
+                      "layout": "FLEX",
+                      "flex_flow": "ROW",
+                      "flex_main_place": "CENTER",
+                      "flex_cross_place": "CENTER",
+                      "flex_track_place": "CENTER"
                     }
                   }
                 }
@@ -22390,7 +22647,12 @@
                         "DEFAULT": {
                           "border_width": 2,
                           "radius": 15,
-                          "bg_opa": 255
+                          "bg_opa": 255,
+                          "layout": "FLEX",
+                          "flex_flow": "ROW",
+                          "flex_main_place": "CENTER",
+                          "flex_cross_place": "CENTER",
+                          "flex_track_place": "CENTER"
                         }
                       }
                     }
@@ -23060,7 +23322,8 @@
                             "definition": {
                               "MAIN": {
                                 "DEFAULT": {
-                                  "text_font": "jet_reg_18"
+                                  "text_font": "jet_reg_18",
+                                  "text_align": "CENTER"
                                 }
                               }
                             }
@@ -23092,7 +23355,12 @@
                             "DEFAULT": {
                               "border_width": 2,
                               "radius": 15,
-                              "bg_opa": 255
+                              "bg_opa": 255,
+                              "layout": "FLEX",
+                              "flex_flow": "ROW",
+                              "flex_main_place": "CENTER",
+                              "flex_cross_place": "CENTER",
+                              "flex_track_place": "CENTER"
                             }
                           }
                         }
@@ -23305,7 +23573,12 @@
                               "bg_opa": 255,
                               "bg_color": "#790e0e",
                               "bg_grad_dir": "VER",
-                              "bg_grad_color": "#490808"
+                              "bg_grad_color": "#490808",
+                              "layout": "FLEX",
+                              "flex_flow": "ROW",
+                              "flex_main_place": "CENTER",
+                              "flex_cross_place": "CENTER",
+                              "flex_track_place": "CENTER"
                             }
                           }
                         }
@@ -23593,7 +23866,12 @@
                         "DEFAULT": {
                           "border_width": 2,
                           "radius": 15,
-                          "bg_opa": 255
+                          "bg_opa": 255,
+                          "layout": "FLEX",
+                          "flex_flow": "ROW",
+                          "flex_main_place": "CENTER",
+                          "flex_cross_place": "CENTER",
+                          "flex_track_place": "CENTER"
                         }
                       }
                     }
@@ -23774,7 +24052,12 @@
                             "DEFAULT": {
                               "border_width": 2,
                               "radius": 15,
-                              "bg_opa": 255
+                              "bg_opa": 255,
+                              "layout": "FLEX",
+                              "flex_flow": "ROW",
+                              "flex_main_place": "CENTER",
+                              "flex_cross_place": "CENTER",
+                              "flex_track_place": "CENTER"
                             }
                           }
                         }
@@ -23879,7 +24162,12 @@
                             "DEFAULT": {
                               "border_width": 2,
                               "radius": 15,
-                              "bg_opa": 255
+                              "bg_opa": 255,
+                              "layout": "FLEX",
+                              "flex_flow": "ROW",
+                              "flex_main_place": "CENTER",
+                              "flex_cross_place": "CENTER",
+                              "flex_track_place": "CENTER"
                             }
                           }
                         }
@@ -24482,7 +24770,8 @@
                               "MAIN": {
                                 "DEFAULT": {
                                   "text_color": "#FFE5A8",
-                                  "text_font": "jet_med_48"
+                                  "text_font": "jet_med_48",
+                                  "text_align": "CENTER"
                                 }
                               }
                             }
@@ -24517,7 +24806,12 @@
                               "bg_color": "#790e0e",
                               "bg_opa": 255,
                               "bg_grad_dir": "VER",
-                              "bg_grad_color": "#490808"
+                              "bg_grad_color": "#490808",
+                              "layout": "FLEX",
+                              "flex_flow": "ROW",
+                              "flex_main_place": "CENTER",
+                              "flex_cross_place": "CENTER",
+                              "flex_track_place": "CENTER"
                             }
                           }
                         }
@@ -24589,7 +24883,8 @@
                               "MAIN": {
                                 "DEFAULT": {
                                   "text_color": "#FFE5A8",
-                                  "text_font": "jet_med_48"
+                                  "text_font": "jet_med_48",
+                                  "text_align": "CENTER"
                                 }
                               }
                             }
@@ -24624,7 +24919,12 @@
                               "bg_color": "#0f8104",
                               "bg_opa": 255,
                               "bg_grad_dir": "VER",
-                              "bg_grad_color": "#0d4009"
+                              "bg_grad_color": "#0d4009",
+                              "layout": "FLEX",
+                              "flex_flow": "ROW",
+                              "flex_main_place": "CENTER",
+                              "flex_cross_place": "CENTER",
+                              "flex_track_place": "CENTER"
                             }
                           }
                         }
@@ -24802,7 +25102,8 @@
                               "MAIN": {
                                 "DEFAULT": {
                                   "text_color": "#FFE5A8",
-                                  "text_font": "jet_med_48"
+                                  "text_font": "jet_med_48",
+                                  "text_align": "CENTER"
                                 }
                               }
                             }
@@ -24837,7 +25138,12 @@
                               "bg_color": "#790e0e",
                               "bg_opa": 255,
                               "bg_grad_dir": "VER",
-                              "bg_grad_color": "#490808"
+                              "bg_grad_color": "#490808",
+                              "layout": "FLEX",
+                              "flex_flow": "ROW",
+                              "flex_main_place": "CENTER",
+                              "flex_cross_place": "CENTER",
+                              "flex_track_place": "CENTER"
                             }
                           }
                         }
@@ -24909,7 +25215,8 @@
                               "MAIN": {
                                 "DEFAULT": {
                                   "text_color": "#FFE5A8",
-                                  "text_font": "jet_med_48"
+                                  "text_font": "jet_med_48",
+                                  "text_align": "CENTER"
                                 }
                               }
                             }
@@ -24944,7 +25251,12 @@
                               "bg_color": "#0f8104",
                               "bg_opa": 255,
                               "bg_grad_dir": "VER",
-                              "bg_grad_color": "#0d4009"
+                              "bg_grad_color": "#0d4009",
+                              "layout": "FLEX",
+                              "flex_flow": "ROW",
+                              "flex_main_place": "CENTER",
+                              "flex_cross_place": "CENTER",
+                              "flex_track_place": "CENTER"
                             }
                           }
                         }
@@ -25227,7 +25539,8 @@
                               "MAIN": {
                                 "DEFAULT": {
                                   "text_color": "#FFE5A8",
-                                  "text_font": "jet_med_48"
+                                  "text_font": "jet_med_48",
+                                  "text_align": "CENTER"
                                 }
                               }
                             }
@@ -25262,7 +25575,12 @@
                               "bg_color": "#790e0e",
                               "bg_opa": 255,
                               "bg_grad_dir": "VER",
-                              "bg_grad_color": "#490808"
+                              "bg_grad_color": "#490808",
+                              "layout": "FLEX",
+                              "flex_flow": "ROW",
+                              "flex_main_place": "CENTER",
+                              "flex_cross_place": "CENTER",
+                              "flex_track_place": "CENTER"
                             }
                           }
                         }
@@ -25334,7 +25652,8 @@
                               "MAIN": {
                                 "DEFAULT": {
                                   "text_color": "#FFE5A8",
-                                  "text_font": "jet_med_48"
+                                  "text_font": "jet_med_48",
+                                  "text_align": "CENTER"
                                 }
                               }
                             }
@@ -25369,7 +25688,12 @@
                               "bg_color": "#0f8104",
                               "bg_opa": 255,
                               "bg_grad_dir": "VER",
-                              "bg_grad_color": "#0d4009"
+                              "bg_grad_color": "#0d4009",
+                              "layout": "FLEX",
+                              "flex_flow": "ROW",
+                              "flex_main_place": "CENTER",
+                              "flex_cross_place": "CENTER",
+                              "flex_track_place": "CENTER"
                             }
                           }
                         }
@@ -25547,7 +25871,8 @@
                               "MAIN": {
                                 "DEFAULT": {
                                   "text_color": "#FFE5A8",
-                                  "text_font": "jet_med_48"
+                                  "text_font": "jet_med_48",
+                                  "text_align": "CENTER"
                                 }
                               }
                             }
@@ -25582,7 +25907,12 @@
                               "bg_color": "#790e0e",
                               "bg_opa": 255,
                               "bg_grad_dir": "VER",
-                              "bg_grad_color": "#490808"
+                              "bg_grad_color": "#490808",
+                              "layout": "FLEX",
+                              "flex_flow": "ROW",
+                              "flex_main_place": "CENTER",
+                              "flex_cross_place": "CENTER",
+                              "flex_track_place": "CENTER"
                             }
                           }
                         }
@@ -25654,7 +25984,8 @@
                               "MAIN": {
                                 "DEFAULT": {
                                   "text_color": "#FFE5A8",
-                                  "text_font": "jet_med_48"
+                                  "text_font": "jet_med_48",
+                                  "text_align": "CENTER"
                                 }
                               }
                             }
@@ -25689,7 +26020,12 @@
                               "bg_color": "#0f8104",
                               "bg_opa": 255,
                               "bg_grad_dir": "VER",
-                              "bg_grad_color": "#0d4009"
+                              "bg_grad_color": "#0d4009",
+                              "layout": "FLEX",
+                              "flex_flow": "ROW",
+                              "flex_main_place": "CENTER",
+                              "flex_cross_place": "CENTER",
+                              "flex_track_place": "CENTER"
                             }
                           }
                         }
@@ -25875,7 +26211,12 @@
                         "DEFAULT": {
                           "border_width": 2,
                           "radius": 15,
-                          "bg_opa": 255
+                          "bg_opa": 255,
+                          "layout": "FLEX",
+                          "flex_flow": "ROW",
+                          "flex_main_place": "CENTER",
+                          "flex_cross_place": "CENTER",
+                          "flex_track_place": "CENTER"
                         }
                       }
                     }
@@ -26056,7 +26397,12 @@
                             "DEFAULT": {
                               "border_width": 2,
                               "radius": 15,
-                              "bg_opa": 255
+                              "bg_opa": 255,
+                              "layout": "FLEX",
+                              "flex_flow": "ROW",
+                              "flex_main_place": "CENTER",
+                              "flex_cross_place": "CENTER",
+                              "flex_track_place": "CENTER"
                             }
                           }
                         }
@@ -26367,7 +26713,12 @@
                             "DEFAULT": {
                               "border_width": 2,
                               "radius": 15,
-                              "bg_opa": 255
+                              "bg_opa": 255,
+                              "layout": "FLEX",
+                              "flex_flow": "ROW",
+                              "flex_main_place": "CENTER",
+                              "flex_cross_place": "CENTER",
+                              "flex_track_place": "CENTER"
                             }
                           }
                         }
@@ -26525,7 +26876,12 @@
                             "DEFAULT": {
                               "border_width": 2,
                               "radius": 15,
-                              "bg_opa": 255
+                              "bg_opa": 255,
+                              "layout": "FLEX",
+                              "flex_flow": "ROW",
+                              "flex_main_place": "CENTER",
+                              "flex_cross_place": "CENTER",
+                              "flex_track_place": "CENTER"
                             }
                           }
                         }
@@ -26735,7 +27091,12 @@
                             "DEFAULT": {
                               "border_width": 2,
                               "radius": 15,
-                              "bg_opa": 255
+                              "bg_opa": 255,
+                              "layout": "FLEX",
+                              "flex_flow": "ROW",
+                              "flex_main_place": "CENTER",
+                              "flex_cross_place": "CENTER",
+                              "flex_track_place": "CENTER"
                             }
                           }
                         }
@@ -26840,7 +27201,12 @@
                             "DEFAULT": {
                               "border_width": 2,
                               "radius": 15,
-                              "bg_opa": 255
+                              "bg_opa": 255,
+                              "layout": "FLEX",
+                              "flex_flow": "ROW",
+                              "flex_main_place": "CENTER",
+                              "flex_cross_place": "CENTER",
+                              "flex_track_place": "CENTER"
                             }
                           }
                         }
@@ -26945,7 +27311,12 @@
                             "DEFAULT": {
                               "border_width": 2,
                               "radius": 15,
-                              "bg_opa": 255
+                              "bg_opa": 255,
+                              "layout": "FLEX",
+                              "flex_flow": "ROW",
+                              "flex_main_place": "CENTER",
+                              "flex_cross_place": "CENTER",
+                              "flex_track_place": "CENTER"
                             }
                           }
                         }
@@ -27228,7 +27599,8 @@
                               "MAIN": {
                                 "DEFAULT": {
                                   "text_color": "#FFE5A8",
-                                  "text_font": "jet_med_48"
+                                  "text_font": "jet_med_48",
+                                  "text_align": "CENTER"
                                 }
                               }
                             }
@@ -27263,7 +27635,12 @@
                               "bg_color": "#790e0e",
                               "bg_opa": 255,
                               "bg_grad_dir": "VER",
-                              "bg_grad_color": "#490808"
+                              "bg_grad_color": "#490808",
+                              "layout": "FLEX",
+                              "flex_flow": "ROW",
+                              "flex_main_place": "CENTER",
+                              "flex_cross_place": "CENTER",
+                              "flex_track_place": "CENTER"
                             }
                           }
                         }
@@ -27335,7 +27712,8 @@
                               "MAIN": {
                                 "DEFAULT": {
                                   "text_color": "#FFE5A8",
-                                  "text_font": "jet_med_48"
+                                  "text_font": "jet_med_48",
+                                  "text_align": "CENTER"
                                 }
                               }
                             }
@@ -27370,7 +27748,12 @@
                               "bg_color": "#0f8104",
                               "bg_opa": 255,
                               "bg_grad_dir": "VER",
-                              "bg_grad_color": "#0d4009"
+                              "bg_grad_color": "#0d4009",
+                              "layout": "FLEX",
+                              "flex_flow": "ROW",
+                              "flex_main_place": "CENTER",
+                              "flex_cross_place": "CENTER",
+                              "flex_track_place": "CENTER"
                             }
                           }
                         }
@@ -27548,7 +27931,8 @@
                               "MAIN": {
                                 "DEFAULT": {
                                   "text_color": "#FFE5A8",
-                                  "text_font": "jet_med_48"
+                                  "text_font": "jet_med_48",
+                                  "text_align": "CENTER"
                                 }
                               }
                             }
@@ -27583,7 +27967,12 @@
                               "bg_color": "#790e0e",
                               "bg_opa": 255,
                               "bg_grad_dir": "VER",
-                              "bg_grad_color": "#490808"
+                              "bg_grad_color": "#490808",
+                              "layout": "FLEX",
+                              "flex_flow": "ROW",
+                              "flex_main_place": "CENTER",
+                              "flex_cross_place": "CENTER",
+                              "flex_track_place": "CENTER"
                             }
                           }
                         }
@@ -27655,7 +28044,8 @@
                               "MAIN": {
                                 "DEFAULT": {
                                   "text_color": "#FFE5A8",
-                                  "text_font": "jet_med_48"
+                                  "text_font": "jet_med_48",
+                                  "text_align": "CENTER"
                                 }
                               }
                             }
@@ -27690,7 +28080,12 @@
                               "bg_color": "#0f8104",
                               "bg_opa": 255,
                               "bg_grad_dir": "VER",
-                              "bg_grad_color": "#0d4009"
+                              "bg_grad_color": "#0d4009",
+                              "layout": "FLEX",
+                              "flex_flow": "ROW",
+                              "flex_main_place": "CENTER",
+                              "flex_cross_place": "CENTER",
+                              "flex_track_place": "CENTER"
                             }
                           }
                         }
@@ -27973,7 +28368,8 @@
                               "MAIN": {
                                 "DEFAULT": {
                                   "text_color": "#FFE5A8",
-                                  "text_font": "jet_med_48"
+                                  "text_font": "jet_med_48",
+                                  "text_align": "CENTER"
                                 }
                               }
                             }
@@ -28008,7 +28404,12 @@
                               "bg_color": "#790e0e",
                               "bg_opa": 255,
                               "bg_grad_dir": "VER",
-                              "bg_grad_color": "#490808"
+                              "bg_grad_color": "#490808",
+                              "layout": "FLEX",
+                              "flex_flow": "ROW",
+                              "flex_main_place": "CENTER",
+                              "flex_cross_place": "CENTER",
+                              "flex_track_place": "CENTER"
                             }
                           }
                         }
@@ -28080,7 +28481,8 @@
                               "MAIN": {
                                 "DEFAULT": {
                                   "text_color": "#FFE5A8",
-                                  "text_font": "jet_med_48"
+                                  "text_font": "jet_med_48",
+                                  "text_align": "CENTER"
                                 }
                               }
                             }
@@ -28115,7 +28517,12 @@
                               "bg_color": "#0f8104",
                               "bg_opa": 255,
                               "bg_grad_dir": "VER",
-                              "bg_grad_color": "#0d4009"
+                              "bg_grad_color": "#0d4009",
+                              "layout": "FLEX",
+                              "flex_flow": "ROW",
+                              "flex_main_place": "CENTER",
+                              "flex_cross_place": "CENTER",
+                              "flex_track_place": "CENTER"
                             }
                           }
                         }
@@ -28293,7 +28700,8 @@
                               "MAIN": {
                                 "DEFAULT": {
                                   "text_color": "#FFE5A8",
-                                  "text_font": "jet_med_48"
+                                  "text_font": "jet_med_48",
+                                  "text_align": "CENTER"
                                 }
                               }
                             }
@@ -28328,7 +28736,12 @@
                               "bg_color": "#790e0e",
                               "bg_opa": 255,
                               "bg_grad_dir": "VER",
-                              "bg_grad_color": "#490808"
+                              "bg_grad_color": "#490808",
+                              "layout": "FLEX",
+                              "flex_flow": "ROW",
+                              "flex_main_place": "CENTER",
+                              "flex_cross_place": "CENTER",
+                              "flex_track_place": "CENTER"
                             }
                           }
                         }
@@ -28400,7 +28813,8 @@
                               "MAIN": {
                                 "DEFAULT": {
                                   "text_color": "#FFE5A8",
-                                  "text_font": "jet_med_48"
+                                  "text_font": "jet_med_48",
+                                  "text_align": "CENTER"
                                 }
                               }
                             }
@@ -28435,7 +28849,12 @@
                               "bg_color": "#0f8104",
                               "bg_opa": 255,
                               "bg_grad_dir": "VER",
-                              "bg_grad_color": "#0d4009"
+                              "bg_grad_color": "#0d4009",
+                              "layout": "FLEX",
+                              "flex_flow": "ROW",
+                              "flex_main_place": "CENTER",
+                              "flex_cross_place": "CENTER",
+                              "flex_track_place": "CENTER"
                             }
                           }
                         }
@@ -28644,7 +29063,12 @@
                             "DEFAULT": {
                               "border_width": 2,
                               "radius": 15,
-                              "bg_opa": 255
+                              "bg_opa": 255,
+                              "layout": "FLEX",
+                              "flex_flow": "ROW",
+                              "flex_main_place": "CENTER",
+                              "flex_cross_place": "CENTER",
+                              "flex_track_place": "CENTER"
                             }
                           }
                         }
@@ -28931,7 +29355,12 @@
                         "DEFAULT": {
                           "border_width": 2,
                           "radius": 15,
-                          "bg_opa": 255
+                          "bg_opa": 255,
+                          "layout": "FLEX",
+                          "flex_flow": "ROW",
+                          "flex_main_place": "CENTER",
+                          "flex_cross_place": "CENTER",
+                          "flex_track_place": "CENTER"
                         }
                       }
                     }
@@ -29036,7 +29465,12 @@
                         "DEFAULT": {
                           "border_width": 2,
                           "radius": 15,
-                          "bg_opa": 255
+                          "bg_opa": 255,
+                          "layout": "FLEX",
+                          "flex_flow": "ROW",
+                          "flex_main_place": "CENTER",
+                          "flex_cross_place": "CENTER",
+                          "flex_track_place": "CENTER"
                         }
                       }
                     }
@@ -29963,7 +30397,12 @@
                         "DEFAULT": {
                           "border_width": 2,
                           "radius": 15,
-                          "bg_opa": 255
+                          "bg_opa": 255,
+                          "layout": "FLEX",
+                          "flex_flow": "ROW",
+                          "flex_main_place": "CENTER",
+                          "flex_cross_place": "CENTER",
+                          "flex_track_place": "CENTER"
                         }
                       }
                     }
@@ -30381,7 +30820,12 @@
                         "DEFAULT": {
                           "border_width": 2,
                           "radius": 15,
-                          "bg_opa": 255
+                          "bg_opa": 255,
+                          "layout": "FLEX",
+                          "flex_flow": "ROW",
+                          "flex_main_place": "CENTER",
+                          "flex_cross_place": "CENTER",
+                          "flex_track_place": "CENTER"
                         }
                       }
                     }
@@ -30645,7 +31089,12 @@
                         "DEFAULT": {
                           "border_width": 2,
                           "radius": 15,
-                          "bg_opa": 255
+                          "bg_opa": 255,
+                          "layout": "FLEX",
+                          "flex_flow": "ROW",
+                          "flex_main_place": "CENTER",
+                          "flex_cross_place": "CENTER",
+                          "flex_track_place": "CENTER"
                         }
                       }
                     }
@@ -30750,7 +31199,12 @@
                         "DEFAULT": {
                           "border_width": 2,
                           "radius": 15,
-                          "bg_opa": 255
+                          "bg_opa": 255,
+                          "layout": "FLEX",
+                          "flex_flow": "ROW",
+                          "flex_main_place": "CENTER",
+                          "flex_cross_place": "CENTER",
+                          "flex_track_place": "CENTER"
                         }
                       }
                     }
@@ -31282,7 +31736,12 @@
                             "DEFAULT": {
                               "border_width": 2,
                               "radius": 15,
-                              "bg_opa": 255
+                              "bg_opa": 255,
+                              "layout": "FLEX",
+                              "flex_flow": "ROW",
+                              "flex_main_place": "CENTER",
+                              "flex_cross_place": "CENTER",
+                              "flex_track_place": "CENTER"
                             }
                           }
                         }
@@ -31387,7 +31846,12 @@
                             "DEFAULT": {
                               "border_width": 2,
                               "radius": 15,
-                              "bg_opa": 255
+                              "bg_opa": 255,
+                              "layout": "FLEX",
+                              "flex_flow": "ROW",
+                              "flex_main_place": "CENTER",
+                              "flex_cross_place": "CENTER",
+                              "flex_track_place": "CENTER"
                             }
                           }
                         }
@@ -31492,7 +31956,12 @@
                             "DEFAULT": {
                               "border_width": 2,
                               "radius": 15,
-                              "bg_opa": 255
+                              "bg_opa": 255,
+                              "layout": "FLEX",
+                              "flex_flow": "ROW",
+                              "flex_main_place": "CENTER",
+                              "flex_cross_place": "CENTER",
+                              "flex_track_place": "CENTER"
                             }
                           }
                         }
@@ -32034,7 +32503,12 @@
                             "DEFAULT": {
                               "border_width": 2,
                               "radius": 15,
-                              "bg_opa": 255
+                              "bg_opa": 255,
+                              "layout": "FLEX",
+                              "flex_flow": "ROW",
+                              "flex_main_place": "CENTER",
+                              "flex_cross_place": "CENTER",
+                              "flex_track_place": "CENTER"
                             }
                           }
                         }
@@ -32139,7 +32613,12 @@
                             "DEFAULT": {
                               "border_width": 2,
                               "radius": 15,
-                              "bg_opa": 255
+                              "bg_opa": 255,
+                              "layout": "FLEX",
+                              "flex_flow": "ROW",
+                              "flex_main_place": "CENTER",
+                              "flex_cross_place": "CENTER",
+                              "flex_track_place": "CENTER"
                             }
                           }
                         }
@@ -32244,7 +32723,12 @@
                             "DEFAULT": {
                               "border_width": 2,
                               "radius": 15,
-                              "bg_opa": 255
+                              "bg_opa": 255,
+                              "layout": "FLEX",
+                              "flex_flow": "ROW",
+                              "flex_main_place": "CENTER",
+                              "flex_cross_place": "CENTER",
+                              "flex_track_place": "CENTER"
                             }
                           }
                         }
@@ -32786,7 +33270,12 @@
                             "DEFAULT": {
                               "border_width": 2,
                               "radius": 15,
-                              "bg_opa": 255
+                              "bg_opa": 255,
+                              "layout": "FLEX",
+                              "flex_flow": "ROW",
+                              "flex_main_place": "CENTER",
+                              "flex_cross_place": "CENTER",
+                              "flex_track_place": "CENTER"
                             }
                           }
                         }
@@ -32891,7 +33380,12 @@
                             "DEFAULT": {
                               "border_width": 2,
                               "radius": 15,
-                              "bg_opa": 255
+                              "bg_opa": 255,
+                              "layout": "FLEX",
+                              "flex_flow": "ROW",
+                              "flex_main_place": "CENTER",
+                              "flex_cross_place": "CENTER",
+                              "flex_track_place": "CENTER"
                             }
                           }
                         }
@@ -32996,7 +33490,12 @@
                             "DEFAULT": {
                               "border_width": 2,
                               "radius": 15,
-                              "bg_opa": 255
+                              "bg_opa": 255,
+                              "layout": "FLEX",
+                              "flex_flow": "ROW",
+                              "flex_main_place": "CENTER",
+                              "flex_cross_place": "CENTER",
+                              "flex_track_place": "CENTER"
                             }
                           }
                         }
@@ -33538,7 +34037,12 @@
                             "DEFAULT": {
                               "border_width": 2,
                               "radius": 15,
-                              "bg_opa": 255
+                              "bg_opa": 255,
+                              "layout": "FLEX",
+                              "flex_flow": "ROW",
+                              "flex_main_place": "CENTER",
+                              "flex_cross_place": "CENTER",
+                              "flex_track_place": "CENTER"
                             }
                           }
                         }
@@ -33643,7 +34147,12 @@
                             "DEFAULT": {
                               "border_width": 2,
                               "radius": 15,
-                              "bg_opa": 255
+                              "bg_opa": 255,
+                              "layout": "FLEX",
+                              "flex_flow": "ROW",
+                              "flex_main_place": "CENTER",
+                              "flex_cross_place": "CENTER",
+                              "flex_track_place": "CENTER"
                             }
                           }
                         }
@@ -33748,7 +34257,12 @@
                             "DEFAULT": {
                               "border_width": 2,
                               "radius": 15,
-                              "bg_opa": 255
+                              "bg_opa": 255,
+                              "layout": "FLEX",
+                              "flex_flow": "ROW",
+                              "flex_main_place": "CENTER",
+                              "flex_cross_place": "CENTER",
+                              "flex_track_place": "CENTER"
                             }
                           }
                         }
@@ -34290,7 +34804,12 @@
                             "DEFAULT": {
                               "border_width": 2,
                               "radius": 15,
-                              "bg_opa": 255
+                              "bg_opa": 255,
+                              "layout": "FLEX",
+                              "flex_flow": "ROW",
+                              "flex_main_place": "CENTER",
+                              "flex_cross_place": "CENTER",
+                              "flex_track_place": "CENTER"
                             }
                           }
                         }
@@ -34395,7 +34914,12 @@
                             "DEFAULT": {
                               "border_width": 2,
                               "radius": 15,
-                              "bg_opa": 255
+                              "bg_opa": 255,
+                              "layout": "FLEX",
+                              "flex_flow": "ROW",
+                              "flex_main_place": "CENTER",
+                              "flex_cross_place": "CENTER",
+                              "flex_track_place": "CENTER"
                             }
                           }
                         }
@@ -34500,7 +35024,12 @@
                             "DEFAULT": {
                               "border_width": 2,
                               "radius": 15,
-                              "bg_opa": 255
+                              "bg_opa": 255,
+                              "layout": "FLEX",
+                              "flex_flow": "ROW",
+                              "flex_main_place": "CENTER",
+                              "flex_cross_place": "CENTER",
+                              "flex_track_place": "CENTER"
                             }
                           }
                         }
@@ -35042,7 +35571,12 @@
                             "DEFAULT": {
                               "border_width": 2,
                               "radius": 15,
-                              "bg_opa": 255
+                              "bg_opa": 255,
+                              "layout": "FLEX",
+                              "flex_flow": "ROW",
+                              "flex_main_place": "CENTER",
+                              "flex_cross_place": "CENTER",
+                              "flex_track_place": "CENTER"
                             }
                           }
                         }
@@ -35147,7 +35681,12 @@
                             "DEFAULT": {
                               "border_width": 2,
                               "radius": 15,
-                              "bg_opa": 255
+                              "bg_opa": 255,
+                              "layout": "FLEX",
+                              "flex_flow": "ROW",
+                              "flex_main_place": "CENTER",
+                              "flex_cross_place": "CENTER",
+                              "flex_track_place": "CENTER"
                             }
                           }
                         }
@@ -35252,7 +35791,12 @@
                             "DEFAULT": {
                               "border_width": 2,
                               "radius": 15,
-                              "bg_opa": 255
+                              "bg_opa": 255,
+                              "layout": "FLEX",
+                              "flex_flow": "ROW",
+                              "flex_main_place": "CENTER",
+                              "flex_cross_place": "CENTER",
+                              "flex_track_place": "CENTER"
                             }
                           }
                         }
@@ -36122,7 +36666,12 @@
                                 "DEFAULT": {
                                   "border_width": 2,
                                   "radius": 15,
-                                  "bg_opa": 255
+                                  "bg_opa": 255,
+                                  "layout": "FLEX",
+                                  "flex_flow": "ROW",
+                                  "flex_main_place": "CENTER",
+                                  "flex_cross_place": "CENTER",
+                                  "flex_track_place": "CENTER"
                                 }
                               }
                             }
@@ -36227,7 +36776,12 @@
                                 "DEFAULT": {
                                   "border_width": 2,
                                   "radius": 15,
-                                  "bg_opa": 255
+                                  "bg_opa": 255,
+                                  "layout": "FLEX",
+                                  "flex_flow": "ROW",
+                                  "flex_main_place": "CENTER",
+                                  "flex_cross_place": "CENTER",
+                                  "flex_track_place": "CENTER"
                                 }
                               }
                             }
@@ -36332,7 +36886,12 @@
                                 "DEFAULT": {
                                   "border_width": 2,
                                   "radius": 15,
-                                  "bg_opa": 255
+                                  "bg_opa": 255,
+                                  "layout": "FLEX",
+                                  "flex_flow": "ROW",
+                                  "flex_main_place": "CENTER",
+                                  "flex_cross_place": "CENTER",
+                                  "flex_track_place": "CENTER"
                                 }
                               }
                             }
@@ -36777,7 +37336,12 @@
                         "DEFAULT": {
                           "border_width": 2,
                           "radius": 15,
-                          "bg_opa": 255
+                          "bg_opa": 255,
+                          "layout": "FLEX",
+                          "flex_flow": "ROW",
+                          "flex_main_place": "CENTER",
+                          "flex_cross_place": "CENTER",
+                          "flex_track_place": "CENTER"
                         }
                       }
                     }
@@ -36882,7 +37446,12 @@
                         "DEFAULT": {
                           "border_width": 2,
                           "radius": 15,
-                          "bg_opa": 255
+                          "bg_opa": 255,
+                          "layout": "FLEX",
+                          "flex_flow": "ROW",
+                          "flex_main_place": "CENTER",
+                          "flex_cross_place": "CENTER",
+                          "flex_track_place": "CENTER"
                         }
                       }
                     }
@@ -37634,7 +38203,12 @@
                         "DEFAULT": {
                           "border_width": 2,
                           "radius": 15,
-                          "bg_opa": 255
+                          "bg_opa": 255,
+                          "layout": "FLEX",
+                          "flex_flow": "ROW",
+                          "flex_main_place": "CENTER",
+                          "flex_cross_place": "CENTER",
+                          "flex_track_place": "CENTER"
                         }
                       }
                     }
@@ -37739,7 +38313,12 @@
                         "DEFAULT": {
                           "border_width": 2,
                           "radius": 15,
-                          "bg_opa": 255
+                          "bg_opa": 255,
+                          "layout": "FLEX",
+                          "flex_flow": "ROW",
+                          "flex_main_place": "CENTER",
+                          "flex_cross_place": "CENTER",
+                          "flex_track_place": "CENTER"
                         }
                       }
                     }
@@ -38649,7 +39228,12 @@
                             "DEFAULT": {
                               "border_width": 2,
                               "radius": 15,
-                              "bg_opa": 255
+                              "bg_opa": 255,
+                              "layout": "FLEX",
+                              "flex_flow": "ROW",
+                              "flex_main_place": "CENTER",
+                              "flex_cross_place": "CENTER",
+                              "flex_track_place": "CENTER"
                             }
                           }
                         }
@@ -38754,7 +39338,12 @@
                             "DEFAULT": {
                               "border_width": 2,
                               "radius": 15,
-                              "bg_opa": 255
+                              "bg_opa": 255,
+                              "layout": "FLEX",
+                              "flex_flow": "ROW",
+                              "flex_main_place": "CENTER",
+                              "flex_cross_place": "CENTER",
+                              "flex_track_place": "CENTER"
                             }
                           }
                         }
@@ -38859,7 +39448,12 @@
                             "DEFAULT": {
                               "border_width": 2,
                               "radius": 15,
-                              "bg_opa": 255
+                              "bg_opa": 255,
+                              "layout": "FLEX",
+                              "flex_flow": "ROW",
+                              "flex_main_place": "CENTER",
+                              "flex_cross_place": "CENTER",
+                              "flex_track_place": "CENTER"
                             }
                           }
                         }
@@ -38983,7 +39577,12 @@
                         "DEFAULT": {
                           "border_width": 2,
                           "radius": 15,
-                          "bg_opa": 255
+                          "bg_opa": 255,
+                          "layout": "FLEX",
+                          "flex_flow": "ROW",
+                          "flex_main_place": "CENTER",
+                          "flex_cross_place": "CENTER",
+                          "flex_track_place": "CENTER"
                         }
                       }
                     }
@@ -39088,7 +39687,12 @@
                         "DEFAULT": {
                           "border_width": 2,
                           "radius": 15,
-                          "bg_opa": 255
+                          "bg_opa": 255,
+                          "layout": "FLEX",
+                          "flex_flow": "ROW",
+                          "flex_main_place": "CENTER",
+                          "flex_cross_place": "CENTER",
+                          "flex_track_place": "CENTER"
                         }
                       }
                     }
@@ -39287,7 +39891,12 @@
                         "DEFAULT": {
                           "border_width": 2,
                           "radius": 15,
-                          "bg_opa": 255
+                          "bg_opa": 255,
+                          "layout": "FLEX",
+                          "flex_flow": "ROW",
+                          "flex_main_place": "CENTER",
+                          "flex_cross_place": "CENTER",
+                          "flex_track_place": "CENTER"
                         }
                       }
                     }
@@ -39392,7 +40001,12 @@
                         "DEFAULT": {
                           "border_width": 2,
                           "radius": 15,
-                          "bg_opa": 255
+                          "bg_opa": 255,
+                          "layout": "FLEX",
+                          "flex_flow": "ROW",
+                          "flex_main_place": "CENTER",
+                          "flex_cross_place": "CENTER",
+                          "flex_track_place": "CENTER"
                         }
                       }
                     }
@@ -39497,7 +40111,12 @@
                         "DEFAULT": {
                           "border_width": 2,
                           "radius": 15,
-                          "bg_opa": 255
+                          "bg_opa": 255,
+                          "layout": "FLEX",
+                          "flex_flow": "ROW",
+                          "flex_main_place": "CENTER",
+                          "flex_cross_place": "CENTER",
+                          "flex_track_place": "CENTER"
                         }
                       }
                     }
@@ -39602,7 +40221,12 @@
                         "DEFAULT": {
                           "border_width": 2,
                           "radius": 15,
-                          "bg_opa": 255
+                          "bg_opa": 255,
+                          "layout": "FLEX",
+                          "flex_flow": "ROW",
+                          "flex_main_place": "CENTER",
+                          "flex_cross_place": "CENTER",
+                          "flex_track_place": "CENTER"
                         }
                       }
                     }
@@ -39707,7 +40331,12 @@
                         "DEFAULT": {
                           "border_width": 2,
                           "radius": 15,
-                          "bg_opa": 255
+                          "bg_opa": 255,
+                          "layout": "FLEX",
+                          "flex_flow": "ROW",
+                          "flex_main_place": "CENTER",
+                          "flex_cross_place": "CENTER",
+                          "flex_track_place": "CENTER"
                         }
                       }
                     }
@@ -39812,7 +40441,12 @@
                         "DEFAULT": {
                           "border_width": 2,
                           "radius": 15,
-                          "bg_opa": 255
+                          "bg_opa": 255,
+                          "layout": "FLEX",
+                          "flex_flow": "ROW",
+                          "flex_main_place": "CENTER",
+                          "flex_cross_place": "CENTER",
+                          "flex_track_place": "CENTER"
                         }
                       }
                     }
@@ -40448,7 +41082,12 @@
                           "bg_opa": 255,
                           "bg_color": "#0f8104",
                           "bg_grad_dir": "VER",
-                          "bg_grad_color": "#0d4009"
+                          "bg_grad_color": "#0d4009",
+                          "layout": "FLEX",
+                          "flex_flow": "ROW",
+                          "flex_main_place": "CENTER",
+                          "flex_cross_place": "CENTER",
+                          "flex_track_place": "CENTER"
                         }
                       }
                     }
@@ -40702,7 +41341,12 @@
                                 "DEFAULT": {
                                   "border_width": 2,
                                   "radius": 15,
-                                  "bg_opa": 255
+                                  "bg_opa": 255,
+                                  "layout": "FLEX",
+                                  "flex_flow": "ROW",
+                                  "flex_main_place": "CENTER",
+                                  "flex_cross_place": "CENTER",
+                                  "flex_track_place": "CENTER"
                                 }
                               }
                             }
@@ -40807,7 +41451,12 @@
                                 "DEFAULT": {
                                   "border_width": 2,
                                   "radius": 15,
-                                  "bg_opa": 255
+                                  "bg_opa": 255,
+                                  "layout": "FLEX",
+                                  "flex_flow": "ROW",
+                                  "flex_main_place": "CENTER",
+                                  "flex_cross_place": "CENTER",
+                                  "flex_track_place": "CENTER"
                                 }
                               }
                             }
@@ -40912,7 +41561,12 @@
                                 "DEFAULT": {
                                   "border_width": 2,
                                   "radius": 15,
-                                  "bg_opa": 255
+                                  "bg_opa": 255,
+                                  "layout": "FLEX",
+                                  "flex_flow": "ROW",
+                                  "flex_main_place": "CENTER",
+                                  "flex_cross_place": "CENTER",
+                                  "flex_track_place": "CENTER"
                                 }
                               }
                             }
@@ -41036,7 +41690,12 @@
                             "DEFAULT": {
                               "border_width": 2,
                               "radius": 15,
-                              "bg_opa": 255
+                              "bg_opa": 255,
+                              "layout": "FLEX",
+                              "flex_flow": "ROW",
+                              "flex_main_place": "CENTER",
+                              "flex_cross_place": "CENTER",
+                              "flex_track_place": "CENTER"
                             }
                           }
                         }
@@ -41141,7 +41800,12 @@
                             "DEFAULT": {
                               "border_width": 2,
                               "radius": 15,
-                              "bg_opa": 255
+                              "bg_opa": 255,
+                              "layout": "FLEX",
+                              "flex_flow": "ROW",
+                              "flex_main_place": "CENTER",
+                              "flex_cross_place": "CENTER",
+                              "flex_track_place": "CENTER"
                             }
                           }
                         }
@@ -42657,7 +43321,12 @@
                                 "DEFAULT": {
                                   "border_width": 2,
                                   "radius": 15,
-                                  "bg_opa": 255
+                                  "bg_opa": 255,
+                                  "layout": "FLEX",
+                                  "flex_flow": "ROW",
+                                  "flex_main_place": "CENTER",
+                                  "flex_cross_place": "CENTER",
+                                  "flex_track_place": "CENTER"
                                 }
                               }
                             }
@@ -42762,7 +43431,12 @@
                                 "DEFAULT": {
                                   "border_width": 2,
                                   "radius": 15,
-                                  "bg_opa": 255
+                                  "bg_opa": 255,
+                                  "layout": "FLEX",
+                                  "flex_flow": "ROW",
+                                  "flex_main_place": "CENTER",
+                                  "flex_cross_place": "CENTER",
+                                  "flex_track_place": "CENTER"
                                 }
                               }
                             }
@@ -42867,7 +43541,12 @@
                                 "DEFAULT": {
                                   "border_width": 2,
                                   "radius": 15,
-                                  "bg_opa": 255
+                                  "bg_opa": 255,
+                                  "layout": "FLEX",
+                                  "flex_flow": "ROW",
+                                  "flex_main_place": "CENTER",
+                                  "flex_cross_place": "CENTER",
+                                  "flex_track_place": "CENTER"
                                 }
                               }
                             }
@@ -42991,7 +43670,12 @@
                             "DEFAULT": {
                               "border_width": 2,
                               "radius": 15,
-                              "bg_opa": 255
+                              "bg_opa": 255,
+                              "layout": "FLEX",
+                              "flex_flow": "ROW",
+                              "flex_main_place": "CENTER",
+                              "flex_cross_place": "CENTER",
+                              "flex_track_place": "CENTER"
                             }
                           }
                         }
@@ -43096,7 +43780,12 @@
                             "DEFAULT": {
                               "border_width": 2,
                               "radius": 15,
-                              "bg_opa": 255
+                              "bg_opa": 255,
+                              "layout": "FLEX",
+                              "flex_flow": "ROW",
+                              "flex_main_place": "CENTER",
+                              "flex_cross_place": "CENTER",
+                              "flex_track_place": "CENTER"
                             }
                           }
                         }
@@ -43368,7 +44057,12 @@
                                 "DEFAULT": {
                                   "border_width": 2,
                                   "radius": 15,
-                                  "bg_opa": 255
+                                  "bg_opa": 255,
+                                  "layout": "FLEX",
+                                  "flex_flow": "ROW",
+                                  "flex_main_place": "CENTER",
+                                  "flex_cross_place": "CENTER",
+                                  "flex_track_place": "CENTER"
                                 }
                               }
                             }
@@ -43473,7 +44167,12 @@
                                 "DEFAULT": {
                                   "border_width": 2,
                                   "radius": 15,
-                                  "bg_opa": 255
+                                  "bg_opa": 255,
+                                  "layout": "FLEX",
+                                  "flex_flow": "ROW",
+                                  "flex_main_place": "CENTER",
+                                  "flex_cross_place": "CENTER",
+                                  "flex_track_place": "CENTER"
                                 }
                               }
                             }
@@ -43578,7 +44277,12 @@
                                 "DEFAULT": {
                                   "border_width": 2,
                                   "radius": 15,
-                                  "bg_opa": 255
+                                  "bg_opa": 255,
+                                  "layout": "FLEX",
+                                  "flex_flow": "ROW",
+                                  "flex_main_place": "CENTER",
+                                  "flex_cross_place": "CENTER",
+                                  "flex_track_place": "CENTER"
                                 }
                               }
                             }
@@ -44390,7 +45094,12 @@
                             "DEFAULT": {
                               "border_width": 2,
                               "radius": 15,
-                              "bg_opa": 255
+                              "bg_opa": 255,
+                              "layout": "FLEX",
+                              "flex_flow": "ROW",
+                              "flex_main_place": "CENTER",
+                              "flex_cross_place": "CENTER",
+                              "flex_track_place": "CENTER"
                             }
                           }
                         }
@@ -44495,7 +45204,12 @@
                             "DEFAULT": {
                               "border_width": 2,
                               "radius": 15,
-                              "bg_opa": 255
+                              "bg_opa": 255,
+                              "layout": "FLEX",
+                              "flex_flow": "ROW",
+                              "flex_main_place": "CENTER",
+                              "flex_cross_place": "CENTER",
+                              "flex_track_place": "CENTER"
                             }
                           }
                         }
@@ -44600,7 +45314,12 @@
                             "DEFAULT": {
                               "border_width": 2,
                               "radius": 15,
-                              "bg_opa": 255
+                              "bg_opa": 255,
+                              "layout": "FLEX",
+                              "flex_flow": "ROW",
+                              "flex_main_place": "CENTER",
+                              "flex_cross_place": "CENTER",
+                              "flex_track_place": "CENTER"
                             }
                           }
                         }
@@ -45097,7 +45816,12 @@
                             "DEFAULT": {
                               "border_width": 2,
                               "radius": 15,
-                              "bg_opa": 255
+                              "bg_opa": 255,
+                              "layout": "FLEX",
+                              "flex_flow": "ROW",
+                              "flex_main_place": "CENTER",
+                              "flex_cross_place": "CENTER",
+                              "flex_track_place": "CENTER"
                             }
                           }
                         }
@@ -45202,7 +45926,12 @@
                             "DEFAULT": {
                               "border_width": 2,
                               "radius": 15,
-                              "bg_opa": 255
+                              "bg_opa": 255,
+                              "layout": "FLEX",
+                              "flex_flow": "ROW",
+                              "flex_main_place": "CENTER",
+                              "flex_cross_place": "CENTER",
+                              "flex_track_place": "CENTER"
                             }
                           }
                         }
@@ -45307,7 +46036,12 @@
                             "DEFAULT": {
                               "border_width": 2,
                               "radius": 15,
-                              "bg_opa": 255
+                              "bg_opa": 255,
+                              "layout": "FLEX",
+                              "flex_flow": "ROW",
+                              "flex_main_place": "CENTER",
+                              "flex_cross_place": "CENTER",
+                              "flex_track_place": "CENTER"
                             }
                           }
                         }
@@ -45412,7 +46146,12 @@
                             "DEFAULT": {
                               "border_width": 2,
                               "radius": 15,
-                              "bg_opa": 255
+                              "bg_opa": 255,
+                              "layout": "FLEX",
+                              "flex_flow": "ROW",
+                              "flex_main_place": "CENTER",
+                              "flex_cross_place": "CENTER",
+                              "flex_track_place": "CENTER"
                             }
                           }
                         }
@@ -45517,7 +46256,12 @@
                             "DEFAULT": {
                               "border_width": 2,
                               "radius": 15,
-                              "bg_opa": 255
+                              "bg_opa": 255,
+                              "layout": "FLEX",
+                              "flex_flow": "ROW",
+                              "flex_main_place": "CENTER",
+                              "flex_cross_place": "CENTER",
+                              "flex_track_place": "CENTER"
                             }
                           }
                         }
@@ -45622,7 +46366,12 @@
                             "DEFAULT": {
                               "border_width": 2,
                               "radius": 15,
-                              "bg_opa": 255
+                              "bg_opa": 255,
+                              "layout": "FLEX",
+                              "flex_flow": "ROW",
+                              "flex_main_place": "CENTER",
+                              "flex_cross_place": "CENTER",
+                              "flex_track_place": "CENTER"
                             }
                           }
                         }
@@ -45727,7 +46476,12 @@
                             "DEFAULT": {
                               "border_width": 2,
                               "radius": 15,
-                              "bg_opa": 255
+                              "bg_opa": 255,
+                              "layout": "FLEX",
+                              "flex_flow": "ROW",
+                              "flex_main_place": "CENTER",
+                              "flex_cross_place": "CENTER",
+                              "flex_track_place": "CENTER"
                             }
                           }
                         }
@@ -45832,7 +46586,12 @@
                             "DEFAULT": {
                               "border_width": 2,
                               "radius": 15,
-                              "bg_opa": 255
+                              "bg_opa": 255,
+                              "layout": "FLEX",
+                              "flex_flow": "ROW",
+                              "flex_main_place": "CENTER",
+                              "flex_cross_place": "CENTER",
+                              "flex_track_place": "CENTER"
                             }
                           }
                         }
@@ -45937,7 +46696,12 @@
                             "DEFAULT": {
                               "border_width": 2,
                               "radius": 15,
-                              "bg_opa": 255
+                              "bg_opa": 255,
+                              "layout": "FLEX",
+                              "flex_flow": "ROW",
+                              "flex_main_place": "CENTER",
+                              "flex_cross_place": "CENTER",
+                              "flex_track_place": "CENTER"
                             }
                           }
                         }
@@ -46042,7 +46806,12 @@
                             "DEFAULT": {
                               "border_width": 2,
                               "radius": 15,
-                              "bg_opa": 255
+                              "bg_opa": 255,
+                              "layout": "FLEX",
+                              "flex_flow": "ROW",
+                              "flex_main_place": "CENTER",
+                              "flex_cross_place": "CENTER",
+                              "flex_track_place": "CENTER"
                             }
                           }
                         }
@@ -46147,7 +46916,12 @@
                             "DEFAULT": {
                               "border_width": 2,
                               "radius": 15,
-                              "bg_opa": 255
+                              "bg_opa": 255,
+                              "layout": "FLEX",
+                              "flex_flow": "ROW",
+                              "flex_main_place": "CENTER",
+                              "flex_cross_place": "CENTER",
+                              "flex_track_place": "CENTER"
                             }
                           }
                         }
@@ -46252,7 +47026,12 @@
                             "DEFAULT": {
                               "border_width": 2,
                               "radius": 15,
-                              "bg_opa": 255
+                              "bg_opa": 255,
+                              "layout": "FLEX",
+                              "flex_flow": "ROW",
+                              "flex_main_place": "CENTER",
+                              "flex_cross_place": "CENTER",
+                              "flex_track_place": "CENTER"
                             }
                           }
                         }
@@ -46357,7 +47136,12 @@
                             "DEFAULT": {
                               "border_width": 2,
                               "radius": 15,
-                              "bg_opa": 255
+                              "bg_opa": 255,
+                              "layout": "FLEX",
+                              "flex_flow": "ROW",
+                              "flex_main_place": "CENTER",
+                              "flex_cross_place": "CENTER",
+                              "flex_track_place": "CENTER"
                             }
                           }
                         }
@@ -46462,7 +47246,12 @@
                             "DEFAULT": {
                               "border_width": 2,
                               "radius": 15,
-                              "bg_opa": 255
+                              "bg_opa": 255,
+                              "layout": "FLEX",
+                              "flex_flow": "ROW",
+                              "flex_main_place": "CENTER",
+                              "flex_cross_place": "CENTER",
+                              "flex_track_place": "CENTER"
                             }
                           }
                         }
@@ -46567,7 +47356,12 @@
                             "DEFAULT": {
                               "border_width": 2,
                               "radius": 15,
-                              "bg_opa": 255
+                              "bg_opa": 255,
+                              "layout": "FLEX",
+                              "flex_flow": "ROW",
+                              "flex_main_place": "CENTER",
+                              "flex_cross_place": "CENTER",
+                              "flex_track_place": "CENTER"
                             }
                           }
                         }
@@ -46672,7 +47466,12 @@
                             "DEFAULT": {
                               "border_width": 2,
                               "radius": 15,
-                              "bg_opa": 255
+                              "bg_opa": 255,
+                              "layout": "FLEX",
+                              "flex_flow": "ROW",
+                              "flex_main_place": "CENTER",
+                              "flex_cross_place": "CENTER",
+                              "flex_track_place": "CENTER"
                             }
                           }
                         }
@@ -46777,7 +47576,12 @@
                             "DEFAULT": {
                               "border_width": 2,
                               "radius": 15,
-                              "bg_opa": 255
+                              "bg_opa": 255,
+                              "layout": "FLEX",
+                              "flex_flow": "ROW",
+                              "flex_main_place": "CENTER",
+                              "flex_cross_place": "CENTER",
+                              "flex_track_place": "CENTER"
                             }
                           }
                         }
@@ -46885,7 +47689,12 @@
                               "bg_opa": 255,
                               "bg_color": "#951212",
                               "bg_grad_dir": "VER",
-                              "bg_grad_color": "#490808"
+                              "bg_grad_color": "#490808",
+                              "layout": "FLEX",
+                              "flex_flow": "ROW",
+                              "flex_main_place": "CENTER",
+                              "flex_cross_place": "CENTER",
+                              "flex_track_place": "CENTER"
                             }
                           }
                         }
@@ -47306,7 +48115,12 @@
                             "DEFAULT": {
                               "border_width": 2,
                               "radius": 15,
-                              "bg_opa": 255
+                              "bg_opa": 255,
+                              "layout": "FLEX",
+                              "flex_flow": "ROW",
+                              "flex_main_place": "CENTER",
+                              "flex_cross_place": "CENTER",
+                              "flex_track_place": "CENTER"
                             }
                           }
                         }
@@ -47440,7 +48254,12 @@
                         "DEFAULT": {
                           "border_width": 2,
                           "radius": 15,
-                          "bg_opa": 255
+                          "bg_opa": 255,
+                          "layout": "FLEX",
+                          "flex_flow": "ROW",
+                          "flex_main_place": "CENTER",
+                          "flex_cross_place": "CENTER",
+                          "flex_track_place": "CENTER"
                         }
                       }
                     }
@@ -47545,7 +48364,12 @@
                         "DEFAULT": {
                           "border_width": 2,
                           "radius": 15,
-                          "bg_opa": 255
+                          "bg_opa": 255,
+                          "layout": "FLEX",
+                          "flex_flow": "ROW",
+                          "flex_main_place": "CENTER",
+                          "flex_cross_place": "CENTER",
+                          "flex_track_place": "CENTER"
                         }
                       }
                     }
@@ -47674,7 +48498,12 @@
                             "DEFAULT": {
                               "border_width": 2,
                               "radius": 15,
-                              "bg_opa": 255
+                              "bg_opa": 255,
+                              "layout": "FLEX",
+                              "flex_flow": "ROW",
+                              "flex_main_place": "CENTER",
+                              "flex_cross_place": "CENTER",
+                              "flex_track_place": "CENTER"
                             }
                           }
                         }
@@ -47782,7 +48611,12 @@
                               "bg_opa": 255,
                               "bg_color": "#951212",
                               "bg_grad_dir": "VER",
-                              "bg_grad_color": "#490808"
+                              "bg_grad_color": "#490808",
+                              "layout": "FLEX",
+                              "flex_flow": "ROW",
+                              "flex_main_place": "CENTER",
+                              "flex_cross_place": "CENTER",
+                              "flex_track_place": "CENTER"
                             }
                           }
                         }
@@ -48430,7 +49264,12 @@
                         "DEFAULT": {
                           "border_width": 2,
                           "radius": 15,
-                          "bg_opa": 255
+                          "bg_opa": 255,
+                          "layout": "FLEX",
+                          "flex_flow": "ROW",
+                          "flex_main_place": "CENTER",
+                          "flex_cross_place": "CENTER",
+                          "flex_track_place": "CENTER"
                         }
                       }
                     }
@@ -49034,7 +49873,12 @@
                               "bg_color": "#951212",
                               "bg_opa": 255,
                               "bg_grad_dir": "VER",
-                              "bg_grad_color": "#490808"
+                              "bg_grad_color": "#490808",
+                              "layout": "FLEX",
+                              "flex_flow": "ROW",
+                              "flex_main_place": "CENTER",
+                              "flex_cross_place": "CENTER",
+                              "flex_track_place": "CENTER"
                             }
                           }
                         }
@@ -49142,7 +49986,12 @@
                               "bg_color": "#0f8104",
                               "bg_opa": 255,
                               "bg_grad_color": "#0d4009",
-                              "bg_grad_dir": "VER"
+                              "bg_grad_dir": "VER",
+                              "layout": "FLEX",
+                              "flex_flow": "ROW",
+                              "flex_main_place": "CENTER",
+                              "flex_cross_place": "CENTER",
+                              "flex_track_place": "CENTER"
                             }
                           }
                         }
@@ -49557,7 +50406,12 @@
                             "DEFAULT": {
                               "border_width": 2,
                               "radius": 15,
-                              "bg_opa": 255
+                              "bg_opa": 255,
+                              "layout": "FLEX",
+                              "flex_flow": "ROW",
+                              "flex_main_place": "CENTER",
+                              "flex_cross_place": "CENTER",
+                              "flex_track_place": "CENTER"
                             }
                           }
                         }
@@ -49662,7 +50516,12 @@
                             "DEFAULT": {
                               "border_width": 2,
                               "radius": 15,
-                              "bg_opa": 255
+                              "bg_opa": 255,
+                              "layout": "FLEX",
+                              "flex_flow": "ROW",
+                              "flex_main_place": "CENTER",
+                              "flex_cross_place": "CENTER",
+                              "flex_track_place": "CENTER"
                             }
                           }
                         }
@@ -49965,7 +50824,7 @@
       "descent": 3,
       "glyphs": [],
       "lvglRanges": "32-126",
-      "lvglSymbols": "µ≈≤³°ÄÖÜäöüßÁÉÍÓÚáéíóúÑñ¿¡°ÇçÀàÂâÆæÈèÊêËëÎîÏïÔôŒœÙùÛûŸÿÌìÒòÃÕãõ",
+      "lvglSymbols": "µ≈≤³°ÄÖÜäöüßÁÉÍÓÚáéíóúÑñ¿¡°ÇçÀàÂâÆæÈèÊêËëÎîÏïÔôŒœÙùÛûŸÿÌìÒòÃÕãõĄąĆćĘęŁłŃńŚśŹźŻż",
       "lvglAdditionalSources": [],
       "lvglGlyphs": {
         "encodings": [
@@ -49993,7 +50852,7 @@
       "descent": 3,
       "glyphs": [],
       "lvglRanges": "32-126",
-      "lvglSymbols": "≥∞≈₂µ≤³©ÄÖÜäöüßÁÉÍÓÚáéíóúÑñ¿¡°ÇçÀàÂâÆæÈèÊêËëÎîÏïÔôŒœÙùÛûŸÿÌìÒòÃÕãõ",
+      "lvglSymbols": "≥∞≈₂µ≤³©ÄÖÜäöüßÁÉÍÓÚáéíóúÑñ¿¡°ÇçÀàÂâÆæÈèÊêËëÎîÏïÔôŒœÙùÛûŸÿÌìÒòÃÕãõĄąĆćĘęŁłŃńŚśŹźŻż",
       "lvglAdditionalSources": [],
       "lvglGlyphs": {
         "encodings": [
