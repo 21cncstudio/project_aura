@@ -34,6 +34,7 @@ project(aura_aq)
 # Do not add it to normal flash: an app update must preserve user filesystem data.
 littlefs_create_partition_image(littlefs "${CMAKE_SOURCE_DIR}/data")
 include("${CMAKE_SOURCE_DIR}/idf/panel_overlay.cmake")
+include("${CMAKE_SOURCE_DIR}/idf/arduino_wifi_overlay.cmake")
 get_filename_component(aura_toolchain_dir "${CMAKE_C_COMPILER}" DIRECTORY)
 find_program(AURA_SIZE_TOOL NAMES xtensa-esp32s3-elf-size
     HINTS "${aura_toolchain_dir}" NO_DEFAULT_PATH REQUIRED)

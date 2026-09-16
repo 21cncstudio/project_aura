@@ -148,6 +148,37 @@ function harness(steps) {
   };
 }
 
+test('network rows distinguish the configured name from a mismatching live STA name', async () => {
+  const current = diag({ network: {
+    hostname: 'aura-1fc944',
+    hostname_status: {
+      sta: 'esp32s3-1FC944<&>', matches: false, apply_error: -1,
+      apply_failures: 2, mismatch_count: 1, last_failure_error: 257,
+    },
+  } });
+  const h = harness([reply('/api/diag', current)]);
+  await h.settle();
+  const rows = h.elements.get('networkRows').innerHTML;
+  assert.match(rows, /Configured hostname/);
+  assert.match(rows, /aura-1fc944/);
+  assert.match(rows, /STA hostname/);
+  assert.match(rows, /esp32s3-1FC944&lt;&amp;&gt;/);
+  assert.match(rows, /Hostname matches[\s\S]*?NO/);
+  assert.match(rows, /Hostname apply result[\s\S]*?error -1/);
+  assert.match(rows, /Hostname apply failures[\s\S]*?2/);
+  h.assertConsumed();
+});
+
+test('missing live hostname is shown as unknown, not as a matching configured name', async () => {
+  const h = harness([reply('/api/diag', diag())]);
+  await h.settle();
+  const rows = h.elements.get('networkRows').innerHTML;
+  assert.match(rows, /STA hostname[\s\S]*?--/);
+  assert.match(rows, /Hostname matches[\s\S]*?--/);
+  assert.match(rows, /Hostname apply result[\s\S]*?--/);
+  h.assertConsumed();
+});
+
 test('download keeps complete fresh API payloads and identity, then releases browser resources', async () => {
   const fresh = diag();
   const eventData = events();

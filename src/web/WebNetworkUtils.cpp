@@ -32,6 +32,35 @@ const char *state_hostname(const WebNetworkUtils::Snapshot &snapshot) {
     return "aura";
 }
 
+void fill_hostname_status(ArduinoJson::JsonObject network, const NetworkHostnameSnapshot &status) {
+    auto json = network["hostname_status"].to<ArduinoJson::JsonObject>();
+    json["sta"] = status.available ? status.actual : nullptr;
+    if (status.available) {
+        json["matches"] = status.matches;
+    } else {
+        json["matches"] = nullptr;
+    }
+    if (status.apply_attempted) {
+        json["apply_error"] = status.apply_error;
+    } else {
+        json["apply_error"] = nullptr;
+    }
+    json["apply_failures"] = status.apply_failures;
+    json["mismatch_count"] = status.mismatch_count;
+    if (status.apply_failures != 0) {
+        json["last_failure_error"] = status.last_failure_error;
+    } else {
+        json["last_failure_error"] = nullptr;
+    }
+    if (status.checked) {
+        json["read_error"] = status.read_error;
+        json["checked_at_ms"] = status.checked_at_ms;
+    } else {
+        json["read_error"] = nullptr;
+        json["checked_at_ms"] = nullptr;
+    }
+}
+
 } // namespace
 
 namespace WebNetworkUtils {
@@ -44,6 +73,7 @@ void fillDiagJson(ArduinoJson::JsonObject network, const Snapshot &snapshot) {
     network["wifi_ssid"] = snapshot.wifi_ssid;
     network["ip"] = snapshot.ip;
     network["hostname"] = diag_hostname(snapshot);
+    fill_hostname_status(network, snapshot.hostname_status);
     if (snapshot.has_rssi) {
         network["rssi"] = snapshot.rssi;
     } else {
@@ -62,6 +92,7 @@ void fillStateJson(ArduinoJson::JsonObject network, const Snapshot &snapshot) {
         network["rssi"] = nullptr;
     }
     network["hostname"] = state_hostname(snapshot);
+    fill_hostname_status(network, snapshot.hostname_status);
     network["mqtt_broker"] = snapshot.has_mqtt_broker ? snapshot.mqtt_broker.c_str() : "";
     network["mqtt_enabled"] = snapshot.mqtt_enabled;
     network["mqtt_connected"] = snapshot.mqtt_connected;

@@ -10,6 +10,7 @@
 #include <memory>
 
 #include <Arduino.h>
+#include "core/NetworkHostname.h"
 #include "modules/StorageManager.h"
 #include "web/WebContext.h"
 #include "web/WebTransport.h"
@@ -57,6 +58,7 @@ public:
     void setStateChangeCallback(StateChangeCallback cb, void *ctx);
     void poll();
     void noteStaConnectTransientFailure(uint32_t reason);
+    void requestHostnameCheck() { hostname_check_pending_.store(true, std::memory_order_release); }
 
     bool setEnabled(bool enabled);
     bool applyEnabledIfDirty();
@@ -83,6 +85,7 @@ public:
     const String &ssid() const { return wifi_ssid_; }
     const String &pass() const { return wifi_pass_; }
     const String &hostname() const { return hostname_; }
+    const NetworkHostnameSnapshot &hostnameStatus() const { return network_hostname_.snapshot(); }
     const String &apSsid() const { return ap_ssid_; }
     String localUrl(const char *path = nullptr) const;
     uint8_t retryCount() const { return wifi_retry_count_; }
@@ -103,6 +106,8 @@ private:
     void warmupIfDisabled();
     bool enterpriseSettingsReadyForConnect() const;
     void beginStaConnect(int32_t channel, const uint8_t *bssid);
+    bool applyStaHostname();
+    void observeStaHostname();
     void startSta();
     void startAp();
     void stopAp();
@@ -132,6 +137,9 @@ private:
     String wifi_eap_client_cert_pem_;
     String wifi_eap_client_key_pem_;
     String hostname_;
+    NetworkHostname network_hostname_;
+    std::atomic<bool> hostname_check_pending_{false};
+    uint32_t hostname_last_poll_ms_ = 0;
     String ap_ssid_;
     String wifi_scan_options_;
     bool wifi_scan_in_progress_ = false;
