@@ -6,6 +6,8 @@
     "C",
     "F",
     "ppb",
+    // 'Indeksi' (56 px) wraps in the 40 px card unit label, so 'Index' is
+    // used, as in the other Latin-script locales.
     "Index",
     "HCHO",
     "AQI",
@@ -90,6 +92,8 @@
     "Kosteus korkea",
     "Kosteus hieman korkea",
     "ASETUKSET",
+    // 'ASETUKSET' (72 px) is clipped in the 70 px settings button label, so
+    // the shorter 'VALIKKO' is used.
     "VALIKKO",
     "TALLENNA",
     "LÄMPÖKORJAUS",
