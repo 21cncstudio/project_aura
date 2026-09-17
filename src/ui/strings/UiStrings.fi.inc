@@ -257,7 +257,7 @@
     "Hyväksyttävä: 30-60 ppb\nVähäinen altistus, herkät voivat tuntea lievää ärsytystä",
     "Epämukava: 60-100 ppb\nSilmien ja kurkun ärsytys mahdollista, lisää tuuletusta",
     "Huono: >100 ppb\nTerveysriski, pitkäaikainen altistus haitallista, tuuleta heti",
-    "AQI on tämän laitteen reaaliaikainen ilmanlaadun kokonaisarvo. Se yhdistää hiukkas-, ilmanvaihto- ja kaasusignaalit yhdeksi indeksiksi asteikolla 0-100, jossa pienempi on parempi. Arvo reagoi pääasiassa pahimpaan saastelähteeseen ja lisää pienempiä sakkoja muista kohonneista ryhmistä. Käytä AQI:tä yleiskuvaan ja tarkista sitten yksittäiset anturit pääsyyn löytämiseksi.",
+    "AQI on tämän laitteen reaaliaikainen ilmanlaadun kokonaisarvo. Se yhdistää hiukkas-, ilmanvaihto- ja kaasumittaukset yhdeksi indeksiksi asteikolla 0-100, jossa pienempi on parempi. Arvo reagoi pääasiassa pahimpaan saastelähteeseen ja nousee lisäksi hieman muiden koholla olevien ryhmien vuoksi. Käytä AQI:tä nopeaan yleiskuvaan ja etsi pääsyy tarkistamalla yksittäiset anturit.",
     "Erinomainen: 0-25\nPuhdas ilma, ei toimenpiteitä",
     "Hyväksyttävä: 26-50\nLievää ilmanlaadun heikkenemistä, tuuletus voi auttaa",
     "Epämukava: 51-75\nHavaittava saastekuorma, etsi lähde ja paranna tuuletusta",
