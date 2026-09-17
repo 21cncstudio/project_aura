@@ -310,7 +310,9 @@
     "LÄMPÖTILA",
     "FORMALDEHYDI",
     "SUHTEELLINEN KOSTEUS",
-    "ABSOLUUTTINEN KOSTEUS",
+    // 'ABSOLUUTTINEN KOSTEUS' (231 px) wraps to two lines in the 223 px
+    // sensor info title, so the abbreviated form is used.
+    "ABSOL. KOSTEUS",
     "KASTEPISTE",
     "Homeriski kertoo homeen kasvun todennäköisyydestä kosteus- ja lämpötilaolosuhteiden perusteella. Yli 70 %:n kosteus yhdessä lämpimän ilman kanssa luo ihanteelliset olot homeelle ja pölypunkeille. Homeitiöt aiheuttavat allergioita, hengitystieoireita ja rakennevaurioita. Tarkkaile nurkkia, kylpyhuoneita ja huonosti tuuletettuja tiloja. Pidä kosteus alle 60 % kasvun ehkäisemiseksi.",
     "Erinomainen: 0-2\nMatala riski, olosuhteet epäsuotuisat homeelle",
