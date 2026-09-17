@@ -1,6 +1,6 @@
 # Project Aura AQ
 
-[![PlatformIO](https://img.shields.io/badge/platform-PlatformIO-ff7f2a?logo=platformio&logoColor=white)](https://platformio.org/)
+[![ESP-IDF](https://img.shields.io/badge/platform-ESP--IDF_6.1-323330)](https://github.com/espressif/esp-idf)
 [![ESP32-S3](https://img.shields.io/badge/target-ESP32--S3-323330)](https://www.espressif.com/en/products/socs/esp32-s3)
 [![LVGL](https://img.shields.io/badge/ui-LVGL-00b0f0)](https://lvgl.io/)
 [![License: GPLv3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
