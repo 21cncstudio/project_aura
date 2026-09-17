@@ -262,7 +262,7 @@
     "Hyväksyttävä: 26-50\nLievää ilmanlaadun heikkenemistä, tuuletus voi auttaa",
     "Epämukava: 51-75\nHavaittava saastekuorma, etsi lähde ja paranna tuuletusta",
     "Huono: >75\nKorkea saastetaso, vähennä altistusta ja toimi heti",
-    "CO₂ kertoo sisäilman laadusta ja ilmanvaihdon tehokkuudesta. Raja-arvot perustuvat ASHRAE:n ja Saksan ympäristöviraston (UBA) ohjeisiin. Ulkoilmassa on ~400 ppm. Yli 1000 ppm heikentää kognitiivista suorituskykyä; yli 1500 ppm aiheuttaa uneliaisuutta ja päänsärkyä. Hyvä ilmanvaihto pitää CO₂:n matalana keskittymisen ja terveyden hyväksi.",
+    "Hiilidioksidi (CO₂) kertoo sisäilman laadusta ja ilmanvaihdon tehokkuudesta. Raja-arvot perustuvat ASHRAE:n ja Saksan ympäristöviraston (UBA) ohjeisiin. Ulkoilman hiilidioksidipitoisuus on noin 400 ppm. Yli 1000 ppm:n pitoisuus heikentää kognitiivista suorituskykyä, ja yli 1500 ppm aiheuttaa uneliaisuutta ja päänsärkyä. Hyvä ilmanvaihto pitää hiilidioksidin määrän matalana, mikä tukee keskittymistä ja terveyttä.",
     "Erinomainen: <800 ppm\nOptimaalinen ilmanlaatu keskittymiselle ja tuottavuudelle",
     "Hyväksyttävä: 800-1000 ppm\nLievä keskittymiskyvyn lasku mahdollinen",
     "Epämukava: 1000-1500 ppm\nHavaittavaa väsymystä, heikentynyt kognitiivinen suorituskyky",
