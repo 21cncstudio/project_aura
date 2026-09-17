@@ -7,7 +7,7 @@
 #include "ui/UiController.h"
 
 #include <float.h>
-#include <math.h>
+#include <cmath>
 #include <string.h>
 #include <time.h>
 
@@ -119,9 +119,9 @@ void UiController::update_pressure_info_graph() {
                                                     ChartsHistory::METRIC_PRESSURE,
                                                     raw_value,
                                                     valid) &&
-                valid && isfinite(raw_value)) {
+                valid && std::isfinite(raw_value)) {
                 const float display_value = pressure_to_display(raw_value);
-                if (isfinite(display_value)) {
+                if (std::isfinite(display_value)) {
                     if (!stats.has_values) {
                         stats.min_value = display_value;
                         stats.max_value = display_value;
@@ -152,12 +152,12 @@ void UiController::update_pressure_info_graph() {
     float scale_max = has_values ? max_p : fallback_pressure;
     float scale_span = scale_max - scale_min;
     const float min_span = pressure_display_uses_inhg() ? 0.06f : 2.0f;
-    if (!isfinite(scale_span) || scale_span < min_span) {
+    if (!std::isfinite(scale_span) || scale_span < min_span) {
         scale_span = min_span;
     }
 
     float step = graph_nice_step(scale_span / 4.0f);
-    if (!isfinite(step) || step <= 0.0f) {
+    if (!std::isfinite(step) || step <= 0.0f) {
         step = pressure_display_uses_inhg() ? 0.02f : 0.5f;
     }
 
@@ -167,8 +167,8 @@ void UiController::update_pressure_info_graph() {
         y_min_f -= step;
         y_max_f += step;
     }
-    if (!isfinite(y_min_f) || !isfinite(y_max_f) || y_max_f <= y_min_f) {
-        const float center = isfinite(latest_p) ? latest_p : fallback_pressure;
+    if (!std::isfinite(y_min_f) || !std::isfinite(y_max_f) || y_max_f <= y_min_f) {
+        const float center = std::isfinite(latest_p) ? latest_p : fallback_pressure;
         y_min_f = center - min_span;
         y_max_f = center + min_span;
     }
@@ -194,7 +194,7 @@ void UiController::update_pressure_info_graph() {
     lv_chart_set_range(objects.chart_pressure_info, LV_CHART_AXIS_PRIMARY_Y, y_min, y_max);
 
     if (has_values) {
-        if (!isfinite(latest_p)) {
+        if (!std::isfinite(latest_p)) {
             latest_p = max_p;
         }
         update_pressure_graph_overlays(true, min_p, max_p, latest_p);

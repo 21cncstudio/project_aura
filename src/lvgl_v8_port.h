@@ -46,7 +46,12 @@
  */
 #define LVGL_PORT_TASK_MAX_DELAY_MS             (500)       // The maximum delay of the LVGL timer task, in milliseconds
 #define LVGL_PORT_TASK_MIN_DELAY_MS             (2)         // The minimum delay of the LVGL timer task, in milliseconds
-#define LVGL_PORT_TASK_STACK_SIZE               (6 * 1024)  // The stack size of the LVGL timer task, in bytes
+#if LVGL_VERSION_MAJOR >= 9
+// LVGL 9 software rendering overflowed the former 6 KiB task on hardware.
+#define LVGL_PORT_TASK_STACK_SIZE               (16 * 1024) // Bytes, including renderer/callback stack
+#else
+#define LVGL_PORT_TASK_STACK_SIZE               (6 * 1024)
+#endif
 #define LVGL_PORT_TASK_PRIORITY                 (2)         // The priority of the LVGL timer task
 #ifdef ARDUINO_RUNNING_CORE
 #define LVGL_PORT_TASK_CORE                     (ARDUINO_RUNNING_CORE)  // Valid if using Arduino
@@ -405,6 +410,8 @@ typedef struct {
     uint32_t sample_ms;
     uint32_t timer_handler_count;
     uint32_t timer_handler_age_ms;
+    uint32_t task_stack_size_bytes;
+    uint32_t task_stack_min_free_bytes;
     uint32_t flush_count;
     uint32_t flush_age_ms;
     uint32_t vsync_count;

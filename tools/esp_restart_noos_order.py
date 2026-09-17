@@ -43,10 +43,10 @@ def parse_function_symbol(symbol_table: str, symbol: str) -> FunctionSymbol:
 def validate_restart_order(wrapper_disassembly: str,
                            restart_disassembly: str,
                            panic_disassembly: str,
-                           wrapper_section: str) -> None:
-    """Require the fixed cross-core ordering and active linker interposition."""
+                           wrapper_section: str,
+                           symbol: str = "__wrap_esp_restart_noos") -> None:
+    """Require safe cross-core ordering and both callers reaching the symbol."""
 
-    symbol = "__wrap_esp_restart_noos"
     if f"<{symbol}>:" not in wrapper_disassembly:
         raise RestartOrderError(f"missing linked symbol {symbol}")
     if not wrapper_section.startswith(".iram"):
@@ -77,7 +77,7 @@ def validate_restart_order(wrapper_disassembly: str,
         ("esp_restart", restart_disassembly),
         ("panic_restart", panic_disassembly),
     ):
-        if "<__wrap_esp_restart_noos>" not in disassembly:
+        if f"<{symbol}>" not in disassembly:
             raise RestartOrderError(
-                f"{caller_name} is not routed through __wrap_esp_restart_noos"
+                f"{caller_name} is not routed through {symbol}"
             )

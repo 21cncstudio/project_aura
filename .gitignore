@@ -38,6 +38,6 @@ src/ui/.eez-project-build
 # Local ESP-IDF / component-manager artifacts
 /.dummy/
 /managed_components/
-/dependencies.lock
 /sdkconfig.project_aura
-/CMakeLists.txt
+/build-idf*/
+/sdkconfig.idf61.*

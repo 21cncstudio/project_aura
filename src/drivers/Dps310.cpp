@@ -5,8 +5,8 @@
 // Purchase a Commercial License: see COMMERCIAL_LICENSE_SUMMARY.md
 
 #include "Dps310.h"
-#include <driver/i2c.h>
-#include <math.h>
+#include "AuraI2c.h"
+#include <cmath>
 #include "core/Logger.h"
 
 namespace {
@@ -65,14 +65,14 @@ int32_t Dps310::twosComplement(int32_t val, uint8_t bits) {
 bool Dps310::detect(uint8_t addr) {
     uint8_t reg = Config::DPS310_PRODREVID;
     uint8_t value = 0;
-    esp_err_t err = i2c_master_write_read_device(
+    esp_err_t err = aura_i2c_write_read(
         Config::SENSOR_I2C_PORT,
         addr,
         &reg,
         1,
         &value,
         1,
-        pdMS_TO_TICKS(Config::SENSOR_I2C_TIMEOUT_MS)
+        Config::SENSOR_I2C_TIMEOUT_MS
     );
     if (err != ESP_OK) {
         return false;
@@ -86,25 +86,25 @@ bool Dps310::detect(uint8_t addr) {
 
 bool Dps310::writeU8(uint8_t reg, uint8_t value) {
     uint8_t data[2] = { reg, value };
-    esp_err_t err = i2c_master_write_to_device(
+    esp_err_t err = aura_i2c_write(
         Config::SENSOR_I2C_PORT,
         addr_,
         data,
         sizeof(data),
-        pdMS_TO_TICKS(Config::SENSOR_I2C_TIMEOUT_MS)
+        Config::SENSOR_I2C_TIMEOUT_MS
     );
     return err == ESP_OK;
 }
 
 bool Dps310::readBytes(uint8_t reg, uint8_t *buf, size_t len) {
-    esp_err_t err = i2c_master_write_read_device(
+    esp_err_t err = aura_i2c_write_read(
         Config::SENSOR_I2C_PORT,
         addr_,
         &reg,
         1,
         buf,
         len,
-        pdMS_TO_TICKS(Config::SENSOR_I2C_TIMEOUT_MS)
+        Config::SENSOR_I2C_TIMEOUT_MS
     );
     return err == ESP_OK;
 }
@@ -568,7 +568,7 @@ void Dps310::poll() {
         return;
     }
 
-    if (!isfinite(pressure_hpa) || pressure_hpa <= 0.0f) {
+    if (!std::isfinite(pressure_hpa) || pressure_hpa <= 0.0f) {
         handleNoData(now, "invalid");
         return;
     }

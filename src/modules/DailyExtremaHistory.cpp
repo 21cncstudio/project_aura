@@ -6,7 +6,7 @@
 
 #include "modules/DailyExtremaHistory.h"
 
-#include <math.h>
+#include <cmath>
 #include <memory>
 #include <new>
 #include <stddef.h>
@@ -359,8 +359,8 @@ bool DailyExtremaHistory::validPersistedState(const PersistedState &state) {
         if (!metric.valid) {
             continue;
         }
-        if (metric.sample_count == 0 || !isfinite(metric.min_value) ||
-            !isfinite(metric.max_value) || metric.min_value > metric.max_value) {
+        if (metric.sample_count == 0 || !std::isfinite(metric.min_value) ||
+            !std::isfinite(metric.max_value) || metric.min_value > metric.max_value) {
             return false;
         }
     }
@@ -929,7 +929,7 @@ void DailyExtremaHistory::updateMetric(ChartsHistory::Metric metric,
                                        bool valid,
                                        float value,
                                        uint32_t epoch) {
-    if (!valid || !isfinite(value) || metric >= ChartsHistory::METRIC_COUNT) {
+    if (!valid || !std::isfinite(value) || metric >= ChartsHistory::METRIC_COUNT) {
         return;
     }
 

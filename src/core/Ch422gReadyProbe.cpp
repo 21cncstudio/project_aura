@@ -146,7 +146,7 @@ Result waitWithOps(i2c_port_t port,
             return result;
         }
 
-        // ESP_ERR_TIMEOUT means the legacy controller saw a busy or wedged
+        // ESP_ERR_TIMEOUT means the controller saw a busy or wedged
         // bus. Reusing that host made all later cold-boot retries meaningless.
         // Tear it down first, recover the GPIO bus, then install a fresh host
         // after a passive dwell.
@@ -184,6 +184,10 @@ esp_err_t startHost(i2c_port_t port,
                     gpio_num_t sda,
                     gpio_num_t scl,
                     uint32_t clock_hz) {
+#if AURA_NATIVE_IDF
+    const aura_i2c_host_config_t config{sda, scl, true, true, clock_hz};
+    return aura_i2c_start(port, &config);
+#else
     i2c_config_t config{};
     config.mode = I2C_MODE_MASTER;
     config.sda_io_num = sda;
@@ -197,22 +201,27 @@ esp_err_t startHost(i2c_port_t port,
         return config_error;
     }
     return i2c_driver_install(port, config.mode, 0, 0, 0);
+#endif
 }
 
 esp_err_t writeDevice(i2c_port_t port,
                       uint8_t address,
                       uint8_t value,
                       uint32_t transaction_timeout_ms) {
-    return i2c_master_write_to_device(
+    return aura_i2c_write(
         port,
         address,
         &value,
         sizeof(value),
-        pdMS_TO_TICKS(transaction_timeout_ms));
+        transaction_timeout_ms);
 }
 
 esp_err_t stopHost(i2c_port_t port) {
+#if AURA_NATIVE_IDF
+    return aura_i2c_stop(port);
+#else
     return i2c_driver_delete(port);
+#endif
 }
 
 LineState sampleLines(gpio_num_t sda, gpio_num_t scl) {

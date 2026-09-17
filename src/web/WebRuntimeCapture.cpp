@@ -21,6 +21,7 @@ WebNetworkUtils::Snapshot captureNetworkSnapshot(const WebHandlerContext &contex
     snapshot.sta_connected = connectivity.wifi_connected;
     snapshot.scan_in_progress = connectivity.wifi_scan_in_progress;
     snapshot.sta_status = connectivity.wifi_sta_status;
+    snapshot.hostname_status = connectivity.hostname_status;
 
     if (snapshot.ap_mode) {
         snapshot.wifi_ssid = connectivity.ap_ssid;

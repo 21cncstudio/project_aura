@@ -24,6 +24,7 @@ const char *language_label(Config::Language lang) {
         case Config::Language::IT: return "ITALIANO";
         case Config::Language::PT: return "PORTUGU\xC3\x8AS BR";
         case Config::Language::NL: return "NEDERLANDS";
+        case Config::Language::PL: return "POLSKI";
         case Config::Language::ZH: return "\xE7\xAE\x80\xE4\xBD\x93\xE4\xB8\xAD\xE6\x96\x87";
         case Config::Language::JA: return "\xE6\x97\xA5\xE6\x9C\xAC\xE8\xAA\x9E";
         case Config::Language::EN:
@@ -37,7 +38,7 @@ void replace_font_recursive(lv_obj_t *obj, const lv_font_t *from, const lv_font_
         return;
     }
 
-    const lv_font_t *current = lv_obj_get_style_text_font(obj, LV_PART_MAIN | LV_STATE_DEFAULT);
+    const lv_font_t *current = lv_obj_get_style_text_font(obj, LV_PART_MAIN);
     if (current == from) {
         lv_obj_set_style_text_font(obj, to, LV_PART_MAIN | LV_STATE_DEFAULT);
     }
@@ -58,7 +59,8 @@ Config::Language UiLocalization::nextLanguage(Config::Language current) {
         case Config::Language::FR: return Config::Language::IT;
         case Config::Language::IT: return Config::Language::PT;
         case Config::Language::PT: return Config::Language::NL;
-        case Config::Language::NL: return Config::Language::ZH;
+        case Config::Language::NL: return Config::Language::PL;
+        case Config::Language::PL: return Config::Language::ZH;
         case Config::Language::ZH: return Config::Language::JA;
         case Config::Language::JA: return Config::Language::EN;
         default:
@@ -172,6 +174,7 @@ void UiLocalization::refreshTextsForScreen(UiController &owner, int screen_id) {
             owner.update_sensor_info_texts();
             break;
         case SCREEN_ID_PAGE_DAC_SETTINGS:
+            owner.update_dac_texts();
             break;
         case SCREEN_ID_PAGE_FW_UPDATE:
             owner.update_fw_update_texts();
@@ -209,5 +212,6 @@ void UiLocalization::refreshAllTexts(UiController &owner) {
     owner.update_fw_update_texts();
     owner.update_diag_texts();
     owner.update_boot_diag_texts();
+    owner.update_dac_texts();
     updateLanguageFonts(owner);
 }

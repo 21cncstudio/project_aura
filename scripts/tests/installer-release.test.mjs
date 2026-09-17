@@ -31,6 +31,18 @@ function validEsp32S3Image({ appendDigest = false } = {}) {
   return bytes;
 }
 
+test("OTA initialization accepts exact erased IDF sectors and rejects partial or mixed data", () => {
+  assert.doesNotThrow(() => validateEsp32S3BinaryHeader("boot_app0.bin", Buffer.alloc(0x2000, 0xff)));
+  assert.doesNotThrow(() => validateEsp32S3BinaryHeader("boot_app0.bin", Buffer.from([1, 0, 0, 0])));
+  for (const size of [4, 0x1000, 0x2001]) {
+    assert.throws(() => validateEsp32S3BinaryHeader("boot_app0.bin", Buffer.alloc(size, 0xff)));
+  }
+  const mixed = Buffer.alloc(0x2000, 0xff);
+  mixed[4096] = 0;
+  assert.throws(() => validateEsp32S3BinaryHeader("boot_app0.bin", mixed));
+  assert.throws(() => validateEsp32S3BinaryHeader("boot_app0.bin", Buffer.alloc(0x2000)));
+});
+
 test("stable JSON is independent of object insertion order", () => {
   assert.equal(stableJson({ b: 2, a: 1 }), stableJson({ a: 1, b: 2 }));
 });

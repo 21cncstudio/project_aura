@@ -32,10 +32,6 @@ BASE_SCREENS = """void generated() {
     lv_obj_set_style_border_width(obj, 2, LV_PART_MAIN | LV_STATE_DEFAULT);
     // label_delta_4
 
-    // label_firmware_trust
-    lv_label_set_text_static(obj, "UNVERIFIED FW");
-    tick_screen_page_settings();
-
     // label_optional_gas_text
     lv_label_set_text_static(obj, "Optional DFRobot electrochemical gas module for NH3, O3, SO2, NO2, H2S, or ambient O2. Units and reference bands depend on the installed sensor. Use as an air-quality indicator, not as a certified safety monitor.");
     // optional_gas_info_thresholds
@@ -44,6 +40,19 @@ BASE_SCREENS = """void generated() {
 
 
 class EezUiPostprocessTests(unittest.TestCase):
+    def test_co2_warmup_starts_hidden_after_editor_regeneration(self) -> None:
+        generated = (BASE_SCREENS + "\n// label_co2_warmup\n"
+                     "    objects.label_co2_warmup = obj;\n"
+                     '    lv_label_set_text_static(obj, "WARMUP");\n'
+                     "// card_pressure_pro\n")
+        project = self.make_project(screens=generated)
+        postprocess_project(project)
+        target = project / "src/ui/screens.c"
+        self.assertIn("lv_obj_add_flag(obj, LV_OBJ_FLAG_HIDDEN);", target.read_text())
+        first = target.read_bytes()
+        self.assertEqual((), postprocess_project(project))
+        self.assertEqual(first, target.read_bytes())
+
     def make_project(
         self,
         fonts_header: str = BASE_FONTS_HEADER,
@@ -135,7 +144,6 @@ class EezUiPostprocessTests(unittest.TestCase):
         stale_screens = (
             BASE_SCREENS.replace("0x160c09", "0x130b08")
             .replace("border_width(obj, 2", "border_width(obj, 1")
-            .replace("UNVERIFIED FW", "OFFICIAL FW")
             .replace(
                 "H2S, or ambient O2. Units and reference bands depend on the installed sensor.",
                 "or H2S. Higher ppm means higher gas concentration. Bands depend on the installed sensor.",
@@ -150,7 +158,6 @@ class EezUiPostprocessTests(unittest.TestCase):
 
         self.assertIn("lv_color_hex(0x160c09)", text)
         self.assertEqual(2, text.count("border_width(obj, 2"))
-        self.assertIn('lv_label_set_text_static(obj, "UNVERIFIED FW")', text)
         self.assertIn("H2S, or ambient O2", text)
         self.assertEqual((), postprocess_project(project, check=True))
 
@@ -169,15 +176,6 @@ class EezUiPostprocessTests(unittest.TestCase):
         self.assertEqual(original, target.read_bytes())
         self.assertEqual(original_fonts, fonts_target.read_bytes())
 
-    def test_optional_firmware_trust_block_may_be_absent(self) -> None:
-        start = BASE_SCREENS.index("    // label_firmware_trust")
-        end = BASE_SCREENS.index("\n\n    // label_optional_gas_text", start)
-        screens = BASE_SCREENS[:start] + BASE_SCREENS[end + 2 :]
-        project = self.make_project(screens=screens)
-
-        postprocess_project(project)
-
-        self.assertEqual((), postprocess_project(project, check=True))
 
 
 if __name__ == "__main__":

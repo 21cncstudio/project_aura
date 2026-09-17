@@ -2,7 +2,7 @@
 # SPDX-FileCopyrightText: 2026 Volodymyr Papush (21CNCStudio)
 # SPDX-License-Identifier: GPL-3.0-or-later
 
-"""Verify glyph coverage for localized status messages in every body font."""
+"""Verify localized status glyphs and complete Latin tables in the 18 px font."""
 
 from __future__ import annotations
 
@@ -40,6 +40,7 @@ KEY_RE = re.compile(r"UI_STR_ID\((?P<name>\w+)\)")
 class FontCheck:
     font_path: Path
     strings_paths: tuple[Path, ...]
+    full_table: bool = False
 
 
 def repo_root() -> Path:
@@ -98,13 +99,13 @@ def status_indices(root: Path) -> list[int]:
     return [index for index, key in enumerate(keys) if key.startswith("Msg")]
 
 
-def required_codepoints(paths: tuple[Path, ...], indices: list[int]) -> set[int]:
+def required_codepoints(paths: tuple[Path, ...], indices: list[int] | None) -> set[int]:
     values: list[str] = []
     for path in paths:
         strings = read_c_string_literals(path)
-        if not indices or max(indices) >= len(strings):
+        if indices is not None and (not indices or max(indices) >= len(strings)):
             raise RuntimeError(f"translation table is shorter than the key table: {path}")
-        values.extend(strings[index] for index in indices)
+        values.extend(strings if indices is None else (strings[index] for index in indices))
     return {
         ord(char)
         for value in values
@@ -124,10 +125,10 @@ def checks(root: Path) -> list[FontCheck]:
     fonts = root / "src/ui"
     latin_strings = tuple(
         strings / f"UiStrings.{locale}.inc"
-        for locale in ("en", "de", "es", "fr", "it", "ptbr", "nl")
+        for locale in ("en", "de", "es", "fr", "it", "ptbr", "nl", "pl")
     )
     return [
-        FontCheck(fonts / f"ui_font_jet_reg_{size}.c", latin_strings)
+        FontCheck(fonts / f"ui_font_jet_reg_{size}.c", latin_strings, full_table=(size == 18))
         for size in (14, 18)
     ] + [
         FontCheck(
@@ -148,7 +149,7 @@ def main() -> int:
     failed = False
     indices = status_indices(repo_root())
     for check in checks(repo_root()):
-        required = required_codepoints(check.strings_paths, indices)
+        required = required_codepoints(check.strings_paths, None if check.full_table else indices)
         available = font_codepoints(check.font_path)
         missing = sorted(required - available)
         if missing:
@@ -157,7 +158,8 @@ def main() -> int:
             for codepoint in missing:
                 print(f"  {describe(codepoint)}")
         else:
-            print(f"OK {check.font_path.name}: {len(required)} required status glyphs")
+            scope = "all strings" if check.full_table else "status strings"
+            print(f"OK {check.font_path.name}: {len(required)} required glyphs ({scope})")
     return 1 if failed else 0
 
 

@@ -26,7 +26,7 @@ typedef enum {
     REG_DIRECTION,
 } reg_type_t;
 
-static char *TAG = "io_expander";
+static const char *TAG = "io_expander";
 
 static esp_err_t write_reg(esp_io_expander_handle_t handle, reg_type_t reg, uint32_t value);
 static esp_err_t read_reg(esp_io_expander_handle_t handle, reg_type_t reg, uint32_t *value);

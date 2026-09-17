@@ -5,7 +5,7 @@
  */
 
 #include "inttypes.h"
-#include "driver/i2c.h"
+#include "AuraI2c.h"
 #include "esp_expander_utils.h"
 #include "esp_expander_base.hpp"
 
@@ -14,6 +14,28 @@
 
 namespace esp_expander {
 
+#if AURA_NATIVE_IDF
+void Base::Config::convertPartialToFull(void)
+{
+    ESP_UTILS_LOG_TRACE_ENTER_WITH_THIS();
+
+    if (isHostConfigValid() && std::holds_alternative<HostPartialConfig>(host.value())) {
+#if ESP_UTILS_CONF_LOG_LEVEL == ESP_UTILS_LOG_LEVEL_DEBUG
+        printHostConfig();
+#endif // ESP_UTILS_LOG_LEVEL_DEBUG
+        auto &config = std::get<HostPartialConfig>(host.value());
+        host = HostFullConfig{
+            .sda_io_num = config.sda_io_num,
+            .scl_io_num = config.scl_io_num,
+            .sda_pullup_en = config.sda_pullup_en,
+            .scl_pullup_en = config.scl_pullup_en,
+            .clk_speed = static_cast<uint32_t>(config.clk_speed),
+        };
+    }
+
+    ESP_UTILS_LOG_TRACE_EXIT_WITH_THIS();
+}
+#else
 void Base::Config::convertPartialToFull(void)
 {
     ESP_UTILS_LOG_TRACE_ENTER_WITH_THIS();
@@ -38,7 +60,58 @@ void Base::Config::convertPartialToFull(void)
 
     ESP_UTILS_LOG_TRACE_EXIT_WITH_THIS();
 }
+#endif
 
+#if AURA_NATIVE_IDF
+void Base::Config::printHostConfig(void) const
+{
+    ESP_UTILS_LOG_TRACE_ENTER_WITH_THIS();
+
+    if (!isHostConfigValid()) {
+        ESP_UTILS_LOGI("\n\t{Host config}[skipped]");
+        goto end;
+    }
+
+    if (std::holds_alternative<HostFullConfig>(host.value())) {
+        auto &config = std::get<HostFullConfig>(host.value());
+        ESP_UTILS_LOGI(
+            "\n\t{Host config}[full]\n"
+            "\t\t-> [host_id]: %d\n"
+            "\t\t-> [sda_io_num]: %d\n"
+            "\t\t-> [scl_io_num]: %d\n"
+            "\t\t-> [sda_pullup_en]: %d\n"
+            "\t\t-> [scl_pullup_en]: %d\n"
+            "\t\t-> [master.clk_speed]: %d\n"
+            , static_cast<int>(host_id)
+            , static_cast<int>(config.sda_io_num)
+            , static_cast<int>(config.scl_io_num)
+            , static_cast<int>(config.sda_pullup_en)
+            , static_cast<int>(config.scl_pullup_en)
+            , static_cast<int>(config.clk_speed)
+        );
+    } else {
+        auto &config = std::get<HostPartialConfig>(host.value());
+        ESP_UTILS_LOGI(
+            "\n\t{Host config}[partial]\n"
+            "\t\t-> [host_id]: %d\n"
+            "\t\t-> [sda_io_num]: %d\n"
+            "\t\t-> [scl_io_num]: %d\n"
+            "\t\t-> [sda_pullup_en]: %d\n"
+            "\t\t-> [scl_pullup_en]: %d\n"
+            "\t\t-> [clk_speed]: %d"
+            , static_cast<int>(host_id)
+            , static_cast<int>(config.sda_io_num)
+            , static_cast<int>(config.scl_io_num)
+            , static_cast<int>(config.sda_pullup_en)
+            , static_cast<int>(config.scl_pullup_en)
+            , static_cast<int>(config.clk_speed)
+        );
+    }
+
+end:
+    ESP_UTILS_LOG_TRACE_EXIT_WITH_THIS();
+}
+#else
 void Base::Config::printHostConfig(void) const
 {
     ESP_UTILS_LOG_TRACE_ENTER_WITH_THIS();
@@ -91,6 +164,7 @@ void Base::Config::printHostConfig(void) const
 end:
     ESP_UTILS_LOG_TRACE_EXIT_WITH_THIS();
 }
+#endif
 
 void Base::Config::printDeviceConfig(void) const
 {
@@ -136,12 +210,16 @@ bool Base::init(void)
     // Initialize the I2C host if not skipped
     if (!isHostSkipInit()) {
         i2c_port_t host_id = static_cast<i2c_port_t>(getConfig().host_id);
+#if AURA_NATIVE_IDF
+        ESP_UTILS_CHECK_ERROR_RETURN(aura_i2c_start(host_id, getHostFullConfig()), false, "I2C master bus creation failed");
+#else
         ESP_UTILS_CHECK_ERROR_RETURN(
             i2c_param_config(host_id, getHostFullConfig()), false, "I2C param config failed"
         );
         ESP_UTILS_CHECK_ERROR_RETURN(
             i2c_driver_install(host_id, getHostFullConfig()->mode, 0, 0, 0), false, "I2C driver install failed"
         );
+#endif
         ESP_UTILS_LOGD("Init I2C host(%d)", static_cast<int>(host_id));
     }
 
@@ -177,7 +255,11 @@ bool Base::del(void)
 
     if (isOverState(State::INIT) && !isHostSkipInit()) {
         i2c_port_t host_id = static_cast<i2c_port_t>(getConfig().host_id);
+#if AURA_NATIVE_IDF
+        ESP_UTILS_CHECK_ERROR_RETURN(aura_i2c_stop(host_id), false, "I2C master bus deletion failed");
+#else
         ESP_UTILS_CHECK_ERROR_RETURN(i2c_driver_delete(host_id), false, "I2C driver delete failed");
+#endif
         ESP_UTILS_LOGD("Delete I2C host(%d)", static_cast<int>(host_id));
     }
 

@@ -1011,12 +1011,18 @@ static const char kDiagPageTemplate[] PROGMEM = R"HTML(
                 var snapshot = boot.i2c_snapshot || {};
                 var buses = data.i2c_buses || {};
 
+                var hostnameStatus = net.hostname_status || {};
                 setRows('networkRows',
                     row('Mode', esc(net.mode || '--').toUpperCase()) +
                     row('WiFi enabled', net.wifi_enabled ? 'yes' : 'no') +
                     row('SSID', '<span class="mono">' + esc(net.wifi_ssid || '--') + '</span>') +
                     row('IP', '<span class="mono">' + esc(net.ip || '--') + '</span>') +
-                    row('Hostname', '<span class="mono">' + esc(net.hostname || '--') + '</span>') +
+                    row('Configured hostname', '<span class="mono">' + esc(net.hostname || '--') + '</span>') +
+                    row('STA hostname', '<span class="mono">' + esc(hostnameStatus.sta || '--') + '</span>') +
+                    row('Hostname matches', typeof hostnameStatus.matches === 'boolean' ? (hostnameStatus.matches ? 'yes' : 'NO') : '--') +
+                    row('Hostname apply result', typeof hostnameStatus.apply_error === 'number' ? (hostnameStatus.apply_error === 0 ? 'OK' : 'error ' + hostnameStatus.apply_error) : '--') +
+                    row('Hostname apply failures', typeof hostnameStatus.apply_failures === 'number' ? String(hostnameStatus.apply_failures) : '--') +
+                    row('Hostname mismatches', typeof hostnameStatus.mismatch_count === 'number' ? String(hostnameStatus.mismatch_count) : '--') +
                     row('RSSI', (typeof net.rssi === 'number') ? (net.rssi + ' dBm') : '--') +
                     row('STA status', String(typeof net.sta_status === 'number' ? net.sta_status : '--')) +
                     row('Scan in progress', net.scan_in_progress ? 'yes' : 'no')

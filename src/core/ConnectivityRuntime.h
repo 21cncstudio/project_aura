@@ -11,6 +11,7 @@
 #include <freertos/semphr.h>
 
 #include "config/AppConfig.h"
+#include "core/NetworkHostname.h"
 
 class AuraNetworkManager;
 class MqttManager;
@@ -27,6 +28,7 @@ struct ConnectivityRuntimeSnapshot {
     String ap_ssid;
     String wifi_scan_options;
     String hostname;
+    NetworkHostnameSnapshot hostname_status;
     String sta_ip;
     String ap_ip;
     bool has_rssi = false;

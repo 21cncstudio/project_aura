@@ -7,8 +7,8 @@
 #include "drivers/Bmp3xx.h"
 #include "drivers/Bmp3xxProbe.h"
 
-#include <driver/i2c.h>
-#include <math.h>
+#include "AuraI2c.h"
+#include <cmath>
 
 #include "config/AppConfig.h"
 #include "core/Logger.h"
@@ -91,25 +91,25 @@ bool Bmp3xx::detect(uint8_t addr) {
 
 bool Bmp3xx::writeU8(uint8_t reg, uint8_t value) {
     uint8_t data[2] = {reg, value};
-    esp_err_t err = i2c_master_write_to_device(
+    esp_err_t err = aura_i2c_write(
         Config::SENSOR_I2C_PORT,
         addr_,
         data,
         sizeof(data),
-        pdMS_TO_TICKS(Config::SENSOR_I2C_TIMEOUT_MS)
+        Config::SENSOR_I2C_TIMEOUT_MS
     );
     return err == ESP_OK;
 }
 
 bool Bmp3xx::readBytes(uint8_t reg, uint8_t *buf, size_t len) {
-    esp_err_t err = i2c_master_write_read_device(
+    esp_err_t err = aura_i2c_write_read(
         Config::SENSOR_I2C_PORT,
         addr_,
         &reg,
         1,
         buf,
         len,
-        pdMS_TO_TICKS(Config::SENSOR_I2C_TIMEOUT_MS)
+        Config::SENSOR_I2C_TIMEOUT_MS
     );
     return err == ESP_OK;
 }
@@ -275,7 +275,7 @@ bool Bmp3xx::compute(float &pressure_hpa, float &temperature_c) {
 
     temperature_c = static_cast<float>(temp);
     pressure_hpa = static_cast<float>(comp_press / 100.0);
-    return isfinite(temperature_c) && isfinite(pressure_hpa);
+    return std::isfinite(temperature_c) && std::isfinite(pressure_hpa);
 }
 
 const char *Bmp3xx::variantLabel() const {
@@ -606,7 +606,7 @@ void Bmp3xx::poll() {
         return;
     }
 
-    if (!isfinite(pressure_hpa) || pressure_hpa <= 0.0f) {
+    if (!std::isfinite(pressure_hpa) || pressure_hpa <= 0.0f) {
         handleNoData(now, "invalid");
         return;
     }

@@ -6,7 +6,7 @@
 
 #pragma once
 
-#include <math.h>
+#include <cmath>
 #include <stdint.h>
 #include <stdio.h>
 #include <time.h>
@@ -21,7 +21,7 @@ inline float temperature_to_display(float celsius, bool units_c) {
 }
 
 inline float graph_nice_step(float value) {
-    if (!isfinite(value) || value <= 0.0f) {
+    if (!std::isfinite(value) || value <= 0.0f) {
         return 1.0f;
     }
     const float exponent = floorf(log10f(value));

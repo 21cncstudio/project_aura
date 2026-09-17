@@ -7,7 +7,7 @@
 #include "core/BootHelpers.h"
 
 #include <Arduino.h>
-#include <driver/i2c.h>
+#include "AuraI2c.h"
 #include <driver/gpio.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
@@ -33,14 +33,14 @@ bool gt911_read_product_id(uint8_t addr, uint8_t *out, size_t len) {
         static_cast<uint8_t>(GT911_REG_PRODUCT_ID >> 8),
         static_cast<uint8_t>(GT911_REG_PRODUCT_ID & 0xFF)
     };
-    esp_err_t err = i2c_master_write_read_device(
+    esp_err_t err = aura_i2c_write_read(
         I2C_PORT,
         addr,
         reg,
         sizeof(reg),
         out,
         len,
-        pdMS_TO_TICKS(I2C_TIMEOUT_MS)
+        I2C_TIMEOUT_MS
     );
     return err == ESP_OK;
 }

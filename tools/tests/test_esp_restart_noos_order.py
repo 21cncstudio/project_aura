@@ -26,6 +26,19 @@ SAFE_TARGETS = (
 
 
 class EspRestartNoosOrderTests(unittest.TestCase):
+    def test_accepts_upstream_restart_without_linker_wrapper(self):
+        upstream = wrapper_with(*SAFE_TARGETS).replace("__wrap_esp_restart_noos", "esp_restart_noos")
+        validate_restart_order(upstream, "call <esp_restart_noos>",
+                               "call <esp_restart_noos>", ".iram0.text",
+                               symbol="esp_restart_noos")
+
+    def test_upstream_check_rejects_old_wrapper_routing(self):
+        upstream = wrapper_with(*SAFE_TARGETS).replace("__wrap_esp_restart_noos", "esp_restart_noos")
+        with self.assertRaisesRegex(RestartOrderError, "esp_restart is not routed"):
+            validate_restart_order(upstream, "call <__wrap_esp_restart_noos>",
+                                   "call <esp_restart_noos>", ".iram0.text",
+                                   symbol="esp_restart_noos")
+
     def test_parses_exact_function_range_and_section(self):
         table = (
             "4037572c g     F .iram0.text 00000187 "

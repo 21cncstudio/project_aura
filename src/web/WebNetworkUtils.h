@@ -8,6 +8,7 @@
 
 #include <Arduino.h>
 #include <ArduinoJson.h>
+#include "core/NetworkHostname.h"
 
 namespace WebNetworkUtils {
 
@@ -21,6 +22,7 @@ struct Snapshot {
     String ip;
     bool has_hostname = false;
     String hostname;
+    NetworkHostnameSnapshot hostname_status;
     bool has_rssi = false;
     int rssi = 0;
     bool has_mqtt_broker = false;

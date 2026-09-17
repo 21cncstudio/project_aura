@@ -132,12 +132,15 @@ export function validateEsp32S3BinaryHeader(fileName, bytes) {
   } else if (fileName === "partitions.bin") {
     valid = bytes.byteLength >= 2 && bytes[0] === 0xaa && bytes[1] === 0x50;
   } else if (fileName === "boot_app0.bin") {
+    // Native IDF initializes both OTA-data sectors as erased flash. Its
+    // bootloader then chooses app0. Older Arduino packages use sequence 1.
     valid =
-      bytes.byteLength >= 4 &&
+      (bytes.byteLength === 0x2000 && bytes.every((byte) => byte === 0xff)) ||
+      (bytes.byteLength >= 4 &&
       bytes[0] === 0x01 &&
       bytes[1] === 0x00 &&
       bytes[2] === 0x00 &&
-      bytes[3] === 0x00;
+      bytes[3] === 0x00);
   }
   if (!valid) throw new Error(`Invalid ESP32-S3 binary header: ${fileName}`);
 }

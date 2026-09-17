@@ -20,7 +20,9 @@ void UiController::update_settings_texts() {
     if (objects.label_temp_offset_title) safe_label_set_text(objects.label_temp_offset_title, UiText::LabelTempOffsetTitle());
     if (objects.label_hum_offset_title) safe_label_set_text(objects.label_hum_offset_title, UiText::LabelHumOffsetTitle());
     if (objects.label_btn_night_mode) safe_label_set_text(objects.label_btn_night_mode, UiText::LabelNightMode());
-    if (objects.label_btn_units) safe_label_set_text(objects.label_btn_units, "UNITS");
+    if (objects.label_btn_units) safe_label_set_text(objects.label_btn_units, UiText::LabelUnitsButton());
+    if (objects.label_btn_diag) safe_label_set_text(objects.label_btn_diag, UiText::LabelLogsButton());
+    if (objects.label_language_title) safe_label_set_text(objects.label_language_title, UiText::LabelLanguageTitle());
     if (objects.label_btn_head_status) safe_label_set_text(objects.label_btn_head_status, UiText::LabelHeadStatus());
     if (objects.label_btn_wifi) safe_label_set_text(objects.label_btn_wifi, UiText::LabelWifi());
     if (objects.label_btn_time_date) safe_label_set_text(objects.label_btn_time_date, UiText::LabelTimeDate());
@@ -31,7 +33,7 @@ void UiController::update_settings_texts() {
     if (objects.label_btn_factory_reset) safe_label_set_text(objects.label_btn_factory_reset, UiText::LabelFactoryReset());
     if (objects.label_btn_co2_calib) safe_label_set_text(objects.label_btn_co2_calib, UiText::LabelCo2Calibration());
     if (objects.label_btn_about) safe_label_set_text(objects.label_btn_about, UiText::LabelAbout());
-    if (objects.label_btn_web_page) safe_label_set_text(objects.label_btn_web_page, "WEB\nPAGE");
+    if (objects.label_btn_web_page) safe_label_set_text(objects.label_btn_web_page, UiText::LabelWebPageButton());
     if (objects.label_dac_settings) safe_label_set_text(objects.label_dac_settings, UiText::LabelDacSettings());
     if (objects.label_dac_settings_title) safe_label_set_text(objects.label_dac_settings_title, UiText::LabelDacSettingsTitle());
     sync_back_button_label(objects.label_btn_about_back, false);
@@ -39,7 +41,7 @@ void UiController::update_settings_texts() {
     if (objects.container_about_text) {
         char about_text[256];
         snprintf(about_text, sizeof(about_text),
-                 "Project Aura\nVersion: v%s\n(c) Volodymyr Papush (21CNCStudio)\nOpen-source firmware (GPL-3.0-or-later)\naura-aq.com",
+                 UiText::LabelAboutTextFormat(),
                  AppVersion::displayVersion());
         safe_label_set_text(objects.container_about_text, about_text);
     }
@@ -59,6 +61,7 @@ void UiController::update_main_texts() {
     if (objects.label_time_title_2) safe_label_set_text(objects.label_time_title_2, UiText::LabelTimeCard());
     if (objects.label_voc_warmup_1) safe_label_set_text(objects.label_voc_warmup_1, UiText::LabelWarmup());
     if (objects.label_nox_warmup_1) safe_label_set_text(objects.label_nox_warmup_1, UiText::LabelWarmup());
+    if (objects.label_co2_warmup) safe_label_set_text(objects.label_co2_warmup, UiText::LabelWarmup());
     if (objects.label_hcho_warmup) safe_label_set_text(objects.label_hcho_warmup, UiText::LabelWarmup());
     if (objects.label_co_warmup) safe_label_set_text(objects.label_co_warmup, UiText::LabelWarmup());
     if (objects.label_voc_unit_1) safe_label_set_text(objects.label_voc_unit_1, UiText::UnitIndex());
@@ -260,13 +263,13 @@ void UiController::update_fw_update_texts() {
 
 void UiController::update_fw_update_ui() {
     if (objects.label_fw_update_1) {
-        safe_label_set_text(objects.label_fw_update_1, "Firmware Update");
+        safe_label_set_text(objects.label_fw_update_1, UiText::LabelFwUpdateTitle());
     }
     if (objects.label_btn_fw_update_allow) {
-        safe_label_set_text(objects.label_btn_fw_update_allow, "ALLOW\nUPDATE");
+        safe_label_set_text(objects.label_btn_fw_update_allow, UiText::LabelFwUpdateAllow());
     }
     if (objects.label_btn_fw_update_cancel) {
-        safe_label_set_text(objects.label_btn_fw_update_cancel, "DENY\nUPDATE");
+        safe_label_set_text(objects.label_btn_fw_update_cancel, UiText::LabelFwUpdateDeny());
     }
 
     const bool confirm_pending =
@@ -277,13 +280,13 @@ void UiController::update_fw_update_ui() {
     const char *body = UiText::LabelFwUpdateScreen();
     switch (firmware_update_screen_mode_) {
         case WebUiBridge::FirmwareUpdateScreenMode::ConfirmPending:
-            body = "Web upload is waiting.\nAllow firmware update?";
+            body = UiText::LabelFwUpdatePending();
             break;
         case WebUiBridge::FirmwareUpdateScreenMode::ConfirmAllowed:
-            body = "Update allowed.\nStarting upload...";
+            body = UiText::LabelFwUpdateAllowed();
             break;
         case WebUiBridge::FirmwareUpdateScreenMode::ConfirmDenied:
-            body = "Update denied.\nUpload cancelled.";
+            body = UiText::LabelFwUpdateDenied();
             break;
         case WebUiBridge::FirmwareUpdateScreenMode::Installing:
         case WebUiBridge::FirmwareUpdateScreenMode::Hidden:
@@ -315,7 +318,7 @@ void UiController::update_boot_diag_texts() {
     if (objects.lbl_diag_storage_label) safe_label_set_text(objects.lbl_diag_storage_label, UiText::LabelBootDiagStorageLabel());
     if (objects.lbl_diag_i2c_label) safe_label_set_text(objects.lbl_diag_i2c_label, UiText::LabelBootDiagI2cLabel());
     if (objects.lbl_diag_touch_label) safe_label_set_text(objects.lbl_diag_touch_label, UiText::LabelBootDiagTouchLabel());
-    if (objects.lbl_diag_sen_label) safe_label_set_text(objects.lbl_diag_sen_label, UiText::LabelBootDiagSenLabel());
+    if (objects.lbl_diag_sen_label) safe_label_set_text(objects.lbl_diag_sen_label, sensorManager.mainSensorLabel());
     if (objects.lbl_diag_sfa_label) {
         char hcho_label[16];
         snprintf(hcho_label, sizeof(hcho_label), "%s:", sensorManager.hchoSensorLabel());
@@ -331,4 +334,3 @@ void UiController::update_boot_diag_texts() {
     if (objects.lbl_diag_error) safe_label_set_text(objects.lbl_diag_error, UiText::LabelBootDiagErrorsDetected());
     if (objects.label_btn_diag_errors) safe_label_set_text(objects.label_btn_diag_errors, UiText::LabelBootDiagShowErrors());
 }
-

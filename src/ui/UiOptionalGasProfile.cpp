@@ -6,7 +6,7 @@
 
 #include "ui/UiOptionalGasProfile.h"
 
-#include <math.h>
+#include <cmath>
 #include <stdio.h>
 #include <string.h>
 
@@ -66,7 +66,7 @@ void format_number(float value, uint8_t decimals, char *buf, size_t buf_size) {
     if (!buf || buf_size == 0) {
         return;
     }
-    if (!isfinite(value)) {
+    if (!std::isfinite(value)) {
         snprintf(buf, buf_size, "--");
         return;
     }
@@ -90,7 +90,7 @@ uint8_t display_decimals_for_value(float value, uint8_t decimals, uint8_t fallba
     if (decimals <= 2) {
         normalized = decimals;
     }
-    if (normalized == 2 && isfinite(value) && value >= 1.0f) {
+    if (normalized == 2 && std::isfinite(value) && value >= 1.0f) {
         return 1;
     }
     return normalized;
@@ -112,7 +112,7 @@ bool isKnown(OptionalGasType type) {
 }
 
 Band classify(const Profile &profile, float value, bool valid) {
-    if (!valid || !isfinite(value) || value < 0.0f) {
+    if (!valid || !std::isfinite(value) || value < 0.0f) {
         return Band::Inactive;
     }
     if (profile.classification == ClassificationMode::NormalRange) {

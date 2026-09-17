@@ -12,7 +12,7 @@
 #include "ui/UiText.h"
 
 #include <ctype.h>
-#include <math.h>
+#include <cmath>
 #include <string.h>
 #include <time.h>
 #include <esp_wifi.h>
@@ -2160,7 +2160,7 @@ lv_color_t UiController::getOptionalGasColor(DfrOptionalGasSensor::OptionalGasTy
 }
 
 lv_color_t UiController::getHCHOColor(float hcho_ppb, bool valid) {
-    if (!valid || !isfinite(hcho_ppb) || hcho_ppb < 0.0f) return color_inactive();
+    if (!valid || !std::isfinite(hcho_ppb) || hcho_ppb < 0.0f) return color_inactive();
     const DisplayThresholds::Config thresholds = displayThresholds.snapshot();
     return color_for_display_band(DisplayThresholds::classifyHigh(hcho_ppb, thresholds.hcho));
 }
@@ -2205,11 +2205,11 @@ AirQuality UiController::getAirQuality(const SensorData &data) {
 bool UiController::has_poor_gas_background_alert() {
     const DisplayThresholds::Config thresholds = displayThresholds.snapshot();
     const bool hcho_valid = currentData.hcho_valid &&
-                            isfinite(currentData.hcho) &&
+                            std::isfinite(currentData.hcho) &&
                             currentData.hcho >= 0.0f;
     const bool co_valid = currentData.co_sensor_present &&
                           currentData.co_valid &&
-                          isfinite(currentData.co_ppm) &&
+                          std::isfinite(currentData.co_ppm) &&
                           currentData.co_ppm >= 0.0f;
 
     if (!poor_gas_background_alert_active_) {
@@ -2279,7 +2279,7 @@ void UiController::set_dot_color(lv_obj_t *obj, lv_color_t color) {
     lv_obj_set_style_bg_color(obj, color, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_border_color(obj, color, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_shadow_color(obj, color, LV_PART_MAIN | LV_STATE_DEFAULT);
-    if (color.full == color_inactive().full) {
+    if (lv_color_eq(color, color_inactive())) {
         lv_obj_set_style_shadow_opa(obj, LV_OPA_TRANSP, LV_PART_MAIN | LV_STATE_DEFAULT);
     } else {
         lv_obj_set_style_shadow_opa(obj, LV_OPA_COVER, LV_PART_MAIN | LV_STATE_DEFAULT);
@@ -2287,21 +2287,21 @@ void UiController::set_dot_color(lv_obj_t *obj, lv_color_t color) {
 }
 
 lv_color_t UiController::blink_red(lv_color_t color) {
-    if (alert_blink_enabled && (color.full == color_red().full) && !blink_state) {
+    if (alert_blink_enabled && (lv_color_eq(color, color_red())) && !blink_state) {
         return color_inactive();
     }
     return color;
 }
 
 lv_color_t UiController::night_alert_color(lv_color_t color) {
-    if (color.full == color_red().full) {
+    if (lv_color_eq(color, color_red())) {
         return color_red();
     }
     // Keep warning levels faint but still distinguishable at night.
-    if (color.full == color_orange().full) {
+    if (lv_color_eq(color, color_orange())) {
         return lv_color_mix(color_orange(), color_inactive(), 84);
     }
-    if (color.full == color_yellow().full) {
+    if (lv_color_eq(color, color_yellow())) {
         return lv_color_mix(color_yellow(), color_inactive(), 46);
     }
     return color_inactive();
@@ -2338,7 +2338,7 @@ void UiController::compute_header_style(const AirQuality &aq,
         base = color_red();
     }
     shadow_opa = header_status_enabled ? LV_OPA_COVER : LV_OPA_TRANSP;
-    if (alert_blink_enabled && header_status_enabled && (base.full == color_red().full) && !blink_state) {
+    if (alert_blink_enabled && header_status_enabled && (lv_color_eq(base, color_red())) && !blink_state) {
         color = color_inactive();
         shadow_opa = LV_OPA_TRANSP;
         return;
@@ -2361,16 +2361,16 @@ int UiController::pressure_altitude_meters() const {
 }
 
 float UiController::pressure_absolute_to_msl_hpa(float pressure_hpa, int altitude_m) const {
-    if (!isfinite(pressure_hpa)) {
+    if (!std::isfinite(pressure_hpa)) {
         return pressure_hpa;
     }
     const float altitude = static_cast<float>(altitude_m);
     const float base = 1.0f - (altitude / 44330.0f);
-    if (!isfinite(base) || base <= 0.0f) {
+    if (!std::isfinite(base) || base <= 0.0f) {
         return pressure_hpa;
     }
     const float corrected = pressure_hpa / powf(base, 5.255f);
-    return isfinite(corrected) ? corrected : pressure_hpa;
+    return std::isfinite(corrected) ? corrected : pressure_hpa;
 }
 
 float UiController::pressure_delta_to_msl_hpa(float pressure_delta_hpa) const {
@@ -2383,7 +2383,7 @@ float UiController::pressure_delta_to_msl_hpa(float pressure_delta_hpa) const {
 }
 
 float UiController::pressure_hpa_to_display_units(float pressure_hpa) const {
-    if (!isfinite(pressure_hpa)) {
+    if (!std::isfinite(pressure_hpa)) {
         return pressure_hpa;
     }
     if (!pressure_display_uses_inhg()) {
@@ -2448,7 +2448,7 @@ void UiController::update_pressure_altitude_preview() {
     safe_label_set_text(objects.abs_pressure_unit, unit);
     safe_label_set_text(objects.msl_pressure_unit, unit);
 
-    if (!currentData.pressure_valid || !isfinite(currentData.pressure)) {
+    if (!currentData.pressure_valid || !std::isfinite(currentData.pressure)) {
         safe_label_set_text_static(objects.abs_pressure_value, UiText::ValueMissing());
         safe_label_set_text_static(objects.msl_pressure_value, UiText::ValueMissing());
         return;
@@ -2532,7 +2532,7 @@ void UiController::co2_calib_overlay_timer_cb(lv_timer_t *timer) {
     if (!timer) {
         return;
     }
-    UiController *owner = static_cast<UiController *>(timer->user_data);
+    UiController *owner = static_cast<UiController *>(lv_timer_get_user_data(timer));
     if (owner) {
         owner->co2_calib_overlay_timer_ = nullptr;
         owner->co2_calib_overlay_mode_ =
@@ -2696,26 +2696,20 @@ void UiController::update_clock_labels() {
         safe_label_set_text(objects.label_time_ampm_title_2, show_ampm ? ampm_buf : "");
         set_label_hidden(objects.label_time_ampm_title_2, !show_ampm);
     }
+    const char *date_pattern = "%d.%m.%Y";
     switch (date_format_) {
         case Config::DateFormat::MDY:
-            snprintf(buf, sizeof(buf), "%02d/%02d/%04d",
-                     local_tm.tm_mon + 1,
-                     local_tm.tm_mday,
-                     local_tm.tm_year + 1900);
+            date_pattern = "%m/%d/%Y";
             break;
         case Config::DateFormat::ISO:
-            snprintf(buf, sizeof(buf), "%04d-%02d-%02d",
-                     local_tm.tm_year + 1900,
-                     local_tm.tm_mon + 1,
-                     local_tm.tm_mday);
+            date_pattern = "%Y-%m-%d";
             break;
         case Config::DateFormat::DMY:
         default:
-            snprintf(buf, sizeof(buf), "%02d.%02d.%04d",
-                     local_tm.tm_mday,
-                     local_tm.tm_mon + 1,
-                     local_tm.tm_year + 1900);
             break;
+    }
+    if (strftime(buf, sizeof(buf), date_pattern, &local_tm) == 0) {
+        snprintf(buf, sizeof(buf), "%s", UiText::DateMissing());
     }
     if (objects.label_date_value_1) safe_label_set_text(objects.label_date_value_1, buf);
     if (objects.label_date_value_2) safe_label_set_text(objects.label_date_value_2, buf);
@@ -3143,7 +3137,7 @@ void UiController::set_chip_color(lv_obj_t *obj, lv_color_t color) {
     if (!obj) return;
     lv_obj_set_style_border_color(obj, color, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_shadow_color(obj, color, LV_PART_MAIN | LV_STATE_DEFAULT);
-    if (color.full == color_inactive().full) {
+    if (lv_color_eq(color, color_inactive())) {
         lv_obj_set_style_shadow_opa(obj, LV_OPA_TRANSP, LV_PART_MAIN | LV_STATE_DEFAULT);
     } else {
         lv_obj_set_style_shadow_opa(obj, LV_OPA_COVER, LV_PART_MAIN | LV_STATE_DEFAULT);
@@ -3209,7 +3203,7 @@ void UiController::update_ui() {
         const bool status_red =
             status_max_severity >= static_cast<uint8_t>(StatusMessages::STATUS_RED);
         header_col = (co_status_alert_active || status_red) ? color_red() : color_inactive();
-        header_shadow = (header_col.full == color_red().full) ? LV_OPA_COVER : LV_OPA_TRANSP;
+        header_shadow = (lv_color_eq(header_col, color_red())) ? LV_OPA_COVER : LV_OPA_TRANSP;
     }
     if (objects.container_header_pro) {
         lv_obj_set_style_border_color(objects.container_header_pro, header_col, LV_PART_MAIN | LV_STATE_DEFAULT);
@@ -3242,7 +3236,7 @@ void UiController::update_settings_header() {
         const bool status_red =
             status_severity >= static_cast<uint8_t>(StatusMessages::STATUS_RED);
         header_col = (co_alert_active || status_red) ? color_red() : color_inactive();
-        header_shadow = (header_col.full == color_red().full) ? LV_OPA_COVER : LV_OPA_TRANSP;
+        header_shadow = (lv_color_eq(header_col, color_red())) ? LV_OPA_COVER : LV_OPA_TRANSP;
     }
     lv_obj_set_style_border_color(objects.container_settings_header, header_col, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_shadow_color(objects.container_settings_header, header_col, LV_PART_MAIN | LV_STATE_DEFAULT);
@@ -3373,103 +3367,103 @@ void UiController::init_ui_defaults() {
     update_co2_calib_overlay_ui();
 
     if (objects.btn_info_graph) {
-        lv_obj_add_flag(objects.btn_info_graph, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_CHECKABLE);
+        lv_obj_add_flag(objects.btn_info_graph, static_cast<lv_obj_flag_t>(LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_CHECKABLE));
         lv_obj_set_ext_click_area(objects.btn_info_graph, 18);
     }
     if (objects.btn_temp_range_1h) {
-        lv_obj_add_flag(objects.btn_temp_range_1h, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_CHECKABLE);
+        lv_obj_add_flag(objects.btn_temp_range_1h, static_cast<lv_obj_flag_t>(LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_CHECKABLE));
         lv_obj_set_ext_click_area(objects.btn_temp_range_1h, 12);
     }
     if (objects.btn_temp_range_3h) {
-        lv_obj_add_flag(objects.btn_temp_range_3h, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_CHECKABLE);
+        lv_obj_add_flag(objects.btn_temp_range_3h, static_cast<lv_obj_flag_t>(LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_CHECKABLE));
         lv_obj_set_ext_click_area(objects.btn_temp_range_3h, 12);
     }
     if (objects.btn_temp_range_24h) {
-        lv_obj_add_flag(objects.btn_temp_range_24h, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_CHECKABLE);
+        lv_obj_add_flag(objects.btn_temp_range_24h, static_cast<lv_obj_flag_t>(LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_CHECKABLE));
         lv_obj_set_ext_click_area(objects.btn_temp_range_24h, 12);
     }
     if (objects.btn_voc_range_1h) {
-        lv_obj_add_flag(objects.btn_voc_range_1h, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_CHECKABLE);
+        lv_obj_add_flag(objects.btn_voc_range_1h, static_cast<lv_obj_flag_t>(LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_CHECKABLE));
         lv_obj_set_ext_click_area(objects.btn_voc_range_1h, 12);
     }
     if (objects.btn_voc_range_3h) {
-        lv_obj_add_flag(objects.btn_voc_range_3h, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_CHECKABLE);
+        lv_obj_add_flag(objects.btn_voc_range_3h, static_cast<lv_obj_flag_t>(LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_CHECKABLE));
         lv_obj_set_ext_click_area(objects.btn_voc_range_3h, 12);
     }
     if (objects.btn_voc_range_24h) {
-        lv_obj_add_flag(objects.btn_voc_range_24h, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_CHECKABLE);
+        lv_obj_add_flag(objects.btn_voc_range_24h, static_cast<lv_obj_flag_t>(LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_CHECKABLE));
         lv_obj_set_ext_click_area(objects.btn_voc_range_24h, 12);
     }
     if (objects.btn_nox_range_1h) {
-        lv_obj_add_flag(objects.btn_nox_range_1h, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_CHECKABLE);
+        lv_obj_add_flag(objects.btn_nox_range_1h, static_cast<lv_obj_flag_t>(LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_CHECKABLE));
         lv_obj_set_ext_click_area(objects.btn_nox_range_1h, 12);
     }
     if (objects.btn_nox_range_3h) {
-        lv_obj_add_flag(objects.btn_nox_range_3h, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_CHECKABLE);
+        lv_obj_add_flag(objects.btn_nox_range_3h, static_cast<lv_obj_flag_t>(LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_CHECKABLE));
         lv_obj_set_ext_click_area(objects.btn_nox_range_3h, 12);
     }
     if (objects.btn_nox_range_24h) {
-        lv_obj_add_flag(objects.btn_nox_range_24h, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_CHECKABLE);
+        lv_obj_add_flag(objects.btn_nox_range_24h, static_cast<lv_obj_flag_t>(LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_CHECKABLE));
         lv_obj_set_ext_click_area(objects.btn_nox_range_24h, 12);
     }
     if (objects.btn_hcho_range_1h) {
-        lv_obj_add_flag(objects.btn_hcho_range_1h, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_CHECKABLE);
+        lv_obj_add_flag(objects.btn_hcho_range_1h, static_cast<lv_obj_flag_t>(LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_CHECKABLE));
         lv_obj_set_ext_click_area(objects.btn_hcho_range_1h, 12);
     }
     if (objects.btn_hcho_range_3h) {
-        lv_obj_add_flag(objects.btn_hcho_range_3h, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_CHECKABLE);
+        lv_obj_add_flag(objects.btn_hcho_range_3h, static_cast<lv_obj_flag_t>(LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_CHECKABLE));
         lv_obj_set_ext_click_area(objects.btn_hcho_range_3h, 12);
     }
     if (objects.btn_hcho_range_24h) {
-        lv_obj_add_flag(objects.btn_hcho_range_24h, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_CHECKABLE);
+        lv_obj_add_flag(objects.btn_hcho_range_24h, static_cast<lv_obj_flag_t>(LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_CHECKABLE));
         lv_obj_set_ext_click_area(objects.btn_hcho_range_24h, 12);
     }
     if (objects.btn_pm05_range_1h) {
-        lv_obj_add_flag(objects.btn_pm05_range_1h, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_CHECKABLE);
+        lv_obj_add_flag(objects.btn_pm05_range_1h, static_cast<lv_obj_flag_t>(LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_CHECKABLE));
         lv_obj_set_ext_click_area(objects.btn_pm05_range_1h, 12);
     }
     if (objects.btn_pm05_range_3h) {
-        lv_obj_add_flag(objects.btn_pm05_range_3h, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_CHECKABLE);
+        lv_obj_add_flag(objects.btn_pm05_range_3h, static_cast<lv_obj_flag_t>(LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_CHECKABLE));
         lv_obj_set_ext_click_area(objects.btn_pm05_range_3h, 12);
     }
     if (objects.btn_pm05_range_24h) {
-        lv_obj_add_flag(objects.btn_pm05_range_24h, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_CHECKABLE);
+        lv_obj_add_flag(objects.btn_pm05_range_24h, static_cast<lv_obj_flag_t>(LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_CHECKABLE));
         lv_obj_set_ext_click_area(objects.btn_pm05_range_24h, 12);
     }
     if (objects.btn_pm25_4_range_1h) {
-        lv_obj_add_flag(objects.btn_pm25_4_range_1h, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_CHECKABLE);
+        lv_obj_add_flag(objects.btn_pm25_4_range_1h, static_cast<lv_obj_flag_t>(LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_CHECKABLE));
         lv_obj_set_ext_click_area(objects.btn_pm25_4_range_1h, 12);
     }
     if (objects.btn_pm25_4_range_3h) {
-        lv_obj_add_flag(objects.btn_pm25_4_range_3h, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_CHECKABLE);
+        lv_obj_add_flag(objects.btn_pm25_4_range_3h, static_cast<lv_obj_flag_t>(LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_CHECKABLE));
         lv_obj_set_ext_click_area(objects.btn_pm25_4_range_3h, 12);
     }
     if (objects.btn_pm25_4_range_24h) {
-        lv_obj_add_flag(objects.btn_pm25_4_range_24h, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_CHECKABLE);
+        lv_obj_add_flag(objects.btn_pm25_4_range_24h, static_cast<lv_obj_flag_t>(LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_CHECKABLE));
         lv_obj_set_ext_click_area(objects.btn_pm25_4_range_24h, 12);
     }
     if (objects.btn_pm1_10_range_1h) {
-        lv_obj_add_flag(objects.btn_pm1_10_range_1h, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_CHECKABLE);
+        lv_obj_add_flag(objects.btn_pm1_10_range_1h, static_cast<lv_obj_flag_t>(LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_CHECKABLE));
         lv_obj_set_ext_click_area(objects.btn_pm1_10_range_1h, 12);
     }
     if (objects.btn_pm1_10_range_3h) {
-        lv_obj_add_flag(objects.btn_pm1_10_range_3h, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_CHECKABLE);
+        lv_obj_add_flag(objects.btn_pm1_10_range_3h, static_cast<lv_obj_flag_t>(LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_CHECKABLE));
         lv_obj_set_ext_click_area(objects.btn_pm1_10_range_3h, 12);
     }
     if (objects.btn_pm1_10_range_24h) {
-        lv_obj_add_flag(objects.btn_pm1_10_range_24h, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_CHECKABLE);
+        lv_obj_add_flag(objects.btn_pm1_10_range_24h, static_cast<lv_obj_flag_t>(LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_CHECKABLE));
         lv_obj_set_ext_click_area(objects.btn_pm1_10_range_24h, 12);
     }
     if (objects.btn_co_range_1h) {
-        lv_obj_add_flag(objects.btn_co_range_1h, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_CHECKABLE);
+        lv_obj_add_flag(objects.btn_co_range_1h, static_cast<lv_obj_flag_t>(LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_CHECKABLE));
         lv_obj_set_ext_click_area(objects.btn_co_range_1h, 12);
     }
     if (objects.btn_co_range_3h) {
-        lv_obj_add_flag(objects.btn_co_range_3h, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_CHECKABLE);
+        lv_obj_add_flag(objects.btn_co_range_3h, static_cast<lv_obj_flag_t>(LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_CHECKABLE));
         lv_obj_set_ext_click_area(objects.btn_co_range_3h, 12);
     }
     if (objects.btn_co_range_24h) {
-        lv_obj_add_flag(objects.btn_co_range_24h, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_CHECKABLE);
+        lv_obj_add_flag(objects.btn_co_range_24h, static_cast<lv_obj_flag_t>(LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_CHECKABLE));
         lv_obj_set_ext_click_area(objects.btn_co_range_24h, 12);
     }
     if (objects.btn_wifi_reconnect) {
@@ -3485,15 +3479,15 @@ void UiController::init_ui_defaults() {
         lv_obj_set_ext_click_area(objects.chip_rtc_status, 12);
     }
     if (objects.chip_rtc_detection_auto) {
-        lv_obj_add_flag(objects.chip_rtc_detection_auto, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_CHECKABLE);
+        lv_obj_add_flag(objects.chip_rtc_detection_auto, static_cast<lv_obj_flag_t>(LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_CHECKABLE));
         lv_obj_set_ext_click_area(objects.chip_rtc_detection_auto, 12);
     }
     if (objects.chip_rtc_detection_pcf8523) {
-        lv_obj_add_flag(objects.chip_rtc_detection_pcf8523, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_CHECKABLE);
+        lv_obj_add_flag(objects.chip_rtc_detection_pcf8523, static_cast<lv_obj_flag_t>(LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_CHECKABLE));
         lv_obj_set_ext_click_area(objects.chip_rtc_detection_pcf8523, 12);
     }
     if (objects.chip_rtc_detection_ds3231) {
-        lv_obj_add_flag(objects.chip_rtc_detection_ds3231, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_CHECKABLE);
+        lv_obj_add_flag(objects.chip_rtc_detection_ds3231, static_cast<lv_obj_flag_t>(LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_CHECKABLE));
         lv_obj_set_ext_click_area(objects.chip_rtc_detection_ds3231, 12);
     }
 

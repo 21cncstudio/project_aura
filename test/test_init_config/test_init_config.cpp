@@ -45,6 +45,25 @@ void test_default_date_format_uses_japanese_iso_and_unit_defaults() {
                           static_cast<int>(Config::defaultDateFormat(Config::Language::EN, false)));
 }
 
+void test_saved_language_ids_remain_compatible_when_polish_is_added() {
+    const Config::Language previous[] = {
+        Config::Language::EN, Config::Language::DE, Config::Language::ES,
+        Config::Language::FR, Config::Language::IT, Config::Language::PT,
+        Config::Language::NL, Config::Language::ZH, Config::Language::JA,
+    };
+    for (int saved = 0; saved < 9; ++saved) {
+        TEST_ASSERT_EQUAL_INT(saved, static_cast<int>(previous[saved]));
+        TEST_ASSERT_EQUAL_INT(static_cast<int>(previous[saved]),
+                              static_cast<int>(Config::clampLanguage(saved)));
+    }
+    TEST_ASSERT_EQUAL_INT(static_cast<int>(Config::Language::PL),
+                          static_cast<int>(Config::clampLanguage(9)));
+    TEST_ASSERT_EQUAL_INT(static_cast<int>(Config::Language::EN),
+                          static_cast<int>(Config::clampLanguage(-1)));
+    TEST_ASSERT_EQUAL_INT(static_cast<int>(Config::Language::EN),
+                          static_cast<int>(Config::clampLanguage(255)));
+}
+
 void test_production_panel_recovery_defaults_do_not_run_unproven_hardware_actions() {
     TEST_ASSERT_FALSE(Config::PANEL_CH422G_STARTUP_PREFLIGHT_ENABLED);
     TEST_ASSERT_FALSE(Config::PANEL_PREINIT_BUS_RECOVERY_ENABLED);
@@ -61,6 +80,7 @@ int main(int, char **) {
     RUN_TEST(test_normalize_offsets_clamps_high);
     RUN_TEST(test_normalize_offsets_clamps_low);
     RUN_TEST(test_default_date_format_uses_japanese_iso_and_unit_defaults);
+    RUN_TEST(test_saved_language_ids_remain_compatible_when_polish_is_added);
     RUN_TEST(test_production_panel_recovery_defaults_do_not_run_unproven_hardware_actions);
     return UNITY_END();
 }

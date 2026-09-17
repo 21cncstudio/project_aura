@@ -1,19 +1,24 @@
 # Project Aura native-USB CH422G patch
 
 This directory contains the runtime sources from Espressif
-`ESP32_IO_Expander` v1.1.0, upstream commit
-`e79a63876a1d8a834cf8ec8f8b698ff9d9374579`.
+`ESP32_IO_Expander` v1.1.1:
+https://github.com/esp-arduino-libs/ESP32_IO_Expander/releases/tag/v1.1.1
 
 The upstream license is preserved in `license.txt`. The SHA-256 of the
 unmodified upstream `src/port/esp_io_expander_ch422g.c` is:
 
 ```text
-44BD59BFBE6790D3A75F118C9FC0F3D040D6BC44AA191AC4E47B77D7EC164292
+81b2e174f483202255c536a2d2567be981d142bfae5f303eddbed9c0bf717079
 ```
+
+Native IDF 6.1 builds use `AuraI2c.h` and the new master bus/device API for
+all expander transfers. Existing host driver tests use the legacy-shaped
+fake through the same wrapper. Native bus ownership and shared configuration
+remain coordinated with Display Panel; the pin numbers are unchanged.
 
 Both hardware profiles now use this one copy. The directory was originally
 named `ESP32_IO_Expander_7`; the upstream runtime sources were not replaced when
-it was renamed. Only the CH422G reset image and reset order are changed:
+it was renamed. The Aura-specific CH422G reset image and reset order are preserved:
 
 - `WR_IO` comes from the C-compatible `include/Ch422gBoardPolicy.h`: `0xDB`
   for 4.3-inch and the unchanged `0xD1` for 7-inch. Both keep EXIO5 (`USB_SEL`)
@@ -33,7 +38,8 @@ WR_SET address=0x24 data=0x01
 ```
 
 There are no retries, recovery actions, forced writes, mutex changes, or
-changes to later CH422G operations. The optional CH422G probe uses the same
+Aura-specific changes to later CH422G operations. Upstream 1.1.1 adds
+optional sleep methods, which Aura does not call. The optional CH422G probe uses the same
 policy header, so it cannot restore the upstream all-HIGH/CAN image.
 
 Both production profiles and both dedicated native-test profiles build this

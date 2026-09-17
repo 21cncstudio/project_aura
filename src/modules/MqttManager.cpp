@@ -7,6 +7,7 @@
 #include "modules/MqttManager.h"
 
 #include <ctype.h>
+#include <inttypes.h>
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
@@ -322,7 +323,7 @@ void MqttManager::loadPrefs() {
 void MqttManager::initDeviceId() {
     uint64_t mac = ESP.getEfuseMac();
     char buf[24];
-    snprintf(buf, sizeof(buf), "aura_%04X%08X", static_cast<uint16_t>(mac >> 32),
+    snprintf(buf, sizeof(buf), "aura_%04X%08" PRIX32, static_cast<unsigned>(static_cast<uint16_t>(mac >> 32)),
              static_cast<uint32_t>(mac & 0xFFFFFFFF));
     mqtt_device_id_ = buf;
 }

@@ -6,7 +6,7 @@
 
 #include "modules/DisplayThresholds.h"
 
-#include <math.h>
+#include <cmath>
 
 #include "core/Logger.h"
 
@@ -14,7 +14,7 @@ namespace DisplayThresholds {
 namespace {
 
 bool finite(float value) {
-    return isfinite(value);
+    return std::isfinite(value);
 }
 
 void set_error(String *error, const char *message) {

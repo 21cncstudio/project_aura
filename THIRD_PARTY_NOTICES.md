@@ -15,3 +15,13 @@ Review and update this file when dependencies change.
 Additional components
 - The Arduino ESP32 core and ESP-IDF libraries are distributed under their respective licenses.
   See the PlatformIO packages referenced in platformio.ini.
+
+Native ESP-IDF 6.1 migration dependencies are pinned in `main/idf_component.yml`
+and resolved in `dependencies.lock`. LVGL 9.5.0 and ArduinoJson 7.4.3 retain
+upstream MIT licenses. ESP32 Display Panel, IO Expander 1.1.1 and esp-lib-utils
+0.3.0 retain upstream Apache-2.0 licenses. Vendored source licenses and
+adaptation records are in `components/espressif__esp32_display_panel` and
+`third_party/ESP32_IO_Expander_Aura`.
+
+The EEZ source uses JetBrains Mono and Noto Sans SC source fonts. Their SIL
+Open Font License texts are retained alongside the TTFs in `ui/fonts`.

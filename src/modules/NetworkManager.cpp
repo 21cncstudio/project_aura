@@ -14,7 +14,9 @@
 #include <WiFi.h>
 #include <esp_heap_caps.h>
 #include <esp_mac.h>
+#include <esp_netif.h>
 #include <esp_wifi.h>
+#include <esp_idf_version.h>
 #if __has_include("esp_eap_client.h")
 #include "esp_eap_client.h"
 #endif
@@ -34,7 +36,7 @@ namespace {
 
 AuraNetworkManager *g_network = nullptr;
 NetworkCommandQueue *g_network_command_queue = nullptr;
-wifi_event_id_t g_wifi_disconnect_event_handle = 0;
+wifi_event_id_t g_wifi_event_handle = 0;
 const uint32_t kInitialWifiConnectDelayMs = 3000;
 constexpr uint32_t kWifiInternalHeapMinFreeForStart = 32UL * 1024UL;
 constexpr uint32_t kWifiInternalHeapMinLargestForStart = 16UL * 1024UL;
@@ -47,13 +49,20 @@ constexpr uint32_t kWifiStaStartSettleMs = 150UL;
 constexpr uint32_t kWifiColdBootWarmupMs = 2500UL;
 constexpr uint8_t kWifiColdBootSoftConnectAttempts = 3;
 constexpr uint32_t kWifiRecoveryRetryDelayMs = 30000UL;
+constexpr uint32_t kHostnameCheckIntervalMs = 5000UL;
 constexpr wifi_ps_type_t kWifiStaDefaultPowerSaveMode = WIFI_PS_NONE;
+#if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(6, 0, 0)
+constexpr wifi_err_reason_t kWifiInactiveReason = WIFI_REASON_DISASSOC_DUE_TO_INACTIVITY;
+#else
+constexpr wifi_err_reason_t kWifiInactiveReason = WIFI_REASON_ASSOC_EXPIRE;
+#endif
+static_assert(kWifiInactiveReason == 4, "Preserve the existing inactivity retry policy");
 
 bool is_retryable_connect_reason(wifi_err_reason_t reason) {
     return reason == WIFI_REASON_AUTH_EXPIRE ||
            reason == WIFI_REASON_AUTH_LEAVE ||
            reason == WIFI_REASON_NO_AP_FOUND ||
-           reason == WIFI_REASON_ASSOC_EXPIRE;
+           reason == kWifiInactiveReason;
 }
 
 bool has_internal_heap_for_wifi_start(uint32_t &free_bytes, uint32_t &largest_block_bytes) {
@@ -61,6 +70,14 @@ bool has_internal_heap_for_wifi_start(uint32_t &free_bytes, uint32_t &largest_bl
     largest_block_bytes = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
     return (free_bytes >= kWifiInternalHeapMinFreeForStart) &&
            (largest_block_bytes >= kWifiInternalHeapMinLargestForStart);
+}
+
+int32_t set_netif_hostname(void *context, const char *hostname) {
+    return esp_netif_set_hostname(static_cast<esp_netif_t *>(context), hostname);
+}
+
+int32_t get_netif_hostname(void *context, const char **hostname) {
+    return esp_netif_get_hostname(static_cast<esp_netif_t *>(context), hostname);
 }
 
 void clear_sta_enterprise_state() {
@@ -155,6 +172,13 @@ void format_wifi_event_bssid(const uint8_t *bssid, char *out, size_t out_size) {
 }
 
 void network_wifi_event(arduino_event_id_t event, arduino_event_info_t info) {
+    if (g_network && (event == ARDUINO_EVENT_WIFI_STA_START ||
+                      event == ARDUINO_EVENT_WIFI_STA_STOP ||
+                      event == ARDUINO_EVENT_WIFI_STA_GOT_IP)) {
+        // Never read/mutate a netif in the Arduino callback task. GOT_IP also
+        // covers connections completed outside Aura's normal state transition.
+        g_network->requestHostnameCheck();
+    }
     if (event != ARDUINO_EVENT_WIFI_STA_DISCONNECTED) {
         return;
     }
@@ -307,9 +331,8 @@ void AuraNetworkManager::begin(StorageManager &storage) {
     mdns_started_ = false;
     ensureServerBackend();
     WiFi.persistent(false);
-    if (g_wifi_disconnect_event_handle == 0) {
-        g_wifi_disconnect_event_handle =
-            WiFi.onEvent(network_wifi_event, ARDUINO_EVENT_WIFI_STA_DISCONNECTED);
+    if (g_wifi_event_handle == 0) {
+        g_wifi_event_handle = WiFi.onEvent(network_wifi_event);
     }
     hostname_ = build_wifi_hostname();
     if (hostname_.isEmpty()) {
@@ -383,6 +406,7 @@ void AuraNetworkManager::begin(StorageManager &storage) {
         WiFi.persistent(false);
         WiFi.disconnect();
         WiFi.mode(WIFI_OFF);
+        network_hostname_.clearLive();
         resetColdBootStaAssist();
         setWifiState(WIFI_STATE_OFF);
     }
@@ -655,6 +679,7 @@ void AuraNetworkManager::shutdownWifi(bool erase_sdk_credentials) {
     wifi_scan_started_ms_ = 0;
     WiFi.disconnect(true, erase_sdk_credentials);
     WiFi.mode(WIFI_OFF);
+    network_hostname_.clearLive();
     setWifiState(WIFI_STATE_OFF);
     wifi_retry_count_ = 0;
     wifi_retry_at_ms_ = 0;
@@ -768,6 +793,12 @@ void AuraNetworkManager::startApOnDemand() {
 
 void AuraNetworkManager::poll() {
     const bool ota_busy = WebHandlersIsOtaBusy();
+    const uint32_t hostname_now_ms = millis();
+    if (hostname_check_pending_.exchange(false, std::memory_order_acq_rel) ||
+        hostname_now_ms - hostname_last_poll_ms_ >= kHostnameCheckIntervalMs) {
+        observeStaHostname();
+        hostname_last_poll_ms_ = hostname_now_ms;
+    }
 
     if (state() == WIFI_STATE_STA_CONNECTING) {
         const uint8_t transient_failures =
@@ -780,6 +811,7 @@ void AuraNetworkManager::poll() {
 
         wl_status_t st = WiFi.status();
         if (st == WL_CONNECTED) {
+            observeStaHostname();
             apply_sta_default_power_save("sta connected");
             setWifiState(WIFI_STATE_STA_CONNECTED);
             sta_link_fail_streak_ = 0;
@@ -911,6 +943,7 @@ void AuraNetworkManager::warmupIfDisabled() {
     delay(50);
     WiFi.disconnect();
     WiFi.mode(WIFI_OFF);
+    network_hostname_.clearLive();
 }
 
 bool AuraNetworkManager::enterpriseSettingsReadyForConnect() const {
@@ -969,6 +1002,36 @@ void AuraNetworkManager::beginStaConnect(int32_t channel, const uint8_t *bssid) 
 #endif
 }
 
+bool AuraNetworkManager::applyStaHostname() {
+    const bool ok = network_hostname_.apply(hostname_.c_str(), WiFi.STA.netif(),
+                                           set_netif_hostname, get_netif_hostname, millis());
+    const auto &status = network_hostname_.snapshot();
+    Logger::log(ok ? Logger::Info : Logger::Warn, "WiFi",
+                "STA hostname apply: expected=%s actual=%s result=%s failures=%lu",
+                hostname_.c_str(), status.available ? status.actual : "<unavailable>",
+                esp_err_to_name(status.apply_error),
+                static_cast<unsigned long>(status.apply_failures));
+    return ok;
+}
+
+void AuraNetworkManager::observeStaHostname() {
+    if ((WiFi.getMode() & WIFI_STA) == 0 || !WiFi.STA.started()) {
+        network_hostname_.clearLive();
+        return;
+    }
+    const auto previous = network_hostname_.snapshot();
+    network_hostname_.observe(hostname_.c_str(), WiFi.STA.netif(), get_netif_hostname, millis());
+    const auto &status = network_hostname_.snapshot();
+    if (status.mismatch_count != previous.mismatch_count ||
+        status.read_error != previous.read_error) {
+        Logger::log(Logger::Warn, "WiFi",
+                    "STA hostname check: expected=%s actual=%s read=%s mismatches=%lu",
+                    hostname_.c_str(), status.available ? status.actual : "<unavailable>",
+                    esp_err_to_name(status.read_error),
+                    static_cast<unsigned long>(status.mismatch_count));
+    }
+}
+
 void AuraNetworkManager::startSta() {
     if (wifi_ssid_.isEmpty()) {
         return;
@@ -1006,6 +1069,7 @@ void AuraNetworkManager::startSta() {
                  static_cast<unsigned>(kWifiColdBootWarmupMs));
             resetStaConnectAttemptState();
             WiFi.mode(WIFI_OFF);
+            network_hostname_.clearLive();
             if (!wait_for_sta_stopped(kWifiStaTransitionTimeoutMs)) {
                 LOGW("WiFi", "STA stop timeout before warmup");
             }
@@ -1047,6 +1111,7 @@ void AuraNetworkManager::startSta() {
         LOGI("WiFi", "forcing STA reset before connect");
         resetStaConnectAttemptState();
         WiFi.mode(WIFI_OFF);
+        network_hostname_.clearLive();
         if (!wait_for_sta_stopped(kWifiStaTransitionTimeoutMs)) {
             LOGW("WiFi", "STA stop timeout after forced reset");
         }
@@ -1068,7 +1133,7 @@ void AuraNetworkManager::startSta() {
         wifi_ui_dirty_ = true;
         return;
     }
-    // Rely on our own retry logic instead of Arduino's internal reconnect churn.
+    // The maintained Arduino STA overlay makes this include its first retry.
     WiFi.setAutoReconnect(false);
     // Give the STA interface a brief settle window after mode transition.
     delay(kWifiStaStartSettleMs);
@@ -1079,17 +1144,9 @@ void AuraNetworkManager::startSta() {
     // Apply the hostname to the live STA esp-netif before WiFi.begin() starts
     // DHCP. This also covers a STA interface created earlier for cold-boot
     // warmup, where the staged value alone would not update the live netif.
-    if (!hostname_.isEmpty()) {
-        if (!WiFi.STA.setHostname(hostname_.c_str())) {
-            LOGW("WiFi", "failed to apply hostname to STA interface");
-        }
-        const char *sta_hostname = WiFi.STA.getHostname();
-        if (sta_hostname == nullptr || std::strcmp(sta_hostname, hostname_.c_str()) != 0) {
-            Logger::log(Logger::Warn, "WiFi",
-                        "STA hostname mismatch (expected=%s actual=%s)",
-                        hostname_.c_str(),
-                        sta_hostname ? sta_hostname : "null");
-        }
+    if (!applyStaHostname()) {
+        scheduleStaRetry("hostname apply/verification failed");
+        return;
     }
 
     bool targeted_connect = false;
@@ -1152,6 +1209,7 @@ void AuraNetworkManager::startAp() {
         wifi_ui_dirty_ = true;
         return;
     }
+    observeStaHostname();
     startServerIfNeeded();
     IPAddress ip = WiFi.softAPIP();
     startScan();

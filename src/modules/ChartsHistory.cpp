@@ -6,7 +6,7 @@
 
 #include "modules/ChartsHistory.h"
 #include <algorithm>
-#include <math.h>
+#include <cmath>
 #include <new>
 #include <stddef.h>
 #include <stdio.h>
@@ -39,9 +39,9 @@ bool ChartsHistory::validEntry(const Entry &e) {
         (e.kind != LegacySnapshot && e.start_epoch % kStepSeconds != 0)) return false;
     for (int m = 0; m < kMetricCount; ++m) {
         if (!(e.valid_mask & (1U << m))) continue;
-        if (!isfinite(e.values[m])) return false;
-        if (e.kind == Summary && (!e.samples[m] || !isfinite(e.minimum[m]) ||
-            !isfinite(e.maximum[m]) || e.minimum[m] > e.values[m] ||
+        if (!std::isfinite(e.values[m])) return false;
+        if (e.kind == Summary && (!e.samples[m] || !std::isfinite(e.minimum[m]) ||
+            !std::isfinite(e.maximum[m]) || e.minimum[m] > e.values[m] ||
             e.maximum[m] < e.values[m] || e.first_second[m] > e.last_second[m] ||
             e.last_second[m] >= kStepSeconds)) return false;
     }
@@ -114,7 +114,7 @@ void ChartsHistory::load(StorageManager &storage) {
             e.kind = LegacySnapshot;
             e.optional_gas_type = legacy->optional_gas_type;
             for (int m = 0; m < kMetricCount; ++m) if ((legacy->valid_mask[raw] & (1U << m)) &&
-                isfinite(legacy->values[m][raw])) {
+                std::isfinite(legacy->values[m][raw])) {
                 e.valid_mask |= 1U << m;
                 e.values[m] = legacy->values[m][raw];
             }
@@ -310,7 +310,7 @@ void ChartsHistory::update(const SensorData &data, StorageManager &storage, bool
     if (data.optional_gas_sensor_present &&
         data.optional_gas_valid &&
         data.optional_gas_type != 0 &&
-        isfinite(data.optional_gas_ppm) &&
+        std::isfinite(data.optional_gas_ppm) &&
         data.optional_gas_ppm >= 0.0f) {
         reading.valid_mask |= metricBit(METRIC_OPTIONAL_GAS);
         reading.values[METRIC_OPTIONAL_GAS] = data.optional_gas_ppm;
@@ -318,7 +318,7 @@ void ChartsHistory::update(const SensorData &data, StorageManager &storage, bool
 
 
     for (int m = 0; m < kMetricCount; ++m) {
-        if (!(fresh_mask & reading.valid_mask & (1U << m)) || !isfinite(reading.values[m])) continue;
+        if (!(fresh_mask & reading.valid_mask & (1U << m)) || !std::isfinite(reading.values[m])) continue;
         if (active_.samples[m] == UINT16_MAX) continue;
         const float value = reading.values[m];
         const uint16_t second = now - bucket;

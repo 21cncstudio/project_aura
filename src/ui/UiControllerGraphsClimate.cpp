@@ -7,7 +7,7 @@
 #include "ui/UiController.h"
 
 #include <float.h>
-#include <math.h>
+#include <cmath>
 #include <string.h>
 #include <time.h>
 
@@ -250,11 +250,11 @@ void UiController::update_temperature_info_graph() {
     const float min_span = profile.min_span;
     const float span = scale_max - scale_min;
     float scale_span = span;
-    if (!isfinite(scale_span) || scale_span < min_span) {
+    if (!std::isfinite(scale_span) || scale_span < min_span) {
         scale_span = min_span;
     }
     float step = graph_nice_step(scale_span / 4.0f);
-    if (!isfinite(step) || step <= 0.0f) {
+    if (!std::isfinite(step) || step <= 0.0f) {
         step = temp_units_c ? 0.5f : 1.0f;
     }
     float y_min_f = floorf((scale_min - (step * 0.9f)) / step) * step;
@@ -263,8 +263,8 @@ void UiController::update_temperature_info_graph() {
         y_min_f -= step;
         y_max_f += step;
     }
-    if (!isfinite(y_min_f) || !isfinite(y_max_f) || y_max_f <= y_min_f) {
-        const float center = isfinite(latest_temp) ? latest_temp : fallback;
+    if (!std::isfinite(y_min_f) || !std::isfinite(y_max_f) || y_max_f <= y_min_f) {
+        const float center = std::isfinite(latest_temp) ? latest_temp : fallback;
         y_min_f = center - min_span;
         y_max_f = center + min_span;
     }
@@ -301,7 +301,7 @@ void UiController::update_temperature_info_graph() {
     update_temperature_zone_overlay(profile, y_min_f, y_max_f);
 
     if (has_values) {
-        if (!isfinite(latest_temp)) {
+        if (!std::isfinite(latest_temp)) {
             latest_temp = max_temp;
         }
         update_temperature_graph_overlays(profile, true, min_temp, max_temp, latest_temp);
@@ -342,12 +342,12 @@ void UiController::update_humidity_info_graph() {
     float scale_min = has_values ? min_h : 50.0f;
     float scale_max = has_values ? max_h : 50.0f;
     float scale_span = scale_max - scale_min;
-    if (!isfinite(scale_span) || scale_span < 10.0f) {
+    if (!std::isfinite(scale_span) || scale_span < 10.0f) {
         scale_span = 10.0f;
     }
 
     float step = graph_nice_step(scale_span / 4.0f);
-    if (!isfinite(step) || step <= 0.0f) {
+    if (!std::isfinite(step) || step <= 0.0f) {
         step = 5.0f;
     }
 
@@ -357,7 +357,7 @@ void UiController::update_humidity_info_graph() {
         y_min_f -= step;
         y_max_f += step;
     }
-    if (!isfinite(y_min_f) || !isfinite(y_max_f) || y_max_f <= y_min_f) {
+    if (!std::isfinite(y_min_f) || !std::isfinite(y_max_f) || y_max_f <= y_min_f) {
         y_min_f = 0.0f;
         y_max_f = 100.0f;
     }
@@ -394,7 +394,7 @@ void UiController::update_humidity_info_graph() {
     update_humidity_zone_overlay(y_min_f, y_max_f);
 
     if (has_values) {
-        if (!isfinite(latest_h)) {
+        if (!std::isfinite(latest_h)) {
             latest_h = max_h;
         }
         update_humidity_graph_overlays(true, min_h, max_h, latest_h);

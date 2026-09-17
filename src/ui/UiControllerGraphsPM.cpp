@@ -7,7 +7,7 @@
 #include "ui/UiController.h"
 
 #include <float.h>
-#include <math.h>
+#include <cmath>
 #include <string.h>
 #include <time.h>
 
@@ -146,7 +146,7 @@ void UiController::update_pm05_info_graph() {
     update_pm05_zone_overlay(axis.y_min_display, axis.y_max_display);
 
     if (has_values) {
-        if (!isfinite(latest_value)) {
+        if (!std::isfinite(latest_value)) {
             latest_value = max_value;
         }
         update_pm05_graph_overlays(true, min_value, max_value, latest_value);
@@ -296,7 +296,7 @@ void UiController::update_pm25_4_info_graph() {
     update_pm25_4_zone_overlay(axis.y_min_display, axis.y_max_display);
 
     if (has_values) {
-        if (!isfinite(latest_value)) {
+        if (!std::isfinite(latest_value)) {
             latest_value = max_value;
         }
         update_pm25_4_graph_overlays(true, min_value, max_value, latest_value);
@@ -445,7 +445,7 @@ void UiController::update_pm1_10_info_graph() {
     update_pm1_10_zone_overlay(axis.y_min_display, axis.y_max_display);
 
     if (has_values) {
-        if (!isfinite(latest_value)) {
+        if (!std::isfinite(latest_value)) {
             latest_value = max_value;
         }
         update_pm1_10_graph_overlays(true, min_value, max_value, latest_value);

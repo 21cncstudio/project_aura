@@ -6,7 +6,7 @@
 
 #include "drivers/Bmp3xxProbe.h"
 
-#include <driver/i2c.h>
+#include "AuraI2c.h"
 
 #include "config/AppConfig.h"
 
@@ -18,14 +18,14 @@ constexpr uint8_t kBmp3xxOsrReservedMask = 0xC0;
 constexpr uint8_t kBmp3xxOdrReservedMask = 0xE0;
 
 bool read_register(uint8_t addr, uint8_t reg, uint8_t &value) {
-    const esp_err_t err = i2c_master_write_read_device(
+    const esp_err_t err = aura_i2c_write_read(
         Config::SENSOR_I2C_PORT,
         addr,
         &reg,
         1,
         &value,
         1,
-        pdMS_TO_TICKS(Config::SENSOR_I2C_TIMEOUT_MS)
+        Config::SENSOR_I2C_TIMEOUT_MS
     );
     return err == ESP_OK;
 }

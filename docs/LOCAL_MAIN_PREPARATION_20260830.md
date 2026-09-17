@@ -1,5 +1,11 @@
 # Local main preparation, 2026-08-30
 
+**Current source update, 2026-09-17:** the user authorized moving local main to
+ESP-IDF 6.1 / LVGL 9.5 while retaining its newer history changes. The source
+location below remains the same; firmware now uses `scripts/build_idf.ps1`.
+See [the consolidation report](MAIN_IDF61_UI_CLEANUP_20260917.md). Older build and
+device evidence below remains tied to its original artifacts.
+
 The user approved local branch preparation and instructions for future chats.
 Do not push, publish, deploy, or change remote refs without new explicit approval.
 

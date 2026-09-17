@@ -8,7 +8,7 @@
 #include <string.h>
 #include <stdlib.h>
 
-#include "driver/i2c.h"
+#include "AuraI2c.h"
 #include "esp_bit_defs.h"
 #include "esp_check.h"
 #include "esp_log.h"
@@ -45,7 +45,7 @@ typedef struct {
     } regs;
 } esp_io_expander_tca95xx_16bit_t;
 
-static char *TAG = "tca95xx_16";
+static const char *TAG = "tca95xx_16";
 
 static esp_err_t read_input_reg(esp_io_expander_handle_t handle, uint32_t *value);
 static esp_err_t write_output_reg(esp_io_expander_handle_t handle, uint32_t value);
@@ -95,7 +95,7 @@ static esp_err_t read_input_reg(esp_io_expander_handle_t handle, uint32_t *value
     uint8_t temp[2] = {0, 0};
     // *INDENT-OFF*
     ESP_RETURN_ON_ERROR(
-        i2c_master_write_read_device(tca->i2c_num, tca->i2c_address, (uint8_t[]){INPUT_REG_ADDR}, 1, (uint8_t*)&temp, 2, pdMS_TO_TICKS(I2C_TIMEOUT_MS)),
+        aura_i2c_write_read(tca->i2c_num, tca->i2c_address, (uint8_t[]){INPUT_REG_ADDR}, 1, (uint8_t*)&temp, 2, I2C_TIMEOUT_MS),
         TAG, "Read input reg failed");
     // *INDENT-ON*
     *value = (((uint32_t)temp[1]) << 8) | (temp[0]);
@@ -109,7 +109,7 @@ static esp_err_t write_output_reg(esp_io_expander_handle_t handle, uint32_t valu
 
     uint8_t data[] = {OUTPUT_REG_ADDR, value & 0xff, value >> 8};
     ESP_RETURN_ON_ERROR(
-        i2c_master_write_to_device(tca->i2c_num, tca->i2c_address, data, sizeof(data), pdMS_TO_TICKS(I2C_TIMEOUT_MS)),
+        aura_i2c_write(tca->i2c_num, tca->i2c_address, data, sizeof(data), I2C_TIMEOUT_MS),
         TAG, "Write output reg failed");
     tca->regs.output = value;
     return ESP_OK;
@@ -130,7 +130,7 @@ static esp_err_t write_direction_reg(esp_io_expander_handle_t handle, uint32_t v
 
     uint8_t data[] = {DIRECTION_REG_ADDR, value & 0xff, value >> 8};
     ESP_RETURN_ON_ERROR(
-        i2c_master_write_to_device(tca->i2c_num, tca->i2c_address, data, sizeof(data), pdMS_TO_TICKS(I2C_TIMEOUT_MS)),
+        aura_i2c_write(tca->i2c_num, tca->i2c_address, data, sizeof(data), I2C_TIMEOUT_MS),
         TAG, "Write direction reg failed");
     tca->regs.direction = value;
     return ESP_OK;

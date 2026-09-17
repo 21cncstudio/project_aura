@@ -29,6 +29,48 @@ may be absent. A quiet report is not a physical screen/touch or runtime-health
 PASS. Keep the two API payloads separate; do not treat repeated entries in both
 as two independent incidents.
 
+## Wi-Fi hostname observations
+
+`network.hostname` retains the configured Aura name for compatibility and
+mDNS URLs. It is not a readback of DHCP Option 12. Both `/api/diag` and
+`/api/state` now include `network.hostname_status`:
+
+| Field | Meaning |
+| --- | --- |
+| `sta` | Last observed live STA esp-netif hostname, or `null` when unavailable |
+| `matches` | Comparison with the configured name, or `null` without a live name |
+| `apply_error` | Last apply/verification result: `0` success, an ESP error code, or `-1` for a readback mismatch/missing name; `null` before any attempt |
+| `apply_failures` | Failed apply attempts since boot, retained across Wi-Fi restarts |
+| `last_failure_error` | Most recent failed apply result, retained after recovery; `null` without failures |
+| `mismatch_count` | Observed mismatch episodes/name changes, not repeated polls of the same mismatch |
+| `read_error` | Last live read result; `null` without an observation on the current interface |
+| `checked_at_ms` | Device uptime in milliseconds at that observation; `null` after stopping the interface |
+
+The network owner task checks after interface/IP events, when accepting a
+connection, and every five seconds. Arduino callbacks only signal a pending
+check. HTTP handlers use a copied snapshot and never inspect esp-netif.
+Live fields are cleared when Aura stops/recreates Wi-Fi; historical counters
+and apply results remain. A setter error or failed readback before connecting
+defers that connection through the existing bounded-rate Wi-Fi retry policy.
+Periodic observation does not silently rename an active interface or reset it.
+
+The `/diag` page shows configured and live names separately. A matching live
+name establishes the stack's observed value, not what was transmitted earlier
+or what a router currently displays. This change does not establish the cause
+of the reported UniFi alternation between old and new hostnames.
+
+Native IDF builds also apply `idf/arduino_wifi_overlay.cmake`: a generated
+copy of Arduino's `STA.cpp` makes its first retry honor `setAutoReconnect(false)`.
+The managed component is not edited. Configuration fails if the expected
+upstream retry block or source registration changes, requiring a new review.
+The host regression test executes the actual patched event callback, including
+first failure, failure after GOT_IP, voluntary disconnect and disabling retries.
+
+Checks: native suites `test_network_hostname`, `test_network_identity`,
+`test_web_network_utils`, `test_web_diag_api_utils`, `test_web_state_api_utils`;
+`python -B tools/tests/test_idf_arduino_wifi_overlay.py`;
+`node --test tools/tests/test_diag_report.mjs`; both native IDF profiles.
+
 ## Startup I2C interpretation
 
 The existing `boot.i2c_status`, `boot.sda_high` and `boot.scl_high` keys retain

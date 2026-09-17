@@ -363,19 +363,20 @@ board-specific, so always verify the display-size label before installing. Do no
 file is compatible with both boards. In particular, the first 7-inch migration to v1.2.0 must follow
 the complete [v1.2.0 update guide](https://aura-aq.com/blog/aura-aq-1-2-0) and must not use OTA.
 
-For development builds, use PlatformIO CLI or VSCode + PlatformIO extension.
-The firmware is built with Arduino ESP32 core 3.1.1 (ESP-IDF 5.3.x).
+Development firmware on `main` uses ESP-IDF 6.1, Arduino-ESP32 3.3.11 as a
+component, and LVGL 9.5. Install the matching ESP-IDF SDK and tools, then build
+the intended hardware profile:
 
 ```powershell
-git clone https://github.com/21cncstudio/project_aura.git
-cd project_aura
-pio run -e project_aura                  # build firmware
-pio run -e project_aura -t upload        # flash firmware
-pio run -e project_aura -t uploadfs      # flash LittleFS image (web/UI assets)
-pio device monitor -b 115200             # serial monitor
+./scripts/build_idf.ps1 -Profile 4_3 -IdfPath '<esp-idf-v6.1>' -ToolsPath '<idf-tools>'
+./scripts/build_idf.ps1 -Profile 7_dual_i2c -IdfPath '<esp-idf-v6.1>' -ToolsPath '<idf-tools>'
 ```
 
-> **Note:** `uploadfs` is required at least once on a fresh device. Without it the web dashboard and translations will be missing. Re-run it whenever assets in `data/` change.
+These commands only build; they do not flash or open serial ports. See the
+[native build guide](docs/IDF61_MIGRATION.md) and the
+[release packaging procedure](docs/releases/RELEASING.md) for profile-bound
+artifacts. PlatformIO is retained for [host tests](TESTING.md) and identity
+metadata. Its previous firmware build is intentionally disabled on this source.
 
 ## Configuration
 1. Wi-Fi setup:

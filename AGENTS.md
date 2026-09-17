@@ -1,5 +1,21 @@
 # Agent Instructions
 
+## Current firmware development (2026-09-17)
+
+- The user authorized consolidating the ESP-IDF 6.1 / LVGL 9.5 migration into
+  local `main`. Continue in
+  `D:\21cncstudio\project_aura\tmp\worktrees\aura-post-115-clean`.
+- Build both profiles with `scripts/build_idf.ps1`: `4_3` and `7_dual_i2c`.
+  PlatformIO remains the host-test and profile-metadata path; its old firmware
+  build is intentionally blocked. Do not downgrade dependencies to make it run.
+- Canonical EEZ source is `ui/aura-lvgl.eez-project`; regenerate and run
+  `tools/eez_ui_postprocess.py` together. Keep both display profiles supported.
+- The old `idf-6.1-migration` worktree is a retained checkpoint, not the active
+  development destination. Preserve `codex/aura-main-before-idf61-20260917`,
+  `dual-profile-release`, the root archive and exact tested artifacts.
+- This consolidation authorizes local source/build work. It does not authorize
+  flashing, signing a release, pushing, publishing, or changing production.
+
 ## Local Main Preparation (2026-08-30)
 
 - The user authorized local preparation only. Do not push, publish, deploy, or
@@ -49,8 +65,8 @@ Project Aura extension maintained outside the EEZ project.
 - After every EEZ Studio **Build**, run `python tools/eez_ui_postprocess.py`.
 - Before accepting generated UI changes, run
   `python tools/eez_ui_postprocess.py --check` and review `git diff -- src/ui`.
-- A normal `project_aura` PlatformIO build runs the same post-process
-  automatically before compilation.
+- The native ESP-IDF build runs the same post-process automatically before
+  compilation.
 - Do not commit `src/ui/.eez-project-build`.
 - If a new project-maintained addition is repeatedly removed by EEZ, add it
   as an idempotent invariant in `tools/eez_ui_postprocess.py`, add a unit test,

@@ -6,7 +6,7 @@
 
 #include "drivers/Ds3231.h"
 
-#include <driver/i2c.h>
+#include "AuraI2c.h"
 #include <string.h>
 
 #include "config/AppConfig.h"
@@ -118,14 +118,14 @@ bool Ds3231::read(uint8_t reg, uint8_t *buf, size_t len) {
     if (!buf || len == 0) {
         return false;
     }
-    const esp_err_t err = i2c_master_write_read_device(
+    const esp_err_t err = aura_i2c_write_read(
         Config::SENSOR_I2C_PORT,
         Config::DS3231_ADDR,
         &reg,
         1,
         buf,
         len,
-        pdMS_TO_TICKS(Config::SENSOR_I2C_TIMEOUT_MS)
+        Config::SENSOR_I2C_TIMEOUT_MS
     );
     return err == ESP_OK;
 }
@@ -137,12 +137,12 @@ bool Ds3231::write(uint8_t reg, const uint8_t *buf, size_t len) {
     uint8_t data[19] = { 0 };
     data[0] = reg;
     memcpy(&data[1], buf, len);
-    const esp_err_t err = i2c_master_write_to_device(
+    const esp_err_t err = aura_i2c_write(
         Config::SENSOR_I2C_PORT,
         Config::DS3231_ADDR,
         data,
         len + 1,
-        pdMS_TO_TICKS(Config::SENSOR_I2C_TIMEOUT_MS)
+        Config::SENSOR_I2C_TIMEOUT_MS
     );
     return err == ESP_OK;
 }

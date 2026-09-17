@@ -108,6 +108,7 @@ typedef struct _objects_t {
     lv_obj_t *co2_value_unit;
     lv_obj_t *label_co2_value_1;
     lv_obj_t *label_co2_unit_1;
+    lv_obj_t *label_co2_warmup;
     lv_obj_t *card_pressure_pro;
     lv_obj_t *label_pressure_title_1;
     lv_obj_t *label_pressure_value_1;
@@ -292,8 +293,6 @@ typedef struct _objects_t {
     lv_obj_t *log_status;
     lv_obj_t *label_log_title;
     lv_obj_t *label_log_status;
-    lv_obj_t *chip_firmware_trust;
-    lv_obj_t *label_firmware_trust;
     lv_obj_t *background_3;
     lv_obj_t *container_wifi_status;
     lv_obj_t *label_wifi_status_value;

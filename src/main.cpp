@@ -525,6 +525,12 @@ void setup()
         static_cast<gpio_num_t>(I2C_SCL_PIN));
     delay(3000);
     Serial.begin(115200);
+#if ARDUINO_USB_CDC_ON_BOOT && ARDUINO_USB_MODE
+    // Diagnostic USB output must not wait for a host to drain the TX buffer.
+    // Arduino 3.3.11 can otherwise wait 20 x 100 ms per write fragment,
+    // stalling touch callbacks and sensor polling when no monitor is reading.
+    Serial.setTxTimeoutMs(0);
+#endif
     Logger::begin(Serial, static_cast<Logger::Level>(Config::LOG_LEVEL));
     Logger::setSerialOutputEnabled(Config::LOG_SERIAL_OUTPUT);
     Logger::setSensorsSerialOutputEnabled(Config::LOG_SERIAL_SENSORS_OUTPUT);
@@ -535,10 +541,9 @@ void setup()
     LOGI("Main", "Arduino loop task stack size: %u bytes",
          static_cast<unsigned>(getArduinoLoopTaskStackSize()));
 
-    // Log IPC task stack size to verify CONFIG_IPC_TASK_STACK_SIZE is applied
+    // Log the configured IPC task stack size.
     #ifdef CONFIG_ESP_IPC_TASK_STACK_SIZE
         LOGI("Main", "IPC task stack size: %d bytes", CONFIG_ESP_IPC_TASK_STACK_SIZE);
-        if (CONFIG_ESP_IPC_TASK_STACK_SIZE > 1024) LOGW("Main", "Warning: If using precompiled libs, actual IPC stack might still be 1024!");
     #else
         LOGI("Main", "IPC task stack size: using default (CONFIG_ESP_IPC_TASK_STACK_SIZE not defined)");
     #endif

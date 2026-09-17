@@ -28,7 +28,11 @@ constexpr lv_grad_dir_t kGradNone = LV_GRAD_DIR_NONE;
 constexpr lv_grad_dir_t kGradVer = LV_GRAD_DIR_VER;
 
 uint32_t color_to_rgb(lv_color_t color) {
+#if LVGL_VERSION_MAJOR >= 9
+    return lv_color_to_u32(color) & 0xFFFFFFu;
+#else
     return lv_color_to32(color) & 0xFFFFFFu;
+#endif
 }
 
 lv_color_t color_from_rgb(uint32_t rgb) {

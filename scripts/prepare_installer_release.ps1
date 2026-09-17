@@ -4,6 +4,10 @@ param(
   [ValidateSet("stable", "beta", "recovery")][string]$Channel = "stable",
   [string]$KeyDirectory = (Join-Path $env:USERPROFILE ".project_aura\signing"),
   [string]$OutputRoot = "release-assets",
+  [ValidateSet("idf", "platformio")][string]$BuildSystem = "idf",
+  [string]$IdfPath = $env:IDF_PATH,
+  [string]$ToolsPath = $env:IDF_TOOLS_PATH,
+  [ValidateRange(1, 32)][int]$Jobs = 4,
   [string]$NodePath,
   [string]$RecoveryBinary,
   [string]$RecoveryIdentityPath,
@@ -91,13 +95,18 @@ try {
     Version = $Version
     OutputRoot = $OutputRoot
     SkipWebInstallerSync = $true
+    BuildSystem = $BuildSystem
+    IdfPath = $IdfPath
+    ToolsPath = $ToolsPath
+    Jobs = $Jobs
   }
   if ($SkipBuild) {
     $assetPreparation["SkipBuild"] = $true
   }
   & (Join-Path $PSScriptRoot "prepare_release_assets.ps1") @assetPreparation
+  $layout = Get-AuraReleaseBuildLayout -RepositoryRoot $root -Environment $Env -BuildSystem $BuildSystem
   $identity = Read-AuraBuildIdentity `
-    -IdentityPath (Join-Path $root (".pio\build\{0}\generated\build-identity.json" -f $Env)) `
+    -IdentityPath $layout.IdentityPath `
     -Environment $Env `
     -RepositoryRoot $root
 
@@ -141,5 +150,12 @@ try {
   Write-Host "Upload this ZIP in Aura Admin -> Firmware & Installers."
 } finally {
   Remove-Item -LiteralPath $tempPrivate -Force -ErrorAction SilentlyContinue
-  Remove-Item -LiteralPath $stagingDir -Recurse -Force -ErrorAction SilentlyContinue
+  $tempRoot = [System.IO.Path]::GetFullPath([System.IO.Path]::GetTempPath()).TrimEnd('\') + '\'
+  $resolvedStaging = [System.IO.Path]::GetFullPath($stagingDir)
+  if ($resolvedStaging.StartsWith($tempRoot, [System.StringComparison]::OrdinalIgnoreCase) -and
+      (Split-Path -Leaf $resolvedStaging) -match '^aura-release-[a-f0-9-]{36}$') {
+    Remove-Item -LiteralPath $resolvedStaging -Recurse -Force -ErrorAction SilentlyContinue
+  } else {
+    throw "Refusing to clean an unexpected staging path: $resolvedStaging"
+  }
 }

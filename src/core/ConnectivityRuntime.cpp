@@ -38,6 +38,7 @@ void ConnectivityRuntime::update(AuraNetworkManager &networkManager, MqttManager
     snapshot_.ap_ssid = networkManager.apSsid();
     snapshot_.wifi_scan_options = networkManager.scanOptions();
     snapshot_.hostname = networkManager.hostname();
+    snapshot_.hostname_status = networkManager.hostnameStatus();
     if (snapshot_.ap_ssid.isEmpty()) {
         snapshot_.ap_ssid = Config::WIFI_AP_SSID;
     }

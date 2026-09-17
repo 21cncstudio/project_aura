@@ -57,6 +57,8 @@ struct DisplayPayload {
     uint32_t sample_ms = 0;
     uint32_t timer_handler_count = 0;
     uint32_t timer_handler_age_ms = UINT32_MAX;
+    uint32_t task_stack_size_bytes = 0;
+    uint32_t task_stack_min_free_bytes = 0;
     uint32_t flush_count = 0;
     uint32_t flush_age_ms = UINT32_MAX;
     const char *refresh_callback_semantics = "unknown";

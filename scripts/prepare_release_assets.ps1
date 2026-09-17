@@ -5,6 +5,10 @@ param(
   [string]$Repo = "21cncstudio/project_aura",
   [string]$Tag,
   [string]$OutputRoot = "release-assets",
+  [ValidateSet("idf", "platformio")][string]$BuildSystem = "idf",
+  [string]$IdfPath = $env:IDF_PATH,
+  [string]$ToolsPath = $env:IDF_TOOLS_PATH,
+  [ValidateRange(1, 32)][int]$Jobs = 4,
   [switch]$SkipBuild,
   [switch]$SkipWebInstallerSync
 )
@@ -47,7 +51,8 @@ function Invoke-Platformio {
 
 $root = Resolve-Path (Join-Path $PSScriptRoot "..")
 $platformioIni = Join-Path $root "platformio.ini"
-$buildDir = Join-Path $root (".pio\\build\\{0}" -f $Env)
+$layout = Get-AuraReleaseBuildLayout -RepositoryRoot $root -Environment $Env -BuildSystem $BuildSystem
+$buildDir = $layout.Directory
 
 $configuredVersion = $null
 if (Test-Path $platformioIni) {
@@ -84,11 +89,17 @@ if (Test-Path -LiteralPath $outDir) {
 }
 
 if (-not $SkipBuild) {
+  if ($BuildSystem -eq "idf") {
+    Write-Step "Building native ESP-IDF firmware and filesystem"
+    & (Join-Path $PSScriptRoot "build_idf.ps1") -Profile $contract.HardwareProfile `
+      -IdfPath $IdfPath -ToolsPath $ToolsPath -Jobs $Jobs
+  } else {
   $platformioExe = Resolve-PlatformioCommand
   Write-Step "Building firmware"
   Invoke-Platformio -Exe $platformioExe -PioArgs @("run", "-e", $Env)
   Write-Step "Building filesystem image"
   Invoke-Platformio -Exe $platformioExe -PioArgs @("run", "-e", $Env, "-t", "buildfs")
+  }
 }
 
 $identityPath = Join-Path $buildDir "generated\build-identity.json"
@@ -99,17 +110,11 @@ $identity = Read-AuraBuildIdentity `
   -ExpectedBuildId $BuildId
 $displayVersion = Get-AuraEffectiveVersion -Version $Version -BuildId $identity.BuildId
 
-$required = @("bootloader.bin", "partitions.bin", "firmware.bin", "littlefs.bin")
-foreach ($name in $required) {
-  $path = Join-Path $buildDir $name
+$artifactInputs = $layout.ArtifactInputs
+foreach ($path in $artifactInputs.Values) {
   if (-not (Test-Path $path)) {
     throw "Missing build output: $path"
   }
-}
-
-$bootApp0 = Join-Path $env:USERPROFILE ".platformio\\packages\\framework-arduinoespressif32\\tools\\partitions\\boot_app0.bin"
-if (-not (Test-Path $bootApp0)) {
-  throw "Missing boot_app0.bin at $bootApp0"
 }
 
 $partitionsCsv = Join-Path $root $identity.PartitionsFile
@@ -141,9 +146,8 @@ $littlefsOffset = Assert-AuraCanonicalFlashOffset `
   -ExpectedValue 0xC90000 `
   -PartitionName $filesystemPartitionName
 
-$artifactInputs = Get-AuraArtifactInputs -BuildDirectory $buildDir -BootApp0Path $bootApp0
 $artifactStampPath = Join-Path $buildDir "generated\release-artifacts.json"
-if (-not $SkipBuild) {
+if (-not $SkipBuild -and $BuildSystem -eq "platformio") {
   Write-AuraReleaseArtifactStamp `
     -StampPath $artifactStampPath `
     -Identity $identity `
@@ -157,15 +161,13 @@ $artifactStamp = Read-AuraReleaseArtifactStamp `
 New-Item -ItemType Directory -Path $outDir | Out-Null
 
 Write-Step "Copying release binaries"
-Copy-Item -Force (Join-Path $buildDir "bootloader.bin") (Join-Path $outDir "bootloader.bin")
-Copy-Item -Force (Join-Path $buildDir "partitions.bin") (Join-Path $outDir "partitions.bin")
-Copy-Item -Force (Join-Path $buildDir "firmware.bin") (Join-Path $outDir "firmware.bin")
-Copy-Item -Force (Join-Path $buildDir "littlefs.bin") (Join-Path $outDir "littlefs.bin")
-Copy-Item -Force $bootApp0 (Join-Path $outDir "boot_app0.bin")
+foreach ($entry in $artifactInputs.GetEnumerator()) {
+  Copy-Item -LiteralPath $entry.Value (Join-Path $outDir $entry.Key)
+}
 Copy-Item -LiteralPath $artifactStampPath (Join-Path $outDir "release-artifacts.json")
 
 $otaFileName = "project_aura_{0}_{1}_ota_firmware.bin" -f $identity.ArtifactSlug, $displayVersion
-Copy-Item -Force (Join-Path $buildDir "firmware.bin") (Join-Path $outDir $otaFileName)
+Copy-Item -LiteralPath $artifactInputs["firmware.bin"] (Join-Path $outDir $otaFileName)
 
 $manifestFull = [ordered]@{
   name = "Project Aura"

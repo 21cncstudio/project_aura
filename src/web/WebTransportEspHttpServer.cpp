@@ -28,6 +28,8 @@ namespace {
 constexpr uint16_t kHttpServerRecvWaitTimeoutS = 10;
 constexpr uint16_t kHttpServerSendWaitTimeoutS = 30;
 constexpr uint16_t kHttpServerMaxOpenSockets = 10;
+static_assert(kHttpServerMaxOpenSockets + 3 <= CONFIG_LWIP_MAX_SOCKETS,
+              "HTTP client sockets plus three internal sockets must fit LWIP_MAX_SOCKETS");
 constexpr uint32_t kMultipartReadIdleTimeoutMs = 90UL * 1000UL;
 constexpr uint32_t kDrainRecvTimeoutMs = 200;
 constexpr uint32_t kWakeActivityAdmissionTimeoutMs = 3000;
@@ -508,7 +510,7 @@ public:
     }
 
     String uri() const override {
-        return (req_ && req_->uri) ? String(req_->uri) : String();
+        return req_ ? String(req_->uri) : String();
     }
 
     void sendHeader(const char *name, const String &value, bool) override {

@@ -8,7 +8,7 @@
 #include <string.h>
 #include <stdlib.h>
 
-#include "driver/i2c.h"
+#include "AuraI2c.h"
 #include "esp_bit_defs.h"
 #include "esp_check.h"
 #include "esp_log.h"
@@ -40,7 +40,7 @@ typedef struct {
     } regs;
 } esp_io_expander_ht8574_t;
 
-static char *TAG = "ht8574";
+static const char *TAG = "ht8574";
 
 static esp_err_t read_input_reg(esp_io_expander_handle_t handle, uint32_t *value);
 static esp_err_t write_output_reg(esp_io_expander_handle_t handle, uint32_t value);
@@ -90,7 +90,7 @@ static esp_err_t read_input_reg(esp_io_expander_handle_t handle, uint32_t *value
     uint8_t temp = 0;
     // *INDENT-OFF*
     ESP_RETURN_ON_ERROR(
-        i2c_master_read_from_device(ht8574->i2c_num, ht8574->i2c_address, &temp, 1, pdMS_TO_TICKS(I2C_TIMEOUT_MS)),
+        aura_i2c_read(ht8574->i2c_num, ht8574->i2c_address, &temp, 1, I2C_TIMEOUT_MS),
         TAG, "Read input reg failed");
     // *INDENT-ON*
     *value = temp;
@@ -104,7 +104,7 @@ static esp_err_t write_output_reg(esp_io_expander_handle_t handle, uint32_t valu
 
     uint8_t data = (uint8_t)value;
     ESP_RETURN_ON_ERROR(
-        i2c_master_write_to_device(ht8574->i2c_num, ht8574->i2c_address, &data, 1, pdMS_TO_TICKS(I2C_TIMEOUT_MS)),
+        aura_i2c_write(ht8574->i2c_num, ht8574->i2c_address, &data, 1, I2C_TIMEOUT_MS),
         TAG, "Write output reg failed");
     ht8574->regs.output = value;
     return ESP_OK;

@@ -218,6 +218,36 @@ function Get-AuraArtifactInputs {
   }
 }
 
+function Get-AuraReleaseBuildLayout {
+  param(
+    [Parameter(Mandatory = $true)][string]$RepositoryRoot,
+    [Parameter(Mandatory = $true)][string]$Environment,
+    [ValidateSet("idf", "platformio")][string]$BuildSystem = "idf"
+  )
+
+  $contract = Get-AuraHardwareContract -Environment $Environment
+  if ($BuildSystem -eq "idf") {
+    $directory = Join-Path $RepositoryRoot ("build-idf-" + $contract.HardwareProfile)
+    $inputs = [ordered]@{
+      "bootloader.bin" = Join-Path $directory "bootloader\bootloader.bin"
+      "partitions.bin" = Join-Path $directory "partition_table\partition-table.bin"
+      "boot_app0.bin" = Join-Path $directory "ota_data_initial.bin"
+      "firmware.bin" = Join-Path $directory "aura_aq.bin"
+      "littlefs.bin" = Join-Path $directory "littlefs.bin"
+    }
+  } else {
+    $directory = Join-Path $RepositoryRoot (".pio\build\" + $Environment)
+    $bootApp0 = Join-Path $env:USERPROFILE ".platformio\packages\framework-arduinoespressif32\tools\partitions\boot_app0.bin"
+    $inputs = Get-AuraArtifactInputs -BuildDirectory $directory -BootApp0Path $bootApp0
+  }
+  return [pscustomobject]@{
+    Directory = $directory
+    IdentityPath = Join-Path $directory "generated\build-identity.json"
+    StampPath = Join-Path $directory "generated\release-artifacts.json"
+    ArtifactInputs = $inputs
+  }
+}
+
 function Write-AuraReleaseArtifactStamp {
   param(
     [Parameter(Mandatory = $true)][string]$StampPath,

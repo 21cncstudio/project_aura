@@ -8,7 +8,7 @@
 
 #include <optional>
 #include <variant>
-#include "driver/i2c.h"
+#include "AuraI2c.h"
 #include "port/esp_io_expander.h"
 
 // Refer to `esp32-hal-gpio.h` in Arduino
@@ -50,7 +50,11 @@ public:
         bool scl_pullup_en = GPIO_PULLUP_ENABLE;
         int clk_speed = I2C_CLK_SPEED_DEFAULT;
     };
+#if AURA_NATIVE_IDF
+    using HostFullConfig = aura_i2c_host_config_t;
+#else
     using HostFullConfig = i2c_config_t;
+#endif
     using HostConfig = std::variant<HostPartialConfig, HostFullConfig>;
 
     struct DeviceConfig {

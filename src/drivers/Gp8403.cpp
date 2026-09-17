@@ -6,7 +6,7 @@
 
 #include "drivers/Gp8403.h"
 
-#include <driver/i2c.h>
+#include "AuraI2c.h"
 
 #include "config/AppConfig.h"
 #include "core/I2CHelper.h"
@@ -80,12 +80,12 @@ bool Gp8403::writeRegister(uint8_t reg, const uint8_t *data, size_t len) {
         tx[1 + i] = data[i];
     }
 
-    const esp_err_t err = i2c_master_write_to_device(
+    const esp_err_t err = aura_i2c_write(
         Config::SENSOR_I2C_PORT,
         address_,
         tx,
         len + 1,
-        pdMS_TO_TICKS(Config::SENSOR_I2C_TIMEOUT_MS)
+        Config::SENSOR_I2C_TIMEOUT_MS
     );
     return err == ESP_OK;
 }

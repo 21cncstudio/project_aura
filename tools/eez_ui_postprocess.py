@@ -91,7 +91,25 @@ def _restore_co2_marker_border(match: Match[str]) -> str:
     )
 
 
+def _hide_co2_warmup_on_create(match: Match[str]) -> str:
+    if re.search(r"lv_obj_add_flag\(obj, [^;]*\bLV_OBJ_FLAG_HIDDEN\b", match.group("rest")):
+        return match.group(0)
+    return (match.group("assignment") + "\n" + match.group("indent") +
+            "lv_obj_add_flag(obj, LV_OBJ_FLAG_HIDDEN);" + match.group("rest"))
+
+
 SCREEN_OVERRIDES: tuple[ManagedScreenOverride, ...] = (
+    ManagedScreenOverride(
+        name="CO2 warmup runtime visibility",
+        anchor="// label_co2_warmup",
+        end_anchor="// card_pressure_pro",
+        pattern=re.compile(
+            r"(?m)(?P<assignment>^(?P<indent>[ \t]*)objects\.label_co2_warmup = obj;)"
+            r"(?P<rest>[\s\S]*)"
+        ),
+        replacement=_hide_co2_warmup_on_create,
+        optional=True,
+    ),
     ManagedScreenOverride(
         name="CO2 marker border color",
         anchor="// co2_marker_1",
@@ -121,17 +139,6 @@ SCREEN_OVERRIDES: tuple[ManagedScreenOverride, ...] = (
             r"\g<indent>lv_obj_set_style_border_width(obj, 2, "
             r"LV_PART_MAIN | LV_STATE_DEFAULT);"
         ),
-    ),
-    ManagedScreenOverride(
-        name="fail-safe firmware trust label",
-        anchor="// label_firmware_trust",
-        end_anchor="tick_screen_page_settings();",
-        pattern=re.compile(
-            r'(?P<setter>lv_label_set_text(?:_static)?)'
-            r'\(obj, "(?:OFFICIAL|UNVERIFIED) FW"\);'
-        ),
-        replacement=r'\g<setter>(obj, "UNVERIFIED FW");',
-        optional=True,
     ),
     ManagedScreenOverride(
         name="ambient O2 optional gas description",

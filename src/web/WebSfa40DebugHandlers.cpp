@@ -6,7 +6,7 @@
 
 #include "web/WebSfa40DebugHandlers.h"
 
-#include <math.h>
+#include <cmath>
 
 #include <ArduinoJson.h>
 
@@ -37,6 +37,8 @@ const char *status_text(Sfa40::Status status) {
 
 const char *hcho_type_text(SensorManager::HchoSensorType type) {
     switch (type) {
+        case SensorManager::HCHO_SENSOR_SEN69C:
+            return "SEN69C";
         case SensorManager::HCHO_SENSOR_SFA30:
             return "SFA30";
         case SensorManager::HCHO_SENSOR_SFA40:
@@ -83,7 +85,7 @@ String seconds_after_start_text(uint32_t start_ms, uint32_t event_ms) {
 }
 
 String float_text(bool valid, float value, unsigned decimals, const char *unit) {
-    if (!valid || !isfinite(value)) {
+    if (!valid || !std::isfinite(value)) {
         return "n/a";
     }
     String out(value, decimals);

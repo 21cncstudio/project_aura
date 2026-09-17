@@ -48,6 +48,8 @@ void fillJson(ArduinoJson::JsonObject root,
         display["sample_ms"] = payload.display.sample_ms;
         display["timer_handler_count"] = payload.display.timer_handler_count;
         display["timer_handler_age_ms"] = payload.display.timer_handler_age_ms;
+        display["task_stack_size_bytes"] = payload.display.task_stack_size_bytes;
+        display["task_stack_min_free_bytes"] = payload.display.task_stack_min_free_bytes;
         display["flush_count"] = payload.display.flush_count;
         display["flush_age_ms"] = payload.display.flush_age_ms;
         display["refresh_callback_semantics"] =

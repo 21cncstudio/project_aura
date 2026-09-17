@@ -1,7 +1,7 @@
 #pragma once
 #include <Arduino.h>
 #include <ctype.h>
-#include <driver/i2c.h>
+#include "AuraI2c.h"
 #include <string.h>
 #include <time.h>
 
@@ -157,6 +157,7 @@ namespace Config {
         NL = 6,
         ZH = 7,
         JA = 8,
+        PL = 9,
         COUNT
     };
 

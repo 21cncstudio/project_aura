@@ -273,6 +273,8 @@ void UiBootFlow::updateBootDiag(UiController &owner, uint32_t now_ms) {
     if (!boot_touch_detected) {
         append_error_line(error_lines, sizeof(error_lines), error_len, "Touch probe failed at boot");
     }
+    if (objects.lbl_diag_sen_label)
+        owner.safe_label_set_text(objects.lbl_diag_sen_label, owner.sensorManager.mainSensorLabel());
     if (objects.lbl_diag_sen) {
         const char *status = UiText::StatusErr();
         if (owner.sensorManager.isOk()) {
@@ -284,9 +286,9 @@ void UiBootFlow::updateBootDiag(UiController &owner, uint32_t now_ms) {
     }
     if (!owner.sensorManager.isOk()) {
         if (sen66_pending) {
-            append_error_line(error_lines, sizeof(error_lines), error_len, "SEN66 starting...");
+            append_error_line(error_lines, sizeof(error_lines), error_len, "SEN6x starting...");
         } else {
-            append_error_line(error_lines, sizeof(error_lines), error_len, "SEN66 not found/read failed");
+            append_error_line(error_lines, sizeof(error_lines), error_len, "SEN6x not found/read failed");
         }
     }
     if (objects.lbl_diag_dps_label) {

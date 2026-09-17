@@ -6,7 +6,7 @@
 
 #include "core/ChartsRuntimeState.h"
 
-#include <math.h>
+#include <cmath>
 #include <new>
 
 #ifdef UNIT_TEST
@@ -110,7 +110,7 @@ bool ChartsRuntimeState::Snapshot::latestMetric(ChartsHistory::Metric metric,
         const bool valid =
             (entry.valid_mask & static_cast<uint16_t>(1U << static_cast<uint8_t>(metric))) != 0;
         const float value = entry.values[metric];
-        if (valid && isfinite(value) &&
+        if (valid && std::isfinite(value) &&
             (metric != ChartsHistory::METRIC_OPTIONAL_GAS || entry.optional_gas_type == optional_gas_type_)) {
             out_value = value;
             return true;

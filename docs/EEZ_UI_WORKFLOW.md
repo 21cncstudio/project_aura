@@ -14,17 +14,21 @@ python tools/eez_ui_postprocess.py --check
 
 The first command applies the Project Aura generated-UI contract. The second
 command is a non-mutating verification and must report that the contract is
-already satisfied. A normal PlatformIO firmware build also invokes the same
-post-processor before compilation as a final safety net.
+already satisfied. The native IDF build also invokes the same post-processor before compilation.
+Firmware on `main` is built with `scripts/build_idf.ps1`.
+The canonical project is `ui/aura-lvgl.eez-project`, using LVGL 9.5.0.
+The obsolete firmware-trust chip and its label have been removed from the source
+and generated UI. Release-package signature verification remains separate.
 
 The post-processor currently preserves:
 
 - declarations for the externally generated Japanese 14 px and 18 px fonts;
 - the CO2 marker border that remains visible after its color changes;
 - the two pressure delta chip borders;
-- the fail-safe `UNVERIFIED FW` initial trust label when that settings block is
-  present in the generated UI;
 - the ambient O2 description on the optional gas information screen.
+- the initial hidden state of `label_co2_warmup`; `hiddenInEditor` alone does
+  not hide a widget at runtime. Its visibility follows `SensorData.co2_warmup`
+  independently of the VOC/NOx and HCHO warmups.
 
 The script is intentionally strict. If EEZ changes an expected object name or
 emits an unknown value, it exits with an error instead of editing a possibly
@@ -40,3 +44,49 @@ python -m unittest discover -s tools/tests -p "test_*.py"
 Do not commit `src/ui/.eez-project-build`; it is EEZ build metadata. Review the
 remaining generated diff before committing because the post-processor only
 protects known Project Aura invariants.
+
+## LVGL 9 source and backup
+
+The canonical project is `ui/aura-lvgl.eez-project`, targeting LVGL 9.5.0 with
+output `../src/ui`. Source TTFs and licenses are in `ui/fonts`; bitmaps and
+fonts are embedded as well. The installed EEZ Studio 0.27.1 can generate this
+version. Always retain and check the independently maintained font C subsets,
+including Japanese, after generation. The headless builder emits screens,
+styles and images but not the font C files.
+
+The original file in `release-assets/EEZ` was updated after a verified full
+backup. Exact paths, hashes and migration changes are documented in
+[IDF61_REMAINING_UPDATES_20260911.md](IDF61_REMAINING_UPDATES_20260911.md).
+
+For an offline rendering check after native dependencies are resolved, with
+CMake, Ninja and a host GCC/G++ on PATH:
+
+```powershell
+cmake -S tools/tests/lvgl9_ui -B .pio/lvgl9-ui -G Ninja
+cmake --build .pio/lvgl9-ui -j 6
+.pio/lvgl9-ui/aura_ui_check.exe .pio/lvgl9-ui/rendered
+python tools/check_ui_font_coverage.py
+```
+
+The renderer checks the actual generated C resources and writes 15 PPM images.
+It is a resource/API check, not a substitute for testing firmware runtime UI,
+touch, rotation or sleep/wake on both physical profiles.
+
+## Localized buttons and Polish
+
+All 186 `btn_*` containers in the EEZ source use Flex centering on both axes.
+Keep label height set to content so one-line and multiline translations stay
+centered. `btn_language` uses `ROW_REVERSE` because its serialized children are
+value, then title. The confirmation button contains three alternative labels;
+firmware shows only the label for the current action. Theme buttons center their
+preview card without changing its internal layout.
+
+The 14 px and 18 px JetBrains fonts include all Polish upper- and lowercase
+letters. When editing glyph sets, update the canonical source and the user's
+`release-assets/EEZ/aura-lvgl.eez-project` after a verified backup. Regenerate the
+font C subsets as well: the headless EEZ build does not emit those files.
+`tools/check_ui_font_coverage.py` includes Polish and checks every Latin-language
+string against the 18 px font, in addition to the existing status-font checks.
+
+See [POLISH_LOCALIZATION_20260916.md](POLISH_LOCALIZATION_20260916.md) for the local
+implementation, rendered layout checks and build evidence.

@@ -35,9 +35,9 @@ enum { UI_OBJECT_SLOT_COUNT = (int)(sizeof(objects_t) / sizeof(lv_obj_t *)) };
 #define UI_STATIC_ASSERT(cond, msg) _Static_assert(cond, msg)
 #endif
 
-UI_STATIC_ASSERT(UI_PAGE_SLOT_COUNT == UI_KNOWN_SCREEN_COUNT,
+UI_STATIC_ASSERT((int)UI_PAGE_SLOT_COUNT == (int)UI_KNOWN_SCREEN_COUNT,
                  "EEZ page layout changed: update ui_runtime screen tables.");
-UI_STATIC_ASSERT(SCREEN_ID_PAGE_DIAG == UI_KNOWN_SCREEN_COUNT,
+UI_STATIC_ASSERT((int)SCREEN_ID_PAGE_DIAG == (int)UI_KNOWN_SCREEN_COUNT,
                  "Expected diagnostics to be last screen id; update ui_runtime mapping.");
 UI_STATIC_ASSERT(offsetof(objects_t, page_boot_logo) == 0,
                  "objects_t must start with page_boot_logo.");
@@ -53,7 +53,7 @@ static int16_t currentScreen = -1;
 static uint8_t createdScreens[UI_MAX_SCREEN_ID + 1];
 
 static bool isScreenIdValid(enum ScreensEnum screenId) {
-    return screenId >= SCREEN_ID_PAGE_BOOT_LOGO && screenId <= UI_MAX_SCREEN_ID;
+    return screenId >= SCREEN_ID_PAGE_BOOT_LOGO && (int)screenId <= (int)UI_MAX_SCREEN_ID;
 }
 
 static lv_obj_t *getLvglObjectFromScreenId(enum ScreensEnum screenId) {
