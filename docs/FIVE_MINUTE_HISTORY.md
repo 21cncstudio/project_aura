@@ -118,3 +118,12 @@ This metadata does not enable pairing in main: Aura-to-Hub pairing currently
 exists on the separate feature/aura-link branch. A combined firmware candidate
 is required before a physical end-to-end test; that older branch is not merged
 into main by this history integration.
+
+## Branch organization update, 2026-09-18
+
+The old pairing implementation described above is now preserved on
+`archive/aura-link-pre-idf61-20260918`. The active local `feature/aura-link`
+was restarted from the current ESP-IDF 6.1 / LVGL 9.5 main and is a prepared
+development base; the Hub implementation has not yet been ported into it.
+See [the current branch map](ACTIVE_BRANCHES.md). A combined firmware candidate
+and physical end-to-end history relay test are still pending.

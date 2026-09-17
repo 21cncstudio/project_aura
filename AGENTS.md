@@ -10,7 +10,7 @@
   build is intentionally blocked. Do not downgrade dependencies to make it run.
 - Canonical EEZ source is `ui/aura-lvgl.eez-project`; regenerate and run
   `tools/eez_ui_postprocess.py` together. Keep both display profiles supported.
-- The old `idf-6.1-migration` worktree is a retained checkpoint, not the active
+- The old `aura-idf61` worktree (`archive/idf-6.1-migration-20260918`) is a retained checkpoint, not the active
   development destination. Preserve `codex/aura-main-before-idf61-20260917`,
   `dual-profile-release`, the root archive and exact tested artifacts.
 - This consolidation authorizes local source/build work. It does not authorize
@@ -50,12 +50,24 @@
 
 ## Branch Discipline
 
-While `feature/aura-link` is active, keep Aura Link / Aura Hub work isolated on that branch.
+Read [the current branch map](docs/ACTIVE_BRANCHES.md) before choosing a checkout.
+There are two active firmware development lines:
 
-- Code changes related to Aura Link or Aura Hub belong on `feature/aura-link`.
-- Code changes unrelated to Aura Link or Aura Hub must be made and committed on `main`.
-- If the current branch is `feature/aura-link` and the task is unrelated to Aura Link or Aura Hub, switch to `main` before editing or committing.
-- If the scope is ambiguous, clarify before mixing changes across branches.
+- `main`: common firmware, ESP-IDF 6.1 / LVGL 9.5, in
+  `D:/21cncstudio/project_aura/tmp/worktrees/aura-post-115-clean`.
+- `feature/aura-link`: local Aura-to-Hub work, in
+  `D:/21cncstudio/project_aura/tmp/worktrees/aura-hub`. It has no upstream;
+  do not publish it without explicit approval. The retained name follows the
+  existing project convention; this is the Aura firmware repo, not Link backend.
+- The current Hub branch starts from current main. Old pairing/upload code is
+  preserved on `archive/aura-link-pre-idf61-20260918`; it has NOT been ported
+  into the new branch yet. Do not claim a combined candidate is ready.
+- Keep general fixes on main, then merge main forward into the Hub branch.
+  Keep Hub-specific code out of main until separately reviewed and accepted.
+- Signing/OEM experiments and the completed migration are archive checkpoints.
+  Do not merge their old branch contents wholesale into either active line.
+- Preserve dirty archive checkouts, release checkpoints and exact tested BINs.
+  Local branch organization is not authorization to flash, publish or deploy.
 
 ## EEZ Studio UI Generation
 
