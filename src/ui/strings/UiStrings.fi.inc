@@ -314,10 +314,10 @@
     // sensor info title, so the abbreviated form is used.
     "ABSOL. KOSTEUS",
     "KASTEPISTE",
-    "Homeriski kertoo homeen kasvun todennäköisyydestä kosteus- ja lämpötilaolosuhteiden perusteella. Yli 70 %:n kosteus yhdessä lämpimän ilman kanssa luo ihanteelliset olot homeelle ja pölypunkeille. Homeitiöt aiheuttavat allergioita, hengitystieoireita ja rakennevaurioita. Tarkkaile nurkkia, kylpyhuoneita ja huonosti tuuletettuja tiloja. Pidä kosteus alle 60 % kasvun ehkäisemiseksi.",
+    "Homeriski kertoo homeen kasvun todennäköisyydestä kosteuden ja lämpötilan perusteella. Yli 70 %:n kosteus ja lämmin ilma luovat ihanteelliset olot homeelle ja pölypunkeille. Homeitiöt aiheuttavat allergioita, hengitystieoireita ja rakennevaurioita. Tarkkaile nurkkia, kylpyhuoneita ja huonosti tuuletettuja tiloja. Pidä kosteus alle 60 %, jotta home ei pääse kasvamaan.",
     "Erinomainen: 0-2\nMatala riski, olosuhteet epäsuotuisat homeelle",
     "Hyväksyttävä: 3-4\nKohtalainen riski, tarkkaile kosteutta",
-    "Epämukava: 5-7\nKorkea riski, alenna kosteutta ja paranna tuuletusta",
+    "Epämukava: 5-7\nKorkea riski, vähennä kosteutta ja paranna tuuletusta",
     "Huono: 8-10\nKriittinen riski, homeen kasvu todennäköistä, toimi heti",
     "HOMERISKI",
     "PM1 ovat alle 1 mikronin ultrapieniä hiukkasia, jotka tunkeutuvat syvimmälle keuhkoihin ja suoraan verenkiertoon. Lähteitä: palaminen, ajoneuvojen pakokaasut, tupakansavu, ruoanlaiton käryt. Hiukkaskoko on vaarallisin, koska se tunkeutuu syvälle kudoksiin. Virallisia EPA-raja-arvoja ei ole, joten arvot on johdettu PM2.5-ohjeista tiukemmin rajoin suuremman terveysvaikutuksen vuoksi.",
