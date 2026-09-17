@@ -10,6 +10,7 @@
 #include <Esp.h>
 #include <stdlib.h>
 #include <errno.h>
+#include <inttypes.h>
 
 #include "core/ChartsRuntimeState.h"
 #include "drivers/DfrOptionalGasSensor.h"
@@ -115,8 +116,8 @@ void handleData(WebHandlerContext &context, bool ota_busy) {
         WebChartsApiUtils::fillHistoryJson(doc.to<ArduinoJson::JsonObject>(), history_view, after, limit);
         const uint64_t mac = ESP.getEfuseMac();
         char device_id[24];
-        snprintf(device_id, sizeof(device_id), "aura_%04X%08X",
-                 static_cast<uint16_t>(mac >> 32), static_cast<uint32_t>(mac));
+        snprintf(device_id, sizeof(device_id), "aura_%04" PRIX32 "%08" PRIX32,
+                 static_cast<uint32_t>((mac >> 32) & 0xFFFF), static_cast<uint32_t>(mac));
         doc["device_id"] = device_id;
     } else WebChartsApiUtils::fillJson(
         doc.to<ArduinoJson::JsonObject>(),
