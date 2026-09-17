@@ -92,6 +92,8 @@ bool Sen6x::start(bool asc) {
 bool Sen6x::isOk() const { return identity_valid_ && (isSen69c() ? sen69c_.isOk() : model_ == Model::Sen66 && sen66_.isOk()); }
 bool Sen6x::isBusy() const { return phase_ != Phase::Idle || (isSen69c() ? sen69c_.isBusy() : model_ == Model::Sen66 && sen66_.isBusy()); }
 bool Sen6x::isWarmupActive() const { return identity_valid_ && (isSen69c() ? sen69c_.isWarmupActive() : model_ == Model::Sen66 && sen66_.isWarmupActive()); }
+int Sen6x::acquiredCo2() const { return isSen69c() ? sen69c_.acquiredCo2() : model_ == Model::Sen66 ? sen66_.acquiredCo2() : 0; }
+uint32_t Sen6x::pm05LastDataMs() const { return isSen69c() ? sen69c_.pm05LastDataMs() : model_ == Model::Sen66 ? sen66_.lastDataMs() : 0; }
 uint32_t Sen6x::lastDataMs() const { return isSen69c() ? sen69c_.lastDataMs() : model_ == Model::Sen66 ? sen66_.lastDataMs() : 0; }
 void Sen6x::poll(SensorData &data, bool &changed) {
     changed = false;

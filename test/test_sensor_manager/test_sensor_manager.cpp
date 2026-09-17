@@ -1449,6 +1449,32 @@ void test_history_freshness_counts_equal_new_acquisitions_once() {
     TEST_ASSERT_FLOAT_WITHIN(.001,20,equal.history_data.temperature);
 }
 
+void test_sen69c_history_counts_values_and_particle_numbers_separately() {
+    Sen6x::selectedModel() = Sen6x::Model::Sen69c;
+    StorageManager storage; storage.begin(); PressureHistory pressure; SensorManager manager; SensorData data;
+    manager.begin(storage, 0, 0);
+    auto &sen = Sen66::state(); sen.provide_data = true; sen.update_last_data_on_poll = true;
+    sen.poll_data.co2_valid = true; sen.poll_data.co2 = 987;
+    sen.poll_data.pm05_valid = true; sen.poll_data.pm05 = 12.3f;
+    const auto co2 = ChartsHistory::metricBit(ChartsHistory::METRIC_CO2);
+    const auto pm05 = ChartsHistory::metricBit(ChartsHistory::METRIC_PM05);
+    setMillis(100000); auto values = manager.poll(data, storage, pressure, true, true);
+    TEST_ASSERT_TRUE(values.history_fresh_mask & co2);
+    TEST_ASSERT_EQUAL(987, values.history_data.co2);
+    TEST_ASSERT_FALSE(values.history_fresh_mask & pm05);
+    sen.update_last_data_on_poll = false; sen.update_pm05_on_poll = true;
+    setMillis(100020); auto numbers = manager.poll(data, storage, pressure, true, true);
+    TEST_ASSERT_FALSE(numbers.history_fresh_mask & co2);
+    TEST_ASSERT_TRUE(numbers.history_fresh_mask & pm05);
+    TEST_ASSERT_FLOAT_WITHIN(.001f, 12.3f, numbers.history_data.pm05);
+    sen.update_pm05_on_poll = false;
+    setMillis(100040); auto cached = manager.poll(data, storage, pressure, true, true);
+    TEST_ASSERT_FALSE(cached.history_fresh_mask & (co2 | pm05));
+    sen.update_pm05_on_poll = true;
+    setMillis(101020); auto equal = manager.poll(data, storage, pressure, true, true);
+    TEST_ASSERT_TRUE(equal.history_fresh_mask & pm05);
+}
+
 void test_sensor_manager_sen69c_uses_integrated_hcho_without_sfa_probes() {
     Sen6x::selectedModel() = Sen6x::Model::Sen69c;
     StorageManager storage; storage.begin();
@@ -1564,6 +1590,7 @@ void test_sensor_manager_control_recovery_stops_after_five_attempts() {
 int main(int, char **) {
     UNITY_BEGIN();
     RUN_TEST(test_history_freshness_counts_equal_new_acquisitions_once);
+    RUN_TEST(test_sen69c_history_counts_values_and_particle_numbers_separately);
     RUN_TEST(test_sensor_manager_recovers_after_failed_asc_restart);
     RUN_TEST(test_sensor_manager_recovers_after_failed_frc_restart);
     RUN_TEST(test_sensor_manager_control_recovery_stops_after_five_attempts);

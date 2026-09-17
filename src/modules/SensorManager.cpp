@@ -779,7 +779,8 @@ SensorManager::PollResult SensorManager::poll(SensorData &data,
         late_probe_at_entry == LateProbeKind::Sen66 ||
         late_probe_kind_ == LateProbeKind::Sen66;
 
-    const uint32_t previous_sen66_ms = sen66_.lastDataMs();
+    const uint32_t previous_sen6x_ms = sen6x_.lastDataMs();
+    const uint32_t previous_pm05_ms = sen6x_.pm05LastDataMs();
     const uint32_t previous_co_ms = sen0466_.lastDataMs();
     const uint32_t previous_optional_ms = optional_gas_.lastDataMs();
     bool hcho_new = false;
@@ -935,14 +936,17 @@ SensorManager::PollResult SensorManager::poll(SensorData &data,
     log_soft_warnings(data, warmup_now);
 
     result.history_data = data;
-    if (sen66_.lastDataMs() != previous_sen66_ms) {
-        result.history_data.co2 = sen66_.acquiredCo2();
+    if (sen6x_.lastDataMs() != previous_sen6x_ms) {
+        result.history_data.co2 = sen6x_.acquiredCo2();
         for (const auto metric : {ChartsHistory::METRIC_CO2, ChartsHistory::METRIC_TEMPERATURE,
             ChartsHistory::METRIC_HUMIDITY, ChartsHistory::METRIC_VOC, ChartsHistory::METRIC_NOX,
-            ChartsHistory::METRIC_PM05, ChartsHistory::METRIC_PM1, ChartsHistory::METRIC_PM25,
+            ChartsHistory::METRIC_PM1, ChartsHistory::METRIC_PM25,
             ChartsHistory::METRIC_PM4, ChartsHistory::METRIC_PM10})
             result.history_fresh_mask |= ChartsHistory::metricBit(metric);
     }
+    // SEN69C receives particle counts in a later poll stage than its other values.
+    if (sen6x_.pm05LastDataMs() != previous_pm05_ms)
+        result.history_fresh_mask |= ChartsHistory::metricBit(ChartsHistory::METRIC_PM05);
     if (hcho_new) result.history_fresh_mask |= ChartsHistory::metricBit(ChartsHistory::METRIC_HCHO);
     if (pressure_new) {
         result.history_data.pressure = pressure_sensor_ == PRESSURE_BMP58X ? bmp580_.acquiredPressure() :

@@ -31,7 +31,9 @@ public:
     bool isCo2WarmupActive() const;
     bool isHchoWarmupActive() const;
     bool hasHchoFault() const;
+    int acquiredCo2() const { return acquired_co2_; }
     uint32_t lastDataMs() const { return last_data_ms_; }
+    uint32_t pm05LastDataMs() const { return pm05_last_ms_; }
     uint32_t hchoLastDataMs() const { return hcho_last_ms_; }
     bool takeHcho(float &value);
     void invalidateHcho() { hcho_new_ = false; }
@@ -75,6 +77,8 @@ private:
     uint32_t last_voc_ms_ = 0, last_pressure_ms_ = 0, status_ = 0;
     uint32_t status_clear_due_ms_ = 0, errors_absent_once_ = 0;
     uint8_t failures_ = 0;
+    int acquired_co2_ = 0;
+    uint32_t pm05_last_ms_ = 0;
     uint16_t pressure_hpa_ = 1013;
     StartPhase start_phase_ = StartPhase::Idle;
     PollPhase poll_phase_ = PollPhase::Idle;

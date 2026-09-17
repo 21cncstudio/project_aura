@@ -12,6 +12,8 @@ struct Sen66TestState {
     bool provide_data = false;
     bool poll_changed = false;
     bool update_last_data_on_poll = false;
+    bool update_pm05_on_poll = false;
+    uint32_t pm05_last_data_ms = 0;
     uint32_t poll_delay_ms = 0;
     bool start_ok = true;
     bool start_called = false;

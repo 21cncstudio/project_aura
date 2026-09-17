@@ -307,6 +307,7 @@ void Sen69c::decodeValues(const uint16_t *w, SensorData &d) {
     d.co2_valid = air_ok && !(status_ & Co2Error) && int16_t(w[9]) >= 0 && w[9] != 0x7FFF &&
                   millis()-start_ms_ >= Co2ConditioningMs;
     d.co2 = d.co2_valid ? int16_t(w[9]) : 0;
+    acquired_co2_ = d.co2;
     co2_ready_ = d.co2_valid;
 }
 void Sen69c::failPoll() {
@@ -378,6 +379,7 @@ void Sen69c::poll(SensorData &d, bool &changed) {
     case PollPhase::Numbers:
         d.pm05_valid = receive(w, 5) && w[0] != 0xFFFF && !(status_ & (FanError|PmError));
         d.pm05 = d.pm05_valid ? w[0]/10.0f : 0;
+        if (d.pm05_valid) pm05_last_ms_ = now;
         changed = true; poll_phase_ = PollPhase::Idle; break;
     }
     due_ms_ = millis() + CommandMs;

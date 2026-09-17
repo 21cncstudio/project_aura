@@ -32,7 +32,7 @@ This repository contains the firmware source code and configuration needed to fl
 - **Display options:** Waveshare ESP32-S3-Touch-LCD-4.3 and ESP32-S3-Touch-LCD-7.0 are supported. The 16 MB flash version is mandatory.
 - **Minimum useful BOM:** compatible Waveshare display board + Sensirion SEN66 + stable 5V/2A USB power. Everything else is optional.
 - **Build paths:** use the recommended custom Aura PCB for the cleanest build, or the classic module-based Adafruit/STEMMA QT/Qwiic path.
-- **First flash:** easiest through the browser-based web installer; developers can build from source with PlatformIO.
+- **First flash:** easiest through the browser-based web installer; developers can build from source with ESP-IDF 6.1.
 - **Works without internet:** AP setup mode and the local dashboard are fully offline.
 
 ## Stable Firmware and v1.2.0 Update
@@ -75,7 +75,7 @@ restarting or unplugging Aura.
 - [Pin Configuration](#pin-configuration)
 - [UI Languages](#ui-languages)
 - [Firmware Architecture](#firmware-architecture)
-- [Build and Flash](#build-and-flash-platformio)
+- [Build and Flash](#build-and-flash-esp-idf)
 - [Configuration](#configuration)
 - [MQTT + Home Assistant](#mqtt--home-assistant)
 - [Network Requirements](#network-requirements)
@@ -352,7 +352,7 @@ graph TD
 Core modules live in `src/core/` and orchestrate startup (`AppInit`, `BoardInit`).
 Feature managers are in `src/modules/`, UI in `src/ui/`, and web pages in `src/web/`.
 
-## Build and Flash (PlatformIO)
+## Build and Flash (ESP-IDF)
 For most builders, the first flash is easiest through the browser-based Aura Web Installer:
 
 [Open the Aura AQ Web Installer](https://aura-aq.com/installer/aura-aq)

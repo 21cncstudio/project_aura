@@ -19,6 +19,11 @@ public:
         if (controlStartFailure()) { state().ok = false; return false; }
         return success;
     }
+    void poll(SensorData &data, bool &changed) {
+        Sen66::poll(data, changed);
+        if (state().update_pm05_on_poll) state().pm05_last_data_ms = millis();
+    }
+    uint32_t pm05LastDataMs() const { return isSen69c() ? state().pm05_last_data_ms : lastDataMs(); }
     bool isSen69c() const { return selectedModel() == Model::Sen69c; }
     Model model() const { return selectedModel(); }
     const char *label() const { return isSen69c() ? "SEN69C" : "SEN66"; }

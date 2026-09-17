@@ -93,6 +93,31 @@ void test_model_probe_routes_sen66_to_existing_driver() {
     TEST_ASSERT_FALSE(Sen66::state().asc_enabled);
     TEST_ASSERT_EQUAL(0,I2cMock::sensorCommandCount(0x6B,0xD304));
 }
+void test_sen69c_facade_reports_raw_co2_and_independent_number_acquisition() {
+    identity(); word(0x6711, 1);
+    RealSen6x sensor; sensor.begin(); sensor.beginLateStart(true);
+    for (unsigned i = 0; i < 300 && sensor.isBusy(); ++i) {
+        sensor.pollLateStart(millis()); advanceMillis(20);
+    }
+    TEST_ASSERT_TRUE(sensor.isOk());
+    frame(); advanceMillis(61000);
+    SensorData data;
+    for (unsigned i = 0; i < 4; ++i) {
+        bool changed; sensor.poll(data, changed); advanceMillis(20);
+    }
+    TEST_ASSERT_EQUAL(987, sensor.acquiredCo2());
+    TEST_ASSERT_GREATER_THAN(0, sensor.lastDataMs());
+    TEST_ASSERT_EQUAL(0, sensor.pm05LastDataMs());
+    const uint32_t values_ms = sensor.lastDataMs();
+    bool changed; sensor.poll(data, changed);
+    TEST_ASSERT_EQUAL(values_ms, sensor.lastDataMs());
+    TEST_ASSERT_GREATER_THAN(values_ms, sensor.pm05LastDataMs());
+    TEST_ASSERT_FLOAT_WITHIN(.01f, 12.3f, data.pm05);
+    const uint32_t numbers_ms = sensor.pm05LastDataMs();
+    advanceMillis(20); sensor.poll(data, changed);
+    TEST_ASSERT_EQUAL(numbers_ms, sensor.pm05LastDataMs());
+}
+
 void test_unknown_model_is_not_started() {
     identity("SEN68"); RealSen6x sensor; sensor.begin(); sensor.beginLateStart(true);
     sensor.pollLateStart(millis()); advanceMillis(20);
@@ -147,6 +172,7 @@ void test_decode_sen69c_hcho_and_co2_are_separate_words() {
     SensorData data; data.pressure=1010; data.pressure_valid=true;
     pollFrame(sensor,data);
     TEST_ASSERT_TRUE(data.co2_valid); TEST_ASSERT_EQUAL(987,data.co2);
+    TEST_ASSERT_EQUAL(987, sensor.acquiredCo2());
     TEST_ASSERT_TRUE(data.hcho_valid); TEST_ASSERT_FLOAT_WITHIN(.01f,43.2f,data.hcho);
     TEST_ASSERT_FLOAT_WITHIN(.01f,45.67f,data.humidity);
     TEST_ASSERT_FLOAT_WITHIN(.01f,25,data.temperature);
@@ -157,6 +183,7 @@ void test_co2_signed_invalid_marker_does_not_become_32767ppm() {
     Sen69c sensor; start(sensor); frame(0x7FFF,0x7FFF); setMillis(sensor.start_ms_+61000);
     SensorData data; pollFrame(sensor,data);
     TEST_ASSERT_FALSE(data.co2_valid); TEST_ASSERT_EQUAL(0,data.co2);
+    TEST_ASSERT_EQUAL(0, sensor.acquiredCo2());
     TEST_ASSERT_TRUE(data.hcho_valid); TEST_ASSERT_FLOAT_WITHIN(.01f,3276.7f,data.hcho);
 }
 void test_co2_and_hcho_warmup_are_independent() {
@@ -374,6 +401,7 @@ int main(int,char**) {
     RUN_TEST(test_pressure_does_not_overwrite_pending_identity_response);
     RUN_TEST(test_model_probe_waits_and_selects_only_sen69c);
     RUN_TEST(test_model_probe_routes_sen66_to_existing_driver);
+    RUN_TEST(test_sen69c_facade_reports_raw_co2_and_independent_number_acquisition);
     RUN_TEST(test_unknown_model_is_not_started);
     RUN_TEST(test_identity_bad_crc_never_configures_sensor);
     RUN_TEST(test_unterminated_identity_is_rejected);

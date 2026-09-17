@@ -24,7 +24,9 @@ public:
     bool isOk() const;
     bool isBusy() const;
     bool isWarmupActive() const;
+    int acquiredCo2() const;
     uint32_t lastDataMs() const;
+    uint32_t pm05LastDataMs() const;
     bool isCo2WarmupActive() const { return isOk() && isSen69c() && sen69c_.isCo2WarmupActive(); }
     bool isHchoWarmupActive() const { return isSen69c() && (isBusy() || (isOk() && sen69c_.isHchoWarmupActive())); }
     bool hasHchoFault() const { return isSen69c() && !isBusy() && (!identity_valid_ || sen69c_.hasHchoFault()); }
