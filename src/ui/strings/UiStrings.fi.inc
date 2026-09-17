@@ -237,7 +237,7 @@
     "Absoluuttinen kosteus hieman korkea",
     "Absoluuttinen kosteus korkea",
     "Absoluuttinen kosteus erittäin korkea",
-    "Lämpötila vaikuttaa viihtyvyyteen, tuottavuuteen ja unen laatuun. Raja-arvot perustuvat ASHRAE 55 -standardiin (lämpöviihtyvyys) ja WHO:n asumissuosituksiin. Ihanteellinen lämpötila auttaa keskittymään ja ehkäisee väsymystä. Liian kylmä tai kuuma aiheuttaa epämukavuutta, uneliaisuutta tai keskittymisvaikeuksia. Pitkäaikainen altistus huonoille lämpöolosuhteille voi vaikuttaa terveyteen.",
+    "Lämpötila vaikuttaa viihtyvyyteen, tuottavuuteen ja unen laatuun. Raja-arvot perustuvat ASHRAE 55 -lämpöviihtyvyysstandardiin ja WHO:n asumissuosituksiin. Ihanteellinen lämpötila auttaa keskittymään ja ehkäisee väsymystä. Liian kylmä tai kuuma aiheuttaa epämukavuutta, uneliaisuutta tai keskittymisvaikeuksia. Pitkäaikainen altistus huonoille lämpöolosuhteille voi vaikuttaa terveyteen.",
     "Erinomainen: 20-25°C (68-77°F)\nIhanteellinen lämpötila viihtyvyydelle ja tuottavuudelle",
     "Hyväksyttävä: 18-20°C tai 25-26°C (64-68°F tai 77-79°F)\nHieman ihannealueen ulkopuolella, silti miellyttävä",
     "Epämukava: 16-18°C tai 26-28°C (61-64°F tai 79-82°F)\nSelvää epämukavuutta, tuottavuus laskee",
