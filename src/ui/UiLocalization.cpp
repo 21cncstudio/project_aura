@@ -27,6 +27,7 @@ const char *language_label(Config::Language lang) {
         case Config::Language::PL: return "POLSKI";
         case Config::Language::ZH: return "\xE7\xAE\x80\xE4\xBD\x93\xE4\xB8\xAD\xE6\x96\x87";
         case Config::Language::JA: return "\xE6\x97\xA5\xE6\x9C\xAC\xE8\xAA\x9E";
+        case Config::Language::FI: return "SUOMI";
         case Config::Language::EN:
         default:
             return "ENGLISH";
@@ -62,7 +63,8 @@ Config::Language UiLocalization::nextLanguage(Config::Language current) {
         case Config::Language::NL: return Config::Language::PL;
         case Config::Language::PL: return Config::Language::ZH;
         case Config::Language::ZH: return Config::Language::JA;
-        case Config::Language::JA: return Config::Language::EN;
+        case Config::Language::JA: return Config::Language::FI;
+        case Config::Language::FI: return Config::Language::EN;
         default:
             return Config::Language::EN;
     }

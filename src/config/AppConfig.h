@@ -158,6 +158,7 @@ namespace Config {
         ZH = 7,
         JA = 8,
         PL = 9,
+        FI = 10,
         COUNT
     };
 

@@ -286,6 +286,7 @@ Project Aura speaks your language. You can switch languages in the Settings menu
 - Nederlands
 - Simplified Chinese
 - Japanese
+- Suomi
 
 Japanese UI text uses generated LVGL font subsets. After editing
 `src/ui/strings/UiStrings.ja.inc`, regenerate the Japanese fonts with:

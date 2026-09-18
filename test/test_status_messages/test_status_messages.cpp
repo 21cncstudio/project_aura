@@ -265,6 +265,13 @@ void test_language_switch_localizes_co_danger_without_changing_severity() {
     TEST_ASSERT_EQUAL_UINT8(StatusMessages::STATUS_RED, polish.messages[0].severity);
     assert_message_text(polish.messages[0], "Niebezpieczne CO - natychmiast wyjdź");
 
+    UiStrings::setLanguage(Config::Language::FI);
+    const auto finnish = StatusMessages::build_status_messages(data, false, thresholds);
+    TEST_ASSERT_EQUAL_UINT(1, finnish.count);
+    TEST_ASSERT_EQUAL_UINT8(StatusMessages::STATUS_SENSOR_CO, finnish.messages[0].sensor);
+    TEST_ASSERT_EQUAL_UINT8(StatusMessages::STATUS_RED, finnish.messages[0].severity);
+    assert_message_text(finnish.messages[0], "Häkävaara (CO) - Poistu heti");
+
     UiStrings::setLanguage(Config::Language::EN);
     const auto english = StatusMessages::build_status_messages(data, false, thresholds);
     TEST_ASSERT_EQUAL_UINT8(polish.messages[0].severity, english.messages[0].severity);
