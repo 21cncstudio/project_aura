@@ -291,7 +291,7 @@
     "Erinomainen: <2.0 hPa (<0.06 inHg)\nTasainen sää, miellyttävä kaikille",
     "Hyväksyttävä: 2.0-6.0 hPa (0.06-0.18 inHg)\nSää muuttuu, lievät oireet mahdollisia",
     "Epämukava: 6.0-10.0 hPa (0.18-0.30 inHg)\nMyrsky tai rintama ohittamassa, epämukavuus lisääntyy",
-    "Huono: >10.0 hPa (>0.30 inHg)\nVoimakas sääilmiö, vahvat oireet todennäköisiä",
+    "Huono: >10.0 hPa (>0.30 inHg)\nVoimakas sääilmiö, vahvat oireet mahdollisia",
     "Ilmankosteus vaikuttaa hengitysmukavuuteen, ihon terveyteen ja koettuun lämpötilaan. Raja-arvot perustuvat ASHRAE 55 -standardiin ja EPA:n suosituksiin. Ihannealue (40-60%) ehkäisee hengitysteiden kuivumista ja homeen kasvua. Matala kosteus kuivattaa ihoa, ärsyttää ja lisää staattista sähköä. Korkea kosteus edistää hometta, pölypunkkeja ja epämukavuutta. Tasapaino suojaa terveyttä ja kotia.",
     "Erinomainen: 40-60%\nMukava ja terveellinen hengitysteille ja iholle",
     "Hyväksyttävä: 30-40% tai 60-65%\nLievää kuivuutta tai kosteutta, vähäinen epämukavuus mahdollinen",
