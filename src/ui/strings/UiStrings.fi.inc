@@ -277,7 +277,7 @@
     "Hyväksyttävä: >25-50 µg/m³\nLievästi koholla, herkät voivat tuntea ärsytystä",
     "Epämukava: >50-75 µg/m³\nHengitysoireet mahdollisia, vähennä altistusta",
     "Huono: >75 µg/m³\nKorkea altistusriski, paranna tuuletusta ja suodatusta",
-    "PM10 ovat karkeita hiukkasia, kuten pölyä, siitepölyä ja homeitiöitä. Raja-arvot perustuvat US EPA:n AQI-indeksiin. Ne voivat ärsyttää silmiä, nenää ja kurkkua. Ne ovat PM2.5:tä vähemmän haitallisia, mutta vaikuttavat silti hengitysterveyteen. Lähteitä: pöly, rakentaminen, siitepöly, katupöly. Vähennä siivoamalla säännöllisesti, suodattamalla ilmaa ja pitämällä ikkunat kiinni.",
+    "PM10 ovat karkeita hiukkasia, kuten pölyä, siitepölyä ja homeitiöitä. Raja-arvot perustuvat US EPA:n AQI-indeksiin. PM10-hiukkaset voivat ärsyttää silmiä, nenää ja kurkkua. Ne ovat PM2.5:tä vähemmän haitallisia, mutta vaikuttavat silti hengitysterveyteen. Lähteitä: pöly, rakentaminen ja katupöly. Vähennä siivoamalla säännöllisesti, suodattamalla ja pitämällä ikkunat kiinni.",
     "Erinomainen: ≤54 µg/m³\nPuhdas ilma, ärsytystä ei odoteta",
     "Hyväksyttävä: >54-154 µg/m³\nHerkät voivat tuntea lievää ärsytystä",
     "Epämukava: >154-254 µg/m³\nSilmien ja kurkun ärsytys mahdollista, rajoita altistusta",
