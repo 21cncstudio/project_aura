@@ -216,7 +216,9 @@
     "Heap:",
     "Tallennus:",
     "I2C:",
-    "Kosketus:",
+    // 'Kosketus:' (99 px) overlaps the value, which starts 71 px after the
+    // label, and the word does not work in this technical context.
+    "Touch:",
     "SEN66:",
     "SFA3X:",
     "PCF8523:",
