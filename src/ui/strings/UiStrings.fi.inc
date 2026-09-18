@@ -50,7 +50,7 @@
     "AP-tila:\n1) Yhdistä puhelin/PC Auran AP-verkkoon.\n2) Avaa: http://192.168.4.1/dashboard\nWi-Fi-asetus: http://192.168.4.1/wifi",
     "STA (Wi-Fi) -tila:\nKäytä: {{IP_URL}}\nVaihtoehtoinen osoite:\n{{LOCAL_URL}}",
     "Ei yhteyttä:\nOta AP-tila käyttöön Wi-Fi-asetuksista tai yhdistä kotiverkkoon.\nPalaa sitten tälle sivulle.",
-    "Häkää (CO) havaittu - Tarkista lähde ja hälytin",
+    "Häkää havaittu - Tarkista lähde ja häkävaroitin",
     "Häkää (CO) koholla - Siirry raittiiseen ilmaan",
     "Häkävaara (CO) - Poistu heti",
     "Hiilidioksidi (CO2) erittäin korkea",
