@@ -301,7 +301,7 @@
     "Erinomainen: 7-15 g/m³\nIhanteellinen kosteus, mukava hengittää",
     "Hyväksyttävä: 5-7 tai 15-18 g/m³\nHieman kuiva tai kostea, vähäinen epämukavuus mahdollinen",
     "Epämukava: 4-5 tai 18-20 g/m³\nHavaittavaa kuivuutta tai tukaluutta, epämukavuus mahdollinen",
-    "Huono: <4 tai >20 g/m³\nErittäin kuiva tai kostea, hengitys- ja iho-oireet todennäköisiä",
+    "Huono: <4 tai >20 g/m³\nErittäin kuiva tai kostea, hengitys- ja iho-oireet mahdollisia",
     "Kastepiste kuvaa kosteuden tuntua suhteellista kosteutta paremmin. Tulkinta perustuu NOAA:n mukavuusasteikkoon. Se kertoo, kuinka tukalalta tai kuivalta ilma tuntuu. Matala kastepiste tarkoittaa kuivaa ilmaa, joka ärsyttää ihoa ja hengitysteitä. Korkea kastepiste tuntuu tahmealta ja painostavalta, eikä hikoilu viilennä kunnolla. Ihannealueella hengitys on mukavaa ja keho viilenee luonnollisesti.",
     "Erinomainen: 10-16°C (50-61°F)\nIhanteellinen viihtyvyys, miellyttävä hengittää",
     "Hyväksyttävä: 8-10°C (46-50°F) tai 16-18°C (61-64°F)\nHieman kuiva tai kostea, silti miellyttävä",
