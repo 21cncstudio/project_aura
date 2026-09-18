@@ -51,7 +51,7 @@
     "STA (Wi-Fi) -tila:\nKäytä: {{IP_URL}}\nVaihtoehtoinen osoite:\n{{LOCAL_URL}}",
     "Ei yhteyttä:\nOta AP-tila käyttöön Wi-Fi-asetuksista tai yhdistä kotiverkkoon.\nPalaa sitten tälle sivulle.",
     "Häkää havaittu - Tarkista lähde ja häkävaroitin",
-    "Häkää (CO) koholla - Siirry raittiiseen ilmaan",
+    "Häkäpitoisuus koholla - Siirry raittiiseen ilmaan",
     "Häkävaara (CO) - Poistu heti",
     "Hiilidioksidi (CO2) erittäin korkea",
     "Hiilidioksidi (CO2) korkea",
