@@ -300,7 +300,7 @@
     "Absoluuttinen kosteus mittaa ilman vesihöyryn määrän (g/m³) lämpötilasta riippumatta. Toisin kuin suhteellinen kosteus, se kertoo todellisen kosteussisällön. Matalat arvot kuivattavat hengitysteitä ja ihoa. Korkeat arvot vaikeuttavat viilenemistä ja edistävät hometta. Hyödyllinen tuuletuksessa ja sisä- ja ulkoilman vertailussa. Ihannealue tukee hengitysterveyttä ja viihtyvyyttä.",
     "Erinomainen: 7-15 g/m³\nIhanteellinen kosteus, mukava hengittää",
     "Hyväksyttävä: 5-7 tai 15-18 g/m³\nHieman kuiva tai kostea, vähäinen epämukavuus mahdollinen",
-    "Epämukava: 4-5 tai 18-20 g/m³\nHavaittavaa kuivuutta tai tukaluutta, epämukavuus todennäköinen",
+    "Epämukava: 4-5 tai 18-20 g/m³\nHavaittavaa kuivuutta tai tukaluutta, epämukavuus mahdollinen",
     "Huono: <4 tai >20 g/m³\nErittäin kuiva tai kostea, hengitys- ja iho-oireet todennäköisiä",
     "Kastepiste kuvaa kosteuden tuntua suhteellista kosteutta paremmin. Tulkinta perustuu NOAA:n mukavuusasteikkoon. Se kertoo, kuinka tukalalta tai kuivalta ilma tuntuu. Matala kastepiste tarkoittaa kuivaa ilmaa, joka ärsyttää ihoa ja hengitysteitä. Korkea kastepiste tuntuu tahmealta ja painostavalta, eikä hikoilu viilennä kunnolla. Ihannealueella hengitys on mukavaa ja keho viilenee luonnollisesti.",
     "Erinomainen: 10-16°C (50-61°F)\nIhanteellinen viihtyvyys, miellyttävä hengittää",
