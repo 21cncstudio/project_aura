@@ -41,6 +41,7 @@ constexpr Profile kProfiles[] = {
     {OptionalGasType::NO2, "NO2", "Nitrogen dioxide (NO2)", 1, 2, 0.05f, 0.10f, 1.0f, 0.05f, 0.3f, 100.0f, "ppm", ClassificationMode::Increasing, 0.0f, 0.0f, "Optional DFRobot electrochemical gas sensor. Higher ppm means higher gas concentration."},
     {OptionalGasType::H2S, "H2S", "Hydrogen sulfide (H2S)", 0, 1, 0.5f, 1.0f, 10.0f, 0.5f, 2.0f, 100.0f, "ppm", ClassificationMode::Increasing, 0.0f, 0.0f, "Optional DFRobot electrochemical gas sensor. Higher ppm means higher gas concentration."},
     {OptionalGasType::O3, "O3", "Ozone (O3)", 1, 2, 0.05f, 0.10f, 0.50f, 0.05f, 0.2f, 100.0f, "ppm", ClassificationMode::Increasing, 0.0f, 0.0f, "Optional DFRobot electrochemical gas sensor. Higher ppm means higher gas concentration."},
+    {OptionalGasType::O3_SEN0321, "O3", "Ozone (O3)", 0, 0, 0.05f, 0.10f, 0.50f, 0.05f, 0.2f, 1000.0f, "ppb", ClassificationMode::Increasing, 0.0f, 0.0f, "DFRobot SEN0321 electrochemical ozone sensor. Higher ppb means higher ozone concentration."},
     {OptionalGasType::O2, "O2", "Oxygen (O2)", 1, 1, 0.0f, 0.0f, 25.0f, 21.5f, 5.0f, 10.0f, "%Vol", ClassificationMode::NormalRange, Config::SEN0465_O2_NORMAL_MIN_PERCENT_VOL, Config::SEN0465_O2_NORMAL_MAX_PERCENT_VOL, "SEN0465 ambient oxygen reading (0-25 %Vol). Reference only; Aura is not a certified safety monitor or breathing-gas analyzer."},
 };
 
@@ -127,18 +128,19 @@ Band classify(const Profile &profile, float value, bool valid) {
 }
 
 void formatValue(const Profile &profile, float ppm, char *buf, size_t buf_size) {
-    format_number(ppm, profile.value_decimals, buf, buf_size);
+    format_number(DfrOptionalGasSensor::displayValue(profile.type, ppm), profile.value_decimals, buf, buf_size);
 }
 
 void formatValue(const Profile &profile, float ppm, uint8_t decimals, char *buf, size_t buf_size) {
-    format_number(ppm,
-                  display_decimals_for_value(ppm, decimals, profile.value_decimals),
+    format_number(DfrOptionalGasSensor::displayValue(profile.type, ppm),
+                  profile.type == OptionalGasType::O3_SEN0321 ? 0 :
+                      display_decimals_for_value(ppm, decimals, profile.value_decimals),
                   buf,
                   buf_size);
 }
 
 void formatThreshold(const Profile &profile, float ppm, char *buf, size_t buf_size) {
-    format_number(ppm, profile.threshold_decimals, buf, buf_size);
+    format_number(DfrOptionalGasSensor::displayValue(profile.type, ppm), profile.threshold_decimals, buf, buf_size);
 }
 
 void formatBandLabel(const Profile &profile, uint8_t band, char *buf, size_t buf_size) {

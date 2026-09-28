@@ -273,6 +273,12 @@ void daily_history_status_handle() {
     });
 }
 
+void daily_history_reconnect_handle() {
+    with_ota_busy([](WebHandlerContext &context, bool ota_busy) {
+        WebDailyHistoryHandlers::handleReconnect(context, ota_busy, WebHandlersSupport::otaBusyJson());
+    });
+}
+
 void daily_history_csv_handle() {
     with_ota_busy([](WebHandlerContext &context, bool ota_busy) {
         WebDailyHistoryHandlers::handleCsv(context, ota_busy, WebHandlersSupport::otaBusyJson());

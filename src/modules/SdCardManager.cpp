@@ -10,8 +10,16 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#ifdef UNIT_TEST
+#include <chrono>
+#ifdef _WIN32
+#include <direct.h>
+#include <io.h>
+#endif
+#endif
 
 #include "core/Logger.h"
+#include "core/WakePowerGuard.h"
 
 #ifndef UNIT_TEST
 #include <driver/sdspi_host.h>
@@ -29,6 +37,14 @@ constexpr spi_host_device_t kSdSpiHost = SPI2_HOST;
 #endif
 
 constexpr size_t kCopyBufferSize = 1024;
+
+int sync_file(FILE *file) {
+#if defined(UNIT_TEST) && defined(_WIN32)
+    return _commit(_fileno(file));
+#else
+    return fsync(fileno(file));
+#endif
+}
 
 bool is_decimal_digit(char ch) {
     return ch >= '0' && ch <= '9';
@@ -115,9 +131,13 @@ SdCardManager::~SdCardManager() {
 }
 
 void SdCardManager::setState(SdCardPolicy::State state, const char *error, int32_t error_code) {
+    lockStatus();
     state_ = state;
     last_error_ = error ? error : "";
     last_error_code_ = error_code;
+    if (state == SdCardPolicy::State::Fault && error_code)
+        captureFirstErrorLocked("mount", error, error_code, "esp");
+    unlockStatus();
 }
 
 DailyStorageFailureKind SdCardManager::classifyErrno(int error_code) {
@@ -132,6 +152,7 @@ DailyStorageFailureKind SdCardManager::classifyErrno(int error_code) {
         case EPERM: return DailyStorageFailureKind::ReadOnly;
         case EINVAL:
         case ENAMETOOLONG: return DailyStorageFailureKind::Invalid;
+        case ETIMEDOUT:
         case EIO:
 #ifdef ENODEV
         case ENODEV:
@@ -149,11 +170,11 @@ void SdCardManager::recordFailure(const char *operation,
                                   int error_code,
                                   DailyStorageFailureKind kind,
                                   bool write_fault) const {
-#ifndef UNIT_TEST
-    if (status_mutex_) {
-        xSemaphoreTake(status_mutex_, portMAX_DELAY);
-    }
-#endif
+    lockStatus();
+    if (kind != DailyStorageFailureKind::Busy && kind != DailyStorageFailureKind::Missing)
+        captureFirstErrorLocked(operation, stage, error_code, "errno");
+    recovery_.ioFailure(kind, millis());
+    if (recovery_.pending()) io_blocked_.store(true);
     const bool preserve_active_write_fault = write_fault_ && !write_fault;
     if (!preserve_active_write_fault) {
         last_failure_kind_ = kind;
@@ -174,26 +195,25 @@ void SdCardManager::recordFailure(const char *operation,
             write_fault_ = true;
         }
     }
-#ifndef UNIT_TEST
-    if (status_mutex_) {
-        xSemaphoreGive(status_mutex_);
-    }
-#endif
+    unlockStatus();
 }
 
 void SdCardManager::recordSuccess(const char *operation, bool write_success) const {
-#ifndef UNIT_TEST
-    if (status_mutex_) {
-        xSemaphoreTake(status_mutex_, portMAX_DELAY);
-    }
-#endif
+    lockStatus();
+    if (write_success || !write_fault_) recovery_.ioSuccess();
     if (write_success) {
+        has_successful_write_ = true;
+        if (operation && (strcmp(operation, "state_write") == 0 || strcmp(operation, "daily_csv") == 0)) {
+            write_verification_pending_ = false;
+            history_session_ready_.store(true);
+        }
         last_write_success_ms_ = millis();
         const bool clears_active_fault =
             !write_fault_ || strcmp(last_operation_, operation ? operation : "") == 0;
         if (clears_active_fault) {
             copy_text(last_operation_, sizeof(last_operation_), operation);
             write_fault_ = false;
+            incident_active_ = false;
             runtime_healthy_ = true;
             last_failure_kind_ = DailyStorageFailureKind::None;
             runtime_error_code_ = 0;
@@ -215,46 +235,64 @@ void SdCardManager::recordSuccess(const char *operation, bool write_success) con
             consecutive_failures_ = 0;
         }
     }
-#ifndef UNIT_TEST
-    if (status_mutex_) {
-        xSemaphoreGive(status_mutex_);
-    }
-#endif
+    unlockStatus();
 }
 
 DailyStorageFailureKind SdCardManager::lastFailureKind() const {
     DailyStorageFailureKind result = DailyStorageFailureKind::Unknown;
-#ifndef UNIT_TEST
-    if (status_mutex_) {
-        xSemaphoreTake(status_mutex_, portMAX_DELAY);
-    }
-#endif
+    lockStatus();
     result = last_failure_kind_;
-#ifndef UNIT_TEST
-    if (status_mutex_) {
-        xSemaphoreGive(status_mutex_);
-    }
-#endif
+    unlockStatus();
     return result;
 }
 
-bool SdCardManager::lock(uint32_t timeout_ms) const {
+void SdCardManager::lockStatus() const {
 #ifdef UNIT_TEST
-    (void)timeout_ms;
-    return true;
+    status_mutex_test_.lock();
 #else
-    if (!mutex_) {
-        return true;
-    }
-    return xSemaphoreTake(mutex_, pdMS_TO_TICKS(timeout_ms)) == pdTRUE;
+    if (status_mutex_) xSemaphoreTake(status_mutex_, portMAX_DELAY);
 #endif
 }
 
+void SdCardManager::unlockStatus() const {
+#ifdef UNIT_TEST
+    status_mutex_test_.unlock();
+#else
+    if (status_mutex_) xSemaphoreGive(status_mutex_);
+#endif
+}
+
+void SdCardManager::captureFirstErrorLocked(const char *operation, const char *stage,
+                                          int32_t code, const char *domain) const {
+    if (incident_active_) return;
+    incident_active_ = true;
+    copy_text(first_error_operation_, sizeof(first_error_operation_), operation);
+    copy_text(first_error_stage_, sizeof(first_error_stage_), stage);
+    first_error_code_ = code;
+    first_error_ms_ = millis();
+    first_error_domain_ = domain;
+}
+
+bool SdCardManager::lockRaw(uint32_t timeout_ms) const {
+#ifdef UNIT_TEST
+    return file_mutex_test_.try_lock_for(std::chrono::milliseconds(timeout_ms));
+#else
+    return mutex_ && xSemaphoreTake(mutex_, pdMS_TO_TICKS(timeout_ms)) == pdTRUE;
+#endif
+}
+
+bool SdCardManager::lock(uint32_t timeout_ms) const {
+    if (!isReady() || !lockRaw(timeout_ms)) return false;
+    // Recheck after acquiring: an unmount may have run while we waited.
+    if (!isReady()) { unlock(); return false; }
+    return true;
+}
+
 void SdCardManager::unlock() const {
-#ifndef UNIT_TEST
-    if (mutex_) {
-        xSemaphoreGive(mutex_);
-    }
+#ifdef UNIT_TEST
+    file_mutex_test_.unlock();
+#else
+    if (mutex_) xSemaphoreGive(mutex_);
 #endif
 }
 
@@ -296,22 +334,43 @@ bool SdCardManager::setCardSelect(bool selected) {
 }
 
 bool SdCardManager::begin(esp_panel::board::Board *board) {
-#ifdef UNIT_TEST
-    (void)board;
-    attempted_ = true;
-    mounted_ = false;
-    setState(SdCardPolicy::State::Fault, "unit test");
-    return false;
-#else
-    attempted_ = true;
-    if (mounted_) {
-        return true;
-    }
+    if (!lockRaw(0)) return false;
     board_ = board;
-    spi_bus_owned_ = false;
-    if (!board_) {
-        setState(SdCardPolicy::State::BoardUnavailable, "board unavailable");
-        LOGI("SD", "optional storage unavailable: board not initialized");
+    const bool ok = mountLocked();
+    initial_mount_ = false;
+    lockStatus();
+    recovery_.mountResult(ok, mount_retryable_, millis());
+    io_blocked_.store(!ok);
+    unlockStatus();
+    unlock();
+    return ok;
+}
+
+bool SdCardManager::mountLocked() {
+    lockStatus();
+    attempted_ = true;
+    unlockStatus();
+    mount_retryable_ = false;
+    if (cleanup_failed_) return false;
+#ifdef UNIT_TEST
+    const bool ok = test_backend_.mount && test_backend_.mount(test_backend_.context);
+    mounted_.store(ok);
+    mount_retryable_ = !ok;
+    if (!ok) {
+        setState(SdCardPolicy::State::NotDetected);
+        return false;
+    }
+    const uint32_t serial = test_backend_.card_serial
+        ? test_backend_.card_serial(test_backend_.context) : 1;
+    const bool history_present = test_backend_.history_present &&
+        test_backend_.history_present(test_backend_.context);
+    if (!acceptMountedCard(serial, 0, 0, history_present)) return false;
+    setState(SdCardPolicy::State::Mounted);
+    return true;
+#else
+    if (mounted_) return true;
+    if (!board_ || !mutex_ || !status_mutex_) {
+        setState(SdCardPolicy::State::BoardUnavailable, "board or SD locks unavailable");
         return false;
     }
     if (!setCardSelect(false)) {
@@ -333,20 +392,22 @@ bool SdCardManager::begin(esp_panel::board::Board *board) {
     host.max_freq_khz = SDMMC_FREQ_DEFAULT;
 
     esp_err_t err = spi_bus_initialize(kSdSpiHost, &bus_cfg, SDSPI_DEFAULT_DMA);
-    if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) {
+    if (err != ESP_OK) {
         setState(SdCardPolicy::State::Fault, "SPI bus init failed", err);
         LOGW("SD", "SPI bus init failed: %s", esp_err_to_name(err));
         setCardSelect(false);
         return false;
     }
-    spi_bus_owned_ = err == ESP_OK;
+    spi_bus_owned_ = true;
 
     // The Waveshare TF slot CS is on CH422G EXIO4, not an ESP GPIO.
     // FatFS/SDSPI is mounted without GPIO CS and EXIO4 is held active while mounted.
     if (!setCardSelect(true)) {
         if (spi_bus_owned_) {
-            spi_bus_free(kSdSpiHost);
-            spi_bus_owned_ = false;
+            const esp_err_t free_err = spi_bus_free(kSdSpiHost);
+            spi_bus_owned_ = free_err != ESP_OK;
+            cleanup_failed_ = spi_bus_owned_;
+            if (cleanup_failed_) mount_retryable_ = false;
         }
         setState(SdCardPolicy::State::Fault, "CS expander write failed");
         LOGW("SD", "skip SD mount: failed to assert CS through IO expander");
@@ -364,17 +425,19 @@ bool SdCardManager::begin(esp_panel::board::Board *board) {
     mount_config.disk_status_check_enable = true;
     mount_config.use_one_fat = false;
 
-    const esp_log_level_t previous_mount_log_level = esp_log_level_get("vfs_fat_sdmmc");
-    esp_log_level_set("vfs_fat_sdmmc", ESP_LOG_NONE);
+    // Keep the SDK's first mount/FatFs error in the serial log.
     err = esp_vfs_fat_sdspi_mount(kMountPoint, &host, &slot_config, &mount_config, &card_);
-    esp_log_level_set("vfs_fat_sdmmc", previous_mount_log_level);
     if (err != ESP_OK) {
+        mount_retryable_ = err == ESP_ERR_TIMEOUT || err == ESP_ERR_INVALID_CRC ||
+                           err == ESP_ERR_INVALID_RESPONSE;
         mounted_ = false;
         card_ = nullptr;
         const bool cs_released = setCardSelect(false);
         if (spi_bus_owned_) {
-            spi_bus_free(kSdSpiHost);
-            spi_bus_owned_ = false;
+            const esp_err_t free_err = spi_bus_free(kSdSpiHost);
+            spi_bus_owned_ = free_err != ESP_OK;
+            cleanup_failed_ = spi_bus_owned_;
+            if (cleanup_failed_) mount_retryable_ = false;
         }
         if (!cs_released) {
             setState(SdCardPolicy::State::Fault, "CS release failed", err);
@@ -397,6 +460,20 @@ bool SdCardManager::begin(esp_panel::board::Board *board) {
     }
 
     mounted_ = true;
+    lockStatus();
+    card_size_bytes_ = static_cast<uint64_t>(card_->csd.capacity) * card_->csd.sector_size;
+    unlockStatus();
+    bool history_present = false;
+    if (!history_session_ready_ && !blank_history_accepted_ && !initial_mount_) {
+        // Include .bak/.tmp leftovers too: a directory from a previous session
+        // needs normal boot-time restoration before any new RAM snapshot is saved.
+        struct stat st = {};
+        errno = 0;
+        const String path = String(kMountPoint) + "/aura/history";
+        history_present = stat(path.c_str(), &st) == 0 || errno != ENOENT;
+    }
+    if (!acceptMountedCard(card_->cid.serial, card_->cid.mfg_id, card_->cid.oem_id,
+                           history_present)) return false;
     setState(SdCardPolicy::State::Mounted);
     updateSpaceInfoLocked();
     recordSuccess("mount", false);
@@ -407,68 +484,219 @@ bool SdCardManager::begin(esp_panel::board::Board *board) {
 #endif
 }
 
-bool SdCardManager::end() {
-#ifdef UNIT_TEST
-    return true;
-#else
-    if (!mounted_) {
-        return true;
-    }
-    if (!lock(5000)) {
-        recordFailure("unmount", "lock", EBUSY, DailyStorageFailureKind::Busy, false);
+bool SdCardManager::acceptMountedCard(uint32_t serial, uint32_t manufacturer,
+                                      uint32_t oem, bool history_present) {
+    // RAM history belongs to the accepted card. Do not merge another card's history.
+    const bool same_card = have_card_identity_ && card_serial_ == serial &&
+        card_manufacturer_ == manufacturer && card_oem_ == oem;
+    const bool session_ready = history_session_ready_.load() || blank_history_accepted_;
+    media_changed_ = !SdCardPolicy::mayResumeHistory(initial_mount_, have_card_identity_,
+                                                    same_card, history_present, session_ready);
+    if (media_changed_) {
+        setState(SdCardPolicy::State::Fault, "SD history may differ; export current day, then restart");
         return false;
     }
-    const esp_err_t unmount_err = esp_vfs_fat_sdcard_unmount(kMountPoint, card_);
+    // Accepting an empty late-inserted store binds it to the existing RAM even
+    // before the first write succeeds. Our own failed write may create history
+    // directories/sidecars; they must not be mistaken for an unrestored session.
+    // This does not acknowledge a successful save, or authorize a different CID.
+    if (!initial_mount_ && !session_ready && !history_present)
+        blank_history_accepted_ = true;
+    have_card_identity_ = true;
+    card_serial_ = serial;
+    card_manufacturer_ = manufacturer;
+    card_oem_ = oem;
+    return true;
+}
+
+bool SdCardManager::end() {
+    recovery_paused_.store(true);
+    io_blocked_.store(true);
+    if (!waitForRecoveryIdle(5000) || !lockRaw(5000)) return false;
+    const bool ok = unmountLocked();
+    unlock();
+    return ok;
+}
+
+bool SdCardManager::unmountLocked() {
+    if (cleanup_failed_) return false;
+#ifdef UNIT_TEST
+    const bool ok = !mounted_ || !test_backend_.unmount ||
+                    test_backend_.unmount(test_backend_.context);
+    mounted_.store(false);
+    cleanup_failed_ = !ok;
+    return ok;
+#else
+    if (mounted_) {
+        const esp_err_t err = esp_vfs_fat_sdcard_unmount(kMountPoint, card_);
+        mounted_ = false;
+        // The SDK may have freed the card even on an unregister error. Never reuse it.
+        card_ = nullptr;
+        if (err != ESP_OK) {
+            cleanup_failed_ = true;
+            setState(SdCardPolicy::State::Fault, "SD unmount failed; restart required", err);
+            return false;
+        }
+    }
     if (spi_bus_owned_) {
-        spi_bus_free(kSdSpiHost);
+        const esp_err_t err = spi_bus_free(kSdSpiHost);
+        if (err != ESP_OK) {
+            cleanup_failed_ = true;
+            setState(SdCardPolicy::State::Fault, "SD bus cleanup failed; restart required", err);
+            return false;
+        }
+        spi_bus_owned_ = false;
     }
-    const bool cs_released = setCardSelect(false);
-    mounted_ = false;
-    card_ = nullptr;
-    spi_bus_owned_ = false;
-#ifndef UNIT_TEST
-    if (status_mutex_) {
-        xSemaphoreTake(status_mutex_, portMAX_DELAY);
-    }
-#endif
+    const bool cs_released = !board_ || setCardSelect(false);
+    lockStatus();
     filesystem_total_bytes_ = 0;
     filesystem_free_bytes_ = 0;
-#ifndef UNIT_TEST
-    if (status_mutex_) {
-        xSemaphoreGive(status_mutex_);
-    }
-#endif
-    unlock();
-    if (unmount_err != ESP_OK) {
-        LOGW("SD", "unmount failed: %s", esp_err_to_name(unmount_err));
-        return false;
-    }
+    card_size_bytes_ = 0;
+    unlockStatus();
     if (!cs_released) {
-        LOGW("SD", "unmounted but failed to release card select");
+        setState(SdCardPolicy::State::Fault, "SD card select unavailable");
         return false;
     }
-    recordSuccess("unmount", false);
+    setState(SdCardPolicy::State::NotDetected);
     return true;
 #endif
 }
 
+void SdCardManager::prepareForShutdown() {
+    recovery_paused_.store(true);
+    lockStatus();
+    // A queued manual reconnect must not prevent the normal final history flush
+    // on an otherwise healthy card. Failed/changed media stay quarantined.
+    if (!worker_running_ && mounted_ && runtime_healthy_ && !write_fault_ &&
+        !cleanup_failed_ && !media_changed_) {
+        recovery_.cancelPending();
+        io_blocked_.store(false);
+    }
+    unlockStatus();
+}
+
+bool SdCardManager::requestRecovery() {
+    lockStatus();
+    const bool allowed = attempted_ && !cleanup_failed_ &&
+                         !recovery_paused_ && state_ != SdCardPolicy::State::BoardUnavailable;
+    if (allowed) {
+        recovery_.request(millis());
+        io_blocked_.store(true);
+    }
+    unlockStatus();
+    return allowed;
+}
+
+void SdCardManager::poll(uint32_t now, bool paused) {
+    recovery_paused_.store(paused || WakePowerGuard::backgroundPaused(now));
+    if (recovery_paused_ || worker_running_) return;
+    lockStatus();
+    const bool start = recovery_.start(now);
+    if (start) worker_running_.store(true);
+    unlockStatus();
+    if (!start) return;
+#ifndef UNIT_TEST
+    if (xTaskCreate(recoveryTask, "sd_recovery", 6144, this, 1, nullptr) != pdPASS) {
+        lockStatus();
+        recovery_.defer(now);
+        unlockStatus();
+        worker_running_.store(false);
+        LOGW("SD", "recovery deferred: task allocation failed");
+    }
+#endif
+}
+
+void SdCardManager::recoveryTask(void *self) {
+    static_cast<SdCardManager *>(self)->recover();
+#ifndef UNIT_TEST
+    vTaskDelete(nullptr);
+#endif
+}
+
+void SdCardManager::recover() {
+    // Atomically admit this worker against cross-core backlight wake. The lease
+    // covers teardown, CH422G writes and mounting, so a later wake waits for us.
+    // It also rejects a wake that started after poll() dispatched this task.
+    WakePowerGuard::Activity wake_activity = WakePowerGuard::tryAcquireActivity(millis());
+    // Do not interrupt an open CSV stream. New file access is already gated.
+    if (!wake_activity || recovery_paused_ || !lockRaw(0)) {
+        lockStatus();
+        recovery_.defer(millis());
+        unlockStatus();
+        worker_running_.store(false);
+        return;
+    }
+    if (recovery_paused_) {
+        unlock();
+        lockStatus();
+        recovery_.defer(millis());
+        unlockStatus();
+        worker_running_.store(false);
+        return;
+    }
+    mount_retryable_ = false;
+    const bool ok = unmountLocked() && mountLocked();
+    lockStatus();
+    recovery_.mountResult(ok, !cleanup_failed_ && mount_retryable_, millis());
+    if (ok) {
+        write_verification_pending_ = true;
+        recovered_.store(true);
+    }
+    io_blocked_.store(!ok);
+    unlockStatus();
+    unlock();
+    LOGI("SD", "recovery %s", ok ? "mounted; awaiting history write" : "failed");
+    worker_running_.store(false);
+}
+
+bool SdCardManager::waitForRecoveryIdle(uint32_t timeout_ms) const {
+#ifdef UNIT_TEST
+    (void)timeout_ms;
+    return recoveryIdle();
+#else
+    const uint32_t started = millis();
+    while (worker_running_) {
+        if (millis() - started >= timeout_ms) return false;
+        vTaskDelay(pdMS_TO_TICKS(1));
+    }
+    return true;
+#endif
+}
+
+#ifdef UNIT_TEST
+void SdCardManager::runRecoveryForTest() {
+    if (worker_running_) recover();
+}
+#endif
+
 SdCardManager::Status SdCardManager::status() const {
     Status result{};
+    lockStatus();
     result.state = state_;
     result.mounted = mounted_;
+    result.ready = isReady();
     result.attempted = attempted_;
     result.mount_point = kMountPoint;
     result.last_error = last_error_;
     result.last_error_code = last_error_code_;
-#ifndef UNIT_TEST
-    if (card_) {
-        result.card_size_bytes =
-            static_cast<uint64_t>(card_->csd.capacity) * static_cast<uint64_t>(card_->csd.sector_size);
-    }
-    if (status_mutex_) {
-        xSemaphoreTake(status_mutex_, portMAX_DELAY);
-    }
-#endif
+    result.card_size_bytes = card_size_bytes_;
+    result.can_reconnect = attempted_ && !cleanup_failed_ && !recovery_paused_ &&
+                           state_ != SdCardPolicy::State::BoardUnavailable;
+    result.recovery_pending = recovery_.pending();
+    result.recovering = recovery_.active();
+    result.recovery_paused = recovery_paused_;
+    result.recovery_blocked = recovery_.blocked() || cleanup_failed_ || media_changed_;
+    result.recovery_retry_ms = recovery_.remainingMs(millis());
+    result.recovery_attempts = recovery_.attempts();
+    result.recovery_successes = recovery_.successes();
+    result.write_verification_pending = write_verification_pending_;
+    result.has_successful_write = has_successful_write_;
+    result.last_write_age_ms = has_successful_write_ ? millis() - last_write_success_ms_ : 0;
+    copy_text(result.first_error_operation, sizeof(result.first_error_operation), first_error_operation_);
+    copy_text(result.first_error_stage, sizeof(result.first_error_stage), first_error_stage_);
+    result.first_error_code = first_error_code_;
+    result.first_error_ms = first_error_ms_;
+    result.first_error_domain = first_error_domain_;
     result.runtime_healthy = runtime_healthy_;
     result.write_fault = write_fault_;
     result.runtime_failure_kind = last_failure_kind_;
@@ -483,11 +711,7 @@ SdCardManager::Status SdCardManager::status() const {
     result.busy_count = busy_count_;
     result.filesystem_total_bytes = filesystem_total_bytes_;
     result.filesystem_free_bytes = filesystem_free_bytes_;
-#ifndef UNIT_TEST
-    if (status_mutex_) {
-        xSemaphoreGive(status_mutex_);
-    }
-#endif
+    unlockStatus();
     return result;
 }
 
@@ -510,12 +734,17 @@ bool SdCardManager::ensureParentDirsLocked(const char *relative_path, const char
         if (!path_has_parent_char(path[i])) {
             continue;
         }
-        String dir = path.substring(0, i);
+        String dir(path.c_str(), static_cast<size_t>(i));
         if (dir.length() <= strlen(kMountPoint)) {
             continue;
         }
         errno = 0;
-        if (mkdir(dir.c_str(), 0775) != 0 && errno != EEXIST) {
+#if defined(UNIT_TEST) && defined(_WIN32)
+        const int mkdir_result = _mkdir(dir.c_str());
+#else
+        const int mkdir_result = mkdir(dir.c_str(), 0775);
+#endif
+        if (mkdir_result != 0 && errno != EEXIST) {
             const int error_code = current_errno_or_io();
             recordFailure(operation, "mkdir", error_code, classifyErrno(error_code), true);
             return false;
@@ -630,7 +859,7 @@ void SdCardManager::updateSpaceInfoLocked() {
 bool SdCardManager::fileInfoUnlocked(const char *path, bool &exists, size_t &out_size) const {
     exists = false;
     out_size = 0;
-    if (!mounted_ || !path) {
+    if (!path) {
         recordFailure("stat", "validate", EINVAL, DailyStorageFailureKind::Invalid, false);
         return false;
     }
@@ -684,7 +913,7 @@ bool SdCardManager::fileSize(const char *path, size_t &out_size) const {
 }
 
 bool SdCardManager::appendText(const char *path, const char *text) {
-    if (!mounted_ || !path || !text) {
+    if (!path || !text) {
         recordFailure("append", "validate", EINVAL, DailyStorageFailureKind::Invalid, true);
         return false;
     }
@@ -716,7 +945,7 @@ bool SdCardManager::appendText(const char *path, const char *text) {
         error_code = current_errno_or_io();
         stage = "flush";
     }
-    if (ok && fsync(fileno(file)) != 0) {
+    if (ok && sync_file(file) != 0) {
         ok = false;
         error_code = current_errno_or_io();
         stage = "sync";
@@ -740,7 +969,7 @@ bool SdCardManager::appendUniqueTextBlockAtomic(const char *path,
                                                 const char *unique_line_prefix,
                                                 const char *header,
                                                 const char *block) {
-    if (!mounted_ || !path || !unique_line_prefix || unique_line_prefix[0] == '\0' || !block) {
+    if (!path || !unique_line_prefix || unique_line_prefix[0] == '\0' || !block) {
         recordFailure("daily_csv", "validate", EINVAL, DailyStorageFailureKind::Invalid, true);
         return false;
     }
@@ -847,7 +1076,7 @@ bool SdCardManager::appendUniqueTextBlockAtomic(const char *path,
         error_code = current_errno_or_io();
         stage = "flush_temp";
     }
-    if (ok && fsync(fileno(target)) != 0) {
+    if (ok && sync_file(target) != 0) {
         ok = false;
         error_code = current_errno_or_io();
         stage = "sync_temp";
@@ -881,7 +1110,7 @@ bool SdCardManager::appendUniqueTextBlockAtomic(const char *path,
 bool SdCardManager::removeDailyCsvRowsOnOrAfterAtomic(const char *path,
                                                        const char *cutoff_iso_day) {
     constexpr const char *kOperation = "daily_csv_prune";
-    if (!mounted_ || !path || !cutoff_iso_day || strlen(cutoff_iso_day) != 10U ||
+    if (!path || !cutoff_iso_day || strlen(cutoff_iso_day) != 10U ||
         !is_valid_iso_day(cutoff_iso_day)) {
         recordFailure(kOperation, "validate", EINVAL, DailyStorageFailureKind::Invalid, true);
         return false;
@@ -1018,7 +1247,7 @@ bool SdCardManager::removeDailyCsvRowsOnOrAfterAtomic(const char *path,
         error_code = current_errno_or_io();
         stage = "flush_temp";
     }
-    if (ok && fsync(fileno(target)) != 0) {
+    if (ok && sync_file(target) != 0) {
         ok = false;
         error_code = current_errno_or_io();
         stage = "sync_temp";
@@ -1078,7 +1307,7 @@ bool SdCardManager::removeDailyCsvRowsOnOrAfterAtomic(const char *path,
 
 bool SdCardManager::readBinary(const char *path, void *out, size_t len, size_t &out_len) const {
     out_len = 0;
-    if (!mounted_ || !path || !out) {
+    if (!path || !out) {
         recordFailure("state_read", "validate", EINVAL, DailyStorageFailureKind::Invalid, false);
         return false;
     }
@@ -1118,7 +1347,7 @@ bool SdCardManager::readBinary(const char *path, void *out, size_t len, size_t &
 }
 
 bool SdCardManager::writeBinaryAtomic(const char *path, const void *data, size_t len) {
-    if (!mounted_ || !path || !data) {
+    if (!path || !data) {
         recordFailure("state_write", "validate", EINVAL, DailyStorageFailureKind::Invalid, true);
         return false;
     }
@@ -1154,7 +1383,7 @@ bool SdCardManager::writeBinaryAtomic(const char *path, const void *data, size_t
         error_code = current_errno_or_io();
         stage = "flush_temp";
     }
-    if (ok && fsync(fileno(file)) != 0) {
+    if (ok && sync_file(file) != 0) {
         ok = false;
         error_code = current_errno_or_io();
         stage = "sync_temp";
@@ -1183,7 +1412,7 @@ bool SdCardManager::writeBinaryAtomic(const char *path, const void *data, size_t
 }
 
 bool SdCardManager::removeFile(const char *path) {
-    if (!mounted_ || !path) {
+    if (!path) {
         recordFailure("remove", "validate", EINVAL, DailyStorageFailureKind::Invalid, true);
         return false;
     }
@@ -1259,7 +1488,7 @@ bool SdCardManager::removeFile(const char *path) {
 }
 
 FILE *SdCardManager::openReadUnlocked(const char *relative_path) const {
-    if (!mounted_ || !relative_path) {
+    if (!relative_path) {
         recordFailure("open_read", "validate", EINVAL, DailyStorageFailureKind::Invalid, false);
         return nullptr;
     }
@@ -1275,16 +1504,6 @@ FILE *SdCardManager::openReadUnlocked(const char *relative_path) const {
         return nullptr;
     }
     recordSuccess("open_read", false);
-    return file;
-}
-
-FILE *SdCardManager::openRead(const char *relative_path) const {
-    if (!lock()) {
-        recordFailure("open_read", "lock", EBUSY, DailyStorageFailureKind::Busy, false);
-        return nullptr;
-    }
-    FILE *file = openReadUnlocked(relative_path);
-    unlock();
     return file;
 }
 

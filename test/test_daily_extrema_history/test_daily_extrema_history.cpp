@@ -31,6 +31,7 @@ time_t local_epoch(int year, int month, int day, int hour, int minute) {
 class FakeDailyStorage final : public DailyHistoryStorage {
 public:
     bool ready = true;
+    bool history_session_ready = false;
     bool fail_append = false;
     bool fail_prune = false;
     bool fail_prune_sidecar_cleanup = false;
@@ -46,6 +47,7 @@ public:
     std::map<std::string, std::vector<uint8_t>> binary_files;
 
     bool isReady() const override { return ready; }
+    void noteHistorySessionReady() override { history_session_ready = true; }
 
     bool fileInfo(const char *path, bool &exists, size_t &out_size) const override {
         exists = false;
@@ -1434,8 +1436,83 @@ void test_daily_extrema_uses_older_snapshot_when_newest_is_corrupt() {
     TEST_ASSERT_TRUE(csv.find("1200") == std::string::npos);
 }
 
+void test_daily_extrema_exports_sen0321_in_ppb() {
+    FakeDailyStorage storage; DailyExtremaHistory history; history.begin(storage, true);
+    SensorData data{}; data.optional_gas_sensor_present = true; data.optional_gas_valid = true;
+    data.optional_gas_type = static_cast<uint8_t>(DfrOptionalGasSensor::OptionalGasType::O3_SEN0321);
+    data.optional_gas_ppm = 0.037f; history.update(data, getMillis());
+    setNowEpoch(kDayTwoNoon); history.update(data, getMillis());
+    const std::string csv = storage.text_files[DailyExtremaHistory::kDailyCsvPath];
+    TEST_ASSERT_TRUE(csv.find("2026-06-27,optional_gas,ppb,37,") != std::string::npos);
+}
+
+void test_recovery_keeps_ram_samples_and_pending_days_then_saves_once() {
+    FakeDailyStorage storage;
+    DailyExtremaHistory history;
+    history.begin(storage, true);
+    SensorData data;
+    set_basic_data(data, 700, 21.0f, 10.0f);
+    history.update(data, getMillis());
+    storage.ready = false;
+    advanceMillis(1000);
+    set_basic_data(data, 1200, 23.0f, 15.0f);
+    history.update(data, getMillis());
+    setNowEpoch(kDayTwoNoon);
+    advanceMillis(1000);
+    history.update(data, getMillis());
+    TEST_ASSERT_EQUAL_UINT8(1, history.pendingDayCount());
+    const uint32_t samples = history.currentSampleCount();
+    String before;
+    TEST_ASSERT_TRUE(history.currentDayCsv(before));
+    storage.ready = true;
+    history.storageRecovered();
+    TEST_ASSERT_EQUAL_UINT32(samples, history.currentSampleCount());
+    String after;
+    TEST_ASSERT_TRUE(history.currentDayCsv(after));
+    TEST_ASSERT_EQUAL_STRING(before.c_str(), after.c_str());
+    history.poll(getMillis());
+    TEST_ASSERT_TRUE(history.lastWriteOk());
+    TEST_ASSERT_EQUAL_UINT8(0, history.pendingDayCount());
+    const std::string csv = storage.text_files[DailyExtremaHistory::kDailyCsvPath];
+    TEST_ASSERT_TRUE(csv.find("2026-06-27,co2,ppm,700") != std::string::npos);
+    TEST_ASSERT_TRUE(csv.find("1200") != std::string::npos);
+    history.storageRecovered();
+    history.poll(getMillis());
+    TEST_ASSERT_EQUAL_STRING(csv.c_str(), storage.text_files[DailyExtremaHistory::kDailyCsvPath].c_str());
+    DailyExtremaHistory reboot;
+    reboot.begin(storage, true);
+    reboot.update(data, getMillis());
+    TEST_ASSERT_EQUAL_UINT32(20260628, reboot.currentDayKey());
+    TEST_ASSERT_TRUE(reboot.currentSampleCount() >= samples);
+}
+
+void test_unreadable_boot_history_does_not_claim_ram_matches_card() {
+    FakeDailyStorage storage;
+    storage.fail_info_path = DailyExtremaHistory::kStatePathA;
+    DailyExtremaHistory history;
+    history.begin(storage, true);
+    SensorData data;
+    set_basic_data(data, 700, 21.0f, 10.0f);
+    history.update(data, getMillis());
+    TEST_ASSERT_FALSE(storage.history_session_ready);
+    storage.ready = false;
+    history.update(data, getMillis());
+    TEST_ASSERT_TRUE(history.currentSampleCount() > 0);
+    TEST_ASSERT_FALSE(storage.history_session_ready);
+    // Normal boot with readable media is the only restore acknowledgement.
+    storage.ready = true;
+    storage.fail_info_path.clear();
+    DailyExtremaHistory reboot;
+    reboot.begin(storage, true);
+    reboot.update(data, getMillis());
+    TEST_ASSERT_TRUE(storage.history_session_ready);
+}
+
 int main(int, char **) {
     UNITY_BEGIN();
+    RUN_TEST(test_unreadable_boot_history_does_not_claim_ram_matches_card);
+    RUN_TEST(test_recovery_keeps_ram_samples_and_pending_days_then_saves_once);
+    RUN_TEST(test_daily_extrema_exports_sen0321_in_ppb);
     RUN_TEST(test_daily_extrema_tracks_min_max_and_peak_times);
     RUN_TEST(test_daily_extrema_ignores_invalid_values);
     RUN_TEST(test_daily_extrema_exports_current_day_without_finalizing);

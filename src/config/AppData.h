@@ -15,7 +15,7 @@ struct SensorData {
     float pressure_delta_24h = 0.0f;
     float hcho = 0.0f;
     float co_ppm = 0.0f;
-    float optional_gas_ppm = 0.0f;
+    float optional_gas_ppm = 0.0f; // canonical ppm (or %Vol for O2), never display ppb
     float nh3_ppm = 0.0f;
     int co2 = 0;
     int voc_index = 0;

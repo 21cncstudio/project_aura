@@ -189,6 +189,7 @@ private:
     bool mqtt_anonymous_ = false;
     bool mqtt_tls_enabled_ = false;
     bool mqtt_discovery_sent_ = false;
+    uint8_t mqtt_discovery_optional_type_ = 0;
     uint32_t mqtt_last_attempt_ms_ = 0;
     uint32_t mqtt_last_publish_ms_ = 0;
     bool mqtt_publish_requested_ = false;

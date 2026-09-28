@@ -125,12 +125,15 @@ void fillJson(ArduinoJson::JsonObject root, const Payload &payload) {
         data.optional_gas_valid &&
         std::isfinite(data.optional_gas_ppm) &&
         data.optional_gas_ppm >= 0.0f;
-    WebJsonUtils::jsonSetFloatOrNull(sensors, "optional_gas", optional_gas_valid, data.optional_gas_ppm);
+    WebJsonUtils::jsonSetFloatOrNull(sensors, "optional_gas", optional_gas_valid,
+                                    DfrOptionalGasSensor::displayValue(optional_gas_type, data.optional_gas_ppm));
     if (optional_gas_present) {
         const uint8_t optional_gas_decimals =
-            data.optional_gas_ppm_decimals <= 2 ? data.optional_gas_ppm_decimals : 1;
+            optional_gas_type == DfrOptionalGasSensor::OptionalGasType::O3_SEN0321 ? 0 :
+                (data.optional_gas_ppm_decimals <= 2 ? data.optional_gas_ppm_decimals : 1);
         sensors["optional_gas_decimals"] = optional_gas_decimals;
-        sensors["optional_gas_ppm_decimals"] = optional_gas_decimals;
+        sensors["optional_gas_ppm_decimals"] =
+            optional_gas_type == DfrOptionalGasSensor::OptionalGasType::O3_SEN0321 ? 3 : optional_gas_decimals;
         sensors["optional_gas_unit"] = DfrOptionalGasSensor::unitForType(optional_gas_type);
     } else {
         sensors["optional_gas_decimals"] = nullptr;

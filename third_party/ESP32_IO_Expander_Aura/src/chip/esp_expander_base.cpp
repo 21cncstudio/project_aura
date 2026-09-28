@@ -290,6 +290,8 @@ bool Base::pinMode(uint8_t pin, uint8_t mode)
 
 bool Base::digitalWrite(uint8_t pin, uint8_t value)
 {
+    // SD chip select and backlight share the output register.
+    std::lock_guard<std::mutex> output_guard(_output_mutex);
     ESP_UTILS_LOG_TRACE_ENTER_WITH_THIS();
 
     ESP_UTILS_CHECK_FALSE_RETURN(isOverState(State::BEGIN), false, "Not begun");
@@ -344,6 +346,8 @@ bool Base::multiPinMode(uint32_t pin_mask, uint8_t mode)
 
 bool Base::multiDigitalWrite(uint32_t pin_mask, uint8_t value)
 {
+    // SD chip select and backlight share the output register.
+    std::lock_guard<std::mutex> output_guard(_output_mutex);
     ESP_UTILS_LOG_TRACE_ENTER_WITH_THIS();
 
     ESP_UTILS_CHECK_FALSE_RETURN(isOverState(State::BEGIN), false, "Not begun");

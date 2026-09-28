@@ -436,8 +436,59 @@ void test_discovery_entity_object_id_sanitizes_base_topic() {
     TEST_ASSERT_EQUAL_STRING("project_aura_kitchen_1_fan_auto", object_id.c_str());
 }
 
+void test_sen0321_mqtt_uses_integer_ppb_and_null_when_invalid() {
+    SensorData data{};
+    data.optional_gas_sensor_present = true; data.optional_gas_valid = true;
+    data.optional_gas_ppm = 0.037f; data.optional_gas_ppm_decimals = 3;
+    data.optional_gas_type = static_cast<uint8_t>(DfrOptionalGasSensor::OptionalGasType::O3_SEN0321);
+    String payload = MqttPayloadBuilder::buildStatePayload(data, FanStateSnapshot{}, false, false, false, false);
+    assert_contains(payload, "\"optional_gas\":37,");
+    assert_contains(payload, "\"o3\":37,");
+    assert_contains(payload, "\"optional_gas_unit\":\"ppb\"");
+    assert_contains(payload, "\"optional_gas_decimals\":0");
+    assert_contains(payload, "\"nh3\":null");
+    data.optional_gas_valid = false;
+    payload = MqttPayloadBuilder::buildStatePayload(data, FanStateSnapshot{}, false, false, false, false);
+    assert_contains(payload, "\"o3\":null");
+    assert_contains(payload, "\"optional_gas\":null");
+}
+
+void test_optional_gas_discovery_preserves_legacy_identity_unit_and_scale() {
+    using Type = DfrOptionalGasSensor::OptionalGasType;
+    for (Type type : {Type::None, Type::NH3, Type::SO2, Type::NO2, Type::H2S, Type::O3, Type::O2, Type::O3_SEN0321}) {
+        const auto profile = MqttPayloadBuilder::optionalGasDiscoveryProfile(static_cast<uint8_t>(type));
+        const String discovery = MqttPayloadBuilder::buildDiscoverySensorPayload(
+            "aura_test", "Aura", "aura/test", "optional_gas", "aura_test_optional_gas",
+            "Optional Gas", profile.legacy_unit, "", "measurement", profile.legacy_value_template, "mdi:molecule");
+        assert_contains(discovery, "\"unique_id\":\"aura_test_optional_gas\"");
+        assert_contains(discovery, "\"value_template\":\"{{ value_json.optional_gas_canonical }}\"");
+        TEST_ASSERT_NULL(strstr(discovery.c_str(), "unit_of_measurement"));
+        TEST_ASSERT_EQUAL_STRING(type == Type::O3_SEN0321 ? "ppb" : "ppm", profile.ozone_unit);
+
+        SensorData data{};
+        data.optional_gas_sensor_present = true; data.optional_gas_valid = true;
+        data.optional_gas_type = static_cast<uint8_t>(type);
+        data.optional_gas_ppm = 0.052f; data.optional_gas_ppm_decimals = 2;
+        if (type == Type::O2) { data.optional_gas_ppm = 20.9f; data.optional_gas_ppm_decimals = 1; }
+        if (type == Type::O3_SEN0321) data.optional_gas_ppm_decimals = 3;
+        const String state = MqttPayloadBuilder::buildStatePayload(data, false, false, false, false);
+        if (type == Type::None) assert_contains(state, "\"optional_gas_canonical\":null");
+        else if (type == Type::O2) assert_contains(state, "\"optional_gas_canonical\":20.9,");
+        else if (type == Type::O3_SEN0321) {
+            assert_contains(state, "\"optional_gas_canonical\":0.052,");
+            assert_contains(state, "\"optional_gas\":52,");
+            assert_contains(state, "\"o3\":52,");
+        } else assert_contains(state, "\"optional_gas_canonical\":0.05,");
+        data.optional_gas_valid = false;
+        assert_contains(MqttPayloadBuilder::buildStatePayload(data, false, false, false, false),
+                        "\"optional_gas_canonical\":null");
+    }
+}
+
 int main(int, char **) {
     UNITY_BEGIN();
+    RUN_TEST(test_optional_gas_discovery_preserves_legacy_identity_unit_and_scale);
+    RUN_TEST(test_sen0321_mqtt_uses_integer_ppb_and_null_when_invalid);
     RUN_TEST(test_state_payload_includes_pm05_pm1_pm4_and_co_null_without_sensor);
     RUN_TEST(test_state_payload_includes_co_when_sensor_present_and_valid);
     RUN_TEST(test_state_payload_buffer_builder_matches_string_payload);

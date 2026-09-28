@@ -7,6 +7,7 @@
 #pragma once
 
 #include <optional>
+#include <mutex>
 #include <variant>
 #include "AuraI2c.h"
 #include "port/esp_io_expander.h"
@@ -313,6 +314,7 @@ protected:
 private:
     HostFullConfig *getHostFullConfig();
 
+    std::mutex _output_mutex;
     State _state = State::DEINIT;
     bool _is_host_skip_init = false;
     Config _config = {};

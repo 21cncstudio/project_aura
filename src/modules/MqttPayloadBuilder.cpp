@@ -405,6 +405,7 @@ const char *optional_gas_unit_text(const SensorData &data) {
 }
 
 int optional_gas_ppm_decimals(const SensorData &data, float value) {
+    if (optional_gas_type_from_data(data) == OptionalGasType::O3_SEN0321) return 0;
     const int decimals = data.optional_gas_ppm_decimals <= 2 ? data.optional_gas_ppm_decimals : 1;
     if (decimals == 2 && std::isfinite(value) && value >= 1.0f) {
         return 1;
@@ -429,6 +430,11 @@ String buildDiscoveryEntityObjectId(const String &base_topic,
         entity_object_id = "project_aura";
     }
     return entity_object_id;
+}
+
+OptionalGasDiscoveryProfile optionalGasDiscoveryProfile(uint8_t type) {
+    return {"", "{{ value_json.optional_gas_canonical }}",
+            static_cast<OptionalGasType>(type) == OptionalGasType::O3_SEN0321 ? "ppb" : "ppm"};
 }
 
 String buildDiscoverySensorPayload(const String &device_id,
@@ -727,7 +733,8 @@ size_t buildStatePayload(char *out,
     const bool so2_valid = optional_gas_value_valid_for_type(data, OptionalGasType::SO2);
     const bool no2_valid = optional_gas_value_valid_for_type(data, OptionalGasType::NO2);
     const bool h2s_valid = optional_gas_value_valid_for_type(data, OptionalGasType::H2S);
-    const bool o3_valid = optional_gas_value_valid_for_type(data, OptionalGasType::O3);
+    const bool o3_valid = optional_gas_value_valid(data) &&
+        DfrOptionalGasSensor::isOzone(optional_gas_type_from_data(data));
     const bool o2_valid = optional_gas_value_valid_for_type(data, OptionalGasType::O2);
     const bool optional_gas_valid = optional_gas_value_valid(data);
     const bool optional_gas_known = optional_gas_type_known(data);
@@ -743,16 +750,21 @@ size_t buildStatePayload(char *out,
     format_fan_timer_remaining(fan_timer_remaining_text,
                                sizeof(fan_timer_remaining_text),
                                fan_timer_remaining);
+    const float optional_value = DfrOptionalGasSensor::displayValue(optional_gas_type_from_data(data), data.optional_gas_ppm);
     const int optional_decimals = optional_gas_ppm_decimals(data, data.optional_gas_ppm);
     const int nh3_decimals = optional_gas_ppm_decimals(data, data.nh3_ppm);
     if (!add_float("co", co_valid, data.co_ppm, 1) ||
-        !add_float("optional_gas", optional_gas_valid, data.optional_gas_ppm, optional_decimals) ||
+        !add_float("optional_gas", optional_gas_valid, optional_value, optional_decimals) ||
+        // Legacy HA entity: canonical ppm (O2: %Vol), regardless of display units.
+        !add_float("optional_gas_canonical", optional_gas_valid, data.optional_gas_ppm,
+                   optional_gas_type_from_data(data) == OptionalGasType::O3_SEN0321 ? 3 : optional_decimals) ||
         !add_nullable_cstr("optional_gas_type", optional_gas_type_text(data)) ||
         !add_nullable_cstr("optional_gas_unit", optional_gas_unit_text(data)) ||
         !add_int("optional_gas_decimals", optional_gas_known, optional_decimals) ||
-        !add_int("optional_gas_ppm_decimals", optional_gas_known, optional_decimals) ||
+        !add_int("optional_gas_ppm_decimals", optional_gas_known,
+                 optional_gas_type_from_data(data) == OptionalGasType::O3_SEN0321 ? 3 : optional_decimals) ||
         !add_float("nh3", nh3_valid, data.nh3_ppm, nh3_decimals) ||
-        !add_float("o3", o3_valid, data.optional_gas_ppm, optional_decimals) ||
+        !add_float("o3", o3_valid, optional_value, optional_decimals) ||
         !add_float("so2", so2_valid, data.optional_gas_ppm, optional_decimals) ||
         !add_float("no2", no2_valid, data.optional_gas_ppm, optional_decimals) ||
         !add_float("h2s", h2s_valid, data.optional_gas_ppm, optional_decimals) ||

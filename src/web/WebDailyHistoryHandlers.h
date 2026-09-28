@@ -11,6 +11,7 @@
 namespace WebDailyHistoryHandlers {
 
 void handleStatus(WebHandlerContext &context, bool ota_busy, const char *ota_busy_json);
+void handleReconnect(WebHandlerContext &context, bool ota_busy, const char *ota_busy_json);
 void handleCsv(WebHandlerContext &context, bool ota_busy, const char *ota_busy_json);
 void handleCurrentDayCsv(WebHandlerContext &context, bool ota_busy, const char *ota_busy_json);
 void handleClearHistory(WebHandlerContext &context, bool ota_busy, const char *ota_busy_json);

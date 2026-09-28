@@ -45,6 +45,7 @@ public:
 #endif
     void poll(uint32_t now_ms);
     void flush();
+    void storageRecovered();
 
     bool hasCurrentDay() const;
     uint32_t currentDayKey() const;

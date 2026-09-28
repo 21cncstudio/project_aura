@@ -31,6 +31,7 @@ static void resetDriverStates() {
     Dps310::state() = Dps310TestState();
     Sfa30::state() = Sfa30TestState();
     Sfa40::state() = Sfa40TestState();
+    Sen0321::state() = Sen0321TestState();
     Sen0466::state() = Sen0466TestState();
     DfrOptionalGasSensor::state() = DfrOptionalGasSensorTestState();
 }
@@ -1587,8 +1588,29 @@ void test_sensor_manager_control_recovery_stops_after_five_attempts() {
     TEST_ASSERT_EQUAL(1 + StartupProbePolicy::kMaxAttempts, Sen66::state().late_start_begin_count);
     TEST_ASSERT_FALSE(manager.isOk());
 }
+void test_sen0321_manager_keeps_ppm_precision_and_invalidates_stale() {
+    StorageManager storage; storage.begin();
+    PressureHistory history; SensorManager manager; SensorData data{};
+    Sen0321::state().present = true;
+    manager.begin(storage, 0.0f, 0.0f);
+    setMillis(1000); Sen0321::state().valid = true;
+    Sen0321::state().ppm = 0.037f; Sen0321::state().last_data_ms = getMillis();
+    manager.poll(data, storage, history, true);
+    TEST_ASSERT_TRUE(data.optional_gas_sensor_present); TEST_ASSERT_TRUE(data.optional_gas_valid);
+    TEST_ASSERT_EQUAL_UINT8(7, data.optional_gas_type);
+    TEST_ASSERT_EQUAL_UINT8(3, data.optional_gas_ppm_decimals);
+    TEST_ASSERT_FLOAT_WITHIN(0.00001f, 0.037f, data.optional_gas_ppm);
+    Sen0321::state().ppm = 0.038f; advanceMillis(1000); Sen0321::state().last_data_ms = getMillis();
+    manager.poll(data, storage, history, true);
+    TEST_ASSERT_FLOAT_WITHIN(0.00001f, 0.038f, data.optional_gas_ppm);
+    advanceMillis(600000); manager.poll(data, storage, history, true);
+    TEST_ASSERT_FALSE(data.optional_gas_valid);
+    TEST_ASSERT_FALSE(data.nh3_valid);
+}
+
 int main(int, char **) {
     UNITY_BEGIN();
+    RUN_TEST(test_sen0321_manager_keeps_ppm_precision_and_invalidates_stale);
     RUN_TEST(test_history_freshness_counts_equal_new_acquisitions_once);
     RUN_TEST(test_sen69c_history_counts_values_and_particle_numbers_separately);
     RUN_TEST(test_sensor_manager_recovers_after_failed_asc_restart);

@@ -14,6 +14,7 @@ void setCommandAdvanceMs(uint32_t advance_ms);
 void setCommandRead(uint8_t addr, uint16_t cmd, const uint8_t *data, size_t len);
 void setRegister(uint8_t addr, uint8_t reg, uint8_t value);
 void setRegisters(uint8_t addr, uint8_t reg, const uint8_t *data, size_t len);
+void setRawReadLimit(uint8_t addr, size_t length);
 void setReadWrap(uint8_t addr, uint8_t last_reg);
 void setReadFailure(uint8_t addr, uint8_t reg, bool fail);
 void setReadFailureOnCall(uint8_t addr, uint8_t reg, uint32_t call_number);

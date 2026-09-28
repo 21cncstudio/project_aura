@@ -7,6 +7,7 @@
 #include "web/WebChartsApiUtils.h"
 
 #include <cmath>
+#include <cstring>
 
 #include "config/AppConfig.h"
 #include "web/WebChartsUtils.h"
@@ -84,6 +85,9 @@ void fillJson(ArduinoJson::JsonObject root,
     ArduinoJson::JsonArray series = root["series"].to<ArduinoJson::JsonArray>();
     for (size_t i = 0; i < metric_count; ++i) {
         const WebChartsUtils::ChartMetricSpec &spec = metrics[i];
+        // History is canonical ppm; only the display API converts SEN0321 to ppb.
+        const float scale = spec.metric == ChartsHistory::METRIC_OPTIONAL_GAS &&
+                            optional_gas_unit && strcmp(optional_gas_unit, "ppb") == 0 ? 1000.0f : 1.0f;
         ArduinoJson::JsonObject entry = series.add<ArduinoJson::JsonObject>();
         entry["key"] = spec.key;
         entry["unit"] = spec.metric == ChartsHistory::METRIC_OPTIONAL_GAS && optional_gas_unit
@@ -92,7 +96,7 @@ void fillJson(ArduinoJson::JsonObject root,
 
         float latest_value = 0.0f;
         if (history_latest_metric(history, spec.metric, latest_value)) {
-            entry["latest"] = latest_value;
+            entry["latest"] = latest_value * scale;
         } else {
             entry["latest"] = nullptr;
         }
@@ -114,7 +118,7 @@ void fillJson(ArduinoJson::JsonObject root,
                 history.entryFromOldest(start_offset + slot - missing_prefix, record) &&
                 record.kind == ChartsHistory::Summary && (record.valid_mask & ChartsHistory::metricBit(spec.metric));
             if (summary) {
-                minima.add(record.minimum[spec.metric]); maxima.add(record.maximum[spec.metric]);
+                minima.add(record.minimum[spec.metric] * scale); maxima.add(record.maximum[spec.metric] * scale);
                 counts.add(record.samples[spec.metric]); first.add(record.first_second[spec.metric]);
                 last.add(record.last_second[spec.metric]);
             } else if (include_statistics) {
@@ -133,7 +137,7 @@ void fillJson(ArduinoJson::JsonObject root,
                 values.add(nullptr);
                 continue;
             }
-            values.add(value);
+            values.add(value * scale);
         }
     }
 }
@@ -141,6 +145,7 @@ void fillJson(ArduinoJson::JsonObject root,
 void fillHistoryJson(ArduinoJson::JsonObject root, const HistoryView &history,
                      uint32_t after_epoch, uint16_t limit) {
     root["schema"] = "aura.history.v3";
+    root["optional_gas_value_units"] = "ppm (O2: %Vol)";
     root["step_s"] = kChartStepS;
     root["success"] = true;
     auto records = root["records"].to<ArduinoJson::JsonArray>();

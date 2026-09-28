@@ -11,6 +11,7 @@ struct DfrOptionalGasSensorTestState {
         H2S,
         O3,
         O2 = 6,
+        O3_SEN0321 = 7,
     };
 
     bool present = false;
@@ -78,6 +79,7 @@ public:
                 return "NO2";
             case OptionalGasType::H2S:
                 return "H2S";
+            case OptionalGasType::O3_SEN0321:
             case OptionalGasType::O3:
                 return "O3";
             case OptionalGasType::O2:
@@ -88,7 +90,15 @@ public:
         }
     }
 
+    static float displayScale(OptionalGasType type) {
+        return type == OptionalGasType::O3_SEN0321 ? 1000.0f : 1.0f;
+    }
+    static float displayValue(OptionalGasType type, float ppm) { return ppm * displayScale(type); }
+    static bool isOzone(OptionalGasType type) {
+        return type == OptionalGasType::O3 || type == OptionalGasType::O3_SEN0321;
+    }
     static const char *unitForType(OptionalGasType type) {
+        if (type == OptionalGasType::O3_SEN0321) return "ppb";
         return type == OptionalGasType::O2 ? "%Vol" : "ppm";
     }
 
@@ -98,6 +108,7 @@ public:
             case OptionalGasType::SO2:
             case OptionalGasType::NO2:
             case OptionalGasType::H2S:
+            case OptionalGasType::O3_SEN0321:
             case OptionalGasType::O3:
             case OptionalGasType::O2:
             case OptionalGasType::None:
@@ -114,6 +125,7 @@ public:
             case OptionalGasType::SO2:
             case OptionalGasType::NO2:
                 return 20.0f;
+            case OptionalGasType::O3_SEN0321:
             case OptionalGasType::O3:
                 return 10.0f;
             case OptionalGasType::O2:

@@ -23,7 +23,7 @@ DEFAULT_INVOCATIONS = (
     ("native_test", ()),
     ("native_test_sfa30_driver", ("test_sfa30_driver",)),
     ("native_test_sfa40_driver", ("test_sfa40_driver",)),
-    ("native_test_dfr_optional_gas_driver", ("test_dfr_optional_gas_driver",)),
+    ("native_test_dfr_optional_gas_driver", ("test_dfr_optional_gas_driver", "test_sen0321_driver")),
     ("native_test_gp8403_driver", ("test_gp8403_driver",)),
     ("native_test_i2c_4_3_profile", ("test_i2c_topology", "test_sensor_i2c_routing")),
     ("native_test_i2c_7_profile", (

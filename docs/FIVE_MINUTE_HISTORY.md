@@ -87,8 +87,13 @@ the authenticated/pinned device association, not an arbitrary request field.
 | 12 | PM10 | micrograms/m3 |
 | 13 | Optional gas | ppm, except O2 in percent |
 
-Optional gas types are 1 NH3, 2 SO2, 3 NO2, 4 H2S, 5 O3, 6 O2. Historical records retain
-their original type. The local chart filters older gas types so unlike units cannot be
+Optional gas types are 1 NH3, 2 SO2, 3 NO2, 4 H2S, 5 O3 (legacy module), 6 O2,
+and 7 O3 from SEN0321. Historical records retain their original type.
+SEN0321 still uses canonical ppm in the versioned raw history export; its top-level
+optional_gas_value_units field states the storage units. The ordinary chart API
+(including latest, mean, min and max), UI, daily CSV and live MQTT/state API convert
+SEN0321 values to ppb. Source precision is retained; displayed values use whole ppb.
+Existing type IDs and on-disk record layouts are unchanged. The local chart filters older gas types so unlike units cannot be
 drawn as one series. Hub must split serialized records to its MQTT byte ceiling and keep
 live readings separate from backfill. This API does not yet wire the Hub or Link consumers.
 

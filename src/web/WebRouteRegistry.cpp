@@ -37,6 +37,7 @@ void registerRoutes(WebServerBackend &server) {
     server.onPost("/api/thresholds/reset", thresholds_handle_reset);
     server.onGet("/api/charts", charts_handle_data);
     server.onGet("/api/history/daily/status", daily_history_status_handle);
+    server.onPost("/api/history/sd/reconnect", daily_history_reconnect_handle);
     server.onGet("/api/history/daily.csv", daily_history_csv_handle);
     server.onGet("/api/history/current-day.csv", daily_history_current_day_csv_handle);
     server.onPost("/api/history/clear", daily_history_clear_handle);

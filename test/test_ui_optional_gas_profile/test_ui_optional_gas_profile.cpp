@@ -75,8 +75,24 @@ void test_o2_profile_uses_binary_normal_range_classification() {
                       static_cast<int>(UiOptionalGasProfile::classify(profile, 20.9f, false)));
 }
 
+void test_sen0321_displays_ppb_without_changing_canonical_bands() {
+    const auto type = OptionalGasType::O3_SEN0321;
+    const auto &profile = UiOptionalGasProfile::forType(type);
+    TEST_ASSERT_EQUAL_STRING("ppb", profile.unit);
+    assertFormatValue(type, 0.020f, "20");
+    assertFormatValueWithDecimals(type, 0.037f, 3, "37");
+    assertFormatValue(type, 10.0f, "10000");
+    assertBandContains(type, 0, "<=50 ppb");
+    assertBandContains(type, 2, ">100-500 ppb");
+    TEST_ASSERT_EQUAL(static_cast<int>(UiOptionalGasProfile::Band::Green),
+                      static_cast<int>(UiOptionalGasProfile::classify(profile, 0.050f, true)));
+    TEST_ASSERT_EQUAL(static_cast<int>(UiOptionalGasProfile::Band::Yellow),
+                      static_cast<int>(UiOptionalGasProfile::classify(profile, 0.051f, true)));
+}
+
 int main(int argc, char **argv) {
     UNITY_BEGIN();
+    RUN_TEST(test_sen0321_displays_ppb_without_changing_canonical_bands);
     RUN_TEST(test_optional_gas_values_match_dfrobot_resolution);
     RUN_TEST(test_optional_gas_values_can_use_source_decimal_places);
     RUN_TEST(test_optional_gas_threshold_labels_keep_reference_precision);

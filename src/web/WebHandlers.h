@@ -40,6 +40,7 @@ void thresholds_handle_update();
 void thresholds_handle_reset();
 void charts_handle_data();
 void daily_history_status_handle();
+void daily_history_reconnect_handle();
 void daily_history_csv_handle();
 void daily_history_current_day_csv_handle();
 void daily_history_clear_handle();

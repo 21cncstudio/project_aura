@@ -80,7 +80,11 @@ String format_uint(uint32_t value) {
     return String(buf);
 }
 
-float csv_metric_value(ChartsHistory::Metric metric, float value, bool units_c) {
+float csv_metric_value(ChartsHistory::Metric metric, float value, bool units_c, uint8_t optional_gas_type) {
+    if (metric == ChartsHistory::METRIC_OPTIONAL_GAS) {
+        return DfrOptionalGasSensor::displayValue(
+            static_cast<DfrOptionalGasSensor::OptionalGasType>(optional_gas_type), value);
+    }
     if (units_c) {
         return value;
     }
@@ -115,6 +119,10 @@ const char *csv_metric_unit(const DailyExtremaHistory::MetricDef &def,
 uint8_t csv_metric_decimals(const DailyExtremaHistory::MetricDef &def,
                             bool units_c,
                             uint8_t optional_gas_type) {
+    if (def.metric == ChartsHistory::METRIC_OPTIONAL_GAS &&
+        optional_gas_type == static_cast<uint8_t>(DfrOptionalGasSensor::OptionalGasType::O3_SEN0321)) {
+        return 0;
+    }
     if (def.metric == ChartsHistory::METRIC_OPTIONAL_GAS &&
         optional_gas_type == static_cast<uint8_t>(DfrOptionalGasSensor::OptionalGasType::O2)) {
         return 1;
@@ -680,6 +688,7 @@ bool DailyExtremaHistory::restoreStoredState(uint32_t current_day_key,
         }
     }
     restored_ = true;
+    storage_->noteHistorySessionReady();
 #ifndef UNIT_TEST
     const UBaseType_t stack_free_units = uxTaskGetStackHighWaterMark(nullptr);
     const uint32_t stack_free_bytes =
@@ -1040,6 +1049,18 @@ void DailyExtremaHistory::update(const SensorData &data,
     }
 }
 
+void DailyExtremaHistory::storageRecovered() {
+    ScopedLock guard(*this);
+    if (!guard.locked()) return;
+    // Keep the current day, generations, pending days and cleanup intent intact.
+    // A card mount is not a successful history write.
+    last_save_ms_ = 0;
+    save_retry_pending_ = false;
+    pending_retry_delay_ms_ = 0;
+    if (state_.day_key != 0 || pending_count_ != 0 || csv_cleanup_day_key_ != 0)
+        dirty_ = true;
+}
+
 void DailyExtremaHistory::poll(uint32_t now_ms) {
     ScopedLock guard(*this);
     if (!guard.locked()) {
@@ -1142,12 +1163,12 @@ bool DailyExtremaHistory::appendCsvRowsForState(const PersistedState &state,
         rows += ',';
         rows += csv_metric_unit(def, state.units_c != 0, state.optional_gas_type);
         rows += ',';
-        rows += format_value(csv_metric_value(def.metric, metric.min_value, state.units_c != 0),
+        rows += format_value(csv_metric_value(def.metric, metric.min_value, state.units_c != 0, state.optional_gas_type),
                              csv_metric_decimals(def, state.units_c != 0, state.optional_gas_type));
         rows += ',';
         rows += min_time;
         rows += ',';
-        rows += format_value(csv_metric_value(def.metric, metric.max_value, state.units_c != 0),
+        rows += format_value(csv_metric_value(def.metric, metric.max_value, state.units_c != 0, state.optional_gas_type),
                              csv_metric_decimals(def, state.units_c != 0, state.optional_gas_type));
         rows += ',';
         rows += max_time;

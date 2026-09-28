@@ -719,10 +719,14 @@ const char kDashboardPageTemplateAp[] PROGMEM = R"HTML_DASH_AP(
             <div class="info-row"><span class="info-key">State file</span><span class="info-val" id="sd-state-file">--</span></div>
             <div class="info-row"><span class="info-key">Daily CSV</span><span class="info-val" id="sd-daily-csv">--</span></div>
             <div class="info-row"><span class="info-key">Last write</span><span class="info-val" id="sd-last-write">--</span></div>
+            <div class="info-row"><span class="info-key">Last successful write</span><span class="info-val" id="sd-last-saved">--</span></div>
+            <div class="info-row"><span class="info-key">Recovery</span><span class="info-val" id="sd-recovery">--</span></div>
+            <div class="info-row"><span class="info-key">First error</span><span class="info-val" id="sd-first-error">--</span></div>
             <div class="info-row"><span class="info-key">SD error</span><span class="info-val" id="sd-runtime-error">--</span></div>
           </div>
           <div class="sd-action-row">
             <button class="btn" type="button" id="sdRefreshBtn">Refresh SD</button>
+            <button class="btn" type="button" id="sdReconnectBtn" disabled>Reconnect SD</button>
             <a class="btn btn-cyan link-btn disabled"
                href="/api/history/current-day.csv"
                id="sdExportCurrentBtn"
@@ -736,7 +740,7 @@ const char kDashboardPageTemplateAp[] PROGMEM = R"HTML_DASH_AP(
             <button class="btn btn-danger" type="button" id="sdClearCurrentBtn">Delete current day</button>
             <button class="btn btn-danger" type="button" id="sdClearHistoryBtn">Clear history</button>
           </div>
-          <div class="sd-note" id="sd-note" aria-live="polite">Open System to load SD history status.</div>
+          <div class="sd-note" id="sd-note" role="status" aria-live="polite">Open System to load SD history status.</div>
         </div>
       </div>
       <div class="system-col">
@@ -904,11 +908,10 @@ function fmtSigned(v, d) {
   if (!isNum(v)) return 'N/A';
   return (v > 0 ? '+' : '') + Number(v).toFixed(d);
 }
-function fmtMM(v, unit) {
+function fmtMM(v, unit, digits) {
   if (!isNum(v)) return '-';
-  const s = unit === 'inHg'
-    ? v.toFixed(2)
-    : (Math.abs(v) >= 100 ? v.toFixed(0) : v.toFixed(1));
+  const precision = Number.isInteger(digits) ? digits : (unit === 'inHg' ? 2 : (Math.abs(v) >= 100 ? 0 : 1));
+  const s = v.toFixed(precision);
   return unit ? s + ' ' + unit : s;
 }
 function formatBytes(bytes) {
@@ -1371,6 +1374,13 @@ const OPTIONAL_GAS_PROFILES = {
   O2:  { label:'O2',  unit:'%Vol', max:25.0, thr:{ good:[19.5,23.5], moderate:[19.5,23.5], bad:[19.5,23.5] }, normalRange:[19.5,23.5], digits:1 },
 };
 
+function optionalGasProfile(sensors) {
+  if (sensors.optional_gas_type === 'O3' && sensors.optional_gas_unit === 'ppb') {
+    return { label:'O3', unit:'ppb', max:500, thr:{ good:50, moderate:100, bad:500 }, digits:0 };
+  }
+  return OPTIONAL_GAS_PROFILES[sensors.optional_gas_type];
+}
+
 function optionalGasDigits(sensors, profile, fallback) {
   const raw = sensors
     ? (sensors.optional_gas_decimals ?? sensors.optional_gas_ppm_decimals)
@@ -1393,7 +1403,7 @@ function buildGasMetrics(sensors) {
 
   if (s.optional_gas_sensor_present === true) {
     const type = typeof s.optional_gas_type === 'string' ? s.optional_gas_type : '';
-    const profile = OPTIONAL_GAS_PROFILES[type] || {
+    const profile = optionalGasProfile(s) || {
       label: type || 'Gas',
       unit: 'ppm',
       max: 3.0,
@@ -1530,7 +1540,7 @@ function chartCardForState(card) {
 
   const sensors = stateCache && stateCache.sensors ? stateCache.sensors : {};
   const type = typeof sensors.optional_gas_type === 'string' ? sensors.optional_gas_type : '';
-  const profile = OPTIONAL_GAS_PROFILES[type] || {
+  const profile = optionalGasProfile(sensors) || {
     label: type || 'Optional Gas',
     unit: 'ppm',
     digits: 1,
@@ -1689,6 +1699,8 @@ function renderCharts(payload) {
     const cardUnit = card.lines.length === 1
       ? lineUnits[0]
       : (card.unit || '');
+    const minMaxDigits = card.lines.length === 1 && lineKeys[0] === 'optional_gas' && cardUnit === 'ppb'
+      ? lineDigits[0] : undefined;
 
     const latestItems = card.lines.map((line, idx) => {
       const liveKey = mapSeriesKeyToSensorKey(line.key);
@@ -1732,8 +1744,8 @@ function renderCharts(payload) {
       </div>
       <div class="chart-svg-wrap">${svgHtml}<div class="chart-vline"></div><div class="chart-focus-layer"></div><div class="chart-tooltip"></div></div>
       <div class="chart-minmax">
-        <span>min ${fmtMM(mmMin, cardUnit)}</span>
-        <span>max ${fmtMM(mmMax, cardUnit)}</span>
+        <span>min ${fmtMM(mmMin, cardUnit, minMaxDigits)}</span>
+        <span>max ${fmtMM(mmMax, cardUnit, minMaxDigits)}</span>
       </div>
     </div>`;
   }).join('');
@@ -1885,7 +1897,10 @@ function renderSdHistoryStatus(payload) {
   const sd = (payload && payload.sd) || {};
   const daily = (payload && payload.daily) || {};
   const files = (payload && payload.files) || {};
+  sdHistoryStatusCache = payload;
   const mounted = sd.mounted === true;
+  const ready = sd.ready === true;
+  const recoveryBusy = sd.recovery_pending === true || sd.recovering === true;
   const attempted = sd.attempted === true;
   const sdState = typeof sd.state === 'string'
     ? sd.state
@@ -1901,8 +1916,17 @@ function renderSdHistoryStatus(payload) {
 
   let statusText = 'Not attempted';
   let statusClass = '';
-  if (mounted) {
-    statusText = runtimeFault ? 'Mounted - degraded' : 'Mounted';
+  if (sd.recovering === true) {
+    statusText = 'Reconnecting';
+    statusClass = 'warn';
+  } else if (sd.recovery_pending === true) {
+    statusText = sd.recovery_paused === true ? 'Recovery paused' : 'Waiting to reconnect';
+    statusClass = 'warn';
+  } else if (mounted && !ready) {
+    statusText = 'History paused';
+    statusClass = 'warn';
+  } else if (mounted) {
+    statusText = sd.write_verification_pending === true ? 'Mounted - awaiting save' : (runtimeFault ? 'Mounted - degraded' : 'Mounted');
     statusClass = runtimeFault ? 'err' : 'ok';
   } else if (sdState === 'not_detected') {
     statusText = 'Not detected';
@@ -1931,16 +1955,39 @@ function renderSdHistoryStatus(payload) {
                mounted ? (daily.last_write_ok === true ? 'ok' : 'err') : '');
   setInfoValue('sd-runtime-error', mounted ? formatSdRuntimeError(sd) : '--', runtimeFault ? 'err' : (mounted ? 'ok' : ''));
 
+  setInfoValue('sd-last-saved', sd.has_successful_write === true
+    ? Math.floor(Number(sd.last_write_age_ms || 0) / 1000) + ' s ago' : 'Not yet this boot');
+  const recoveryText = String(Number(sd.recovery_successes || 0)) + ' reconnected / ' +
+    String(Number(sd.recovery_attempts || 0)) + ' attempts';
+  setInfoValue('sd-recovery', recoveryText);
+  const first = sd.first_error || {};
+  setInfoValue('sd-first-error', first.operation
+    ? [first.operation, first.stage, first.domain, String(first.code)].filter(Boolean).join(' / ') : 'None');
+  const reconnect = document.getElementById('sdReconnectBtn');
+  if (reconnect) {
+    reconnect.disabled = sdReconnectBusy || sdServiceBusy || sd.recovering === true ||
+      sd.recovery_paused === true || sd.can_reconnect !== true;
+    reconnect.textContent = sdReconnectBusy || sd.recovering === true ? 'Reconnecting...' : 'Reconnect SD';
+    reconnect.setAttribute('aria-busy', String(sdReconnectBusy || sd.recovering === true));
+  }
+
   const currentReady = isNum(daily.current_sample_count) && daily.current_sample_count > 0;
-  const exportReady = mounted && dailyCsv && dailyCsv.exists === true && Number(dailyCsv.size_bytes || 0) > 0;
+  const exportReady = ready && !sdServiceBusy && dailyCsv && dailyCsv.exists === true && Number(dailyCsv.size_bytes || 0) > 0;
   setSdCurrentExportEnabled(currentReady);
   setSdExportEnabled(exportReady);
   ['sdClearCurrentBtn','sdClearHistoryBtn'].forEach(id => {
     const btn = document.getElementById(id);
-    if (btn) btn.disabled = !mounted;
+    if (btn) btn.disabled = !ready || sdServiceBusy || sdReconnectBusy;
   });
 
-  if (sdState === 'not_detected') {
+  if (recoveryBusy) {
+    const retry = Math.ceil(Number(sd.recovery_retry_ms || 0) / 1000);
+    setSdNote(sd.recovery_paused === true ? 'SD recovery is paused while the device is busy.' :
+      (sd.recovering === true ? 'Reconnecting SD. Measurements continue in memory.' :
+       'SD reconnect scheduled' + (retry ? ' in ' + retry + ' s.' : '.') + ' Measurements continue in memory.'), 'warn');
+  } else if (mounted && !ready) {
+    setSdNote(lastError || 'SD history is paused. Export current day before restarting.', 'warn');
+  } else if (sdState === 'not_detected') {
     setSdNote('Optional SD card not detected. Device continues without SD history.', '');
   } else if (sdState === 'board_unavailable') {
     setSdNote('SD storage unavailable because the board did not initialize.', 'warn');
@@ -1949,6 +1996,8 @@ function renderSdHistoryStatus(payload) {
               sdFault ? 'err' : '');
   } else if (droppedDays > 0) {
     setSdNote(String(droppedDays) + ' daily record(s) were dropped after the pending queue filled. Check or replace the SD card.', 'err');
+  } else if (sd.write_verification_pending === true) {
+    setSdNote('SD reconnected. Waiting for a successful history save.', 'warn');
   } else if (runtimeFault || daily.last_write_ok === false) {
     setSdNote('SD operation failed: ' + formatSdRuntimeError(sd) + '. Today\'s measurements continue in memory and Aura will retry automatically.', 'err');
   } else if (pendingDays > 0) {
@@ -1958,6 +2007,35 @@ function renderSdHistoryStatus(payload) {
     setSdNote('Daily CSV will appear after the first day rollover. Use Export current day to preview today.', 'warn');
   } else {
     setSdNote('Daily CSV is ready for export.', 'ok');
+  }
+}
+
+async function reconnectSd() {
+  if (sdReconnectBusy || sdServiceBusy || otaUploadInFlight || otaAwaitingDeviceOutcome || otaRestartPending) return;
+  sdReconnectBusy = true;
+  setSdServiceButtonsDisabled(true);
+  const btn = document.getElementById('sdReconnectBtn');
+  if (btn) { btn.textContent = 'Reconnecting...'; btn.setAttribute('aria-busy', 'true'); }
+  setSdNote('Requesting SD reconnect...', 'warn');
+  let failureMessage = '';
+  try {
+    const result = await postJson('/api/history/sd/reconnect', {});
+    if (!result || result.success !== true) throw new Error(result && result.error || 'SD reconnect failed.');
+    sdHistoryStatusCache = Object.assign({}, sdHistoryStatusCache || {}, {
+      sd: Object.assign({}, sdHistoryStatusCache && sdHistoryStatusCache.sd || {}, {
+        ready: false, recovery_pending: true, recovery_retry_ms: 0
+      })
+    });
+    setSdNote('SD reconnect queued. Measurements continue in memory.', 'warn');
+    await refreshSdHistory({ silent: true });
+  } catch (error) {
+    failureMessage = error && error.message || 'SD reconnect failed.';
+  } finally {
+    sdReconnectBusy = false;
+    setSdServiceButtonsDisabled(false);
+    if (btn) { btn.textContent = 'Reconnect SD'; btn.setAttribute('aria-busy', 'false'); }
+    if (sdHistoryStatusCache) renderSdHistoryStatus(sdHistoryStatusCache);
+    if (failureMessage) setSdNote(failureMessage, 'err');
   }
 }
 
@@ -1990,14 +2068,17 @@ async function refreshSdHistory(options) {
 // State
 // ─────────────────────────────────────────────
 function setSdServiceButtonsDisabled(disabled) {
-  ['sdClearCurrentBtn','sdClearHistoryBtn','sdRefreshBtn'].forEach(id => {
+  ['sdClearCurrentBtn','sdClearHistoryBtn','sdRefreshBtn','sdReconnectBtn'].forEach(id => {
     const btn = document.getElementById(id);
     if (btn) btn.disabled = !!disabled;
   });
 }
 
 async function runSdServiceAction(url, confirmText, progressText, successText) {
+  if (sdServiceBusy || sdReconnectBusy) return;
   if (confirmText && !window.confirm(confirmText)) return;
+  sdServiceBusy = true;
+  let failureMessage = '';
   setSdServiceButtonsDisabled(true);
   setSdNote(progressText || 'Working...', 'warn');
   try {
@@ -2008,9 +2089,12 @@ async function runSdServiceAction(url, confirmText, progressText, successText) {
     setSdNote(successText || 'Done.', 'ok');
     await refreshSdHistory({ silent: true });
   } catch (error) {
-    setSdNote((error && error.message) ? error.message : 'SD action failed.', 'err');
+    failureMessage = error && error.message || 'SD action failed.';
   } finally {
+    sdServiceBusy = false;
     setSdServiceButtonsDisabled(false);
+    if (sdHistoryStatusCache) renderSdHistoryStatus(sdHistoryStatusCache);
+    if (failureMessage) setSdNote(failureMessage, 'err');
   }
 }
 
@@ -2022,6 +2106,9 @@ let historyCache = null;
 let refreshBusy = false;
 let refreshTimer = null;
 let sdHistoryRefreshBusy = false;
+let sdHistoryStatusCache = null;
+let sdReconnectBusy = false;
+let sdServiceBusy = false;
 let otaUploadInFlight = false;
 let otaAwaitingPhysicalConfirm = false;
 let otaAwaitingDeviceOutcome = false;
@@ -3522,6 +3609,7 @@ document.getElementById('rebootBtn').addEventListener('click', async () => {
 document.getElementById('openThemeBtn').addEventListener('click', () => { window.location.href = '/theme'; });
 document.getElementById('openDacBtn').addEventListener('click', () => { window.location.href = '/dac'; });
 document.getElementById('sdRefreshBtn').addEventListener('click', () => { refreshSdHistory().catch(() => {}); });
+document.getElementById('sdReconnectBtn').addEventListener('click', () => { reconnectSd().catch(() => {}); });
 document.getElementById('sdClearCurrentBtn').addEventListener('click', () => {
   runSdServiceAction('/api/history/current-day/clear',
                      'Delete current day history snapshot?',

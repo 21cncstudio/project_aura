@@ -121,7 +121,7 @@ bool sync_co_fields(SensorData &data, const Sen0466 &co_sensor) {
                                   data.co_ppm);
 }
 
-bool sync_optional_gas_fields(SensorData &data, const DfrOptionalGasSensor &optional_gas) {
+bool sync_optional_gas_fields(SensorData &data, const OptionalGasSensor &optional_gas) {
     const DfrOptionalGasSensor::OptionalGasType gas_type = optional_gas.optionalGasType();
     const bool sensor_present = optional_gas.isPresent() &&
                                 gas_type != DfrOptionalGasSensor::OptionalGasType::None;
@@ -129,7 +129,8 @@ bool sync_optional_gas_fields(SensorData &data, const DfrOptionalGasSensor &opti
     const bool sensor_valid = sensor_present && optional_gas.isDataValid();
     const float sensor_ppm = sensor_present ? optional_gas.ppm() : 0.0f;
     const uint8_t sensor_decimals = sensor_present
-        ? normalize_ppm_decimals(optional_gas.ppmDecimals())
+        ? (gas_type == DfrOptionalGasSensor::OptionalGasType::O3_SEN0321
+               ? 3 : normalize_ppm_decimals(optional_gas.ppmDecimals()))
         : 1;
     const float min_ppm = DfrOptionalGasSensor::minPpmForType(gas_type);
     const float max_ppm = DfrOptionalGasSensor::maxPpmForType(gas_type);
@@ -140,7 +141,7 @@ bool sync_optional_gas_fields(SensorData &data, const DfrOptionalGasSensor &opti
                                           sensor_ppm,
                                           min_ppm,
                                           max_ppm,
-                                          ppm_resolution(sensor_decimals),
+                                          sensor_decimals == 3 ? 0.001f : ppm_resolution(sensor_decimals),
                                           data.optional_gas_sensor_present,
                                           data.optional_gas_warmup,
                                           data.optional_gas_valid,

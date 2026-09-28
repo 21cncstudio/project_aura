@@ -18,6 +18,7 @@ public:
         H2S = 4,
         O3 = 5,
         O2 = 6,
+        O3_SEN0321 = 7, // O3, canonical ppm storage, ppb presentation
     };
 
     DfrOptionalGasSensor();
@@ -28,6 +29,13 @@ public:
     const char *optionalGasLabel() const;
 
     static const char *optionalGasLabel(OptionalGasType type);
+    static float displayScale(OptionalGasType type) {
+        return type == OptionalGasType::O3_SEN0321 ? 1000.0f : 1.0f;
+    }
+    static float displayValue(OptionalGasType type, float ppm) { return ppm * displayScale(type); }
+    static bool isOzone(OptionalGasType type) {
+        return type == OptionalGasType::O3 || type == OptionalGasType::O3_SEN0321;
+    }
     static const char *unitForType(OptionalGasType type);
     static float minPpmForType(OptionalGasType type);
     static float maxPpmForType(OptionalGasType type);

@@ -12,7 +12,7 @@
 #include "core/StartupProbePolicy.h"
 #include "drivers/Bmp3xx.h"
 #include "drivers/Bmp580.h"
-#include "drivers/DfrOptionalGasSensor.h"
+#include "drivers/OptionalGasSensor.h"
 #include "drivers/Dps310.h"
 #include "drivers/Sen0466.h"
 #include "drivers/Sen6x.h"
@@ -199,7 +199,7 @@ private:
     Sfa30 sfa30_;
     Sfa40 sfa40_;
     Sen0466 sen0466_;
-    DfrOptionalGasSensor optional_gas_;
+    OptionalGasSensor optional_gas_;
     Sen6x sen6x_;
     HchoSensorType hcho_sensor_type_ = HCHO_SENSOR_NONE;
     bool warmup_active_last_ = false;

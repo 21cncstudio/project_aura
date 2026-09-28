@@ -175,6 +175,24 @@ void handleStatus(WebHandlerContext &context, bool ota_busy, const char *ota_bus
         sd["optional"] = true;
         sd["mounted"] = status.mounted;
         sd["attempted"] = status.attempted;
+        sd["ready"] = status.ready;
+        sd["can_reconnect"] = status.can_reconnect;
+        sd["recovery_pending"] = status.recovery_pending;
+        sd["recovering"] = status.recovering;
+        sd["recovery_paused"] = status.recovery_paused;
+        sd["recovery_blocked"] = status.recovery_blocked;
+        sd["recovery_retry_ms"] = status.recovery_retry_ms;
+        sd["recovery_attempts"] = status.recovery_attempts;
+        sd["recovery_successes"] = status.recovery_successes;
+        sd["write_verification_pending"] = status.write_verification_pending;
+        sd["has_successful_write"] = status.has_successful_write;
+        sd["last_write_age_ms"] = status.last_write_age_ms;
+        ArduinoJson::JsonObject first = sd["first_error"].to<ArduinoJson::JsonObject>();
+        first["operation"] = status.first_error_operation;
+        first["stage"] = status.first_error_stage;
+        first["code"] = status.first_error_code;
+        first["domain"] = status.first_error_domain;
+        first["uptime_ms"] = status.first_error_ms;
         sd["mount_point"] = status.mount_point;
         sd["card_size_bytes"] = status.card_size_bytes;
         sd["filesystem_total_bytes"] = status.filesystem_total_bytes;
@@ -236,6 +254,23 @@ void handleStatus(WebHandlerContext &context, bool ota_busy, const char *ota_bus
     }
 
     send_json(*context.server, 200, doc);
+}
+
+void handleReconnect(WebHandlerContext &context, bool ota_busy, const char *ota_busy_json) {
+    if (!context.server) return;
+    if (ota_busy) {
+        WebResponseUtils::sendNoStoreHeaders(*context.server);
+        context.server->send(503, "application/json", ota_busy_json);
+        return;
+    }
+    if (!context.sd_card || !context.sd_card->requestRecovery()) {
+        send_error(*context.server, 409, "SD reconnect unavailable; check SD status");
+        return;
+    }
+    ArduinoJson::JsonDocument doc;
+    doc["success"] = true;
+    doc["queued"] = true;
+    send_json(*context.server, 202, doc);
 }
 
 void handleCsv(WebHandlerContext &context, bool ota_busy, const char *ota_busy_json) {

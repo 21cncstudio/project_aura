@@ -155,8 +155,24 @@ void test_web_charts_api_utils_uses_o2_unit_for_optional_gas_history() {
     TEST_ASSERT_EQUAL_FLOAT(20.9f, series[4]["latest"].as<float>());
 }
 
+void test_sen0321_chart_api_converts_canonical_ppm_to_ppb() {
+    FakeHistoryView history;
+    FakeSample point{}; point.valid[ChartsHistory::METRIC_OPTIONAL_GAS] = true;
+    point.values[ChartsHistory::METRIC_OPTIONAL_GAS] = 0.037f;
+    history.samples.push_back(point);
+    ArduinoJson::JsonDocument doc;
+    WebChartsApiUtils::fillJson(doc.to<ArduinoJson::JsonObject>(), history, "1h", "gas", "ppb");
+    const auto gas = doc["series"][4];
+    TEST_ASSERT_EQUAL_STRING("optional_gas", gas["key"].as<const char *>());
+    TEST_ASSERT_EQUAL_STRING("ppb", gas["unit"].as<const char *>());
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, 37, gas["latest"].as<float>());
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, 37, gas["values"][Config::CHART_HISTORY_1H_STEPS - 1].as<float>());
+    TEST_ASSERT_FLOAT_WITHIN(0.00001f, 0.037f, history.samples[0].values[ChartsHistory::METRIC_OPTIONAL_GAS]);
+}
+
 int main(int, char **) {
     UNITY_BEGIN();
+    RUN_TEST(test_sen0321_chart_api_converts_canonical_ppm_to_ppb);
     RUN_TEST(test_web_charts_api_utils_fill_json_populates_core_series_and_missing_prefix);
     RUN_TEST(test_web_charts_api_utils_fill_json_uses_null_timestamps_without_valid_epoch_and_null_latest_for_nan);
     RUN_TEST(test_web_charts_api_utils_uses_o2_unit_for_optional_gas_history);

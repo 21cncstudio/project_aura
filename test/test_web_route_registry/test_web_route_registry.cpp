@@ -44,6 +44,7 @@ DEFINE_HANDLER(thresholds_handle_update)
 DEFINE_HANDLER(thresholds_handle_reset)
 DEFINE_HANDLER(charts_handle_data)
 DEFINE_HANDLER(daily_history_status_handle)
+DEFINE_HANDLER(daily_history_reconnect_handle)
 DEFINE_HANDLER(daily_history_csv_handle)
 DEFINE_HANDLER(daily_history_current_day_csv_handle)
 DEFINE_HANDLER(daily_history_clear_handle)
@@ -227,6 +228,11 @@ void test_web_route_registry_registers_history_endpoints() {
         backend.find(RouteMethod::Post, "/api/history/clear");
     TEST_ASSERT_NOT_NULL(clear);
     TEST_ASSERT_TRUE(clear->handler == daily_history_clear_handle);
+
+    const CapturedRoute *reconnect = backend.find(RouteMethod::Post, "/api/history/sd/reconnect");
+    TEST_ASSERT_NOT_NULL(reconnect);
+    TEST_ASSERT_TRUE(reconnect->handler == daily_history_reconnect_handle);
+    TEST_ASSERT_NULL(backend.find(RouteMethod::Get, "/api/history/sd/reconnect"));
 
     const CapturedRoute *clear_current_day =
         backend.find(RouteMethod::Post, "/api/history/current-day/clear");

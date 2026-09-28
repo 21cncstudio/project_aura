@@ -1066,13 +1066,15 @@ void MqttManager::publishDiscovery(const MqttRuntimeSnapshot &runtime) {
                            "", "", "{{ value_json.main_issue }}", "mdi:alert-circle-outline");
     publishDiscoverySensor("co", "CO", "ppm",
                            "carbon_monoxide", "measurement", "{{ value_json.co }}", "mdi:molecule-co");
-    publishDiscoverySensor("optional_gas", "Optional Gas", "",
-                           "", "measurement", "{{ value_json.optional_gas }}", "mdi:molecule");
+    const auto optional_discovery = MqttPayloadBuilder::optionalGasDiscoveryProfile(mqtt_discovery_optional_type_);
+    publishDiscoverySensor("optional_gas", "Optional Gas", optional_discovery.legacy_unit,
+                           "", "measurement", optional_discovery.legacy_value_template, "mdi:molecule");
     publishDiscoverySensor("optional_gas_type", "Optional Gas Type", "",
                            "", "", "{{ value_json.optional_gas_type }}", "mdi:molecule");
     publishDiscoverySensor("nh3", "NH3", "ppm",
                            "", "measurement", "{{ value_json.nh3 }}", "mdi:molecule");
-    publishDiscoverySensor("o3", "O3", "ppm",
+    publishDiscoverySensor("o3", "O3",
+                           optional_discovery.ozone_unit,
                            "", "measurement", "{{ value_json.o3 }}", "mdi:molecule");
     publishDiscoverySensor("h2s", "H2S", "ppm",
                            "", "measurement", "{{ value_json.h2s }}", "mdi:molecule");
@@ -1757,6 +1759,13 @@ void MqttManager::poll(MqttRuntimeState &runtime_state) {
         mqtt_publish_requested_ = true;
     }
     const MqttRuntimeSnapshot runtime = runtime_state.snapshot();
+    // Detection can finish after the broker connects. Republish the same entity
+    // IDs once the source/unit is known; temporary read failures keep that unit.
+    if (runtime.data.optional_gas_sensor_present && runtime.data.optional_gas_type &&
+        runtime.data.optional_gas_type != mqtt_discovery_optional_type_) {
+        mqtt_discovery_optional_type_ = runtime.data.optional_gas_type;
+        mqtt_discovery_sent_ = false;
+    }
     if (runtime.auto_night_enabled != auto_night_enabled_) {
         lockCommandContext();
         auto_night_enabled_ = runtime.auto_night_enabled;

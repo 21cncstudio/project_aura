@@ -257,8 +257,25 @@ void test_web_state_api_utils_preserves_model_rejection_for_response_recovery() 
     TEST_ASSERT_FALSE(doc["ota_busy"].as<bool>());
 }
 
+void test_sen0321_state_api_ppb_and_canonical_precision() {
+    WebStateApiUtils::Payload payload{};
+    payload.data.optional_gas_sensor_present = true; payload.data.optional_gas_valid = true;
+    payload.data.optional_gas_ppm = 0.037f; payload.data.optional_gas_ppm_decimals = 3;
+    payload.data.optional_gas_type = static_cast<uint8_t>(DfrOptionalGasSensor::OptionalGasType::O3_SEN0321);
+    ArduinoJson::JsonDocument doc;
+    WebStateApiUtils::fillJson(doc.to<ArduinoJson::JsonObject>(), payload);
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, 37.0f, doc["sensors"]["optional_gas"].as<float>());
+    TEST_ASSERT_EQUAL_STRING("ppb", doc["sensors"]["optional_gas_unit"].as<const char *>());
+    TEST_ASSERT_EQUAL_INT(0, doc["sensors"]["optional_gas_decimals"].as<int>());
+    TEST_ASSERT_EQUAL_INT(3, doc["sensors"]["optional_gas_ppm_decimals"].as<int>());
+    payload.data.optional_gas_valid = false;
+    WebStateApiUtils::fillJson(doc.to<ArduinoJson::JsonObject>(), payload);
+    TEST_ASSERT_TRUE(doc["sensors"]["optional_gas"].isNull());
+}
+
 int main(int, char **) {
     UNITY_BEGIN();
+    RUN_TEST(test_sen0321_state_api_ppb_and_canonical_precision);
     RUN_TEST(test_web_state_api_utils_fill_json_populates_sensor_network_and_settings_fields);
     RUN_TEST(test_web_state_api_utils_fill_json_sets_nulls_when_values_are_unavailable);
     RUN_TEST(test_web_state_api_utils_hides_reactive_gas_metrics_during_warmup);

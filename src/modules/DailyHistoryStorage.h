@@ -25,6 +25,8 @@ public:
     virtual ~DailyHistoryStorage() = default;
 
     virtual bool isReady() const = 0;
+    // Successful boot-time restore (including an empty store) binds RAM to this media.
+    virtual void noteHistorySessionReady() {}
     virtual bool fileInfo(const char *path, bool &exists, size_t &out_size) const = 0;
     virtual bool fileExists(const char *path) const = 0;
     virtual bool fileSize(const char *path, size_t &out_size) const = 0;

@@ -13,6 +13,15 @@
 
 namespace MqttPayloadBuilder {
 
+// Keep the original unitless Optional Gas entity's numeric scale. Its history
+// predates unit metadata; the dedicated O3 entity can use ppm/ppb normally.
+struct OptionalGasDiscoveryProfile {
+    const char *legacy_unit;
+    const char *legacy_value_template;
+    const char *ozone_unit;
+};
+OptionalGasDiscoveryProfile optionalGasDiscoveryProfile(uint8_t type);
+
 String buildDiscoveryEntityObjectId(const String &base_topic,
                                     const char *object_id);
 

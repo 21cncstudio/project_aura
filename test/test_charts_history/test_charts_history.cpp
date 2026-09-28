@@ -192,8 +192,30 @@ void test_corrupt_block_is_not_exported_as_valid_measurements() {
     ChartsHistory reboot; reboot.load(s); TEST_ASSERT_EQUAL(0,reboot.count());
 }
 
+void test_sen0321_history_summary_export_and_model_change() {
+    StorageManager s; s.begin(); ChartsHistory h; h.load(s); SensorData d{};
+    d.optional_gas_sensor_present=d.optional_gas_valid=true;
+    d.optional_gas_type=7; d.optional_gas_ppm=.02f;
+    at(0); h.update(d,s,false,true,ChartsHistory::metricBit(GAS));
+    at(100); d.optional_gas_ppm=.08f; h.update(d,s,false,true,ChartsHistory::metricBit(GAS));
+    at(300); h.update(d,s,false,true,0);
+    ChartsRuntimeState runtime; runtime.update(h); auto snap=runtime.copySnapshot(); View view(*snap);
+    ArduinoJson::JsonDocument chart, batch;
+    WebChartsApiUtils::fillJson(chart.to<ArduinoJson::JsonObject>(),view,"1h","gas","ppb",true);
+    const auto series=chart["series"][4]; const auto index=Config::CHART_HISTORY_1H_STEPS-1;
+    TEST_ASSERT_FLOAT_WITHIN(.001,50,series["values"][index].as<float>());
+    TEST_ASSERT_FLOAT_WITHIN(.001,20,series["min"][index].as<float>());
+    TEST_ASSERT_FLOAT_WITHIN(.001,80,series["max"][index].as<float>());
+    WebChartsApiUtils::fillHistoryJson(batch.to<ArduinoJson::JsonObject>(),view);
+    const auto gas_key=std::to_string(static_cast<int>(GAS));
+    TEST_ASSERT_EQUAL(7,batch["records"][0]["optional_gas_type"].as<int>());
+    TEST_ASSERT_FLOAT_WITHIN(.00001,.05,batch["records"][0]["metrics"][gas_key]["mean"].as<float>());
+    d.optional_gas_type=5; at(301); h.update(d,s,false,true,ChartsHistory::metricBit(GAS));
+    float v; bool valid; h.metricValueFromOldest(0,GAS,v,valid); TEST_ASSERT_FALSE(valid);
+}
 int main() {
     UNITY_BEGIN();
+    RUN_TEST(test_sen0321_history_summary_export_and_model_change);
     RUN_TEST(test_export_waits_for_durable_save_and_does_not_advance_cursor);
     RUN_TEST(test_retention_boundary_stays_stable_between_completed_intervals);
     RUN_TEST(test_clear_all_removes_segment_files_too);

@@ -1,2 +1,5 @@
 # Preserve reviewed upstream bytes, including original whitespace; verify by SHA-256.
 components/espressif__esp32_display_panel/** -text -whitespace
+
+# Preserve the downloaded, hash-pinned manufacturer reference.
+docs/datasheets/SEN0321/DFRobot_OzoneSensor_reference/** -text -whitespace

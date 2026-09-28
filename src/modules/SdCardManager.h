@@ -10,6 +10,10 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <atomic>
+#ifdef UNIT_TEST
+#include <mutex>
+#endif
 
 #include "modules/DailyHistoryStorage.h"
 #include "modules/SdCardPolicy.h"
@@ -32,6 +36,23 @@ public:
         SdCardPolicy::State state = SdCardPolicy::State::NotAttempted;
         bool mounted = false;
         bool attempted = false;
+        bool ready = false;
+        bool can_reconnect = false;
+        bool recovery_pending = false;
+        bool recovering = false;
+        bool recovery_paused = false;
+        bool recovery_blocked = false;
+        bool write_verification_pending = false;
+        uint32_t recovery_retry_ms = 0;
+        uint32_t recovery_attempts = 0;
+        uint32_t recovery_successes = 0;
+        uint32_t last_write_age_ms = 0;
+        bool has_successful_write = false;
+        char first_error_operation[32] = {};
+        char first_error_stage[32] = {};
+        int32_t first_error_code = 0;
+        uint32_t first_error_ms = 0;
+        const char *first_error_domain = "";
         uint64_t card_size_bytes = 0;
         const char *mount_point = "/sdcard";
         const char *last_error = "";
@@ -57,9 +78,29 @@ public:
 
     bool begin(esp_panel::board::Board *board);
     bool end();
+    void poll(uint32_t now, bool paused);
+    bool requestRecovery();
+    void pauseRecovery() { recovery_paused_.store(true); }
+    void prepareForShutdown();
+    bool recoveryIdle() const { return !worker_running_.load(); }
+    bool waitForRecoveryIdle(uint32_t timeout_ms) const;
+    bool takeRecoverySuccess() { return recovered_.exchange(false); }
+    bool isReady() const override { return mounted_.load() && !io_blocked_.load(); }
+    void noteHistorySessionReady() override { history_session_ready_.store(true); }
+#ifdef UNIT_TEST
+    // Hardware boundary only. Host tests use the real scheduling and file gates.
+    struct TestBackend {
+        bool (*mount)(void *) = nullptr;
+        bool (*unmount)(void *) = nullptr;
+        void *context = nullptr;
+        uint32_t (*card_serial)(void *) = nullptr;
+        bool (*history_present)(void *) = nullptr;
+    };
+    void setTestBackend(TestBackend backend) { test_backend_ = backend; }
+    void runRecoveryForTest();
+#endif
     Status status() const;
     String fullPath(const char *relative_path) const;
-    FILE *openRead(const char *relative_path) const;
     FILE *openReadLocked(const char *relative_path) const;
     bool fileInfo(const char *path, bool &exists, size_t &out_size) const override;
     bool fileInfoLocked(const char *path, bool &exists, size_t &out_size) const;
@@ -68,7 +109,6 @@ public:
     void noteStreamReadFailure(const char *stage, int error_code) const;
     void noteStreamReadSuccess() const;
 
-    bool isReady() const override { return mounted_; }
     bool fileExists(const char *path) const override;
     bool fileSize(const char *path, size_t &out_size) const override;
     bool appendText(const char *path, const char *text) override;
@@ -84,6 +124,17 @@ public:
     DailyStorageFailureKind lastFailureKind() const override;
 
 private:
+    bool mountLocked();
+    bool acceptMountedCard(uint32_t serial, uint32_t manufacturer, uint32_t oem,
+                           bool history_present);
+    bool unmountLocked();
+    void recover();
+    static void recoveryTask(void *self);
+    bool lockRaw(uint32_t timeout_ms) const;
+    void lockStatus() const;
+    void unlockStatus() const;
+    void captureFirstErrorLocked(const char *operation, const char *stage,
+                                 int32_t code, const char *domain) const;
     bool setCardSelect(bool selected);
     bool ensureParentDirsLocked(const char *relative_path, const char *operation) const;
     bool fileInfoUnlocked(const char *path, bool &exists, size_t &out_size) const;
@@ -110,7 +161,32 @@ private:
     static constexpr uint8_t kSdMisoPin = 13;
     static constexpr uint8_t kSdCsExio = 4;
 
-    bool mounted_ = false;
+    std::atomic<bool> mounted_{false};
+    mutable std::atomic<bool> io_blocked_{true};
+    std::atomic<bool> worker_running_{false};
+    std::atomic<bool> recovery_paused_{false};
+    std::atomic<bool> recovered_{false};
+    mutable SdCardPolicy::Recovery recovery_;
+    bool mount_retryable_ = false;
+    std::atomic<bool> cleanup_failed_{false};
+    std::atomic<bool> media_changed_{false};
+    bool initial_mount_ = true;
+    bool have_card_identity_ = false;
+    bool blank_history_accepted_ = false; // Bound to the saved card identity, under the file lease.
+    mutable std::atomic<bool> history_session_ready_{false};
+    uint32_t card_serial_ = 0;
+    uint32_t card_manufacturer_ = 0;
+    uint32_t card_oem_ = 0;
+    uint64_t card_size_bytes_ = 0;
+    mutable bool write_verification_pending_ = false;
+    mutable bool has_successful_write_ = false;
+    mutable bool incident_active_ = false;
+    mutable char first_error_operation_[32] = {};
+    mutable char first_error_stage_[32] = {};
+    mutable int32_t first_error_code_ = 0;
+    mutable uint32_t first_error_ms_ = 0;
+    mutable const char *first_error_domain_ = "";
+    esp_panel::board::Board *board_ = nullptr;
     bool attempted_ = false;
     SdCardPolicy::State state_ = SdCardPolicy::State::NotAttempted;
     const char *last_error_ = "";
@@ -131,10 +207,13 @@ private:
     uint64_t filesystem_free_bytes_ = 0;
 
 #ifndef UNIT_TEST
-    esp_panel::board::Board *board_ = nullptr;
     sdmmc_card_t *card_ = nullptr;
     mutable SemaphoreHandle_t mutex_ = nullptr;
     mutable SemaphoreHandle_t status_mutex_ = nullptr;
     bool spi_bus_owned_ = false;
+#else
+    mutable std::timed_mutex file_mutex_test_;
+    mutable std::mutex status_mutex_test_;
+    TestBackend test_backend_;
 #endif
 };

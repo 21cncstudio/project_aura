@@ -31,6 +31,8 @@ struct DeviceState {
     std::unordered_set<uint16_t> failing_cmds;
     std::unordered_map<uint16_t, std::vector<uint8_t>> cmd_reads;
     std::unordered_map<uint16_t, uint32_t> sensor_cmd_counts;
+    uint8_t register_pointer = 0;
+    size_t raw_read_limit = 256;
     uint16_t read_wrap_last_reg = 0xFF;
     uint16_t last_sensor_cmd = 0;
     bool has_last_sensor_cmd = false;
@@ -86,6 +88,8 @@ void reset() {
     g_parameter_config_result = ESP_OK;
     g_driver_install_result = ESP_OK;
 }
+
+void setRawReadLimit(uint8_t addr, size_t length) { device(addr).raw_read_limit = length; }
 
 void setDevicePresent(uint8_t addr, bool present) {
     device(addr).present = present;
@@ -382,6 +386,7 @@ esp_err_t i2c_master_write_to_device(i2c_port_t port,
         return state.write_error_on_call[reg];
     }
     if (write_size == 1) {
+        state.register_pointer = reg;
         return ESP_OK;
     }
     for (size_t i = 1; i < write_size; ++i) {
@@ -411,8 +416,14 @@ esp_err_t i2c_master_read_from_device(i2c_port_t port,
             return ESP_OK;
         }
     }
+    DeviceState &state = device(addr);
+    const uint8_t reg = state.register_pointer;
+    ++state.read_call_count[reg];
+    if (read_size > state.raw_read_limit || state.read_fail[reg]) return ESP_FAIL;
+    if (state.read_fail_on_call[reg] && state.read_call_count[reg] == state.read_fail_on_call[reg])
+        return state.read_error_on_call[reg];
     for (size_t i = 0; i < read_size; ++i) {
-        read_buffer[i] = 0;
+        read_buffer[i] = state.regs[static_cast<uint8_t>(reg + i)];
     }
     return ESP_OK;
 }

@@ -1,0 +1,189 @@
+{
+  "date": "2026-09-26",
+  "status": "review_fixes_passed_ota_test_binaries_prepared_hardware_unverified",
+  "native_cases": 263,
+  "rerun_native_cases_after_review": 198,
+  "native_suites": {
+    "native_test_dfr_optional_gas_driver:test_dfr_optional_gas_driver": 31,
+    "native_test_dfr_optional_gas_driver:test_sen0321_driver": 11,
+    "native_test_sfa30_driver:test_sfa30_driver": 13,
+    "native_test_sfa40_driver:test_sfa40_driver": 27,
+    "native_test_gp8403_driver:test_gp8403_driver": 5,
+    "native_test_i2c_4_3_profile:test_i2c_topology": 6,
+    "native_test_i2c_4_3_profile:test_sensor_i2c_routing": 2,
+    "native_test_i2c_7_profile:test_gt911_probe_policy": 1,
+    "native_test_i2c_7_profile:test_i2c_topology": 6,
+    "native_test_i2c_7_profile:test_screen_flip_profile": 3,
+    "native_test_i2c_7_profile:test_sensor_i2c_routing": 2,
+    "native_test:test_charts_history": 17,
+    "native_test:test_daily_extrema_history": 36,
+    "native_test:test_mqtt_payload": 23,
+    "native_test:test_sensor_manager": 60,
+    "native_test:test_ui_optional_gas_profile": 5,
+    "native_test:test_web_charts_api_utils": 4,
+    "native_test:test_web_dashboard_page": 3,
+    "native_test:test_web_state_api_utils": 8
+  },
+  "native_reports": [
+    ".pio/native-tests/reports/20260926T185809Z-a65b7283/launcher.json",
+    ".pio/native-tests/reports/20260926T182807Z-4c6cc3f4/launcher.json",
+    ".pio/native-tests/reports/20260926T185824Z-8d1dd884/launcher.json"
+  ],
+  "dashboard_node_tests": 4,
+  "preexisting_files_unchanged": [
+    {
+      "path": "AGENTS.md",
+      "sha256": "D316B416BFCC68389354B4FBD34DDE34F6D5DD0CBFDD363792BCE4BCB287FE13"
+    },
+    {
+      "path": "docs/ACTIVE_BRANCHES.md",
+      "sha256": "E60D4A51D84D526F014AD7602BE7CFDE48E3D0567DDC8A4DF8FAF370878ED865"
+    },
+    {
+      "path": "src/ui/screens.c",
+      "sha256": "A6A90707311C9199DEE88306FC9C7FC81FFAE660A4874D7F0D9E53045AC71599"
+    },
+    {
+      "path": "ui/aura-lvgl.eez-project",
+      "sha256": "DC037E0A768255509D8FAEC7C9A4BCDD0EF8C87834F3D476446A32CBBDE11FD4"
+    },
+    {
+      "path": "docs/SFA40_AUDIT_20260916.md",
+      "sha256": "801708A15C2C797B78D5F6FA4BC1F80C51E972980A2260C7A847D542B151C1F3"
+    }
+  ],
+  "artifacts": [
+    {
+      "file": "build-idf-4_3\\aura_aq.bin",
+      "sha256": "b4b7651ee450f05efb8983d1ff0259845943f2d1436850de19fcc70926fe975f",
+      "size_bytes": 4599488,
+      "identity": {
+        "build_id": "a2891b7-dirty",
+        "environment": "project_aura",
+        "firmware_flavor": "production",
+        "gt911_address": "0x14",
+        "hardware_profile": "4_3",
+        "hardware_target": "aura-aq-v1",
+        "ota_image_target": "aura-aq-v1",
+        "partitions_file": "partitions_16MB_littlefs.csv",
+        "periodic_memory_monitor_enabled": false,
+        "schema": "project-aura.build-identity.v1",
+        "source_commit": "a2891b7443e8f8778a35162021924c6639e6227e"
+      },
+      "stamp_files": [
+        {
+          "file_name": "bootloader.bin",
+          "size_bytes": 22672,
+          "sha256": "56fcdc865f039e72439aa8e48145c85b4abfb0a32ef9b7be55c1b91306ed2901"
+        },
+        {
+          "file_name": "partitions.bin",
+          "size_bytes": 3072,
+          "sha256": "a4307ff8e476abc6eceed9e15f5f51ceb7fc519bc66387f381cd0ac78d5dadd5"
+        },
+        {
+          "file_name": "boot_app0.bin",
+          "size_bytes": 8192,
+          "sha256": "7d2c7ac4888bfd75cd5f56e8d61f69595121183afc81556c876732fd3782c62f"
+        },
+        {
+          "file_name": "firmware.bin",
+          "size_bytes": 4599488,
+          "sha256": "b4b7651ee450f05efb8983d1ff0259845943f2d1436850de19fcc70926fe975f"
+        },
+        {
+          "file_name": "littlefs.bin",
+          "size_bytes": 3538944,
+          "sha256": "0d4d7e01959fcc63167fadc364df6c1a1fca29ab0fbe55ae505bc6affb58882e"
+        }
+      ],
+      "ota_file": "Aura_AQ_SEN0321_TEST_4.3-inch_20260926_b4b7651e.bin",
+      "ota_validation": {
+        "schema": "project-aura.ota-image-identity.v2",
+        "image": "D:\\21cncstudio\\project_aura_aq\\firmware-main\\build-idf-4_3\\aura_aq.bin",
+        "hardware_target": "aura-aq-v1",
+        "ota_image_target": "aura-aq-v1",
+        "firmware_flavor": "production",
+        "descriptor_offset": 288,
+        "descriptor_size": 64,
+        "descriptor_version": 1,
+        "flavor_descriptor_offset": 352,
+        "flavor_descriptor_size": 32,
+        "flavor_descriptor_version": 1,
+        "image_size": 4599488,
+        "image_sha256": "b4b7651ee450f05efb8983d1ff0259845943f2d1436850de19fcc70926fe975f",
+        "esp_checksum_verified": true,
+        "esp_hash_verified": true
+      },
+      "wrong_profile_rejected": true
+    },
+    {
+      "file": "build-idf-7_dual_i2c\\aura_aq.bin",
+      "sha256": "6d66f992e024b78abdc7e344868df008a924cc6beddaefa6042c0f196a149e44",
+      "size_bytes": 4599808,
+      "identity": {
+        "build_id": "a2891b7-7-dual-i2c-dirty",
+        "environment": "project_aura_7",
+        "firmware_flavor": "production",
+        "gt911_address": "0x5d",
+        "hardware_profile": "7_dual_i2c",
+        "hardware_target": "aura-aq-7-v1",
+        "ota_image_target": "aura-aq-7-v1",
+        "partitions_file": "partitions_16MB_littlefs.csv",
+        "periodic_memory_monitor_enabled": false,
+        "schema": "project-aura.build-identity.v1",
+        "source_commit": "a2891b7443e8f8778a35162021924c6639e6227e"
+      },
+      "stamp_files": [
+        {
+          "file_name": "bootloader.bin",
+          "size_bytes": 22672,
+          "sha256": "0381e499b40c50ab9eabd493ef48a41c2cdba5d767359ed9bbd4a245dd314d32"
+        },
+        {
+          "file_name": "partitions.bin",
+          "size_bytes": 3072,
+          "sha256": "a4307ff8e476abc6eceed9e15f5f51ceb7fc519bc66387f381cd0ac78d5dadd5"
+        },
+        {
+          "file_name": "boot_app0.bin",
+          "size_bytes": 8192,
+          "sha256": "7d2c7ac4888bfd75cd5f56e8d61f69595121183afc81556c876732fd3782c62f"
+        },
+        {
+          "file_name": "firmware.bin",
+          "size_bytes": 4599808,
+          "sha256": "6d66f992e024b78abdc7e344868df008a924cc6beddaefa6042c0f196a149e44"
+        },
+        {
+          "file_name": "littlefs.bin",
+          "size_bytes": 3538944,
+          "sha256": "0d4d7e01959fcc63167fadc364df6c1a1fca29ab0fbe55ae505bc6affb58882e"
+        }
+      ],
+      "ota_file": "Aura_AQ_SEN0321_TEST_7-inch_dual-i2c_20260926_6d66f992.bin",
+      "ota_validation": {
+        "schema": "project-aura.ota-image-identity.v2",
+        "image": "D:\\21cncstudio\\project_aura_aq\\firmware-main\\build-idf-7_dual_i2c\\aura_aq.bin",
+        "hardware_target": "aura-aq-7-v1",
+        "ota_image_target": "aura-aq-7-v1",
+        "firmware_flavor": "production",
+        "descriptor_offset": 288,
+        "descriptor_size": 64,
+        "descriptor_version": 1,
+        "flavor_descriptor_offset": 352,
+        "flavor_descriptor_size": 32,
+        "flavor_descriptor_version": 1,
+        "image_size": 4599808,
+        "image_sha256": "6d66f992e024b78abdc7e344868df008a924cc6beddaefa6042c0f196a149e44",
+        "esp_checksum_verified": true,
+        "esp_hash_verified": true
+      },
+      "wrong_profile_rejected": true
+    }
+  ],
+  "ota_test_bundle": "release-assets\\SEN0321-test-20260926",
+  "prior_validation": "validation-20260926-initial.json",
+  "no_flash": true,
+  "no_publication": true
+}

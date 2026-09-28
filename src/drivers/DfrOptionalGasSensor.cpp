@@ -80,6 +80,7 @@ const char *DfrOptionalGasSensor::optionalGasLabel(OptionalGasType type) {
             return "NO2";
         case OptionalGasType::H2S:
             return "H2S";
+        case OptionalGasType::O3_SEN0321:
         case OptionalGasType::O3:
             return "O3";
         case OptionalGasType::O2:
@@ -91,6 +92,7 @@ const char *DfrOptionalGasSensor::optionalGasLabel(OptionalGasType type) {
 }
 
 const char *DfrOptionalGasSensor::unitForType(OptionalGasType type) {
+    if (type == OptionalGasType::O3_SEN0321) return "ppb";
     return type == OptionalGasType::O2 ? "%Vol" : "ppm";
 }
 
@@ -100,6 +102,7 @@ float DfrOptionalGasSensor::minPpmForType(OptionalGasType type) {
             return Config::SEN0469_NH3_MIN_PPM;
         case OptionalGasType::H2S:
             return Config::SEN0467_H2S_MIN_PPM;
+        case OptionalGasType::O3_SEN0321:
         case OptionalGasType::O3:
             return Config::SEN0472_O3_MIN_PPM;
         case OptionalGasType::SO2:
@@ -120,6 +123,7 @@ float DfrOptionalGasSensor::maxPpmForType(OptionalGasType type) {
             return Config::SEN0469_NH3_MAX_PPM;
         case OptionalGasType::H2S:
             return Config::SEN0467_H2S_MAX_PPM;
+        case OptionalGasType::O3_SEN0321:
         case OptionalGasType::O3:
             return Config::SEN0472_O3_MAX_PPM;
         case OptionalGasType::SO2:

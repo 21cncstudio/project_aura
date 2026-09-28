@@ -247,6 +247,7 @@ bool quiesce_lvgl_for_shared_i2c(const char *operation) {
 
 void disable_runtime_panel_i2c_owners() {
     panel_i2c_ready = false;
+    sdCardManager.pauseRecovery();
     lvgl_port_disable_touch_i2c();
     backlightManager.disableSharedBus();
 }
@@ -262,11 +263,12 @@ bool drain_runtime_panel_i2c_owners() {
         lvgl_port_wait_touch_i2c_idle(SHARED_I2C_OWNER_DRAIN_TIMEOUT_MS);
     const bool backlight_idle =
         backlightManager.waitForSharedBusIdle(SHARED_I2C_OWNER_DRAIN_TIMEOUT_MS);
-    if (!touch_idle || !backlight_idle) {
+    const bool sd_idle = sdCardManager.waitForRecoveryIdle(SHARED_I2C_OWNER_DRAIN_TIMEOUT_MS);
+    if (!touch_idle || !backlight_idle || !sd_idle) {
         LOGE("I2C",
-             "panel-bus owner drain timed out (touch=%s backlight=%s)",
+             "panel-bus owner drain timed out (touch=%s backlight=%s sd=%s)",
              touch_idle ? "idle" : "busy",
-             backlight_idle ? "idle" : "busy");
+             backlight_idle ? "idle" : "busy", sd_idle ? "idle" : "busy");
         return false;
     }
     return true;
@@ -460,8 +462,8 @@ void poll_runtime_i2c_recovery(uint32_t now_ms) {
 
         // A suppressed recovery has no later restart shutdown path. Make one
         // bounded best-effort attempt to clear retained DAC output, but only
-        // after every gated runtime shared-I2C owner has drained. CH422G SD
-        // card-select writes are startup/teardown-only and cannot run here.
+        // after every gated runtime shared-I2C owner has drained, including
+        // the SD recovery task that controls card select on the CH422G.
         if (decision != RuntimeI2cRecoveryPolicy::Decision::Restart &&
             !Config::SENSOR_I2C_SEPARATE) {
             const SharedI2cShutdownPolicy::SafeOutputDecision safe_output_decision =
@@ -781,7 +783,8 @@ void loop()
     }
     const uint32_t health_entry_now = millis();
     observe_last_good_health(health_entry_now, false);
-    if (restart_request_pending) {
+    if (restart_request_pending) sdCardManager.pauseRecovery();
+    if (restart_request_pending && sdCardManager.recoveryIdle()) {
         // Upload admission and restart shutdown use one atomic gate. Whichever
         // side wins first excludes the other without a cross-task check/use gap.
         if (!WebHandlersTryBeginRestartShutdown()) {
@@ -790,6 +793,7 @@ void loop()
                 restart_ota_deferral_logged = true;
             }
         } else {
+            sdCardManager.prepareForShutdown();
             restart_request_pending = false;
             restart_ota_deferral_logged = false;
             LOGI("OTA", "restarting now (main loop)");
@@ -886,6 +890,8 @@ void loop()
     }
 
     const bool ota_busy = WebHandlersIsOtaBusy();
+    sdCardManager.poll(millis(), ota_busy || restart_request_pending || !panel_i2c_ready);
+    if (sdCardManager.takeRecoverySuccess()) dailyExtremaHistory.storageRecovered();
     // Health may be false precisely because the port is paused, but a
     // permanently disabled shared I2C bus must never be followed by an OTA
     // resume that restarts touch traffic.

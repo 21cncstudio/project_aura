@@ -1,0 +1,11 @@
+{
+  "retrieved_date": "2026-09-26",
+  "repository": "https://github.com/DFRobot/DFRobot_OzoneSensor",
+  "commit": "bf073b730981c0e4fc4a6e859173cee4edd8c1fe",
+  "files": [
+    "src/DFRobot_OzoneSensor.cpp",
+    "src/DFRobot_OzoneSensor.h",
+    "LICENSE",
+    "library.properties"
+  ]
+}
