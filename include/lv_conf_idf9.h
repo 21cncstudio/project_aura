@@ -3,8 +3,8 @@
 #ifndef LV_CONF_H
 #define LV_CONF_H
 
-// Native ESP-IDF 6.1 / LVGL 9.5 configuration for the two RGB565 Aura profiles.
-#define LV_COLOR_DEPTH 16
+// Native ESP-IDF 6.1 / LVGL 9.6 configuration for the two RGB565 Aura profiles.
+#define LV_COLOR_FORMAT_DEFAULT LV_COLOR_FORMAT_RGB565
 #define LV_USE_STDLIB_MALLOC LV_STDLIB_CUSTOM
 #define LV_USE_STDLIB_STRING LV_STDLIB_CLIB
 #define LV_USE_STDLIB_SPRINTF LV_STDLIB_CLIB
@@ -29,6 +29,10 @@
 #define LV_USE_LOG 1
 #define LV_LOG_LEVEL LV_LOG_LEVEL_WARN
 #define LV_LOG_PRINTF 0
+// Keep generic assertions enabled alongside null/allocation checks.
+// Keep argument validation identical in native-IDF and host-render builds.
+#define LV_USE_CHECK_ARG 1
+#define LV_USE_ASSERT 1
 #define LV_USE_ASSERT_NULL 1
 #define LV_USE_ASSERT_MALLOC 1
 #define LV_USE_ASSERT_MEM_INTEGRITY 0

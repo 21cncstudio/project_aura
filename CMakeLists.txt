@@ -27,7 +27,7 @@ include_directories("${CMAKE_SOURCE_DIR}/idf/include"
     "${CMAKE_SOURCE_DIR}/include" "${CMAKE_BINARY_DIR}/generated")
 add_compile_definitions(${AURA_DEFINITIONS}
     AURA_NATIVE_IDF=1 ARDUINO_USB_MODE=1 ARDUINO_USB_CDC_ON_BOOT=1 CORE_DEBUG_LEVEL=1
-    LV_CONF_INCLUDE_SIMPLE LV_LVGL_H_INCLUDE_SIMPLE LV_COLOR_16_SWAP=0)
+    LV_CONF_INCLUDE_SIMPLE LV_LVGL_H_INCLUDE_SIMPLE)
 
 project(aura_aq)
 # Produce the installer filesystem with the same LittleFS component as firmware.
