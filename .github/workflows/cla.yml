@@ -16,27 +16,31 @@ permissions:
 jobs:
   agreement:
     name: CLA agreement
-    if: ${{ github.repository == '21cncstudio/project_aura' }}
+    # Skip unrelated comments before requesting a runner.
+    if: >-
+      github.repository == '21cncstudio/project_aura' &&
+      (
+        (
+          github.event_name == 'pull_request_target' &&
+          (
+            github.event.action == 'opened' ||
+            github.event.action == 'reopened' ||
+            github.event.action == 'synchronize' ||
+            (github.event.action == 'closed' && github.event.pull_request.merged == true)
+          )
+        ) ||
+        (
+          github.event_name == 'issue_comment' &&
+          github.event.issue.pull_request &&
+          (
+            github.event.comment.body == 'recheck' ||
+            github.event.comment.body == 'I have read and agree to the Project Aura Individual Contributor License Agreement v2.0, and I hereby sign it.'
+          )
+        )
+      )
     runs-on: ubuntu-latest
     steps:
       - name: Verify contributor signatures
-        if: |
-          (
-            github.event_name == 'pull_request_target' &&
-            (
-              github.event.action == 'opened' ||
-              github.event.action == 'reopened' ||
-              github.event.action == 'synchronize' ||
-              (github.event.action == 'closed' && github.event.pull_request.merged == true)
-            )
-          ) ||
-          (
-            github.event_name == 'issue_comment' &&
-            (
-              github.event.comment.body == 'recheck' ||
-              github.event.comment.body == 'I have read and agree to the Project Aura Individual Contributor License Agreement v2.0, and I hereby sign it.'
-            )
-          )
         uses: contributor-assistant/github-action@ca4a40a7d1004f18d9960b404b97e5f30a505a08 # v2.6.1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
