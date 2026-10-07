@@ -299,7 +299,7 @@ bool Sfa40::stop() {
         measurement_state_unknown_ = true;
         return false;
     }
-    delay(Config::SFA3X_STOP_DELAY_MS);
+    delay(Config::SFA40_PROTOCOL_STOP_DELAY_MS);
     measuring_ = false;
     measurement_state_unknown_ = false;
     warmup_active_ = false;
@@ -763,7 +763,7 @@ bool Sfa40::ensureIdleBeforeStart() {
         last_error_cause_ = ErrorCause::ProtocolStop;
         return false;
     }
-    delay(Config::SFA3X_STOP_DELAY_MS);
+    delay(Config::SFA40_PROTOCOL_STOP_DELAY_MS);
     measuring_ = false;
     measurement_state_unknown_ = false;
     last_error_cause_ = ErrorCause::None;

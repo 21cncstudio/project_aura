@@ -309,6 +309,64 @@ void test_real_sfa40_stops_for_700_ms_before_protocol_detection() {
         diagnostics.start_ms);
 }
 
+void test_real_sfa40_runtime_stop_waits_for_vendor_idle_interval() {
+    uint8_t serial_data[9];
+    encodeWordWithCrc(0x1234, &serial_data[0]);
+    encodeWordWithCrc(0x5678, &serial_data[3]);
+    encodeWordWithCrc(0x9ABC, &serial_data[6]);
+    I2cMock::setDevicePresent(Config::SFA3X_ADDR, true);
+    I2cMock::setCommandRead(Config::SFA3X_ADDR, Config::SFA40_CMD_ID,
+                           serial_data, sizeof(serial_data));
+    Sfa40 sfa;
+    TEST_ASSERT_TRUE(sfa.begin());
+    sfa.start();
+    TEST_ASSERT_TRUE(sfa.isOk());
+
+    const uint32_t before_stop = getMillis();
+    TEST_ASSERT_TRUE(sfa.stop());
+    // Both official Sensirion SFA4x 1.0.0 drivers wait 700 ms after STOP.
+    TEST_ASSERT_TRUE(getMillis() - before_stop >= 700U);
+    TEST_ASSERT_EQUAL_UINT32(2U, I2cMock::sensorCommandCount(
+        Config::SFA3X_ADDR, Config::SFA40_CMD_STOP));
+
+    const uint32_t idle_ms = getMillis();
+    TEST_ASSERT_TRUE(sfa.stop());
+    TEST_ASSERT_EQUAL_UINT32(idle_ms, getMillis());
+    TEST_ASSERT_EQUAL_UINT32(2U, I2cMock::sensorCommandCount(
+        Config::SFA3X_ADDR, Config::SFA40_CMD_STOP));
+}
+
+void test_real_sfa40_selftest_waits_for_idle_when_state_is_unknown() {
+    uint8_t serial_data[9];
+    uint8_t selftest_data[3];
+    encodeWordWithCrc(0x1234, &serial_data[0]);
+    encodeWordWithCrc(0x5678, &serial_data[3]);
+    encodeWordWithCrc(0x9ABC, &serial_data[6]);
+    encodeWordWithCrc(0, selftest_data);
+    I2cMock::setDevicePresent(Config::SFA3X_ADDR, true);
+    I2cMock::setCommandRead(Config::SFA3X_ADDR, Config::SFA40_CMD_ID,
+                           serial_data, sizeof(serial_data));
+    I2cMock::setCommandRead(Config::SFA3X_ADDR, Config::SFA40_CMD_READ_SELFTEST,
+                           selftest_data, sizeof(selftest_data));
+    Sfa40 sfa;
+    TEST_ASSERT_TRUE(sfa.begin());
+    sfa.start();
+    TEST_ASSERT_TRUE(sfa.startSelfTest());
+    uint16_t raw_result = 0xFFFF;
+    TEST_ASSERT_EQUAL(static_cast<int>(Sfa40::SelfTestStatus::Passed),
+                      static_cast<int>(sfa.readSelfTestStatus(raw_result)));
+
+    // Finishing a self-test leaves the sensor state unknown. A subsequent
+    // idle-only command must use the same vendor STOP interval as normal stop.
+    const uint32_t before_selftest = getMillis();
+    TEST_ASSERT_TRUE(sfa.startSelfTest());
+    TEST_ASSERT_TRUE(getMillis() - before_selftest >= 700U);
+    TEST_ASSERT_EQUAL_UINT32(3U, I2cMock::sensorCommandCount(
+        Config::SFA3X_ADDR, Config::SFA40_CMD_STOP));
+    TEST_ASSERT_EQUAL_UINT32(2U, I2cMock::sensorCommandCount(
+        Config::SFA3X_ADDR, Config::SFA40_CMD_START_SELFTEST));
+}
+
 void test_real_sfa40_waits_1_ms_between_measurement_command_and_read() {
     uint8_t serial_data[9];
     uint8_t read_data[12];
@@ -994,6 +1052,8 @@ int main(int, char **) {
     RUN_TEST(test_real_sfa40_detects_by_valid_id_and_reads_hcho);
     RUN_TEST(test_real_sfa40_detects_b4_and_reads_low_byte_status);
     RUN_TEST(test_real_sfa40_stops_for_700_ms_before_protocol_detection);
+    RUN_TEST(test_real_sfa40_runtime_stop_waits_for_vendor_idle_interval);
+    RUN_TEST(test_real_sfa40_selftest_waits_for_idle_when_state_is_unknown);
     RUN_TEST(test_real_sfa40_waits_1_ms_between_measurement_command_and_read);
     RUN_TEST(test_real_sfa40_waits_minimum_startup_delay_before_first_read);
     RUN_TEST(test_real_sfa40_waits_startup_delay_across_millis_wraparound);
