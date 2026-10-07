@@ -261,13 +261,25 @@ dependencies:
       type: service
     version: 1.6.8
   espressif/esp32_display_panel:
-    dependencies: []
+    dependencies:
+    - name: idf
+      version: '>=5.1'
+    - name: espressif/esp-lib-utils
+      public: true
+      version: ==0.3.0
+    - name: espressif/esp32_io_expander
+      public: true
+      version: 1.*
     source:
       path: components/espressif__esp32_display_panel
       type: local
     version: 1.0.5
   espressif/esp32_io_expander:
-    dependencies: []
+    dependencies:
+    - name: idf
+      version: '>=5.1'
+    - name: espressif/esp-lib-utils
+      version: ==0.3.0
     source:
       path: components/espressif__esp32_io_expander
       type: local
@@ -393,6 +405,6 @@ direct_dependencies:
 - espressif/mqtt
 - idf
 - lvgl/lvgl
-manifest_hash: 4049ea62f243f7d05d5527a52d85fa49b14dea5985c801a71fd88dd859c996f2
+manifest_hash: 61c580892d331a1f2cac60bf90c85ac809dedab32be63b3dc3c6e3d31599765a
 target: esp32s3
 version: 3.0.0
