@@ -72,6 +72,20 @@ constexpr uint32_t bootQuietWindowMs(bool cold_start) {
     return cold_start ? BOOT_QUIET_COLD_MS : BOOT_QUIET_WARM_MS;
 }
 
+// Called by the input callback during startup. Retire the deadline on its
+// first expiry: a stale signed deadline comparison becomes true again after
+// half of the uint32_t range (about 24.9 days) and would suppress touch reads.
+inline bool bootQuietWindowActive(uint32_t now_ms, uint32_t &deadline_ms) {
+    if (deadline_ms == 0) {
+        return false;
+    }
+    if (static_cast<int32_t>(deadline_ms - now_ms) > 0) {
+        return true;
+    }
+    deadline_ms = 0;
+    return false;
+}
+
 constexpr bool interruptLineActive(bool configured_active_high,
                                    int sampled_level) {
     return sampled_level == (configured_active_high ? 1 : 0);

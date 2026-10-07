@@ -1,4 +1,5 @@
 #include <unity.h>
+#include <initializer_list>
 
 #include "core/TouchWakePolicy.h"
 
@@ -18,6 +19,54 @@ void test_boot_quiet_window_uses_reliable_cold_start_classification() {
     TEST_ASSERT_EQUAL_UINT32(
         TouchWakePolicy::BOOT_QUIET_WARM_MS,
         TouchWakePolicy::bootQuietWindowMs(false));
+}
+
+void test_boot_quiet_window_expires_at_cold_and_warm_deadlines() {
+    for (bool cold_start : {false, true}) {
+        const uint32_t start = 1234U;
+        const uint32_t end = start + TouchWakePolicy::bootQuietWindowMs(cold_start);
+        uint32_t deadline = end;
+        TEST_ASSERT_TRUE(TouchWakePolicy::bootQuietWindowActive(start, deadline));
+        TEST_ASSERT_TRUE(TouchWakePolicy::bootQuietWindowActive(end - 1U, deadline));
+        TEST_ASSERT_FALSE(TouchWakePolicy::bootQuietWindowActive(end, deadline));
+        TEST_ASSERT_FALSE(TouchWakePolicy::bootQuietWindowActive(end + 1U, deadline));
+    }
+}
+
+void test_expired_boot_quiet_window_does_not_reactivate_after_half_range() {
+    const uint32_t end = 6234U;
+    uint32_t deadline = end;
+    TEST_ASSERT_FALSE(TouchWakePolicy::bootQuietWindowActive(end, deadline));
+    TEST_ASSERT_FALSE(TouchWakePolicy::bootQuietWindowActive(end + 0x7fffffffU, deadline));
+    TEST_ASSERT_FALSE(TouchWakePolicy::bootQuietWindowActive(end + 0x80000000U, deadline));
+    TEST_ASSERT_FALSE(TouchWakePolicy::bootQuietWindowActive(end + 0x80000001U, deadline));
+}
+
+void test_expired_boot_quiet_window_allows_issue157_uptimes() {
+    uint32_t deadline = 6234U;
+    TEST_ASSERT_FALSE(TouchWakePolicy::bootQuietWindowActive(6300U, deadline));
+    // Physical reports from issue #157: rendering advanced, touch reads did not.
+    TEST_ASSERT_FALSE(TouchWakePolicy::bootQuietWindowActive(2410346585U, deadline));
+    TEST_ASSERT_FALSE(TouchWakePolicy::bootQuietWindowActive(2410413202U, deadline));
+}
+
+void test_boot_quiet_window_wraps_once_and_stays_expired() {
+    const uint32_t start = UINT32_MAX - 999U;
+    uint32_t deadline = start + TouchWakePolicy::BOOT_QUIET_COLD_MS;
+    TEST_ASSERT_TRUE(TouchWakePolicy::bootQuietWindowActive(start, deadline));
+    TEST_ASSERT_TRUE(TouchWakePolicy::bootQuietWindowActive(UINT32_MAX, deadline));
+    TEST_ASSERT_TRUE(TouchWakePolicy::bootQuietWindowActive(3999U, deadline));
+    TEST_ASSERT_FALSE(TouchWakePolicy::bootQuietWindowActive(4000U, deadline));
+    TEST_ASSERT_FALSE(TouchWakePolicy::bootQuietWindowActive(UINT32_MAX, deadline));
+    TEST_ASSERT_FALSE(TouchWakePolicy::bootQuietWindowActive(0U, deadline));
+    TEST_ASSERT_FALSE(TouchWakePolicy::bootQuietWindowActive(3999U, deadline));
+}
+
+void test_unarmed_boot_quiet_window_never_blocks_touch() {
+    uint32_t deadline = 0U;
+    TEST_ASSERT_FALSE(TouchWakePolicy::bootQuietWindowActive(0U, deadline));
+    TEST_ASSERT_FALSE(TouchWakePolicy::bootQuietWindowActive(2410346585U, deadline));
+    TEST_ASSERT_FALSE(TouchWakePolicy::bootQuietWindowActive(UINT32_MAX, deadline));
 }
 
 void test_interrupt_active_level_matches_touch_configuration() {
@@ -268,6 +317,11 @@ void test_sparse_wake_errors_form_a_recovery_streak() {
 int main(int, char **) {
     UNITY_BEGIN();
     RUN_TEST(test_boot_quiet_window_uses_reliable_cold_start_classification);
+    RUN_TEST(test_boot_quiet_window_expires_at_cold_and_warm_deadlines);
+    RUN_TEST(test_expired_boot_quiet_window_does_not_reactivate_after_half_range);
+    RUN_TEST(test_expired_boot_quiet_window_allows_issue157_uptimes);
+    RUN_TEST(test_boot_quiet_window_wraps_once_and_stays_expired);
+    RUN_TEST(test_unarmed_boot_quiet_window_never_blocks_touch);
     RUN_TEST(test_interrupt_active_level_matches_touch_configuration);
     RUN_TEST(test_disabled_policy_never_probes_or_wakes);
     RUN_TEST(test_interrupt_latch_coalesces_repeated_signals);

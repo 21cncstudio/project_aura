@@ -1901,8 +1901,8 @@ static void touchpad_read(lv_indev_drv_t *indev_drv, lv_indev_data_t *data)
         return;
     }
 
-    if ((lvgl_touch_boot_quiet_until_ms != 0) &&
-        is_before_deadline(now_ms, lvgl_touch_boot_quiet_until_ms)) {
+    if (TouchWakePolicy::bootQuietWindowActive(
+            now_ms, lvgl_touch_boot_quiet_until_ms)) {
         lvgl_touch_set_cached_state(LV_INDEV_STATE_RELEASED);
         data->state = lvgl_touch_cached_state;
         return;
