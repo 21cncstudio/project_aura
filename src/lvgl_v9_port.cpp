@@ -25,6 +25,9 @@
 #include "core/TouchWakePolicy.h"
 #include "core/WakePowerGuard.h"
 #include "lvgl_v8_port.h"
+#if AURA_NATIVE_ROTATION
+#include "display/NativeRotation.h"
+#endif
 
 using namespace esp_panel::drivers;
 
@@ -274,12 +277,17 @@ static int lvgl_port_framebuffer_index(const void *frame_buffer)
 
 static bool lvgl_port_framebuffers_are_distinct()
 {
+#if AURA_NATIVE_ROTATION
+    return lvgl_port_driver_fb[0] && lvgl_port_driver_fb[1] &&
+           lvgl_port_driver_fb[0] != lvgl_port_driver_fb[1] && !lvgl_port_driver_fb[2];
+#else
     return lvgl_port_driver_fb[0] != nullptr &&
            lvgl_port_driver_fb[1] != nullptr &&
            lvgl_port_driver_fb[2] != nullptr &&
            lvgl_port_driver_fb[0] != lvgl_port_driver_fb[1] &&
            lvgl_port_driver_fb[0] != lvgl_port_driver_fb[2] &&
            lvgl_port_driver_fb[1] != lvgl_port_driver_fb[2];
+#endif
 }
 
 #if LVGL_PORT_AVOID_TEAR
@@ -373,6 +381,13 @@ static bool lvgl_port_switch_and_confirm_vsync(LCD *lcd, void *frame_buffer)
         return false;
     }
     lvgl_port_active_scanout_index = acknowledged_index;
+#elif AURA_NATIVE_ROTATION
+    if (!NativeRotation::acknowledge(frame_buffer)) {
+        ++lvgl_diag_framebuffer_ownership_violation_count;
+        lvgl_port_latch_display_sync_fault("Native framebuffer acknowledgement rejected");
+        return false;
+    }
+    lvgl_port_active_scanout_index = lvgl_port_framebuffer_index(frame_buffer);
 #endif
     // Publish only a completed framebuffer hand-off, never flush entry or an
     // unrelated VSYNC. This acknowledges the driver path, not optical output.
@@ -760,6 +775,7 @@ static void lvgl_touch_latch_screen_idle_fail_safe()
     lvgl_touch_publish_screen_policy_mode();
 }
 
+#if !AURA_NATIVE_ROTATION
 static void lvgl_port_copy_frame_180(const uint16_t *src, uint16_t *dst, uint32_t width, uint32_t height)
 {
     if (src == nullptr || dst == nullptr) {
@@ -773,6 +789,8 @@ static void lvgl_port_copy_frame_180(const uint16_t *src, uint16_t *dst, uint32_
         *to-- = *from++;
     }
 }
+
+#endif
 
 static void lvgl_port_apply_screen_flip_to_touch_point(TouchPoint &point)
 {
@@ -797,8 +815,23 @@ static void lvgl_port_apply_screen_flip_to_touch_point(TouchPoint &point)
     point.y = (ver_res - 1) - point.y;
 }
 
+#if AURA_NATIVE_ROTATION
+[[noreturn]] static void lvgl_port_native_rotation_fault(const char *reason)
+{
+    ++lvgl_diag_framebuffer_ownership_violation_count;
+    lvgl_port_latch_display_sync_fault(reason);
+    lvgl_port_fail_stop_display_task();
+}
+#endif
+
 static bool lvgl_port_apply_screen_flip_180(bool enabled)
 {
+#if AURA_NATIVE_ROTATION
+    // Orientation is immutable for this boot. The UI saves it and requests
+    // the normal orderly restart instead of reinterpreting live framebuffers.
+    return lvgl_port_lcd && !lvgl_display_sync_fault.load(std::memory_order_acquire) &&
+           enabled == lvgl_port_screen_flip_180.load(std::memory_order_acquire);
+#else
     if (lvgl_port_lcd == nullptr) {
         return false;
     }
@@ -879,6 +912,7 @@ static bool lvgl_port_apply_screen_flip_180(bool enabled)
     lv_obj_invalidate(lv_scr_act());
     ESP_LOGI("LVGL", "screen 180 flip %s", enabled ? "enabled" : "disabled");
     return true;
+#endif
 }
 
 static inline uint32_t lvgl_touch_boot_quiet_window_ms()
@@ -1178,6 +1212,11 @@ static void flush_callback(lv_display_t *drv, const lv_area_t *, uint8_t *color_
     /* Action after last area refresh */
     if (lv_display_flush_is_last(drv)) {
         void *next_frame_buffer = color_map;
+#if AURA_NATIVE_ROTATION
+        if (!NativeRotation::canSubmit(color_map)) {
+            lvgl_port_native_rotation_fault("Native flush targets active or foreign framebuffer");
+        }
+#else
         if (lvgl_port_screen_flip_180.load(std::memory_order_acquire)) {
             const int color_map_index =
                 lvgl_port_framebuffer_index(color_map);
@@ -1205,12 +1244,15 @@ static void flush_callback(lv_display_t *drv, const lv_area_t *, uint8_t *color_
             );
         }
 
+#endif
         if (!lvgl_port_switch_and_confirm_vsync(lcd, next_frame_buffer)) {
             lvgl_port_fail_stop_display_task();
         }
+#if !AURA_NATIVE_ROTATION
         if (lvgl_port_screen_flip_180.load(std::memory_order_acquire)) {
             ++lvgl_diag_rotated_copy_switch_count;
         }
+#endif
     }
 
     lv_display_flush_ready(drv);
@@ -1246,22 +1288,32 @@ IRAM_ATTR bool onLcdVsyncCallback(void *user_data)
 }
 
 
-static lv_display_t *display_init(LCD *lcd)
+static lv_display_t *display_init(LCD *lcd, bool initial_flip_180)
 {
     static_assert(LVGL_VERSION_MAJOR == 9 && LV_COLOR_DEPTH == 16,
                   "Native Aura display requires LVGL 9 and RGB565");
-    static_assert(LVGL_PORT_DIRECT_MODE && LVGL_PORT_DISP_BUFFER_NUM == 3 && LVGL_PORT_ROTATION_DEGREE == 0,
-                  "Native Aura display uses three RGB buffers with runtime 180-degree flip");
+    static_assert(LVGL_PORT_DIRECT_MODE && LVGL_PORT_ROTATION_DEGREE == 0 &&
+                  LVGL_PORT_DISP_BUFFER_NUM == (AURA_NATIVE_ROTATION ? 2 : 3),
+                  "Unexpected Aura framebuffer configuration");
     if (!lcd || !lcd->getRefreshPanelHandle()) return nullptr;
     const int width = lcd->getFrameWidth(), height = lcd->getFrameHeight();
-    for (int index = 0; index < RotatedFramebufferPolicy::FRAME_BUFFER_COUNT; ++index)
+    for (int index = 0; index < LVGL_PORT_DISP_BUFFER_NUM; ++index)
         lvgl_port_driver_fb[index] = lcd->getFrameBufferByIndex(index);
     if (!lvgl_port_framebuffers_are_distinct()) return nullptr;
+#if AURA_NATIVE_ROTATION
+    // IDF initially scans fb0; LVGL must render fb1 first. Ownership changes
+    // only after switch_and_confirm_vsync has received the driver's callback.
+    lvgl_buf[0] = lvgl_port_driver_fb[1];
+    lvgl_buf[1] = lvgl_port_driver_fb[0];
+    lvgl_port_active_scanout_index = 0;
+#else
+    (void)initial_flip_180;
     const auto layout = RotatedFramebufferPolicy::makeInitialLayout(0);
     if (!RotatedFramebufferPolicy::valid(layout)) return nullptr;
     lvgl_buf[0] = lvgl_port_driver_fb[layout.renderer_a];
     lvgl_buf[1] = lvgl_port_driver_fb[layout.renderer_b];
     lvgl_port_active_scanout_index = layout.scanout;
+#endif
     lvgl_port_flip_layout = {};
     lv_display_t *display = lv_display_create(width, height);
     if (!display) return nullptr;
@@ -1270,6 +1322,16 @@ static lv_display_t *display_init(LCD *lcd)
                            LV_DISPLAY_RENDER_MODE_DIRECT);
     lv_display_set_user_data(display, lcd);
     lv_display_set_flush_cb(display, flush_callback);
+#if AURA_NATIVE_ROTATION
+    if (!NativeRotation::begin(display, lvgl_port_driver_fb[0], initial_flip_180,
+                               lvgl_port_native_rotation_fault)) {
+        lv_display_delete(display);
+        return nullptr;
+    }
+    lvgl_port_screen_flip_180.store(initial_flip_180, std::memory_order_release);
+    ESP_LOGI("LVGL", "native renderer: orientation=%d, framebuffers=2, rotation-copy=off",
+             initial_flip_180 ? 180 : 0);
+#endif
     return display;
 }
 
@@ -1771,6 +1833,9 @@ static bool lvgl_port_cleanup_partial_init(lv_display_t *disp, lv_indev_t *indev
     if (indev != nullptr) {
         lv_indev_delete(indev);
     }
+#if AURA_NATIVE_ROTATION
+    NativeRotation::reset();
+#endif
     if (disp != nullptr) {
         lv_display_delete(disp);
     }
@@ -1942,7 +2007,7 @@ IRAM_ATTR bool onDrawBitmapFinishCallback(void *user_data)
     return false;
 }
 
-bool lvgl_port_init(LCD *lcd, Touch *tp)
+bool lvgl_port_init(LCD *lcd, Touch *tp, bool initial_flip_180)
 {
     ESP_UTILS_CHECK_FALSE_RETURN(lcd != nullptr, false, "Invalid LCD device");
     ESP_UTILS_CHECK_FALSE_RETURN(
@@ -2067,7 +2132,7 @@ bool lvgl_port_init(LCD *lcd, Touch *tp)
 #endif
 
     ESP_UTILS_LOGI("Initializing LVGL display driver");
-    disp = display_init(lcd);
+    disp = display_init(lcd, initial_flip_180);
     if (disp == nullptr) {
         (void)lvgl_port_cleanup_partial_init(disp, indev);
         ESP_UTILS_LOGE("Initialize LVGL display driver failed");
@@ -2109,7 +2174,9 @@ bool lvgl_port_init(LCD *lcd, Touch *tp)
 #endif
     }
 
+#if !AURA_NATIVE_ROTATION
     lvgl_port_screen_flip_180.store(false, std::memory_order_release);
+#endif
     lvgl_rotation_pipeline_active.store(false, std::memory_order_release);
 
     ESP_UTILS_LOGD("Create mutex for LVGL");
@@ -2599,6 +2666,8 @@ bool lvgl_port_get_diagnostics(lvgl_port_diagnostics_t *out)
         lvgl_diag_touch_irq_no_frame_count.load(std::memory_order_relaxed);
     out->screen_flip_180 =
         lvgl_port_screen_flip_180.load(std::memory_order_acquire);
+    out->native_rotation_renderer = AURA_NATIVE_ROTATION;
+    out->framebuffer_count = LVGL_PORT_DISP_BUFFER_NUM;
     out->rotation_pipeline_active =
         lvgl_rotation_pipeline_active.load(std::memory_order_acquire);
     out->rotated_copy_switch_count = lvgl_diag_rotated_copy_switch_count;

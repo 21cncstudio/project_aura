@@ -2541,8 +2541,9 @@ IRAM_ATTR bool onDrawBitmapFinishCallback(void *user_data)
     return false;
 }
 
-bool lvgl_port_init(LCD *lcd, Touch *tp)
+bool lvgl_port_init(LCD *lcd, Touch *tp, bool initial_flip_180)
 {
+    (void)initial_flip_180; // Legacy profiles still use the post-init setter.
     ESP_UTILS_CHECK_FALSE_RETURN(lcd != nullptr, false, "Invalid LCD device");
     ESP_UTILS_CHECK_FALSE_RETURN(
         (lvgl_task_handle == nullptr) && (lvgl_mux == nullptr),
@@ -3196,6 +3197,8 @@ bool lvgl_port_get_diagnostics(lvgl_port_diagnostics_t *out)
         lvgl_diag_touch_irq_no_frame_count.load(std::memory_order_relaxed);
     out->screen_flip_180 =
         lvgl_port_screen_flip_180.load(std::memory_order_acquire);
+    out->native_rotation_renderer = false;
+    out->framebuffer_count = LVGL_PORT_DISP_BUFFER_NUM;
     out->rotation_pipeline_active =
         lvgl_rotation_pipeline_active.load(std::memory_order_acquire);
     out->rotated_copy_switch_count = lvgl_diag_rotated_copy_switch_count;

@@ -108,6 +108,8 @@ void fillJson(ArduinoJson::JsonObject root,
         touch_polling["irq_no_frame"] =
             payload.display.touch_polling.irq_no_frame;
         display["screen_flip_180"] = payload.display.screen_flip_180;
+        display["native_rotation_renderer"] = payload.display.native_rotation_renderer;
+        display["framebuffer_count"] = payload.display.framebuffer_count;
         display["rotation_pipeline_active"] =
             payload.display.rotation_pipeline_active;
         display["rotated_copy_switch_count"] =

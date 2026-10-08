@@ -13,6 +13,7 @@
 #include "config/AppConfig.h"
 #include "core/Logger.h"
 #include "core/SafeRestart.h"
+#include "core/ScreenRotationRestartPolicy.h"
 #include "web/WebRuntime.h"
 #include "lvgl_v8_port.h"
 #include "modules/NetworkManager.h"
@@ -525,6 +526,22 @@ void UiController::on_screen_flip_180_event(lv_event_t *e) {
     auto &cfg = storage.config();
     const bool previous = cfg.screen_flip_180;
     const bool enabled = !previous;
+#if AURA_NATIVE_ROTATION
+    static ScreenRotationRestartPolicy rotation_restart;
+    if (rotation_restart.pending()) return;
+    if (WebHandlersIsOtaBusy() || !rotation_restart.request(cfg.screen_flip_180,
+            [&] { return storage.saveConfig(true); },
+            [] { WebHandlersRequestRestart(250); })) {
+        if (objects.btn_180_flip) {
+            if (previous) lv_obj_add_state(objects.btn_180_flip, LV_STATE_CHECKED);
+            else lv_obj_clear_state(objects.btn_180_flip, LV_STATE_CHECKED);
+        }
+        LOGE("UI", "screen rotation not saved or OTA busy; restart not requested");
+        return;
+    }
+    LOGI("UI", "screen rotation saved; applying %d degrees after restart", enabled ? 180 : 0);
+    if (objects.btn_180_flip) lv_obj_add_state(objects.btn_180_flip, LV_STATE_DISABLED);
+#else
     if (!lvgl_port_set_screen_flip_180(enabled)) {
         if (objects.btn_180_flip) {
             if (previous) lv_obj_add_state(objects.btn_180_flip, LV_STATE_CHECKED);
@@ -538,6 +555,7 @@ void UiController::on_screen_flip_180_event(lv_event_t *e) {
     if (!persist_ui_config(storage, "screen rotation")) {
         LOGW("UI", "screen rotation queued for save");
     }
+#endif
     if (objects.btn_180_flip) {
         if (enabled) lv_obj_add_state(objects.btn_180_flip, LV_STATE_CHECKED);
         else lv_obj_clear_state(objects.btn_180_flip, LV_STATE_CHECKED);

@@ -171,6 +171,8 @@ void handleDiagData(WebHandlerContext &context,
         payload.display.touch_polling.irq_no_frame =
             display.touch_irq_no_frame_count;
         payload.display.screen_flip_180 = display.screen_flip_180;
+        payload.display.native_rotation_renderer = display.native_rotation_renderer;
+        payload.display.framebuffer_count = display.framebuffer_count;
         payload.display.rotation_pipeline_active =
             display.rotation_pipeline_active;
         payload.display.rotated_copy_switch_count =

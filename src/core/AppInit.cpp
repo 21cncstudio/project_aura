@@ -236,7 +236,8 @@ AppInit::LvglInitResult AppInit::initLvglAndUi(Context &ctx, esp_panel::board::B
         return result;
     }
     LOGI("Main", "Initializing LVGL");
-    result.port_ready = lvgl_port_init(board->getLCD(), board->getTouch());
+    result.port_ready = lvgl_port_init(board->getLCD(), board->getTouch(),
+                                       ctx.storage.config().screen_flip_180);
     if (!result.port_ready) {
         LOGE("Main", "LVGL init failed");
     } else if (!lvgl_port_set_screen_flip_180(ctx.storage.config().screen_flip_180)) {

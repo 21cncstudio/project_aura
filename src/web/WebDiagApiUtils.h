@@ -74,6 +74,8 @@ struct DisplayPayload {
     bool touch_offline = false;
     TouchPollingPayload touch_polling{};
     bool screen_flip_180 = false;
+    bool native_rotation_renderer = false;
+    uint8_t framebuffer_count = 0;
     bool rotation_pipeline_active = false;
     uint32_t rotated_copy_switch_count = 0;
     uint32_t framebuffer_ownership_violation_count = 0;

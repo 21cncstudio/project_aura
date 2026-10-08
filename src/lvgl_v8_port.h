@@ -11,6 +11,7 @@
 #endif
 #include "esp_display_panel.hpp"
 #include "lvgl.h"
+#include "display/NativeRotationConfig.h"
 
 // *INDENT-OFF*
 
@@ -116,7 +117,11 @@
     #define LVGL_PORT_DISP_BUFFER_NUM           (3)
     #define LVGL_PORT_FULL_REFRESH              (1)
 #elif LVGL_PORT_AVOID_TEARING_MODE == 3
-    #define LVGL_PORT_DISP_BUFFER_NUM           (3)
+    #if AURA_NATIVE_ROTATION
+        #define LVGL_PORT_DISP_BUFFER_NUM       (2)
+    #else
+        #define LVGL_PORT_DISP_BUFFER_NUM       (3)
+    #endif
     #define LVGL_PORT_DIRECT_MODE               (1)
 #else
     #error "Invalid avoid tearing mode, please set macro `LVGL_PORT_AVOID_TEARING_MODE` to one of `LVGL_PORT_AVOID_TEARING_MODE_*`"
@@ -144,13 +149,16 @@ extern "C" {
  *
  * @param lcd The pointer to the LCD panel device, mustn't be nullptr
  * @param tp  The pointer to the touch panel device, set to nullptr if is not used
+ * @param initial_flip_180 Saved boot orientation for the native 7-inch renderer.
+ *        Other profiles retain the post-init setter.
  *
  * If initialization fails, all timers, callbacks and partially registered
  * LVGL resources created by this call are released before returning.
  *
  * @return true if success, otherwise false
  */
-bool lvgl_port_init(esp_panel::drivers::LCD *lcd, esp_panel::drivers::Touch *tp);
+bool lvgl_port_init(esp_panel::drivers::LCD *lcd, esp_panel::drivers::Touch *tp,
+                    bool initial_flip_180 = false);
 
 /**
  * @brief Report whether an already-empty LVGL lifecycle is deinitialized.
@@ -443,6 +451,8 @@ typedef struct {
     uint32_t touch_irq_arm_failure_count;
     uint32_t touch_irq_no_frame_count;
     bool screen_flip_180;
+    bool native_rotation_renderer;
+    uint8_t framebuffer_count;
     bool rotation_pipeline_active;
     uint32_t rotated_copy_switch_count;
     uint32_t framebuffer_ownership_violation_count;

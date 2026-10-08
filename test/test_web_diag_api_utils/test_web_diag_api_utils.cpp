@@ -57,6 +57,8 @@ void test_web_diag_api_utils_names_refresh_callback_and_rotation_ownership() {
     payload.display.touch_read_errors = 0;
     payload.display.touch_offline = false;
     payload.display.screen_flip_180 = true;
+    payload.display.native_rotation_renderer = true;
+    payload.display.framebuffer_count = 2;
     payload.display.rotation_pipeline_active = true;
     payload.display.rotated_copy_switch_count = 19;
     payload.display.framebuffer_ownership_violation_count = 0;
@@ -79,6 +81,8 @@ void test_web_diag_api_utils_names_refresh_callback_and_rotation_ownership() {
     TEST_ASSERT_EQUAL_UINT32(20,
                              display["framebuffer_handoff_count"].as<uint32_t>());
     TEST_ASSERT_TRUE(display["screen_flip_180"].as<bool>());
+    TEST_ASSERT_TRUE(display["native_rotation_renderer"].as<bool>());
+    TEST_ASSERT_EQUAL_UINT(2, display["framebuffer_count"].as<unsigned>());
     TEST_ASSERT_TRUE(display["rotation_pipeline_active"].as<bool>());
     TEST_ASSERT_EQUAL_UINT32(
         19, display["rotated_copy_switch_count"].as<uint32_t>());
