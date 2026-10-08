@@ -261,29 +261,41 @@ dependencies:
       type: service
     version: 1.6.8
   espressif/esp32_display_panel:
-    dependencies:
-    - name: idf
-      version: '>=5.1'
-    - name: espressif/esp-lib-utils
-      public: true
-      version: ==0.3.0
-    - name: espressif/esp32_io_expander
-      public: true
-      version: 1.*
+    dependencies: []
     source:
       path: components/espressif__esp32_display_panel
       type: local
     version: 1.0.5
   espressif/esp32_io_expander:
-    dependencies:
-    - name: idf
-      version: '>=5.1'
-    - name: espressif/esp-lib-utils
-      version: ==0.3.0
+    dependencies: []
     source:
       path: components/espressif__esp32_io_expander
       type: local
     version: 1.1.1
+  espressif/esp_lcd_touch:
+    component_hash: 3f85a7d95af876f1a6ecca8eb90a81614890d0f03a038390804e5a77e2caf862
+    dependencies:
+    - name: idf
+      require: private
+      version: '>=4.4.2'
+    source:
+      registry_url: https://components.espressif.com/
+      type: service
+    version: 1.2.1
+  espressif/esp_lcd_touch_gt911:
+    component_hash: 737bdf29e0823eacf041381e81db2aaf5d378f3b5417df7f415f83319e3e790b
+    dependencies:
+    - name: espressif/esp_lcd_touch
+      registry_url: https://components.espressif.com
+      require: public
+      version: ^1.2.0
+    - name: idf
+      require: private
+      version: '>=5.2'
+    source:
+      registry_url: https://components.espressif.com/
+      type: service
+    version: 1.2.1
   espressif/esp_modem:
     component_hash: 06abed971065e9cb88039e011fd85ec1412c7416d3a3d84541a7a432e8d3f94d
     dependencies:
@@ -401,10 +413,12 @@ direct_dependencies:
 - espressif/esp-lib-utils
 - espressif/esp32_display_panel
 - espressif/esp32_io_expander
+- espressif/esp_lcd_touch
+- espressif/esp_lcd_touch_gt911
 - espressif/mdns
 - espressif/mqtt
 - idf
 - lvgl/lvgl
-manifest_hash: 61c580892d331a1f2cac60bf90c85ac809dedab32be63b3dc3c6e3d31599765a
+manifest_hash: 38de162b680423aa063f1520b47ed2f6cefb9777e00fe45aaac47e77dc8d49dd
 target: esp32s3
 version: 3.0.0

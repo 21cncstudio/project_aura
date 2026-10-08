@@ -28,7 +28,9 @@ class NativePanelProvenanceTests(unittest.TestCase):
         vendor = ROOT / "components/espressif__esp32_display_panel"
         with tempfile.TemporaryDirectory() as directory:
             destination = Path(directory)
-            with patch.object(sys, "argv", ["idf_panel_overlay.py", "--source", str(vendor), "--destination", str(destination)]):
+            with patch.object(sys, "argv", ["idf_panel_overlay.py", "--source", str(vendor), "--destination", str(destination),
+                    "--touch-core", str(ROOT / "managed_components/espressif__esp_lcd_touch"),
+                    "--touch-gt911", str(ROOT / "managed_components/espressif__esp_lcd_touch_gt911")]):
                 idf_panel_overlay.main()
             source = (destination / "src/drivers/bus/esp_panel_bus_i2c.cpp").read_text()
             self.assertIn("esp_lcd_new_panel_io_i2c(bus, &panel_config", source)

@@ -7,6 +7,8 @@ dependencies:
   espressif/esp32_io_expander:
     version: "==1.1.1"
     override_path: ../components/espressif__esp32_io_expander
+  espressif/esp_lcd_touch: "==1.2.1"
+  espressif/esp_lcd_touch_gt911: "==1.2.1"
   espressif/esp-lib-utils: "==0.3.0"
   lvgl/lvgl: "==9.6.0~1"
   bblanchon/arduinojson: "==7.4.3"

@@ -1,6 +1,6 @@
 """Build an IDF 6.1 adaptation without modifying vendored Display Panel sources.
 
-The seven changed upstream files are SHA-256 pinned after newline normalization.
+The changed upstream files are SHA-256 pinned after newline normalization.
 Any dependency update requires reviewing these adaptations, not silently applying
 them to a different library. Only generated build-directory copies are changed.
 """
@@ -9,6 +9,7 @@ import argparse
 import hashlib
 from pathlib import Path
 from idf_i2c_adapt import adapt_panel_i2c
+from idf_touch_adapt import touch_patches
 
 
 HASHES = {
@@ -82,6 +83,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--source", type=Path, required=True)
     parser.add_argument("--destination", type=Path, required=True)
+    parser.add_argument("--touch-core", type=Path, required=True)
+    parser.add_argument("--touch-gt911", type=Path, required=True)
     args = parser.parse_args()
     source = args.source.resolve()
     destination = args.destination.resolve()
@@ -90,6 +93,7 @@ def main():
     # Validate all patch inputs before writing any output.
     patches = {name: adapt(name, (source / "src" / name).read_text(encoding="utf-8"))
                for name in HASHES}
+    patches.update(touch_patches(source, args.touch_core, args.touch_gt911))
     for path in (source / "src").rglob("*"):
         if not path.is_file():
             continue
