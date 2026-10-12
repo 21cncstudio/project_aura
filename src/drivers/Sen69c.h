@@ -49,7 +49,6 @@ private:
         char serial[32]{};
         uint8_t state[8]{};
     };
-    static constexpr const char *VocPath = "/sen69c_voc_v1.bin";
     bool readWords(uint16_t command, uint16_t *words, size_t count, uint32_t delay_ms = 20);
     bool applyTemperature();
     bool startMeasurement();

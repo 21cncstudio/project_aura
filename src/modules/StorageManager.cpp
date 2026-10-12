@@ -349,10 +349,11 @@ void StorageManager::poll(uint32_t now_ms) {
 
 void StorageManager::clearAll() {
     const std::lock_guard<std::recursive_mutex> lock(persistence_mutex_);
-#ifndef UNIT_TEST
+    // Keep the reset file list identical on the device and in host tests.
     removeBlob(kConfigPath);
     removeBlob(kLastGoodPath);
     removeBlob(kVocStatePath);
+    removeBlob(kSen69cVocStatePath);
     removeBlob(kPressurePath);
     clearChartsHistory();
     removeBlob(kDacAutoPath);
@@ -361,10 +362,6 @@ void StorageManager::clearAll() {
     removeBlob(kWifiEapCaCertPath);
     removeBlob(kWifiEapClientCertPath);
     removeBlob(kWifiEapClientKeyPath);
-#else
-    g_blob_store.clear();
-    g_config_records.clear();
-#endif
     config_ = Config::StoredConfig{};
     dirty_ = false;
     last_save_ms_ = 0;
@@ -722,9 +719,11 @@ bool StorageManager::removeBlob(const char *path) {
         return false;
     }
     const std::string final_key(path);
-    bool removed = g_blob_store.erase(final_key) > 0;
-    removed = g_blob_store.erase(final_key + ".tmp") > 0 || removed;
-    removed = g_blob_store.erase(final_key + ".bak") > 0 || removed;
+    bool removed = false;
+    for (const auto &key : {final_key, final_key + ".tmp", final_key + ".bak"}) {
+        removed = g_blob_store.erase(key) > 0 || removed;
+        removed = g_config_records.erase(key) > 0 || removed;
+    }
     return removed;
 #endif
 }

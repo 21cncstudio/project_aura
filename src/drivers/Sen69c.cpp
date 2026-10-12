@@ -48,7 +48,7 @@ void Sen69c::setOffsets(float temperature, float humidity) {
 }
 void Sen69c::loadVocState(StorageManager &storage) {
     VocRecord saved{};
-    voc_valid_ = voc_.serial[0] && storage.loadBlob(VocPath, &saved, sizeof(saved)) &&
+    voc_valid_ = voc_.serial[0] && storage.loadBlob(StorageManager::kSen69cVocStatePath, &saved, sizeof(saved)) &&
                  saved.version == 1 && !memcmp(saved.serial, voc_.serial, sizeof(saved.serial));
     if (voc_valid_) memcpy(voc_.state, saved.state, sizeof(voc_.state));
 }
@@ -63,11 +63,11 @@ void Sen69c::saveVocState(StorageManager &storage) {
         voc_.state[2*i+1] = words[i];
     }
     voc_valid_ = true;
-    if (!storage.saveBlobAtomic(VocPath, &voc_, sizeof(voc_)))
+    if (!storage.saveBlobAtomic(StorageManager::kSen69cVocStatePath, &voc_, sizeof(voc_)))
         LOGW("SEN69C", "VOC state save failed");
 }
 void Sen69c::clearVocState(StorageManager &storage) {
-    storage.removeBlob(VocPath);
+    storage.removeBlob(StorageManager::kSen69cVocStatePath);
     voc_valid_ = false;
     memset(voc_.state, 0, sizeof(voc_.state));
 }

@@ -327,6 +327,40 @@ void test_remove_blob_cleans_atomic_artifacts() {
     TEST_ASSERT_FALSE(storage.blobExists("/cleanup.bin.bak"));
 }
 
+void test_factory_reset_clears_config_and_voc_without_formatting_storage() {
+    StorageManager storage;
+    storage.begin();
+    saveCandidate(storage, "reset-candidate");
+    uint32_t now_ms = 0;
+    observeHealthy(storage, now_ms);
+    accumulateHealthy(storage, now_ms, Config::LAST_GOOD_COMMIT_DELAY_MS);
+    storage.poll(now_ms);
+    Config::StoredConfig stored;
+    TEST_ASSERT_TRUE(loadStoredConfig(StorageManager::kConfigPath, stored));
+    TEST_ASSERT_TRUE(loadStoredConfig(StorageManager::kLastGoodPath, stored));
+    const uint8_t state[8] = {42};
+    TEST_ASSERT_TRUE(storage.saveVocState(state, sizeof(state)));
+    const String backup = String(StorageManager::kVocStatePath) + ".bak";
+    TEST_ASSERT_TRUE(storage.saveBlobAtomic(backup.c_str(), state, sizeof(state)));
+    TEST_ASSERT_TRUE(storage.saveBlobAtomic("/unrelated.bin", state, sizeof(state)));
+
+    storage.clearAll();
+
+    TEST_ASSERT_FALSE(loadStoredConfig(StorageManager::kConfigPath, stored));
+    TEST_ASSERT_FALSE(loadStoredConfig(StorageManager::kLastGoodPath, stored));
+    uint8_t actual[8]{};
+    TEST_ASSERT_FALSE(storage.loadVocState(actual, sizeof(actual)));
+    TEST_ASSERT_FALSE(storage.blobExists(backup.c_str()));
+    // This guards against replacing the production reset list with a test-only clear().
+    TEST_ASSERT_TRUE(storage.loadBlob("/unrelated.bin", actual, sizeof(actual)));
+    TEST_ASSERT_EQUAL_UINT8_ARRAY(state, actual, sizeof(state));
+    StorageManager::preserveTestPersistenceForNextBegin();
+    StorageManager rebooted;
+    rebooted.begin();
+    TEST_ASSERT_FALSE(rebooted.isConfigLoaded());
+    TEST_ASSERT_EQUAL_STRING("", rebooted.config().wifi_ssid.c_str());
+}
+
 void test_new_save_supersedes_an_interrupted_backup() {
     StorageManager storage;
     storage.begin();
@@ -794,6 +828,7 @@ int main(int, char **) {
     RUN_TEST(test_blob_load_recovers_interrupted_atomic_replace);
     RUN_TEST(test_text_load_recovers_interrupted_atomic_replace);
     RUN_TEST(test_remove_blob_cleans_atomic_artifacts);
+    RUN_TEST(test_factory_reset_clears_config_and_voc_without_formatting_storage);
     RUN_TEST(test_new_save_supersedes_an_interrupted_backup);
     RUN_TEST(test_dirty_config_saves_while_unhealthy_without_promoting_last_good);
     RUN_TEST(test_last_good_requires_exact_accumulated_healthy_dwell);

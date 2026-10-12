@@ -223,13 +223,53 @@ void test_voc_identity_mismatch_is_not_restored() {
     StorageManager storage; storage.begin();
     Sen69c sensor; sensor.begin(); sensor.setIdentity("SENSOR-B");
     Sen69c::VocRecord record; strcpy(record.serial,"SENSOR-A");
-    TEST_ASSERT_TRUE(storage.saveBlobAtomic(Sen69c::VocPath,&record,sizeof(record)));
+    TEST_ASSERT_TRUE(storage.saveBlobAtomic(StorageManager::kSen69cVocStatePath,&record,sizeof(record)));
     sensor.loadVocState(storage); TEST_ASSERT_FALSE(sensor.voc_valid_);
     sensor.setIdentity("SENSOR-A"); sensor.loadVocState(storage);
     TEST_ASSERT_TRUE(sensor.voc_valid_);
     record.version = 2;
-    TEST_ASSERT_TRUE(storage.saveBlobAtomic(Sen69c::VocPath,&record,sizeof(record)));
+    TEST_ASSERT_TRUE(storage.saveBlobAtomic(StorageManager::kSen69cVocStatePath,&record,sizeof(record)));
     sensor.loadVocState(storage); TEST_ASSERT_FALSE(sensor.voc_valid_);
+}
+void test_factory_reset_discards_sen69c_voc_state_and_atomic_files() {
+    StorageManager storage; storage.begin();
+    Sen69c::VocRecord record; strcpy(record.serial, "SENSOR-A");
+    record.state[0] = 123;
+    const String path(StorageManager::kSen69cVocStatePath);
+    const String backup = path + ".bak", temporary = path + ".tmp";
+    TEST_ASSERT_TRUE(storage.saveBlobAtomic(path.c_str(), &record, sizeof(record)));
+    TEST_ASSERT_TRUE(storage.saveBlobAtomic(backup.c_str(), &record, sizeof(record)));
+    TEST_ASSERT_TRUE(storage.saveBlobAtomic(temporary.c_str(), &record, sizeof(record)));
+    Sen69c before; before.begin(); before.setIdentity("SENSOR-A");
+    before.loadVocState(storage);
+    TEST_ASSERT_TRUE(before.voc_valid_);
+    TEST_ASSERT_EQUAL_UINT8(123, before.voc_.state[0]);
+
+    storage.clearAll();
+
+    // Do not begin StorageManager again: its default test setup clears persistence.
+    Sen69c after; after.begin(); after.setIdentity("SENSOR-A");
+    after.loadVocState(storage);
+    TEST_ASSERT_FALSE(after.voc_valid_);
+    TEST_ASSERT_FALSE(storage.blobExists(path.c_str()));
+    TEST_ASSERT_FALSE(storage.blobExists(backup.c_str()));
+    TEST_ASSERT_FALSE(storage.blobExists(temporary.c_str()));
+}
+void test_safe_factory_reset_does_not_recover_sen69c_voc_backup() {
+    StorageManager storage; storage.begin();
+    Sen69c::VocRecord record; strcpy(record.serial, "SENSOR-A");
+    const String backup = String(StorageManager::kSen69cVocStatePath) + ".bak";
+    // Power loss may leave only the backup, which loadBlob would normally recover.
+    TEST_ASSERT_TRUE(storage.saveBlobAtomic(backup.c_str(), &record, sizeof(record)));
+    StorageManager::preserveTestPersistenceForNextBegin();
+    StorageManager rebooted;
+    rebooted.begin(StorageManager::BootAction::SafeFactoryReset);
+
+    Sen69c sensor; sensor.begin(); sensor.setIdentity("SENSOR-A");
+    sensor.loadVocState(rebooted);
+    TEST_ASSERT_FALSE(sensor.voc_valid_);
+    TEST_ASSERT_FALSE(rebooted.blobExists(StorageManager::kSen69cVocStatePath));
+    TEST_ASSERT_FALSE(rebooted.blobExists(backup.c_str()));
 }
 void test_failed_stop_allows_recovery_after_conditioning_guard() {
     Sen69c sensor; start(sensor); setMillis(sensor.start_ms_+61000);
@@ -417,5 +457,7 @@ int main(int,char**) {
     RUN_TEST(test_co2_error_bit_12_does_not_invalidate_healthy_hcho);
     RUN_TEST(test_frc_rejects_conditioning_and_resumes_after_failed_calibration);
     RUN_TEST(test_voc_identity_mismatch_is_not_restored);
+    RUN_TEST(test_factory_reset_discards_sen69c_voc_state_and_atomic_files);
+    RUN_TEST(test_safe_factory_reset_does_not_recover_sen69c_voc_backup);
     return UNITY_END();
 }

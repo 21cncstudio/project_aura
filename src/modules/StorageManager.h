@@ -76,6 +76,7 @@ public:
     static constexpr const char *kConfigPath = "/config.json";
     static constexpr const char *kLastGoodPath = "/config.last_good.json";
     static constexpr const char *kVocStatePath = "/voc_state.bin";
+    static constexpr const char *kSen69cVocStatePath = "/sen69c_voc_v1.bin";
     static constexpr const char *kPressurePath = "/pressure.bin";
     static constexpr int kChartsSegmentCount = 25;
     static void chartsSegmentPath(int slot, char *out, size_t length);
