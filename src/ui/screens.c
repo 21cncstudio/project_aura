@@ -2804,7 +2804,7 @@ void create_screen_page_settings() {
                             add_style_style_text_primary(obj);
                             lv_obj_set_style_text_font(obj, &ui_font_jet_reg_18, LV_PART_MAIN | LV_STATE_DEFAULT);
                             lv_obj_set_style_text_align(obj, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN | LV_STATE_DEFAULT);
-                            lv_label_set_text_static(obj, "CO2\nCALLIBRATION");
+                            lv_label_set_text_static(obj, "CO2\nCALIBRATION");
                         }
                     }
                 }
@@ -4762,7 +4762,7 @@ void create_screen_page_theme() {
                             lv_obj_add_flag(obj, LV_OBJ_FLAG_CHECKABLE);
                             lv_obj_remove_flag(obj, LV_OBJ_FLAG_CLICK_FOCUSABLE|LV_OBJ_FLAG_GESTURE_BUBBLE|LV_OBJ_FLAG_PRESS_LOCK|LV_OBJ_FLAG_SCROLLABLE|LV_OBJ_FLAG_SCROLL_CHAIN_HOR|LV_OBJ_FLAG_SCROLL_CHAIN_VER|LV_OBJ_FLAG_SCROLL_ELASTIC|LV_OBJ_FLAG_SCROLL_MOMENTUM|LV_OBJ_FLAG_SCROLL_WITH_ARROW|LV_OBJ_FLAG_SNAPPABLE);
                             lv_obj_set_style_radius(obj, 15, LV_PART_MAIN | LV_STATE_DEFAULT);
-                            lv_obj_set_style_bg_color(obj, lv_color_hex(0x071215), LV_PART_MAIN | LV_STATE_DEFAULT);
+                            lv_obj_set_style_bg_color(obj, lv_color_hex(0x0b1518), LV_PART_MAIN | LV_STATE_DEFAULT);
                             lv_obj_set_style_bg_opa(obj, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
                             lv_obj_set_style_layout(obj, LV_LAYOUT_FLEX, LV_PART_MAIN | LV_STATE_DEFAULT);
                             lv_obj_set_style_flex_flow(obj, LV_FLEX_FLOW_ROW, LV_PART_MAIN | LV_STATE_DEFAULT);
@@ -4784,11 +4784,11 @@ void create_screen_page_theme() {
                                     lv_obj_remove_flag(obj, LV_OBJ_FLAG_CLICKABLE|LV_OBJ_FLAG_CLICK_FOCUSABLE|LV_OBJ_FLAG_GESTURE_BUBBLE|LV_OBJ_FLAG_PRESS_LOCK|LV_OBJ_FLAG_SCROLLABLE|LV_OBJ_FLAG_SCROLL_CHAIN_HOR|LV_OBJ_FLAG_SCROLL_CHAIN_VER|LV_OBJ_FLAG_SCROLL_ELASTIC|LV_OBJ_FLAG_SCROLL_MOMENTUM|LV_OBJ_FLAG_SCROLL_WITH_ARROW|LV_OBJ_FLAG_SNAPPABLE);
                                     lv_obj_set_style_border_width(obj, 1, LV_PART_MAIN | LV_STATE_DEFAULT);
                                     lv_obj_set_style_radius(obj, 15, LV_PART_MAIN | LV_STATE_DEFAULT);
-                                    lv_obj_set_style_bg_color(obj, lv_color_hex(0x17292e), LV_PART_MAIN | LV_STATE_DEFAULT);
+                                    lv_obj_set_style_bg_color(obj, lv_color_hex(0x0e2120), LV_PART_MAIN | LV_STATE_DEFAULT);
                                     lv_obj_set_style_bg_opa(obj, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
-                                    lv_obj_set_style_border_color(obj, lv_color_hex(0x1d737b), LV_PART_MAIN | LV_STATE_DEFAULT);
-                                    lv_obj_set_style_bg_grad_color(obj, lv_color_hex(0x141c22), LV_PART_MAIN | LV_STATE_DEFAULT);
-                                    lv_obj_set_style_bg_grad_dir(obj, LV_GRAD_DIR_VER, LV_PART_MAIN | LV_STATE_DEFAULT);
+                                    lv_obj_set_style_border_color(obj, lv_color_hex(0x385358), LV_PART_MAIN | LV_STATE_DEFAULT);
+                                    lv_obj_set_style_bg_grad_color(obj, lv_color_hex(0x0e2120), LV_PART_MAIN | LV_STATE_DEFAULT);
+                                    lv_obj_set_style_bg_grad_dir(obj, LV_GRAD_DIR_NONE, LV_PART_MAIN | LV_STATE_DEFAULT);
                                     {
                                         lv_obj_t *parent_obj = obj;
                                         {
@@ -4798,7 +4798,7 @@ void create_screen_page_theme() {
                                             lv_obj_set_pos(obj, 25, 9);
                                             lv_obj_set_size(obj, 77, LV_SIZE_CONTENT);
                                             lv_obj_remove_flag(obj, LV_OBJ_FLAG_CLICK_FOCUSABLE|LV_OBJ_FLAG_GESTURE_BUBBLE|LV_OBJ_FLAG_PRESS_LOCK|LV_OBJ_FLAG_SCROLLABLE|LV_OBJ_FLAG_SCROLL_CHAIN_HOR|LV_OBJ_FLAG_SCROLL_CHAIN_VER|LV_OBJ_FLAG_SCROLL_ELASTIC|LV_OBJ_FLAG_SCROLL_MOMENTUM|LV_OBJ_FLAG_SCROLL_WITH_ARROW|LV_OBJ_FLAG_SNAPPABLE);
-                                            lv_obj_set_style_text_color(obj, lv_color_hex(0xf1f5f9), LV_PART_MAIN | LV_STATE_DEFAULT);
+                                            lv_obj_set_style_text_color(obj, lv_color_hex(0xeaf1ef), LV_PART_MAIN | LV_STATE_DEFAULT);
                                             lv_obj_set_style_text_font(obj, &ui_font_jet_reg_18, LV_PART_MAIN | LV_STATE_DEFAULT);
                                             lv_obj_set_style_text_align(obj, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN | LV_STATE_DEFAULT);
                                             lv_label_set_text_static(obj, "Aura\nLink");

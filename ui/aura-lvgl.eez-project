@@ -10360,7 +10360,7 @@
                       },
                       "group": "",
                       "groupIndex": 0,
-                      "text": "CO2\nCALLIBRATION",
+                      "text": "CO2\nCALIBRATION",
                       "textType": "literal",
                       "longMode": "WRAP",
                       "recolor": false
@@ -16581,7 +16581,7 @@
                                 "definition": {
                                   "MAIN": {
                                     "DEFAULT": {
-                                      "text_color": "#f1f5f9",
+                                      "text_color": "#EAF1EF",
                                       "text_font": "jet_reg_18",
                                       "text_align": "CENTER"
                                     }
@@ -16615,11 +16615,11 @@
                                 "DEFAULT": {
                                   "border_width": 1,
                                   "radius": 15,
-                                  "bg_color": "#17292E",
+                                  "bg_color": "#0E2120",
                                   "bg_opa": 255,
-                                  "border_color": "#1D737B",
-                                  "bg_grad_color": "#141C22",
-                                  "bg_grad_dir": "VER"
+                                  "border_color": "#385358",
+                                  "bg_grad_color": "#0E2120",
+                                  "bg_grad_dir": "NONE"
                                 }
                               }
                             }
@@ -16646,7 +16646,7 @@
                           "MAIN": {
                             "DEFAULT": {
                               "radius": 15,
-                              "bg_color": "#071215",
+                              "bg_color": "#0B1518",
                               "bg_opa": 255,
                               "layout": "FLEX",
                               "flex_flow": "ROW",

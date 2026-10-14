@@ -1,3 +1,10 @@
+> Workspace update, 2026-09-23: active locations are `firmware-main`
+> and `firmware-hub` under `D:/21cncstudio/project_aura_aq`. Old clean checkouts
+> were removed only after full ZIP archives and per-file hashes were verified.
+> The old diagnostic root and unfinished 7-inch experiment remain in `archive`.
+> See `D:/21cncstudio/project_aura_aq/README.md`. Sections below are the dated
+> source history, not evidence that the former checkout paths still exist.
+
 # Active Aura firmware branches
 
 Updated: 2026-09-18. This is a local source organization record.
@@ -6,8 +13,8 @@ Updated: 2026-09-18. This is a local source organization record.
 
 | Work | Branch | Checkout |
 | --- | --- | --- |
-| General Aura firmware, both display profiles | `main` | `D:/21cncstudio/project_aura/tmp/worktrees/aura-post-115-clean` |
-| Aura connection to Hub | `feature/aura-link` (local, no upstream) | `D:/21cncstudio/project_aura/tmp/worktrees/aura-hub` |
+| General Aura firmware, both display profiles | `main` | `D:/21cncstudio/project_aura_aq/firmware-main` |
+| Aura connection to Hub | `feature/aura-link` (local, no upstream) | `D:/21cncstudio/project_aura_aq/firmware-hub` |
 
 These are the two active lines for current firmware work. Other release,
 contribution and diagnostic checkpoints are retained history, not alternative

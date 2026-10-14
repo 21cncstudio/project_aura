@@ -41,3 +41,7 @@ src/ui/.eez-project-build
 /sdkconfig.project_aura
 /build-idf*/
 /sdkconfig.idf61.*
+
+# Local evidence and build output are retained outside source control.
+/build/
+*.eez-project-ui-state

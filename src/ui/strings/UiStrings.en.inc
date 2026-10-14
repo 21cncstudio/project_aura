@@ -104,7 +104,7 @@
     "AUTO NIGHT",
     "RESTART",
     "FACTORY\nRESET",
-    "CO2\nCALLIBRATION",
+    "CO2\nCALIBRATION",
     "ABOUT",
     "DOT\nINDICATORS",
     "ALERT\nBLINK",

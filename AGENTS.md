@@ -1,89 +1,81 @@
 # Agent Instructions
 
-## Current firmware development (2026-09-17)
+<!-- BEGIN:aura-current-state -->
+## Current project state
 
-- The user authorized consolidating the ESP-IDF 6.1 / LVGL 9.5 migration into
-  local `main`. Continue in
-  `D:\21cncstudio\project_aura\tmp\worktrees\aura-post-115-clean`.
-- Build both profiles with `scripts/build_idf.ps1`: `4_3` and `7_dual_i2c`.
-  PlatformIO remains the host-test and profile-metadata path; its old firmware
-  build is intentionally blocked. Do not downgrade dependencies to make it run.
-- Canonical EEZ source is `ui/aura-lvgl.eez-project`; regenerate and run
-  `tools/eez_ui_postprocess.py` together. Keep both display profiles supported.
-- The old `aura-idf61` worktree (`archive/idf-6.1-migration-20260918`) is a retained checkpoint, not the active
-  development destination. Preserve `codex/aura-main-before-idf61-20260917`,
-  `dual-profile-release`, the root archive and exact tested artifacts.
-- This consolidation authorizes local source/build work. It does not authorize
-  flashing, signing a release, pushing, publishing, or changing production.
+Read `CURRENT_STATE.md` before broad exploration; follow only task-relevant links.
+Update it after significant completed work: date, evidence, open issue, next step.
+Keep history in linked reports and secrets out of these files.
+Cross-project and MacBook/HA context: `D:/21cncstudio/AURA_WORKSPACE.md`.
+<!-- END:aura-current-state -->
 
-## Local Main Preparation (2026-08-30)
+## Prefer existing solutions
 
-- The user authorized local preparation only. Do not push, publish, deploy, or
-  change remote refs without new explicit approval.
-- Read `D:\21cncstudio\project_aura\tmp\worktrees\aura-post-115-clean\docs\LOCAL_MAIN_PREPARATION_20260830.md`
-  before branch integration or firmware edits. Find it without asking the user.
-- Continue firmware work on `main` in
-  `D:\21cncstudio\project_aura\tmp\worktrees\aura-post-115-clean`.
-  The root `D:\21cncstudio\project_aura` now holds
-  `archive/main-diagnostics-20260830` and preserved dirty experiments.
-  Do not switch the root checkout to main, clean it, or move its nested worktrees.
-- `dual-profile-release` is the renamed firmware checkpoint at `019d87b`.
-  Preserve it and the tested BINs; continue new firmware changes on clean main.
-- Do not merge the archived 28-commit diagnostic chain or copy the root dirty
-  tree into main. Clean main descends from `da92fcc`; the old diagnostic main
-  was `7437b2c`. Recheck refs before integration and do not force-push.
-- The same old branch name in the separate Aura Link repository is outside this
-  rename. Preserve Aura Link / Aura Hub isolation below.
+- Before implementing a feature, fixing a problem or optimizing a subsystem,
+  first search online for existing solutions. Prioritize official documentation,
+  vendor examples, maintained libraries/components and upstream fixes or issues.
+  Also inspect relevant implementations in the other Aura and Hub projects.
+- Prefer an applicable existing solution. Check compatibility with the actual MCU,
+  display/interface and dependency versions, licensing, resource requirements and
+  integration constraints. Verify relevant behavior locally; upstream claims or
+  benchmarks do not establish performance or correctness on our hardware.
+- Write a custom implementation only when no applicable solution is found or the
+  available options fail a concrete requirement. Briefly record the sources
+  checked and why they do not fit before proceeding; a superficial search is not
+  evidence that no solution exists.
 
-## Firmware, USB and Release Handoff
+## Workspace and branches
 
-- Before continuing Aura AQ 4.3-inch or 7-inch firmware profiles, dual I2C,
-  GP8403/GPIO44/GPIO6 routing, native USB/COM10/COM11, OTA, or beta publication,
-  read `D:\21cncstudio\project_aura\docs\DUAL_PROFILE_HANDOFF_20260830.md`.
-  Find and read it without asking the user to supply the filename again.
-- This is the entry point for source worktrees, exact tested artifacts, wiring,
-  closed test evidence, signed packages, known defects, and publication gates.
-  Use the absolute path when working from a nested worktree.
-- Treat the handoff as a dated record, not live device or production state.
-  Reverify branch/artifact/device identities and publication status before acting;
-  the handoff does not authorize flashing, resets, migrations, or publication.
-
-## Branch Discipline
-
-Read [the current branch map](docs/ACTIVE_BRANCHES.md) before choosing a checkout.
-There are two active firmware development lines:
-
-- `main`: common firmware, ESP-IDF 6.1 / LVGL 9.5, in
-  `D:/21cncstudio/project_aura/tmp/worktrees/aura-post-115-clean`.
-- `feature/aura-link`: local Aura-to-Hub work, in
-  `D:/21cncstudio/project_aura/tmp/worktrees/aura-hub`. It has no upstream;
-  do not publish it without explicit approval. The retained name follows the
-  existing project convention; this is the Aura firmware repo, not Link backend.
-- The current Hub branch starts from current main. Old pairing/upload code is
-  preserved on `archive/aura-link-pre-idf61-20260918`; it has NOT been ported
-  into the new branch yet. Do not claim a combined candidate is ready.
-- Keep general fixes on main, then merge main forward into the Hub branch.
+- Common firmware: `D:/21cncstudio/project_aura_aq/firmware-main`, branch `main`.
+- Aura-to-Hub firmware: `D:/21cncstudio/project_aura_aq/firmware-hub`, local
+  `feature/aura-link`, no upstream. This is not the separate Link backend repo;
+  preserve their isolation and do not rename its branches as part of firmware work.
+- Read [the branch map](docs/ACTIVE_BRANCHES.md) before choosing a checkout.
+  Its older "Hub port not done" claim is superseded by the dated
+  [Hub integration report](../firmware-hub/docs/HUB_INTEGRATION_STATUS.md). Recheck refs before integration;
+  source/build evidence does not establish the installed BIN or device behavior.
+- Put general fixes on main, then merge main forward into the Hub branch.
   Keep Hub-specific code out of main until separately reviewed and accepted.
-- Signing/OEM experiments and the completed migration are archive checkpoints.
-  Do not merge their old branch contents wholesale into either active line.
-- Preserve dirty archive checkouts, release checkpoints and exact tested BINs.
-  Local branch organization is not authorization to flash, publish or deploy.
+- Common Git repository and dirty diagnostic root:
+  `D:/21cncstudio/project_aura_aq/archive/diagnostic-root`. Preserve its branch,
+  dirty experiments and nested worktrees; do not switch it to main, clean or move it.
+- `D:/21cncstudio/project_aura` and its old checkout/SDK paths are compatibility
+  junctions, not duplicate trees. Do not recursively delete them or target new work there.
+- SDK: `D:/21cncstudio/project_aura_aq/tools/idf61-sdk`.
+  Organization and build wrapper: `D:/21cncstudio/project_aura_aq/README.md` and
+  `tools/build.ps1` in that organization root.
 
-## EEZ Studio UI Generation
+## Required reading and boundaries
 
-EEZ Studio overwrites files under `src/ui` and does not know about every
-Project Aura extension maintained outside the EEZ project.
+- Before firmware edits or branch integration, read
+  `D:/21cncstudio/project_aura_aq/firmware-main/docs/LOCAL_MAIN_PREPARATION_20260830.md`.
+- Before Aura 4.3/7-inch profiles, dual I2C, GP8403/GPIO44/GPIO6, native
+  USB/COM10/COM11, OTA or beta work, read
+  `D:/21cncstudio/project_aura/docs/DUAL_PROFILE_HANDOFF_20260830.md`.
+  Find these files without asking the user. The handoff holds artifact, wiring,
+  test, signing, defect and publication evidence; reverify branch/artifact/device
+  identities and production status before acting on dated records.
+- Read [workspace history](docs/WORKSPACE_HISTORY.md) for integration or archive
+  recovery. Preserve all dirty archives, release checkpoints and exact tested BINs,
+  including `dual-profile-release`, `codex/aura-main-before-idf61-20260917`,
+  `archive/idf-6.1-migration-20260918` and `archive/aura-link-pre-idf61-20260918`.
+  Do not copy the dirty root into main or wholesale merge the archived diagnostic
+  chain, migration, signing, mixed OTA or OEM experiments into active branches.
+- Local preparation/source/build work authorizes no flashing, resets, device
+  migrations, release signing, pushes, publication, deployment, production changes
+  or remote-ref changes. Obtain explicit authorization for those actions. No force-push.
 
-- After every EEZ Studio **Build**, run `python tools/eez_ui_postprocess.py`.
+## Builds and EEZ
+
+- ESP-IDF 6.1 / LVGL 9.6: build both `4_3` and `7_dual_i2c` with
+  `scripts/build_idf.ps1`. PlatformIO is for host tests/profile metadata; its old
+  firmware build is intentionally blocked. Do not downgrade dependencies to unblock it.
+- Canonical EEZ source: `ui/aura-lvgl.eez-project`. Keep both profiles supported.
+  EEZ overwrites `src/ui`; after every EEZ Build run
+  `python tools/eez_ui_postprocess.py`. Native IDF builds also run it automatically.
 - Before accepting generated UI changes, run
   `python tools/eez_ui_postprocess.py --check` and review `git diff -- src/ui`.
-- The native ESP-IDF build runs the same post-process automatically before
-  compilation.
-- Do not commit `src/ui/.eez-project-build`.
-- If a new project-maintained addition is repeatedly removed by EEZ, add it
-  as an idempotent invariant in `tools/eez_ui_postprocess.py`, add a unit test,
-  and document it in `docs/EEZ_UI_WORKFLOW.md`. Do not rely on remembering a
-  manual repair after each generation.
-- Preserve user-authored EEZ changes while cleaning generator noise. General
-  UI changes belong on `main`; Aura Link / Aura Hub-specific UI changes belong
-  on `feature/aura-link`.
+  Preserve user EEZ edits; do not commit `src/ui/.eez-project-build`.
+- For an extension repeatedly removed by EEZ, add an idempotent postprocess
+  invariant, a unit test and documentation in `docs/EEZ_UI_WORKFLOW.md`.
+  Do not rely on manual repairs. General UI belongs on main; Hub UI on the Hub branch.
