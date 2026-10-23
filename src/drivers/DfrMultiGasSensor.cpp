@@ -431,17 +431,7 @@ bool DfrMultiGasSensor::pingAddress() {
                  static_cast<unsigned>(config_.address));
         } else if (DfrGasProbeLogPolicy::isExpectedOptionalAbsenceAfterProbe(
                        probe_failure)) {
-            Logger::logWithoutAlert(
-                Logger::Warn,
-                config_.log_tag,
-                "addr=0x%02X stage=address-probe err=%d(%s) lines before=%u/%u after=%u/%u",
-                static_cast<unsigned>(config_.address),
-                static_cast<int>(err),
-                esp_err_to_name(err),
-                lines_before.sda_high ? 1U : 0U,
-                lines_before.scl_high ? 1U : 0U,
-                lines_after.sda_high ? 1U : 0U,
-                lines_after.scl_high ? 1U : 0U);
+            LOGI(config_.log_tag, "%s not installed", config_.log_tag);
         } else {
             LOGW(config_.log_tag,
                  "addr=0x%02X stage=address-probe err=%d(%s) lines before=%u/%u after=%u/%u",
