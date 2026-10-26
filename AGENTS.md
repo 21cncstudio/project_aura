@@ -41,6 +41,9 @@ Cross-project and MacBook/HA context: `D:/21cncstudio/AURA_WORKSPACE.md`.
   its commit ancestry unless the owner explicitly approves that standalone change.
   Preserve Hub-only commits in the Hub line or a local archive; do not merge the
   standalone cleanup back into Hub blindly.
+- Hub firmware branches and their archive copies are local-only. Do not publish
+  them to GitHub. The obsolete remote feature/aura-link was archived locally and
+  deleted on 2026-10-26 at the owner's explicit direction.
 - Common Git repository and dirty diagnostic root:
   `D:/21cncstudio/project_aura_aq/archive/diagnostic-root`. Preserve its branch,
   dirty experiments and nested worktrees; do not switch it to main, clean or move it.

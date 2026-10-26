@@ -1,65 +1,133 @@
-# Standalone main cleanup and 4.3-inch overnight test — 2026-10-26
+# Standalone main и ночной тест Aura 4.3 — 26–27 октября 2026
 
-## Completed history cleanup
+Статус: чистая standalone-прошивка установлена, начальные проверки пройдены.
+Длительный тест запущен; его окончательный PASS ещё не установлен.
+Остановка: **27 октября 2026, 13:00 Europe/London = 13:00 UTC**.
 
-At the owner's explicit request, 14 local Hub-preparation commits from 7d3e403a
-through 70ba9505 were removed from main's ancestry. They remain recoverable under
-codex/archive-main-hub-preparation-20261026 at 70ba9505d9d1d8e7ac1888f5a6f6628d8c2c0c3f.
-This is history cleanup, not a revert commit hiding those commits in main.
+## История main и GitHub
 
-Standalone source is exactly d7f7dbc47259823cc5ef0b7f5feb34f5788a6991. The general
-SEN0466 log correction 4cc06321 and all earlier main fixes remain. Compared with
-public checkpoint 26339000, the only application-source difference is that
-SEN0466 correction. Removed preparation includes ChartSeries/ChartHistoryArchive,
-their ChartsHistory generation changes and tests, UiScreenHost and its runtime
-hooks, and archive-related test CMake additions. No Hub client, pairing/upload,
-BLE or Outdoor service was found in main. Existing outdoor-air help text is unrelated.
+По прямому указанию владельца из истории main удалены 14 локальных коммитов
+подготовки Hub, от 7d3e403a до 70ba9505. Это очистка ancestry, не обратный коммит.
+Точная прежняя история сохранена в локальной ветке
+`codex/archive-main-hub-preparation-20261026` на
+`70ba9505d9d1d8e7ac1888f5a6f6628d8c2c0c3f`.
+Для всех 14 проверено: они больше не предки main.
 
-firmware-hub was not edited. feature/aura-link remains at
-6b69ae5d9b838b2ea32c92333be4c7bb56925ea0. No remote ref, tag or release was changed.
-Working tree was checked clean after the history operation. Current commit adds
-only this record, status and an explicit clarification of the existing boundary.
+Код standalone соответствует `d7f7dbc47259823cc5ef0b7f5feb34f5788a6991`.
+Сохранены исправление SEN0466 `4cc06321` и все более ранние изменения main.
+Относительно публичного checkpoint `26339000` единственное изменение исходников
+приложения — это исправление SEN0466. Убраны ChartSeries/ChartHistoryArchive,
+их счётчик generation и тестовые добавления, UiScreenHost и его вызовы из UI,
+ссылки CMake на несуществовавшие тестовые цели архива. В итоговом ELF нет
+этих символов, AuraHub/AuraLink/NimBLE-служб. Общие пользовательские тексты
+про outdoor air не являются службой Outdoor.
 
-## Hardware test in progress
+GitHub API проверен по каждому из 14 SHA: `No commit found`, HTTP422.
+Удалённый main остался на `2633900043bb7cc590e75c16c4a54257775f9824`.
+При проверке обнаружена старая GitHub-ветка `feature/aura-link` с вершиной
+`9af661070bdd800b0e6f184631c95519af93ac4e` (коммит от 7 июня 2026;
+дата его публикации не установлена). По последующему указанию владельца эта
+удалённая ветка удалена. До удаления сохранены точная локальная ветка
+`codex/archive-github-aura-link-20261026` и проверенный полный Git bundle.
+Удаление ветки не утверждает удаления всех старых объектов из хранилища GitHub.
 
-The user authorized flashing newly connected Aura 4.3 and observation until
-27 October 2026, 13:00 Europe/London (13:00 UTC). Target: native USB COM5,
-MAC/serial 94:A9:90:04:6F:48, ESP32-S3 rev0.2, 16 MiB flash / 8 MiB PSRAM.
-Its original image descriptor confirms aura-aq-v1 and its partition table exactly
-matches main. Active app0 is at 0x10000. Other serial devices are outside this test.
+Рабочая локальная `feature/aura-link` осталась на
+`6b69ae5d9b838b2ea32c92333be4c7bb56925ea0`; Hub checkout не изменялся.
+Другие удалённые ветки, теги и релизы не менялись; main не публиковался.
+Рабочее дерево main чистое после документирующих коммитов. Изменения после
+сборочного commit 52ec871 относятся только к отчёту/инструкциям, не к firmware.
 
-Local evidence: ../build-idf-soak-4_3-20261026/ (ignored; includes private backup).
-history-cleanup.json and removed-main-commits.txt identify the source operation.
-Original full flash: flash-before.bin, SHA256
-8fb922ec856fd089924448f22f7ab174be98f895dadb8a31eb6797fc34e6747b.
+## Устройство и установленный BIN
 
-An intermediate 70ba950-dirty image with only the missing UiScreenHost include
-was built and written before the owner requested isolation. It was never booted
-for the soak: the board stayed in its flash stub. candidate/, flash-write.log and
-flash-after.bin preserve that attempt. This image is superseded and must not be
-used for final qualification. Final standalone build/flash/monitor evidence will
-be written under final-candidate/, final-flash-*, flash-verified.json and
-monitor-status.json in the same evidence directory.
+Плата: **4.3 / COM5 / 94:A9:90:04:6F:48**, native USB 303A:1001,
+ESP32-S3 rev0.2, flash 16 MiB, PSRAM 8 MiB. Это другая плата, чем историческая COM11.
+Исходный descriptor подтверждал aura-aq-v1; таблица разделов совпала с main.
+COM10/7-inch и прочие платы не открывались, не сбрасывались и не прошивались.
 
-Full initial host suite and 114 tooling tests passed. Those ran before history
-cleanup; affected ChartsHistory/UI/build paths require new validation. Both final
-profile builds and the final hardware run are pending at this documentation commit.
+- Сборка: чистый `52ec871fdc54859c415f5a79bb83e31690105b3b`, build ID **52ec871**.
+- Версия в firmware: **1.2.1-beta**, hardware profile 4_3 / target aura-aq-v1.
+- BIN: 4 643 872 байта; SHA256
+  `68aa4c4d577e4b67e4eb10fa2d5f06dafba7f22aa9fcc836a458ab65a7a62a67`.
+- Записан только активный app0 по 0x10000. Полное чтение 16 MiB после записи:
+  BIN побайтно совпадает, выравнивание FF, все байты вне записанных секторов прежние.
+  Bootloader, table, NVS, OTA metadata, app1, LittleFS и coredump сохранены.
+- Оригинальная flash-копия SHA256
+  `8fb922ec856fd089924448f22f7ab174be98f895dadb8a31eb6797fc34e6747b`.
 
-## Measurement scope
+Первоначальная сборка 70ba950-dirty с единственным добавленным include выявила
+загрязнение main. Она была записана, но осталась в flash stub и не запускалась
+для soak; затем заменена чистой 52ec871. Первоначальные BIN/patch/log/readback
+сохранены отдельно и не выдаются за окончательный тестовый артефакт.
 
-Boot PSRAM test and the boot memory snapshot; ongoing internal free/minimum heap,
-uptime, display/touch faults, sensor state, Wi-Fi and SD progress; one receive-only
-serial session and bounded read-only HTTP load windows alternating with baseline.
-The collector has an absolute stop at 13:00 UTC and requests system-awake only
-while recording. A thread heartbeat will inspect progress and summarize completion.
+## Уже выполнено
 
-Full heap walks remain boot-only per MEMORY_MONITOR_POLICY.md because previous
-periodic walks disturbed RGB refresh. This production BIN does not expose live
-PSRAM free/fragmentation or per-task stack watermarks. Overnight observation does
-not prove exhaustive RAM-pattern coverage, physical touch/display appearance,
-cold power cycles, OTA install/recovery, long-term uptime, or 7-inch hardware.
-Firmware metadata remains 1.2.1-beta; no stable release is published by this test.
+- Окончательные IDF-сборки 4_3 и 7_dual_i2c:PASS; EEZ --check:PASS.
+- Полный host-набор повторён именно на очищенном main: **1154/1154 PASS**,
+  10 environments, JSON reports20261026T214717Z-8a862ed2.
+- Дополнительная проверка затронутой истории:17/17; веб/API-тесты:36/36.
+- Инструменты/сборка/EEZ/OTA identity:114/114 (до очистки; сами инструменты
+  не менялись, кроме возвращённого исходного offline UI CMake).
+- Boot PSRAM:`SPI SRAM memory test OK`; boot memory: internal free 134248,
+  min 133624, largest 77824; PSRAM free 1325484, min 1322312, largest 1310720 байт.
+- Board/LVGL ready, одна Board begin attempt. Владелец подтвердил экран и тач.
+- Владелец подтвердил отсутствие SD. SD запись/сохранность/восстановление
+  на этой конфигурации **не проверены**, отсутствие карты не считается отказом.
+- Два HTTP-клиента,30 секунд,60 запросов state/charts/history:60/60 PASS,
+  max latency360 мс. RAM до/после/через 30 с:73096/73096/73096 байт;
+  lifetime low-water58680→52376 байт. Запас LVGL-стека 9260 из 16384 байт.
+  В этом коротком окне перезагрузок, touch/display sync/ownership/wait faults нет.
 
-Recorder/verification references:
+## Длительная запись
+
+Receive-only USB начат **26 октября 21:46:19 UTC**: один open, TX0,
+без намеренных reset и автоматического serial reconnect. Запуск после app-only
+upload-reset; это не cold power cycle. PID коллектора 65100 на момент запуска.
+
+Wi-Fi был выключен в сохранённых настройках; владелец включил и настроил его.
+Aura получила **192.168.88.54**. Точный build/profile/hostname подтверждён через
+API; подтверждённое сетевое наблюдение началось **21:48:32.922 UTC**.
+В ходе AP-настройки начальный parser регистратора принял адрес DHCP-клиента
+телефона 192.168.4.2 за кандидат endpoint: два timeout до подтверждения платы.
+Это записанные ошибки регистратора/настройки, а не отказы Aura. После строки
+`connected, IP` адрес исправился; исходные записи сохранены, не скрыты.
+
+Диагностика каждые 15 с, state/events/charts/SD-status каждые 60 с. Каждый час
+после 10 минут —5 минут дополнительной нагрузки до 1 GET/с; остальное время baseline.
+Отдельное двухклиентское окно 21:49:45–21:50:15 исключать из спокойного baseline.
+Коллектор сам останавливается в 13:00 UTC и держит запрос предотвращения idle sleep
+только пока работает. Файл STOP_LOAD выключает дополнительную нагрузку;
+STOP завершает запись. На живом процессе не менять скрипт и не открывать второй COM.
+
+Heartbeat `aura-4-3-27-13-00` активен в этом чате каждый час, включая 13:00.
+Он проверяет процесс/продвижение записи, сообщает существенные проблемы и
+подготовит итог после завершения, затем должен поставить себя на паузу.
+При неизменном здоровом ходе уведомлений нет. Компьютер, Aura и Codex нужно
+оставить включёнными; ручной sleep, отключение USB или питания создадут пробел.
+
+## Ограничения допуска к выпуску
+
+Soak пока продолжается. Текущие хорошие значения не являются ночным PASS.
+Live PSRAM/fragmentation и watermarks всех задач API не даёт; доступны boot
+PSRAM и текущие free/min internal heap, а также минимум свободного LVGL-стека.
+Полный heap walk оставлен boot-only по MEMORY_MONITOR_POLICY.md: периодические
+обходы ранее мешали RGB refresh. Не включать его незаметно в production.
+
+Не установлены: исчерпывающий RAM pattern test, cold power cycles, аппаратная
+OTA/recovery матрица, длительная физическая визуальная оценка, SD при вставленной
+карте, длительный uptime и аппаратная квалификация 7-inch. Релиз 1.2.1 не опубликован.
+
+## Доказательства
+
+Всё находится в локальном игнорируемом `../build-idf-soak-4_3-20261026/`:
+`history-cleanup.json`, `source-and-github-verification.json`, `github_hub_checks.json`,
+`removed-main-commits.txt`, Git bundle, `final-candidate/` и manifest,
+`flash-verified.json`, полный before/after flash, финальные build/test логи,
+`owner-hardware-confirmation.json`, `qualified-observation-start.json`,
+`manual-load-result.json`, `monitor-status.json`, `serial.log`, `http.jsonl`.
+Flash backup может содержать приватные настройки; не публиковать raw evidence.
+`RUNNING_SUMMARY.json` — промежуточный снимок, итог будет в monitor-result.json
+и отдельном отчёте после 13:00.
+
+Методика сверена с официальными источниками:
 - https://docs.espressif.com/projects/esptool/en/latest/esp32s3/esptool/advanced-commands.html
 - https://docs.espressif.com/projects/esp-idf/en/v6.1/esp32s3/api-reference/system/heap_debug.html
