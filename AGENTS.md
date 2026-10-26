@@ -36,6 +36,11 @@ Cross-project and MacBook/HA context: `D:/21cncstudio/AURA_WORKSPACE.md`.
   source/build evidence does not establish the installed BIN or device behavior.
 - Put general fixes on main, then merge main forward into the Hub branch.
   Keep Hub-specific code out of main until separately reviewed and accepted.
+- Clarification, 2026-10-26: unused standalone scaffolding for Hub UI/history is
+  Hub-specific even when named a generic/shared module. Keep it out of main and
+  its commit ancestry unless the owner explicitly approves that standalone change.
+  Preserve Hub-only commits in the Hub line or a local archive; do not merge the
+  standalone cleanup back into Hub blindly.
 - Common Git repository and dirty diagnostic root:
   `D:/21cncstudio/project_aura_aq/archive/diagnostic-root`. Preserve its branch,
   dirty experiments and nested worktrees; do not switch it to main, clean or move it.
