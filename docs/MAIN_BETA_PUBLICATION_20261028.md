@@ -18,3 +18,15 @@ Evidence: PUBLISHED.json, public-verification.json, staged-binary-checks.json an
 At publication, exact combined BINs had not been flashed. Existing release notes retain this limitation. The owner then explicitly requested a 4.3-inch Update through the public site; that hardware follow-up is pending and must be recorded separately. 7-inch hardware, cold cycles, long soak and v1.2.0-to-beta transitions remain unqualified.
 
 Rollback references: prior site dpl_2jvbNW2UAnMaWWAcodcxhbAbnPbS, prior backend dpl_FkX3NkNmKcTMoLPNob8zGUa5kKPE. A catalog rollback requires coordinated site/backend identities and release status/current changes; do not blindly restore one component alone.
+
+## 4.3-inch Web Installer follow-up — 2026-10-28, 17:43–17:47 UTC
+
+The owner explicitly requested a real Update through aura-aq.com after publication. The 4.3-inch identity was rechecked against native USB serial/MAC and live hardware target/profile before starting. Existing firmware was the previously tested logo build ff3a8a6. The initial automated connection waited without a visible chooser; the owner restarted the browser interaction, after which the public installer completed the actual write. No terminal flasher or alternate firmware path was used.
+
+The public installer reported 100% success, write/MD5 verification and restart. Its Update result states that both application slots were refreshed without complete-chip erase, and settings/LittleFS were not targeted. HTTP confirmed exact running build 1625a09 / aura-aq-v1 / 4_3. Settings and thresholds match the saved pre-update state. No independent full-flash readback was performed in this web test.
+
+36 GET-only diagnostic samples across 184.17 seconds after the first new-build response: monotonic uptime 12–196 s, Board/LVGL ready, zero display synchronization/framebuffer/lock/touch fault counters. Free internal heap 79176–79424 bytes. Seven HTTP timeouts occurred while writing/restarting; no HTTP failures followed the first new-build response. One NTP synchronization timeout at 19.345 s was retained as a warning.
+
+The owner confirmed: «Экран, показания и тач в порядке». The new HTTP failure-history fields are present in /api/diag. The /diag report button reached Download started; the downloaded file was not independently captured by the browser tool, so end-to-end file validation is not claimed.
+
+This qualifies this specific previous-beta-to-new-beta Web Installer Update and short runtime observation on 4.3-inch. It does not qualify Full Install, v1.2.0-to-beta OTA, cold cycles, long soak or 7-inch hardware. Evidence: firmware-main/build/web-installer-4_3-20261028/RESULT.json and associated snapshots/observer; screenshot aura-4_3-web-update-success.png in the visualization directory recorded above.
