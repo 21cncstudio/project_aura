@@ -31,7 +31,7 @@ void test_stream_retry_delay_uses_expected_buckets() {
 
 void test_stream_abort_reason_text_maps_known_values() {
     TEST_ASSERT_EQUAL_STRING("none", stream_abort_reason_text(StreamAbortReason::None));
-    TEST_ASSERT_EQUAL_STRING("client_disconnected", stream_abort_reason_text(StreamAbortReason::Disconnected));
+    TEST_ASSERT_EQUAL_STRING("connection_closed", stream_abort_reason_text(StreamAbortReason::Disconnected));
     TEST_ASSERT_EQUAL_STRING("socket_write_error", stream_abort_reason_text(StreamAbortReason::SocketWriteError));
 }
 

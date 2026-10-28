@@ -28,6 +28,7 @@ struct StreamContext {
     uint32_t slow_write_warn_ms = 0;
     uint32_t (*nowMs)(void *context) = nullptr;
     uint32_t (*wifiStaConnectedElapsedMs)(void *context) = nullptr;
+    void (*captureFailureEnvironment)(void *context, WebStreamEnvironment &out) = nullptr;
 };
 
 void sendNoStoreHeaders(WebRequest &server);

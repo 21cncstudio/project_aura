@@ -271,6 +271,61 @@ void fillJson(ArduinoJson::JsonObject root,
     }
     web_stream["last_max_write_ms"] = web_stream_snapshot.stats.last_max_write_ms;
     web_stream["last_uri"] = web_stream_snapshot.stats.last_uri;
+    web_stream["failure_capacity"] = kWebStreamFailureCapacity;
+    web_stream["suppressed_failure_logs"] = web_stream_snapshot.suppressed_failure_logs;
+    ArduinoJson::JsonArray failures = web_stream["recent_failures"].to<ArduinoJson::JsonArray>();
+    for (size_t i = 0; i < web_stream_snapshot.failure_count && i < kWebStreamFailureCapacity; ++i) {
+        const WebStreamFailure &failure = web_stream_snapshot.failures[i];
+        ArduinoJson::JsonObject item = failures.add<ArduinoJson::JsonObject>();
+        item["path"] = static_cast<const char *>(failure.request.path);
+        item["peer"] = static_cast<const char *>(failure.request.peer);
+        item["user_agent"] = static_cast<const char *>(failure.request.user_agent);
+        item["path_truncated"] = failure.request.path_truncated;
+        item["user_agent_truncated"] = failure.request.user_agent_truncated;
+        item["first_ms"] = failure.first_ms;
+        item["last_ms"] = failure.last_ms;
+        item["count"] = failure.count;
+        item["sent"] = failure.sent;
+        item["total"] = failure.total;
+        item["duration_ms"] = failure.duration_ms;
+        item["max_write_ms"] = failure.max_write_ms;
+        item["reason"] = stream_abort_reason_text(failure.reason);
+        item["stage"] = web_stream_stage_text(failure.error.stage);
+        if (failure.error.sdk_error_valid) item["sdk_error"] = failure.error.sdk_error;
+        else item["sdk_error"] = nullptr;
+        item["errno_valid"] = failure.error.errno_valid;
+        if (failure.error.errno_valid) item["errno"] = failure.error.socket_errno;
+        else item["errno"] = nullptr;
+        item["send_result"] = failure.error.send_result;
+        item["wire_bytes"] = failure.error.wire_bytes;
+        item["partial_body_bytes"] = failure.error.partial_body_bytes;
+        const WebStreamEnvironment &env = failure.environment;
+        ArduinoJson::JsonObject memory = item["memory"].to<ArduinoJson::JsonObject>();
+        memory["valid"] = env.memory_valid;
+        if (env.memory_valid) {
+            memory["internal_free"] = env.internal_free;
+            memory["internal_min_free"] = env.internal_min_free;
+        }
+        ArduinoJson::JsonObject network = item["network"].to<ArduinoJson::JsonObject>();
+        network["valid"] = env.network_valid;
+        if (env.network_valid) {
+            network["snapshot_age_ms"] = env.network_age_ms;
+            network["wifi_state"] = env.wifi_state;
+            network["sta_status"] = env.wifi_sta_status;
+            network["wifi_enabled"] = env.wifi_enabled;
+            network["wifi_connected"] = env.wifi_connected;
+            network["ap_mode"] = env.ap_mode;
+            network["scan_in_progress"] = env.scan_in_progress;
+            network["wifi_retry_count"] = env.wifi_retry_count;
+            if (env.has_rssi) network["rssi"] = env.rssi;
+            else network["rssi"] = nullptr;
+            network["mqtt_enabled"] = env.mqtt_enabled;
+            network["mqtt_connected"] = env.mqtt_connected;
+            network["mqtt_retry_stage"] = env.mqtt_retry_stage;
+            network["mqtt_tls_waiting_for_time"] = env.mqtt_tls_waiting_for_time;
+        }
+    }
+
 }
 
 } // namespace WebDiagApiUtils

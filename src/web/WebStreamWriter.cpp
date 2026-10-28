@@ -102,6 +102,16 @@ bool web_stream_client_bytes(WebRequest &server,
             continue;
         }
 
+        // An SDK chunk can already be partially on the wire even on EAGAIN.
+        // The transport explicitly marks that failure terminal; errno classifies
+        // it but must never make it retryable.
+        const WebStreamError transport_error = server.streamError();
+        if (transport_error.terminal) {
+            abort_reason = web_stream_error_reason(transport_error);
+            server.stopClient();
+            return false;
+        }
+
         if (written == 0) {
             if (!server.clientConnected()) {
                 abort_reason = StreamAbortReason::Disconnected;

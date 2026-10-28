@@ -119,12 +119,36 @@ void ConnectivityRuntime::update(AuraNetworkManager &networkManager, MqttManager
     snapshot_.mqtt_anonymous = mqttManager.isAnonymous();
     snapshot_.mqtt_tls_enabled = mqttManager.tlsEnabled();
     snapshot_.mqtt_tls_waiting_for_time = mqttManager.isTlsWaitingForTime();
+    sampled_ms_ = millis();
+    sampled_ = true;
     unlock();
 }
 
 ConnectivityRuntimeSnapshot ConnectivityRuntime::snapshot() const {
     lock();
     ConnectivityRuntimeSnapshot copy = snapshot_;
+    unlock();
+    return copy;
+}
+
+ConnectivityStatusSnapshot ConnectivityRuntime::statusSnapshot() const {
+    lock();
+    ConnectivityStatusSnapshot copy{};
+    copy.sampled_ms = sampled_ms_;
+    copy.valid = sampled_;
+    copy.wifi_state = snapshot_.wifi_state;
+    copy.wifi_sta_status = snapshot_.wifi_sta_status;
+    copy.rssi = snapshot_.rssi;
+    copy.wifi_retry_count = snapshot_.wifi_retry_count;
+    copy.mqtt_retry_stage = snapshot_.mqtt_retry_stage;
+    copy.wifi_enabled = snapshot_.wifi_enabled;
+    copy.wifi_connected = snapshot_.wifi_connected;
+    copy.wifi_ap_mode = snapshot_.wifi_ap_mode;
+    copy.wifi_scan_in_progress = snapshot_.wifi_scan_in_progress;
+    copy.has_rssi = snapshot_.has_rssi;
+    copy.mqtt_enabled = snapshot_.mqtt_enabled;
+    copy.mqtt_connected = snapshot_.mqtt_connected;
+    copy.mqtt_tls_waiting_for_time = snapshot_.mqtt_tls_waiting_for_time;
     unlock();
     return copy;
 }

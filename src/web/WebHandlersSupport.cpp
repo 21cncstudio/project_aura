@@ -14,6 +14,7 @@
 #include <freertos/portmacro.h>
 
 #include "core/Logger.h"
+#include "core/ConnectivityRuntime.h"
 #include "core/SafeRestart.h"
 #include "core/Watchdog.h"
 #include "lvgl_v8_port.h"
@@ -78,6 +79,30 @@ uint32_t web_response_wifi_sta_connected_elapsed_ms(void *) {
     return (g_ctx && g_ctx->wifi_sta_connected_elapsed_ms)
                ? g_ctx->wifi_sta_connected_elapsed_ms()
                : 0;
+}
+
+void capture_stream_failure_environment(void *, WebStreamEnvironment &out) {
+    // Same cheap internal-memory counters as /api/diag. No heap walk or live Wi-Fi query.
+    out.internal_free = ESP.getFreeHeap();
+    out.internal_min_free = ESP.getMinFreeHeap();
+    out.memory_valid = true;
+    if (!g_ctx || !g_ctx->connectivity_runtime) return;
+    const ConnectivityStatusSnapshot network = g_ctx->connectivity_runtime->statusSnapshot();
+    out.network_valid = network.valid;
+    out.network_age_ms = millis() - network.sampled_ms;
+    out.wifi_state = network.wifi_state;
+    out.wifi_sta_status = network.wifi_sta_status;
+    out.rssi = network.rssi;
+    out.wifi_retry_count = network.wifi_retry_count;
+    out.mqtt_retry_stage = network.mqtt_retry_stage;
+    out.wifi_enabled = network.wifi_enabled;
+    out.wifi_connected = network.wifi_connected;
+    out.ap_mode = network.wifi_ap_mode;
+    out.scan_in_progress = network.wifi_scan_in_progress;
+    out.has_rssi = network.has_rssi;
+    out.mqtt_enabled = network.mqtt_enabled;
+    out.mqtt_connected = network.mqtt_connected;
+    out.mqtt_tls_waiting_for_time = network.mqtt_tls_waiting_for_time;
 }
 
 uint32_t ota_upload_timeout_ms(size_t image_size_bytes) {
@@ -375,6 +400,7 @@ WebResponseUtils::StreamContext responseContext() {
     context.slow_write_warn_ms = kHttpStreamSlowWriteWarnMs;
     context.nowMs = web_response_now_ms;
     context.wifiStaConnectedElapsedMs = web_response_wifi_sta_connected_elapsed_ms;
+    context.captureFailureEnvironment = capture_stream_failure_environment;
     return context;
 }
 

@@ -12,6 +12,7 @@
 
 #include "config/AppConfig.h"
 #include "core/NetworkHostname.h"
+#include "core/ConnectivityStatusSnapshot.h"
 
 class AuraNetworkManager;
 class MqttManager;
@@ -63,6 +64,7 @@ public:
     ConnectivityRuntime();
     void update(AuraNetworkManager &networkManager, MqttManager &mqttManager);
     ConnectivityRuntimeSnapshot snapshot() const;
+    ConnectivityStatusSnapshot statusSnapshot() const;
 
 private:
     void lock() const;
@@ -71,4 +73,6 @@ private:
     mutable StaticSemaphore_t mutex_buffer_{};
     mutable SemaphoreHandle_t mutex_ = nullptr;
     ConnectivityRuntimeSnapshot snapshot_;
+    uint32_t sampled_ms_ = 0;
+    bool sampled_ = false;
 };

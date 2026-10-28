@@ -18,6 +18,7 @@
 #endif
 
 #include "web/WebStreamPolicy.h"
+#include "web/WebStreamDiagnostics.h"
 
 struct WebStreamStatsSnapshot {
     uint32_t ok_count = 0;
@@ -35,6 +36,9 @@ struct WebStreamStatsSnapshot {
 
 struct WebTransferSnapshot {
     WebStreamStatsSnapshot stats;
+    WebStreamFailure failures[kWebStreamFailureCapacity]{}; // Newest first.
+    uint32_t suppressed_failure_logs = 0;
+    uint8_t failure_count = 0;
     uint16_t active_transfers = 0;
     uint32_t mqtt_pause_remaining_ms = 0;
 };
@@ -59,6 +63,8 @@ public:
                             uint32_t max_write_ms,
                             int last_socket_errno,
                             uint32_t slow_write_warn_ms);
+    // Updates failure.count/first_ms; true means emit a short warning now.
+    bool recordFailure(WebStreamFailure &failure);
     WebTransferSnapshot snapshot(uint32_t now_ms) const;
 
 private:
@@ -96,6 +102,14 @@ private:
     mutable StaticSemaphore_t mutex_buffer_{};
     mutable SemaphoreHandle_t mutex_ = nullptr;
 #endif
+    WebStreamFailure failures_[kWebStreamFailureCapacity]{};
+    uint32_t group_internal_free_ = 0;
+    int32_t group_rssi_ = 0;
+    uint32_t last_failure_log_ms_ = 0;
+    uint32_t suppressed_failure_logs_ = 0;
+    uint8_t failure_head_ = 0;
+    uint8_t failure_count_ = 0;
+    bool consecutive_failure_ = false;
     StatsState stats_{};
     TransferState transfer_{};
 };

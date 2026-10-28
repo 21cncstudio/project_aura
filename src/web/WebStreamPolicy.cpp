@@ -57,7 +57,7 @@ const StreamProfile kImmutableAssetStreamProfile = {
 const char *stream_abort_reason_text(StreamAbortReason reason) {
     switch (reason) {
         case StreamAbortReason::Disconnected:
-            return "client_disconnected";
+            return "connection_closed";
         case StreamAbortReason::InvalidSocket:
             return "invalid_socket";
         case StreamAbortReason::ZeroWriteLimit:
@@ -66,6 +66,12 @@ const char *stream_abort_reason_text(StreamAbortReason reason) {
             return "no_progress_timeout";
         case StreamAbortReason::TotalTimeout:
             return "total_timeout";
+        case StreamAbortReason::ConnectionReset:
+            return "connection_reset";
+        case StreamAbortReason::SocketTimeout:
+            return "socket_timeout";
+        case StreamAbortReason::InternalError:
+            return "internal_error";
         case StreamAbortReason::SocketWriteError:
             return "socket_write_error";
         case StreamAbortReason::None:

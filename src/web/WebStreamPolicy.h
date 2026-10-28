@@ -32,7 +32,10 @@ enum class StreamAbortReason : uint8_t {
     ZeroWriteLimit,
     NoProgressTimeout,
     TotalTimeout,
-    SocketWriteError
+    SocketWriteError,
+    ConnectionReset,
+    SocketTimeout,
+    InternalError
 };
 
 extern const StreamProfile kHtmlStreamProfile;

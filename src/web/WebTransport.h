@@ -10,6 +10,7 @@
 #include <memory>
 #include <stddef.h>
 #include <stdint.h>
+#include "web/WebStreamDiagnostics.h"
 
 enum class WebUploadStatus : uint8_t {
     Start = 0,
@@ -62,6 +63,15 @@ public:
     virtual int32_t writeStreamChunk(const uint8_t *data, size_t size, int &last_error) = 0;
     virtual bool waitUntilWritable(uint16_t wait_ms, int &last_error) = 0;
     virtual void endStreamResponse() = 0;
+    virtual bool finishStreamResponse(int &last_error) {
+        endStreamResponse();
+        last_error = 0;
+        return true;
+    }
+    virtual WebStreamError streamError() const { return {}; }
+    virtual void streamRequestInfo(WebStreamRequestInfo &info) const {
+        info.path_truncated = web_stream_copy_text(info.path, sizeof(info.path), uri().c_str(), true);
+    }
     virtual WebUpload upload() = 0;
 
     // Request-local OTA bookkeeping. A rejected HTTP request must not replace

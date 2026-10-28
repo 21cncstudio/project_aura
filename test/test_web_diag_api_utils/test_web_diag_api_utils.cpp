@@ -483,8 +483,45 @@ void test_web_diag_api_utils_marks_unrun_expander_probe_details_null() {
     }
 }
 
+void test_failure_report_preserves_evidence_and_distinguishes_unknown_values() {
+    WebDiagApiUtils::Payload payload{};
+    payload.web_stream.failure_count = 1;
+    auto &failure = payload.web_stream.failures[0];
+    failure.error.stage = WebStreamStage::Finish;
+    failure.error.sdk_error = 0xB006;
+    failure.error.sdk_error_valid = true;
+    failure.error.wire_bytes = 123;
+    failure.reason = StreamAbortReason::InternalError;
+    failure.count = 3;
+    failure.first_ms = 100;
+    failure.last_ms = 200;
+    failure.environment.memory_valid = true;
+    failure.environment.internal_free = 65000;
+    failure.environment.network_valid = true;
+    failure.environment.network_age_ms = 77;
+    failure.environment.mqtt_connected = true;
+    web_stream_copy_text(failure.request.peer, sizeof(failure.request.peer), "127.0.0.1");
+    web_stream_copy_text(failure.request.user_agent, sizeof(failure.request.user_agent), "curl/8");
+    ArduinoJson::JsonDocument doc;
+    WebDiagApiUtils::fillJson(doc.to<ArduinoJson::JsonObject>(), payload, nullptr, 0, 0);
+    auto item = doc["web_stream"]["recent_failures"][0];
+    TEST_ASSERT_EQUAL_STRING("finish", item["stage"].as<const char *>());
+    TEST_ASSERT_TRUE(item["errno"].isNull());
+    TEST_ASSERT_EQUAL_HEX32(0xB006, item["sdk_error"].as<uint32_t>());
+    TEST_ASSERT_EQUAL_UINT32(3, item["count"].as<uint32_t>());
+    TEST_ASSERT_EQUAL_UINT32(65000, item["memory"]["internal_free"].as<uint32_t>());
+    TEST_ASSERT_EQUAL_UINT32(77, item["network"]["snapshot_age_ms"].as<uint32_t>());
+    TEST_ASSERT_TRUE(item["network"]["mqtt_connected"].as<bool>());
+    TEST_ASSERT_TRUE(item["network"]["rssi"].isNull());
+    TEST_ASSERT_EQUAL_STRING("curl/8", item["user_agent"].as<const char *>());
+    // ArduinoJson must own the bounded strings after a local snapshot goes away.
+    failure.request.user_agent[0] = 'X';
+    TEST_ASSERT_EQUAL_STRING("curl/8", item["user_agent"].as<const char *>());
+}
+
 int main(int, char **) {
     UNITY_BEGIN();
+    RUN_TEST(test_failure_report_preserves_evidence_and_distinguishes_unknown_values);
     RUN_TEST(test_web_diag_api_utils_access_allowed_accepts_ap_or_sta_connectivity);
     RUN_TEST(test_web_diag_api_utils_names_refresh_callback_and_rotation_ownership);
     RUN_TEST(test_web_diag_api_utils_serializes_touch_polling_diagnostics);

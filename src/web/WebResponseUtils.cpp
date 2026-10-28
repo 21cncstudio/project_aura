@@ -82,55 +82,60 @@ bool stream_response_body(WebRequest &server,
                           size_t body_size,
                           const StreamProfile &profile,
                           const WebResponseUtils::StreamContext &context,
-                          const char *log_label) {
-    if (body_size == 0) {
-        record_web_stream_result(
-            context, server.uri(), body_size, 0, true, StreamAbortReason::None, 0, 0);
-        server.endStreamResponse();
-        return true;
-    }
-
+                          bool response_started) {
+    const uint32_t start_ms = context_now_ms(context);
     size_t sent = 0;
     StreamAbortReason abort_reason = StreamAbortReason::None;
     uint32_t max_write_ms = 0;
     int last_socket_errno = 0;
-    const bool ok = context.stream_runtime &&
-                    web_stream_client_bytes(server,
-                                            data,
-                                            body_size,
-                                            profile,
-                                            *context.stream_runtime,
-                                            sent,
-                                            abort_reason,
-                                            max_write_ms,
-                                            last_socket_errno);
-    if (!context.stream_runtime) {
-        abort_reason = StreamAbortReason::SocketWriteError;
+    bool ok = response_started;
+    if (ok && body_size) {
+        ok = data && context.stream_runtime &&
+            web_stream_client_bytes(server, data, body_size, profile, *context.stream_runtime,
+                                    sent, abort_reason, max_write_ms, last_socket_errno);
     }
-
-    record_web_stream_result(
-        context, server.uri(), body_size, sent, ok, abort_reason, max_write_ms, last_socket_errno);
-    if (!ok) {
-        Logger::log(Logger::Warn, "Web",
-                    "%s interrupted: uri=%s sent=%u/%u reason=%s max_write_ms=%u err=%d",
-                    log_label,
-                    server.uri().c_str(),
-                    static_cast<unsigned>(sent),
-                    static_cast<unsigned>(body_size),
-                    stream_abort_reason_text(abort_reason),
-                    static_cast<unsigned>(max_write_ms),
-                    last_socket_errno);
-    } else if (max_write_ms >= context.slow_write_warn_ms) {
-        Logger::log(Logger::Warn, "Web",
-                    "%s slow write: uri=%s size=%u max_write_ms=%u",
-                    log_label,
-                    server.uri().c_str(),
-                    static_cast<unsigned>(body_size),
-                    static_cast<unsigned>(max_write_ms));
+    if (!ok && abort_reason == StreamAbortReason::None) {
+        abort_reason = web_stream_error_reason(server.streamError());
     }
     if (ok) {
-        server.endStreamResponse();
+        const uint32_t finish_start_ms = context_now_ms(context);
+        ok = server.finishStreamResponse(last_socket_errno);
+        const uint32_t finish_ms = context_now_ms(context) - finish_start_ms;
+        if (finish_ms > max_write_ms) max_write_ms = finish_ms;
+        if (!ok) abort_reason = web_stream_error_reason(server.streamError());
     }
+
+    WebStreamRequestInfo request{};
+    server.streamRequestInfo(request);
+    if (!ok) {
+        WebStreamFailure failure{};
+        failure.request = request;
+        failure.error = server.streamError();
+        failure.first_ms = failure.last_ms = context_now_ms(context);
+        failure.sent = static_cast<uint32_t>(sent);
+        failure.total = static_cast<uint32_t>(body_size);
+        failure.duration_ms = failure.last_ms - start_ms;
+        failure.max_write_ms = max_write_ms;
+        failure.reason = abort_reason;
+        if (context.captureFailureEnvironment) {
+            context.captureFailureEnvironment(context.context, failure.environment);
+        }
+        const bool log = !context.stream_state || context.stream_state->recordFailure(failure);
+        server.stopClient();
+        if (log) {
+            Logger::log(Logger::Warn, "Web",
+                        "HTTP interrupted: path=%s sent=%u/%u %s/%s sdk=%ld errno=%d valid=%u n=%lu",
+                        request.path, static_cast<unsigned>(sent), static_cast<unsigned>(body_size),
+                        web_stream_stage_text(failure.error.stage), stream_abort_reason_text(abort_reason),
+                        static_cast<long>(failure.error.sdk_error), failure.error.socket_errno,
+                        failure.error.errno_valid ? 1U : 0U, static_cast<unsigned long>(failure.count));
+        }
+    } else if (max_write_ms >= context.slow_write_warn_ms) {
+        Logger::log(Logger::Warn, "Web", "HTTP slow write: path=%s size=%u max_write_ms=%u",
+                    request.path, static_cast<unsigned>(body_size), static_cast<unsigned>(max_write_ms));
+    }
+    record_web_stream_result(context, request.path, body_size, sent, ok, abort_reason,
+                             max_write_ms, last_socket_errno);
     return ok;
 }
 
@@ -168,13 +173,13 @@ uint32_t transferPauseRemainingMs(const StreamContext &context) {
 
 bool sendHtmlStream(WebRequest &server, const String &html, const StreamContext &context) {
     send_no_store_headers(server);
-    server.beginStreamResponse(200, "text/html; charset=utf-8", html.length());
+    const bool started = server.beginStreamResponse(200, "text/html; charset=utf-8", html.length());
     return stream_response_body(server,
                                 reinterpret_cast<const uint8_t *>(html.c_str()),
                                 html.length(),
                                 kHtmlStreamProfile,
                                 context,
-                                "HTML stream");
+                                started);
 }
 
 bool sendHtmlStreamResilient(WebRequest &server, const String &html, const StreamContext &context) {
@@ -183,13 +188,13 @@ bool sendHtmlStreamResilient(WebRequest &server, const String &html, const Strea
     WifiPowerSaveGuard wifi_ps_guard;
     wifi_ps_guard.suspend();
     send_no_store_headers(server);
-    server.beginStreamResponse(200, "text/html; charset=utf-8", html.length());
+    const bool started = server.beginStreamResponse(200, "text/html; charset=utf-8", html.length());
     return stream_response_body(server,
                                 reinterpret_cast<const uint8_t *>(html.c_str()),
                                 html.length(),
                                 kShellPageStreamProfile,
                                 context,
-                                "HTML stream");
+                                started);
 }
 
 bool sendProgmemAsset(WebRequest &server,
@@ -211,9 +216,9 @@ bool sendProgmemAsset(WebRequest &server,
         wifi_ps_guard.suspend();
     }
     apply_asset_cache_headers(server, cache_mode);
-    server.beginStreamResponse(200, content_type, content_size, gzip_encoded);
+    const bool started = server.beginStreamResponse(200, content_type, content_size, gzip_encoded);
     return stream_response_body(
-        server, content, content_size, profile, context, "PROGMEM asset stream");
+        server, content, content_size, profile, context, started);
 }
 
 bool sendHtmlStreamProgmem(WebRequest &server,

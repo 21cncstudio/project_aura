@@ -5,6 +5,7 @@
 // Purchase a Commercial License: see COMMERCIAL_LICENSE_SUMMARY.md
 
 #include "web/WebTransport.h"
+#include "web/WebHttpSendCapture.h"
 #include "web/WebHttpResponseStorage.h"
 #include "web/WebMultipart.h"
 #include "web/WebQueryString.h"
@@ -16,6 +17,7 @@
 #include <vector>
 
 #include <esp_http_server.h>
+#include <esp_log.h>
 #include <lwip/sockets.h>
 
 #include "core/Logger.h"
@@ -104,6 +106,7 @@ public:
     void begin() override;
     void stop() override;
 
+    int socketSend(int sockfd, const char *buf, size_t size, int flags);
     bool prepareRequest(RouteRegistration &route, void *req);
     void resetRequest();
     void finalizeRequest();
@@ -410,6 +413,41 @@ public:
     void begin(httpd_req_t *req) {
         resetUploadResponseState();
         req_ = req;
+        send_capture_.reset();
+        request_info_ = {};
+        request_info_.path_truncated = web_stream_copy_text(
+            request_info_.path, sizeof(request_info_.path), req ? req->uri : nullptr, true);
+        if (req) {
+            const size_t ua_length = httpd_req_get_hdr_value_len(req, "User-Agent");
+            const esp_err_t ua_result = httpd_req_get_hdr_value_str(
+                req, "User-Agent", request_info_.user_agent, sizeof(request_info_.user_agent));
+            if (ua_result != ESP_OK && ua_result != ESP_ERR_HTTPD_RESULT_TRUNC) {
+                request_info_.user_agent[0] = 0;
+            }
+            request_info_.user_agent_truncated = ua_length >= sizeof(request_info_.user_agent);
+            web_stream_copy_text(request_info_.user_agent, sizeof(request_info_.user_agent),
+                                 request_info_.user_agent);
+            sockaddr_storage peer{};
+            socklen_t peer_size = sizeof(peer);
+            const int fd = httpd_req_to_sockfd(req);
+            if (getpeername(fd, reinterpret_cast<sockaddr *>(&peer), &peer_size) == 0) {
+                if (peer.ss_family == AF_INET) {
+                    inet_ntop(AF_INET, &reinterpret_cast<sockaddr_in *>(&peer)->sin_addr,
+                              request_info_.peer, sizeof(request_info_.peer));
+                } else if (peer.ss_family == AF_INET6) {
+                    inet_ntop(AF_INET6, &reinterpret_cast<sockaddr_in6 *>(&peer)->sin6_addr,
+                              request_info_.peer, sizeof(request_info_.peer));
+                }
+            }
+            // This backend is plain HTTP, with one synchronous request per server task.
+            // The hook remains on the socket; capture is active only inside chunk().
+            const esp_err_t hook_result = httpd_sess_set_send_override(req->handle, fd,
+                [](httpd_handle_t hd, int socket, const char *buf, size_t len, int flags) -> int {
+                    auto *backend = static_cast<EspHttpServerBackend *>(httpd_get_global_user_ctx(hd));
+                    return backend->socketSend(socket, buf, len, flags);
+                });
+            if (hook_result != ESP_OK) send_capture_.failSetup(hook_result);
+        }
         response_storage_.reset();
         args_.clear();
         raw_body_ = "";
@@ -424,6 +462,8 @@ public:
     void reset() {
         resetUploadResponseState();
         req_ = nullptr;
+        send_capture_.reset();
+        request_info_ = {};
         response_storage_.reset();
         args_.clear();
         raw_body_ = "";
@@ -520,11 +560,13 @@ public:
 
         WebHttpResponseStorage::HeaderView stored;
         if (!response_storage_.storeHeader(name, value, stored)) {
+            send_capture_.failSetup(0, false);
             LOGW("WEB", "response header storage failed: %s", name);
             return;
         }
         const esp_err_t err = httpd_resp_set_hdr(req_, stored.name, stored.value);
         if (err != ESP_OK) {
+            send_capture_.failSetup(err);
             LOGW("WEB", "response header rejected: %s (%s)", name, esp_err_to_name(err));
         }
     }
@@ -646,6 +688,7 @@ public:
     }
 
     void stopClient() override {
+        stream_open_ = false; // Finalization must not send after an aborted chunk.
         if (!req_) {
             return;
         }
@@ -659,43 +702,51 @@ public:
                              const char *content_type,
                              size_t,
                              bool gzip_encoded) override {
-        if (!req_) {
+        if (!req_ || send_capture_.error().terminal) {
+            if (!req_) send_capture_.failSetup(0, false);
             return false;
         }
         const char *stored_status = nullptr;
-        if (!response_storage_.storeStatus(status_line_for_code(status_code), stored_status) ||
-            httpd_resp_set_status(req_, stored_status) != ESP_OK) {
-            LOGE("WEB", "stream response status setup failed: %d", status_code);
+        if (!response_storage_.storeStatus(status_line_for_code(status_code), stored_status)) {
+            send_capture_.failSetup(0, false);
+            return false;
+        }
+        esp_err_t result = httpd_resp_set_status(req_, stored_status);
+        if (result != ESP_OK) {
+            send_capture_.failSetup(result);
             return false;
         }
         if (content_type) {
             const char *stored_content_type = nullptr;
-            if (!response_storage_.storeContentType(content_type, stored_content_type) ||
-                httpd_resp_set_type(req_, stored_content_type) != ESP_OK) {
-                LOGE("WEB", "stream response content type setup failed");
+            if (!response_storage_.storeContentType(content_type, stored_content_type)) {
+                send_capture_.failSetup(0, false);
+                return false;
+            }
+            result = httpd_resp_set_type(req_, stored_content_type);
+            if (result != ESP_OK) {
+                send_capture_.failSetup(result);
                 return false;
             }
         }
-        if (gzip_encoded) {
-            sendHeader("Content-Encoding", "gzip", false);
-        }
+        if (gzip_encoded) sendHeader("Content-Encoding", "gzip", false);
+        if (send_capture_.error().terminal) return false;
         stream_open_ = true;
         return true;
     }
 
     int32_t writeStreamChunk(const uint8_t *data, size_t size, int &last_error) override {
         if (!req_ || !stream_open_) {
-            last_error = EBADF;
+            if (!send_capture_.error().terminal) send_capture_.failSetup(0, false);
+            last_error = send_capture_.error().socket_errno;
             return -1;
         }
-        const esp_err_t err =
-            httpd_resp_send_chunk(req_, reinterpret_cast<const char *>(data), static_cast<ssize_t>(size));
-        if (err != ESP_OK) {
-            last_error = EIO;
-            return -1;
-        }
-        last_error = 0;
-        return static_cast<int32_t>(size);
+        const bool ok = send_capture_.chunk(WebStreamStage::Body, data, size, [&]() {
+            return httpd_resp_send_chunk(req_, reinterpret_cast<const char *>(data),
+                                         static_cast<ssize_t>(size));
+        });
+        last_error = send_capture_.error().socket_errno;
+        if (!ok) stream_open_ = false;
+        return ok ? static_cast<int32_t>(size) : -1;
     }
 
     bool waitUntilWritable(uint16_t, int &last_error) override {
@@ -703,12 +754,49 @@ public:
         return true;
     }
 
-    void endStreamResponse() override {
+    bool finishStreamResponse(int &last_error) override {
         if (!req_ || !stream_open_) {
-            return;
+            last_error = send_capture_.error().socket_errno;
+            return !send_capture_.error().terminal;
         }
-        httpd_resp_send_chunk(req_, nullptr, 0);
         stream_open_ = false;
+        const bool ok = send_capture_.chunk(WebStreamStage::Finish, nullptr, 0, [&]() {
+            return httpd_resp_send_chunk(req_, nullptr, 0);
+        });
+        last_error = send_capture_.error().socket_errno;
+        if (!ok) stopClient();
+        return ok;
+    }
+
+    void endStreamResponse() override {
+        int ignored = 0;
+        finishStreamResponse(ignored);
+    }
+
+    WebStreamError streamError() const override { return send_capture_.error(); }
+    void streamRequestInfo(WebStreamRequestInfo &info) const override { info = request_info_; }
+
+    int socketSend(int sockfd, const char *buf, size_t size, int flags) {
+        const auto raw_send = [&]() { return ::send(sockfd, buf, size, flags); };
+        const bool matching_request = req_ && httpd_req_to_sockfd(req_) == sockfd;
+        const bool captured = matching_request && send_capture_.active();
+        const int result = matching_request
+            ? send_capture_.socketSend(buf, size, raw_send) : raw_send();
+        const int socket_errno = result < 0 ? errno : 0;
+        if (result >= 0) return result;
+        // The hook survives keep-alive reuse. Preserve the SDK warning for
+        // ordinary (non-streamed) replies/errors; those have no failure record.
+        if (!captured) ESP_LOGW("httpd_txrx", "error in send : %d", socket_errno);
+        // Match ESP-IDF's default send error categories; keep the raw errno above.
+        switch (socket_errno) {
+            case EAGAIN:
+            case EINTR: return HTTPD_SOCK_ERR_TIMEOUT;
+            case EINVAL:
+            case EBADF:
+            case EFAULT:
+            case ENOTSOCK: return HTTPD_SOCK_ERR_INVALID;
+            default: return HTTPD_SOCK_ERR_FAIL;
+        }
     }
 
     WebUpload upload() override {
@@ -737,6 +825,8 @@ public:
 
 private:
     httpd_req_t *req_ = nullptr;
+    WebHttpSendCapture send_capture_;
+    WebStreamRequestInfo request_info_;
     WebHttpResponseStorage::Storage response_storage_{};
     std::vector<WebQueryArg> args_{};
     String raw_body_;
@@ -759,6 +849,10 @@ EspHttpServerBackend::~EspHttpServerBackend() {
     request_ = nullptr;
     delete &backend_routes(routes_);
     routes_ = nullptr;
+}
+
+int EspHttpServerBackend::socketSend(int sockfd, const char *buf, size_t size, int flags) {
+    return request_->socketSend(sockfd, buf, size, flags);
 }
 
 WebRequest &EspHttpServerBackend::request() {

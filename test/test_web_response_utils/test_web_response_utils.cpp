@@ -1,6 +1,9 @@
 #include <unity.h>
 
 #include <deque>
+#include <errno.h>
+#include <cstring>
+#include "web/WebHttpSendCapture.h"
 #include <vector>
 
 #include "web/WebResponseUtils.h"
@@ -10,6 +13,7 @@ namespace {
 struct FakeRuntime {
     uint32_t now_ms = 0;
     uint32_t wifi_sta_connected_elapsed_ms = 0;
+    uint32_t environment_captures = 0;
 };
 
 uint32_t fake_now_ms(void *context) {
@@ -39,7 +43,7 @@ public:
 
     bool hasArg(const char *) const override { return false; }
     String arg(const char *) const override { return ""; }
-    String uri() const override { return "/test"; }
+    String uri() const override { return "/test?token=must-not-appear"; }
 
     void sendHeader(const char *name, const String &value, bool first = false) override {
         headers_.push_back({String(name), value, first});
@@ -79,10 +83,11 @@ public:
         begin_content_type_ = content_type;
         begin_content_length_ = content_length;
         begin_gzip_ = gzip_encoded;
-        return true;
+        return begin_ok;
     }
 
     int32_t writeStreamChunk(const uint8_t *, size_t, int &last_error) override {
+        ++write_calls;
         if (writes_.empty()) {
             last_error = 0;
             return 0;
@@ -104,7 +109,27 @@ public:
         end_called_ = true;
     }
 
+    bool finishStreamResponse(int &last_error) override {
+        end_called_ = true;
+        runtime_.now_ms += finish_delay_ms;
+        if (!finish_ok) {
+            error.stage = WebStreamStage::Finish;
+            error.sdk_error = 0xB006;
+            error.sdk_error_valid = true;
+            error.socket_errno = EPIPE;
+            error.errno_valid = true;
+            error.terminal = true;
+        }
+        last_error = error.socket_errno;
+        return finish_ok;
+    }
+    WebStreamError streamError() const override { return error; }
     WebUpload upload() override { return {}; }
+    bool begin_ok = true;
+    bool finish_ok = true;
+    uint32_t finish_delay_ms = 0;
+    uint32_t write_calls = 0;
+    WebStreamError error{};
 
     void enqueueWrite(const WriteAction &action) {
         writes_.push_back(action);
@@ -161,6 +186,17 @@ WebResponseUtils::StreamContext make_context(FakeRuntime &runtime, WebStreamStat
     context.slow_write_warn_ms = 200;
     context.nowMs = fake_now_ms;
     context.wifiStaConnectedElapsedMs = fake_wifi_sta_connected_elapsed_ms;
+    context.captureFailureEnvironment = [](void *ctx, WebStreamEnvironment &out) {
+        ++static_cast<FakeRuntime *>(ctx)->environment_captures;
+        out.memory_valid = true;
+        out.internal_free = 60000;
+        out.internal_min_free = 50000;
+        out.network_valid = true;
+        out.network_age_ms = 125;
+        out.wifi_connected = true;
+        out.mqtt_enabled = true;
+        out.mqtt_connected = false;
+    };
     return context;
 }
 
@@ -246,8 +282,102 @@ void test_send_progmem_asset_sets_immutable_cache_headers() {
     TEST_ASSERT_TRUE(WebResponseUtils::shouldPauseMqttForTransfer(context));
 }
 
+void test_finish_failure_is_recorded_even_after_all_body_bytes_or_empty_body() {
+    for (const char *body : {"hello", ""}) {
+        FakeRuntime runtime;
+        WebStreamState state;
+        FakeRequest request(runtime);
+        request.finish_ok = false;
+        request.finish_delay_ms = 500;
+        if (*body) request.enqueueWrite({5, 0, 10, true});
+        const auto context = make_context(runtime, state);
+        TEST_ASSERT_FALSE(WebResponseUtils::sendHtmlStream(request, body, context));
+        TEST_ASSERT_TRUE(request.stopCalled());
+        const auto snapshot = state.snapshot(runtime.now_ms);
+        TEST_ASSERT_EQUAL_UINT32(0, snapshot.stats.ok_count);
+        TEST_ASSERT_EQUAL_UINT32(1, snapshot.stats.abort_count);
+        TEST_ASSERT_EQUAL_UINT32(1, snapshot.failure_count);
+        TEST_ASSERT_EQUAL(WebStreamStage::Finish, snapshot.failures[0].error.stage);
+        TEST_ASSERT_EQUAL(StreamAbortReason::Disconnected, snapshot.failures[0].reason);
+        TEST_ASSERT_EQUAL_UINT32(strlen(body), snapshot.failures[0].sent);
+        TEST_ASSERT_EQUAL_UINT32(500, snapshot.failures[0].max_write_ms);
+        TEST_ASSERT_GREATER_OR_EQUAL_UINT32(500, snapshot.failures[0].duration_ms);
+        TEST_ASSERT_EQUAL_STRING("/test", snapshot.failures[0].request.path);
+        TEST_ASSERT_EQUAL_UINT32(1, runtime.environment_captures);
+        TEST_ASSERT_EQUAL_UINT32(60000, snapshot.failures[0].environment.internal_free);
+    }
+}
+
+void test_partial_http_timeout_is_not_replayed_or_finished() {
+    FakeRuntime runtime;
+    WebStreamState state;
+    FakeRequest request(runtime);
+    request.error.terminal = true;
+    request.error.errno_valid = true;
+    request.error.socket_errno = EAGAIN;
+    request.error.sdk_error = 0xB006;
+    request.error.sdk_error_valid = true;
+    request.error.stage = WebStreamStage::Body;
+    request.error.partial_body_bytes = 2;
+    request.enqueueWrite({-1, EAGAIN, 30000, true});
+    request.enqueueWrite({5, 0, 1, true}); // Must not run.
+    const auto context = make_context(runtime, state);
+    TEST_ASSERT_FALSE(WebResponseUtils::sendHtmlStream(request, "hello", context));
+    TEST_ASSERT_EQUAL_UINT32(1, request.write_calls);
+    TEST_ASSERT_FALSE(request.endCalled());
+    const auto snapshot = state.snapshot(runtime.now_ms);
+    TEST_ASSERT_EQUAL(StreamAbortReason::SocketTimeout, snapshot.failures[0].reason);
+    TEST_ASSERT_EQUAL_UINT32(0, snapshot.failures[0].sent);
+    TEST_ASSERT_EQUAL_UINT32(2, snapshot.failures[0].error.partial_body_bytes);
+    TEST_ASSERT_EQUAL_UINT32(30000, snapshot.failures[0].duration_ms);
+}
+
+void test_setup_failure_stops_before_body_and_success_preserves_history() {
+    FakeRuntime runtime;
+    WebStreamState state;
+    FakeRequest request(runtime);
+    request.begin_ok = false;
+    const auto context = make_context(runtime, state);
+    TEST_ASSERT_FALSE(WebResponseUtils::sendHtmlStream(request, "hello", context));
+    TEST_ASSERT_EQUAL_UINT32(0, request.write_calls);
+    TEST_ASSERT_FALSE(request.endCalled());
+    TEST_ASSERT_EQUAL_UINT32(1, runtime.environment_captures);
+    FakeRequest success(runtime);
+    success.enqueueWrite({5, 0, 250, true}); // Slow but complete, no failure snapshot.
+    TEST_ASSERT_TRUE(WebResponseUtils::sendHtmlStream(success, "hello", context));
+    const auto snapshot = state.snapshot(runtime.now_ms);
+    TEST_ASSERT_EQUAL_UINT32(1, snapshot.stats.ok_count);
+    TEST_ASSERT_EQUAL_UINT32(1, snapshot.stats.abort_count);
+    TEST_ASSERT_EQUAL_UINT32(1, snapshot.stats.slow_count);
+    TEST_ASSERT_EQUAL_UINT32(1, snapshot.failure_count);
+    TEST_ASSERT_EQUAL(StreamAbortReason::InternalError, snapshot.failures[0].reason);
+    TEST_ASSERT_EQUAL_UINT32(1, runtime.environment_captures);
+}
+
+void test_repeated_failure_logs_do_not_hide_abort_counts() {
+    FakeRuntime runtime;
+    WebStreamState state;
+    const auto context = make_context(runtime, state);
+    for (int i = 0; i < 3; ++i) {
+        FakeRequest request(runtime);
+        request.finish_ok = false;
+        request.enqueueWrite({5, 0, 10, true});
+        TEST_ASSERT_FALSE(WebResponseUtils::sendHtmlStream(request, "hello", context));
+    }
+    const auto snapshot = state.snapshot(runtime.now_ms);
+    TEST_ASSERT_EQUAL_UINT32(3, snapshot.stats.abort_count);
+    TEST_ASSERT_EQUAL_UINT32(1, snapshot.failure_count);
+    TEST_ASSERT_EQUAL_UINT32(3, snapshot.failures[0].count);
+    TEST_ASSERT_EQUAL_UINT32(2, snapshot.suppressed_failure_logs);
+    TEST_ASSERT_EQUAL_UINT32(3, runtime.environment_captures);
+}
+
 int main(int, char **) {
     UNITY_BEGIN();
+    RUN_TEST(test_repeated_failure_logs_do_not_hide_abort_counts);
+    RUN_TEST(test_finish_failure_is_recorded_even_after_all_body_bytes_or_empty_body);
+    RUN_TEST(test_partial_http_timeout_is_not_replayed_or_finished);
+    RUN_TEST(test_setup_failure_stops_before_body_and_success_preserves_history);
     RUN_TEST(test_send_html_stream_records_result_and_headers);
     RUN_TEST(test_send_html_stream_resilient_sets_pause_window);
     RUN_TEST(test_send_progmem_asset_sets_immutable_cache_headers);
