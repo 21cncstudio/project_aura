@@ -34,7 +34,7 @@ def main():
     flags=['-O2','-g0','-DAURA_NATIVE_ROTATION_HOST_TEST','-DLV_CONF_INCLUDE_SIMPLE','-DLV_KCONFIG_IGNORE',
            '-I'+str(fixture),'-I'+str(lvgl),'-I'+str(lvgl/'include'),'-I'+str(root/'src')]
     sources=sorted((lvgl/'src').rglob('*.c'))+sorted((root/'src/ui').glob('ui_font_*.c'))
-    sources += [f for f in sorted((root/'src/ui').glob('ui_image_*.c')) if f.name!='ui_image_project_aura_logo.c']
+    sources += sorted((root/'src/ui').glob('ui_image_*.c'))
     sources += [root/'src/ui'/n for n in ['screens.c','styles.c','images.c']]
     sources += [root/'src/display/NativeRotation.cpp',fixture/'probe.cpp',fixture/'canvas_cleanup.cpp']
     headers=sorted(lvgl.rglob('*.h'))+sorted((root/'src/ui').glob('*.h'))

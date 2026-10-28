@@ -11,7 +11,6 @@ set(CONFIG_LV_USE_THORVG_INTERNAL OFF CACHE BOOL "" FORCE)
 add_subdirectory("${AURA_ROOT}/managed_components/lvgl__lvgl" lvgl)
 file(GLOB fonts "${AURA_ROOT}/src/ui/ui_font_*.c")
 file(GLOB images "${AURA_ROOT}/src/ui/ui_image_*.c")
-list(FILTER images EXCLUDE REGEX "ui_image_project_aura_logo[.]c$")
 add_executable(aura_ui_check ui_check.cpp ${fonts} ${images}
     "${AURA_ROOT}/src/ui/screens.c" "${AURA_ROOT}/src/ui/styles.c"
     "${AURA_ROOT}/src/ui/images.c")

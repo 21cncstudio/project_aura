@@ -6,8 +6,6 @@ file(GLOB_RECURSE aura_sources ${aura_glob_options}
     "${CMAKE_CURRENT_LIST_DIR}/../src/*.c")
 list(FILTER aura_sources EXCLUDE REGEX "/src/ui/ui[.]c$")
 list(FILTER aura_sources EXCLUDE REGEX "/src/lvgl_v8_port[.]cpp$")
-# Superseded, unreferenced LVGL 8 logo asset; the EEZ boot image is used instead.
-list(FILTER aura_sources EXCLUDE REGEX "/src/ui/ui_image_project_aura_logo[.]c$")
 list(FILTER aura_sources EXCLUDE REGEX "/src/web/WebTransportArduino[.]cpp$")
 # The old PlatformIO baseline still needs the exact IDF 5.3.2 backport.
 # IDF 6.1 uses and verifies its own upstream implementation.
