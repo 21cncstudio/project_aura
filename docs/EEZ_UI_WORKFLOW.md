@@ -90,3 +90,40 @@ string against the 18 px font, in addition to the existing status-font checks.
 
 See [POLISH_LOCALIZATION_20260916.md](POLISH_LOCALIZATION_20260916.md) for the local
 implementation, rendered layout checks and build evidence.
+
+## RGB565 boot logo (2026-10-28)
+
+The canonical `ui/aura-lvgl.eez-project` stores `page_boot_logo_new` as an
+opaque 386 x 354 embedded PNG with native EEZ RGB565 format ID `bpp=15`.
+The image remains at (207,47), the threshold-zero bounding box of the original
+800 x 480 image. The boot screen explicitly paints opaque black across the
+whole screen; the version label stays at (275,422). Do not stretch the image
+or restore the full ARGB8888 canvas. Both firmware profiles use this resource.
+
+This is the exact bitmap from Hub commit `0e9371c9`, transferred without Hub
+UI/runtime changes. Its ordered 8 x 8 dithering comes from the pinned LVGL
+converter, with exact black preserved. EEZ 9.x ignores the legacy `lvglDither`
+checkbox, so quantization is already encoded in the embedded PNG. Nonzero
+channels were increased by one before embedding to compensate the EEZ
+`color_pre_multiply` divide-by-256 truncation at alpha 255. Do not apply
+dithering again or replace this PNG with a visually similar source.
+
+Use the normal EEZ Build, then the two postprocess commands above. No image
+postprocess or manual edit of generated C is needed. For a headless build,
+`EEZ Studio.exe --build-project <project> --user-data-dir=<temporary-profile>`
+can build an immutable, self-contained copy of the canonical project into a
+staging `src/ui`; keep embedded fonts/bitmaps and review the generated diff.
+The builder does not regenerate the separately maintained font C subsets.
+
+The generated `img_page_boot_logo_new_map` must contain 273,288 bytes of
+RGB565, SHA-256
+`07d6dd0775640996ccff7f9f3b366387e8e486093d7756747a34adf3d1ab3479`.
+The header is RGB565, 386 x 354, stride 772. The old resource used 1,536,000
+bytes: the pixel data saving is 1,262,712 bytes. Check the actual LVGL boot
+render in both profiles: outside the crop it must be identical to the original
+frame (black except the unchanged version label); the crop must equal the
+RGB565 resource. Maximum channel error against the original ARGB pixels is
+[13, 7, 14], caused by quantization/dithering.
+
+Measured firmware sizes and reproduction evidence are in
+[MAIN_LOGO_RGB565_20261028.md](MAIN_LOGO_RGB565_20261028.md).
