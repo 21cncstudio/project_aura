@@ -45,3 +45,6 @@ src/ui/.eez-project-build
 # Local evidence and build output are retained outside source control.
 /build/
 *.eez-project-ui-state
+
+# Retained AP/HTTP browser-test evidence; keep payloads out of source commits.
+/output/playwright/http-ap-*/

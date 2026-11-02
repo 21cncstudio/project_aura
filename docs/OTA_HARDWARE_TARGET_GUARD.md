@@ -92,8 +92,17 @@ whole-artifact check without opening a serial port.
    appended flavor descriptor, and the allowed target/flavor pair.
 4. Reject mismatched, absent, malformed, unsupported, or truncated identity
    before `Update.begin()` or `Update.write()`. Stop the multipart stream and
-   reach the normal final response/cleanup path, with a bounded pending-body
-   drain rather than receiving the whole rejected file.
+   reach the normal final response/cleanup path. No rejected bytes are passed
+   to the OTA writer. Response cleanup may still receive and discard the whole
+   remaining file: the final transport drain uses a TCP half-close, with limits
+   of 90 seconds, 8 MiB, and at least 32 KiB progress per 1500 ms. The earlier
+   OTA response pre-drain remains bounded to 32 KiB/1500 ms. Drain cooperatively
+   pauses for guarded display wake; final close also waits for safe admission.
+   These are per-teardown budgets, not a browser retry or full-request limit. A client outside
+   these bounds may lose the response; the limits apply per request, and a
+   browser can retry. See [the third repair](HTTP_AP_REPAIR3_20261101.md) and
+   [hardware results](HTTP_AP_HARDWARE_20261102.md) for wake and slow-upload
+   consequences. The zero-flash-write guarantee remains unchanged.
 5. Only for a compatible prefix, call `Update.begin()`, write the buffered prefix
    exactly once, and continue with the rest of that chunk and later chunks.
 6. Require the declared byte count and normal OTA finalization before success

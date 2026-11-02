@@ -1,0 +1,15 @@
+Проведи независимое глубокое ревью третьей доработки AP/HTTP Aura AQ.
+Рабочее дерево: D:/21cncstudio/project_aura_aq/firmware-main, main, база 77bfb4b0209a57c4a511352743cd7eb55a385df1, dirty.
+Прочитай AGENTS.md, CURRENT_STATE.md, docs/HTTP_AP_REPAIR3_20261101.md и предыдущую сверку HTTP_AP_REPAIR2_RECHECK_20261101.md. Не принимай утверждения отчёта на веру.
+Проверка только локальная: без устройств/COM/прошивки/перезапуска/commit/push/публикации и без изменения рабочего дерева/Hub. Для мутаций используй отдельные ignored-копии с собственными HTTP И control ports; сохрани прежние артефакты.
+
+Проверь:
+1. Единственное владение SDK close; close_fn/half-close/error paths/stop-restart; окно между возвратом dispatcher и закрытием; stale fd/reuse; отсутствие взаимной блокировки guard и stop.
+2. Кооперативную паузу drain для wake, прогресс-таймер, 90 с/8 МиБ/32 КиБ за 1500 мс, rollover и паузу guard после истечения deadline. Не путай budget teardown, send operation и весь клиентский сценарий. Сохраняется ли JSON у последовательного клиента, браузера, stalled sender и после длинного RenderWait? Какие задержки второго клиента остались?
+3. Scan lease и mutex: stop до фактического start, повторная отмена, отсутствие SCAN_DONE, failed/зависший SDK stop/start/cleanup, completion/reuse, startup cancellation и память worker. Может ли outside-admission service выполнить драйверный вызов без живого lease или после начала Switching? Повторный scan после wake.
+4. Подключение WifiScanTransition к настоящим NetworkManager/NetworkPlane: OFF/forget/AP/STA, быстрые повторные команды, erase credentials, stale flags, OTA busy, включение после выключения, ошибки запуска. Host-тесты менеджер целиком не исполняют; эту границу отчёт признаёт.
+5. Силу S21-S28; 7 отрицательных контролей; ложные положительные/отрицательные тесты. SDK-стенд 123/28, native1009, TCP5 и обе сборки должны соответствовать финальным источникам/артефактам. Проверь manifest/hash, а не только текст лога.
+6. Chrome/Edge 80 КиБ/с через proxy: один POST, полный JSON, фактически пересланные байты. Прекращение body после окончательного ответа допустимо; proxy не должен маскировать RST сервера. Сравни с базой/предыдущим кандидатом, если меняешь условия.
+
+Точные BIN и исходники: build/http-ap-repair3-20261101/artifacts/manifest.json и final-source/manifest.json. Логи sdk-verified, mutations, native-reports, chunk-sdk, build-final-*; браузеры output/playwright/http-ap-repair3-20261101; скрипты local-scripts.
+Не выдавай Windows loopback, mocked Wi-Fi и успешную компиляцию за аппаратную приёмку. Не утверждай, что исправлена причина Chris/#158. Отдельно перечисли доказанные дефекты, компромиссы, гипотезы и аппаратные проверки. Укажи file:line, причинный сценарий и минимальный контроль для каждого дефекта. Прежние ложные FAIL стенда сохранены; оцени исправленные проверки отдельно.

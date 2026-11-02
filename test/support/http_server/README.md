@@ -11,7 +11,7 @@ Run from the firmware checkout (Windows, MinGW):
 python -X utf8 tools/test_http_server_sdk.py --idf-path D:/21cncstudio/project_aura_aq/tools/idf61-sdk/esp-idf
 ```
 
-All 32 groups run by default. Use repeated `--case` arguments to select groups.
+All 33 groups run by default. Use repeated `--case` arguments to select groups.
 Each group runs in its own process with a 120-second timeout; build commands,
 logs, source hashes and assertion counts are saved under `build/`.
 
@@ -45,10 +45,16 @@ timeouts, missing results and unrelated failures are failures of the mutation
 check, not successful detections. `--output-dir` must name a new directory;
 previous evidence is never removed. The production tree is verified unchanged.
 
-The manager integration scenarios from the independent review remain archived
-under `build/http-ap-recheck3-20261101/`. Porting the four worker/HTTP invariants
-does not turn that separate manager stand or its modelled command ordering into
-permanent end-to-end coverage.
+The manager integration scenarios are now maintained separately in
+[the NetworkManager host suite](../network_manager/README.md), including
+save-transition cases A30–A33. That suite executes the real manager with driver
+and HTTP/GUI shims; neither suite establishes full device end-to-end coverage.
+The original independent-review evidence remains under
+`build/http-ap-recheck3-20261101/`.
+
+S33 checks drain completion diagnostics for a peer FIN and an incomplete sender
+that hits the progress timeout. S20 and S22 also check the diagnostic reason for
+the total-time and byte limits.
 
 These tests do not remove the 90-second / 8-MiB drain bounds or the 32-KiB per
 1500-ms progress requirement. Slow uploads and sender pauses can still lose a
