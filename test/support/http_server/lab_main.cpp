@@ -1568,6 +1568,106 @@ static void s36_plain_send_diagnostic() {
         "header setup failure recorded without inventing socket errno");
 }
 
+static std::atomic<int> g_body_handler_calls{0};
+static void test_body_read() {
+    ++g_body_handler_calls;
+    g_ctx.server->send(200, "text/plain", g_ctx.server->arg("plain").c_str());
+}
+
+static SOCKET open_accepted_body(size_t size) {
+    SOCKET s = cl_connect();
+    cl_send(s, "POST /test/body HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/octet-stream\r\nContent-Length: " +
+               std::to_string(size) + "\r\n\r\nx");
+    expect(wait_for_test([] { return WakePowerGuard::activeOperations() > 0; }),
+           "accepted body reader owns admission before the experiment");
+    return s;
+}
+
+static void s38_body_yields_and_restores_timeout() {
+    printf("\n== S38 accepted body survives two wakes without socket I/O in protected phases ==\n");
+    set_mode(true);
+    SOCKET s = open_accepted_body(2048);
+    g_lab_guard_fd = g_lab_last_accepted.load(); g_lab_guard_io = 0;
+    for (int cycle = 0; cycle < 2; ++cycle) {
+        expect(wait_for_test([] { return WakePowerGuard::activeOperations() > 0; }),
+               "body read reacquires admission between wakes");
+        const uint32_t start = millis();
+        WakePowerGuard::request(start);
+        const bool switched = wait_wake_ready(700) && WakePowerGuard::beginSwitch();
+        printf("  wake_ms=%u\n", millis()-start);
+        expect(switched, "accepted body yields to the wake owner promptly");
+        if (switched) {
+            Sleep(50); WakePowerGuard::beginSettle(millis(), 50); Sleep(60);
+            const bool render = WakePowerGuard::beginRenderWait(millis());
+            Sleep(150);
+            expect(render && WakePowerGuard::activeOperations() == 0 && g_lab_guard_io == 0,
+                   "body reader performs no socket operation during protected wake phases");
+            expect(WakePowerGuard::completeRenderWait(), "wake completes without dropping the request");
+        } else {
+            WakePowerGuard::cancel();
+        }
+    }
+    cl_send(s, std::string(2047, 'x'));
+    Reply r = cl_read(s, 3000);
+    expect(r.status == 200 && r.complete && body_of(r) == std::string(2048, 'x'),
+           "resumed request preserves all bytes including SDK parser-buffered data");
+    expect(g_body_handler_calls == 1, "body handler runs exactly once after complete reception");
+    // The parser starts after the first byte. It must retain the original
+    // receive timeout rather than the body's 50 ms cooperative slice.
+    cl_send(s, "G"); Sleep(200);
+    cl_send(s, "ET /wifi HTTP/1.1\r\nHost: localhost\r\n\r\n");
+    r = cl_read(s, 3000);
+    expect(r.status == 200 && r.complete, "keepalive header parsing restores the normal receive timeout");
+    ::closesocket(s); g_lab_guard_fd = -1;
+}
+
+static void s39_body_progress_timeout() {
+    printf("\n== S39 stalled and byte-trickle bodies cannot hold the HTTP server indefinitely ==\n");
+    set_mode(true);
+    for (bool trickle : {false, true}) {
+        SOCKET s = open_accepted_body(4096);
+        std::atomic<bool> sending{true};
+        std::thread sender([&] {
+            while (sending) { if (trickle) cl_send(s, "x"); Sleep(200); }
+        });
+        Reply next;
+        std::thread peer([&] { next = one_shot("GET", "/wifi", 20000); });
+        const uint32_t start = millis();
+        Reply r = cl_read(s, 15000);
+        const uint32_t elapsed = millis()-start;
+        sending = false; sender.join(); ::closesocket(s); peer.join();
+        printf("  trickle=%d elapsed_ms=%u status=%d\n", trickle, elapsed, r.status);
+        expect(r.status == 408 && r.complete && elapsed >= 9000 && elapsed < 14000,
+               "lack of useful body progress produces a bounded complete 408");
+        expect(g_body_handler_calls == 0, "incomplete request never reaches its application handler");
+        expect(next.status == 200 && next.complete, "queued client recovers after body timeout and sender close");
+        expect(WakePowerGuard::activeOperations() == 0, "body timeout leaves no activity lease behind");
+    }
+}
+
+static void s40_body_total_timeout() {
+    printf("\n== S40 useful body progress cannot restart the aggregate deadline ==\n");
+    set_mode(true);
+    SOCKET s = open_accepted_body(60*1024);
+    std::atomic<bool> sending{true};
+    std::thread sender([&] {
+        size_t left = 60*1024-1;
+        while (sending && left) {
+            const size_t size = std::min(left, size_t(1024));
+            cl_send(s, std::string(size, 'x')); left -= size; Sleep(600);
+        }
+    });
+    const uint32_t start = millis();
+    Reply r = cl_read(s, 35000);
+    const uint32_t elapsed = millis()-start;
+    sending = false; sender.join(); ::closesocket(s);
+    printf("  elapsed_ms=%u status=%d\n", elapsed, r.status);
+    expect(r.status == 408 && r.complete && elapsed >= 29000 && elapsed < 34000,
+           "steady progress still stops at the aggregate body deadline");
+    expect(g_body_handler_calls == 0, "aggregate timeout cannot apply a partial body");
+    expect(one_shot("GET", "/wifi").complete, "server serves the next client after aggregate timeout");
+}
+
 int main(int argc, char **argv) {
     timeBeginPeriod(1);
     WSADATA w;
@@ -1583,7 +1683,9 @@ int main(int argc, char **argv) {
     // Production has room for eight spare routes. Register only the fixtures
     // for this isolated case rather than silently exceeding its real limit.
     if (argc < 2) { printf("Select one case, or use tools/test_http_server_sdk.py for the full suite\n"); return 2; }
-    if (!strcmp(argv[1], "s9")) {
+    if (!strcmp(argv[1], "s38") || !strcmp(argv[1], "s39") || !strcmp(argv[1], "s40")) {
+        g_backend->onPost("/test/body", test_body_read);
+    } else if (!strcmp(argv[1], "s9")) {
         g_backend->onGet("/test/plain-fail", test_plain_failure);
         g_backend->onGet("/test/finish-fail", test_finish_failure);
         g_backend->onGet("/test/setup-fail", test_setup_failure);
@@ -1647,6 +1749,9 @@ int main(int argc, char **argv) {
     if (want("s35")) s35_save_receipt();
     if (want("s36")) s36_plain_send_diagnostic();
     if (want("s37")) s37_slow_ap_rejected_image();
+    if (want("s38")) s38_body_yields_and_restores_timeout();
+    if (want("s39")) s39_body_progress_timeout();
+    if (want("s40")) s40_body_total_timeout();
     printf("\nunexpected=%d\n", g_fail);
     fflush(stdout);
     g_network_thread_run = false;

@@ -500,23 +500,33 @@ static const char kWifiPageTemplate[] PROGMEM = R"HTML(
         }
 
         function watchScanProgress() {
-            var poll = function() {
-                fetch('/wifi?scan_status=1&ts=' + Date.now(), { cache: 'no-store' })
-                    .then(function(response) {
-                        if (!response.ok) throw new Error('HTTP ' + response.status);
-                        return response.json();
-                    })
-                    .then(function(payload) {
-                        if (!payload || payload.success !== true) return;
-                        if (payload.scan_in_progress === false) {
-                            window.location.replace('/wifi');
-                            return;
-                        }
-                        setTimeout(poll, 5000);
-                    })
-                    .catch(function() {
-                        setTimeout(poll, 8000);
+            var poll = async function() {
+                var controller = new AbortController();
+                // Bound headers and JSON body together. Start the next attempt
+                // only after this one settles, including abort cleanup.
+                var timeout = setTimeout(function() { controller.abort(); }, 15000);
+                var nextDelay = 8000;
+                try {
+                    var response = await fetch('/wifi?scan_status=1&ts=' + Date.now(), {
+                        cache: 'no-store', signal: controller.signal
                     });
+                    if (!response.ok) throw new Error('HTTP ' + response.status);
+                    var payload = await response.json();
+                    if (!payload || payload.success !== true ||
+                        typeof payload.scan_in_progress !== 'boolean') {
+                        throw new Error('Invalid scan status');
+                    }
+                    if (payload.scan_in_progress === false) {
+                        window.location.replace('/wifi');
+                        return;
+                    }
+                    nextDelay = 5000;
+                } catch (err) {
+                    // The AP can briefly disappear from the radio during scan.
+                } finally {
+                    clearTimeout(timeout);
+                }
+                setTimeout(poll, nextDelay);
             };
             setTimeout(poll, 2000);
         }

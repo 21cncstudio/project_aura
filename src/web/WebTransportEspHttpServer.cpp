@@ -32,6 +32,12 @@ constexpr uint16_t kHttpServerRecvWaitTimeoutS = 10;
 // budget (10 s). Partial SDK sends share this deadline; they cannot restart it.
 constexpr uint16_t kHttpServerSendWaitTimeoutS = 5;
 constexpr uint32_t kHttpWriteBudgetMs = kHttpServerSendWaitTimeoutS * 1000UL;
+// Ordinary forms/JSON are capped at 64 KiB. A byte trickle must not restart
+// their lifetime forever. OTA/multipart keeps its separate upload policy.
+constexpr uint32_t kBodyReadTimeoutMs = 30000;
+constexpr uint32_t kBodyReadProgressTimeoutMs = 10000;
+constexpr size_t kBodyReadProgressBytes = 1024;
+constexpr uint32_t kBodyRecvSliceMs = 50;
 constexpr uint16_t kHttpServerMaxOpenSockets = 10;
 static_assert(kHttpServerMaxOpenSockets + 3 <= CONFIG_LWIP_MAX_SOCKETS,
               "HTTP client sockets plus three internal sockets must fit LWIP_MAX_SOCKETS");
@@ -75,6 +81,7 @@ WakePowerGuard::Activity wait_for_web_activity_admission(
 enum class RequestBodyReadResult : uint8_t {
     Ok,
     TooLarge,
+    Timeout,
     ReadError,
     AllocationFailed,
 };
@@ -125,7 +132,7 @@ public:
     void stop() override;
 
     int socketSend(int sockfd, const char *buf, size_t size, int flags);
-    bool prepareRequest(RouteRegistration &route, void *req);
+    bool prepareRequest(RouteRegistration &route, void *req, WakePowerGuard::Activity &activity);
     void resetRequest();
     esp_err_t finalizeRequest(WakePowerGuard::Activity &activity, bool rejected = false);
     esp_err_t rejectRequest(void *req, int status, const char *message, WakePowerGuard::Activity &activity);
@@ -155,6 +162,7 @@ String status_line_for_code(int status_code) {
         case 403: return "403 Forbidden";
         case 404: return "404 Not Found";
         case 405: return "405 Method Not Allowed";
+        case 408: return "408 Request Timeout";
         case 409: return "409 Conflict";
         case 413: return "413 Payload Too Large";
         case 499: return "499 Client Closed Request";
@@ -185,7 +193,24 @@ String read_header_value(httpd_req_t *req, const char *field) {
     return String(buffer.get());
 }
 
-RequestBodyReadResult read_request_body(httpd_req_t *req, String &out) {
+// This backend owns plain HTTP sockets. Keep the SDK receive contract while
+// treating the short polling timeout as expected, rather than logging 20
+// warnings/second through httpd_default_recv. The mapping also remains valid
+// for subsequent keepalive requests after the normal socket timeout is restored.
+int receive_body_socket(httpd_handle_t, int fd, char *buf, size_t size, int flags) {
+    const int received = recv(fd, buf, size, flags);
+    if (received >= 0) return received;
+    if (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR) {
+        return HTTPD_SOCK_ERR_TIMEOUT;
+    }
+    if (errno == EINVAL || errno == EBADF || errno == EFAULT || errno == ENOTSOCK) {
+        return HTTPD_SOCK_ERR_INVALID;
+    }
+    return HTTPD_SOCK_ERR_FAIL;
+}
+
+RequestBodyReadResult read_request_body(httpd_req_t *req, String &out,
+                                       WakePowerGuard::Activity &activity) {
     if (!req || req->content_len == 0) {
         out = "";
         return RequestBodyReadResult::Ok;
@@ -199,20 +224,71 @@ RequestBodyReadResult read_request_body(httpd_req_t *req, String &out) {
     if (!out.reserve(req->content_len)) {
         return RequestBodyReadResult::AllocationFailed;
     }
-    size_t remaining = req->content_len;
-    char buffer[512];
-    while (remaining > 0) {
-        const size_t chunk_size = remaining < sizeof(buffer) ? remaining : sizeof(buffer);
-        const int received = httpd_req_recv(req, buffer, chunk_size);
-        if (received <= 0) {
-            return RequestBodyReadResult::ReadError;
-        }
-        if (!out.concat(buffer, static_cast<unsigned int>(received))) {
-            return RequestBodyReadResult::AllocationFailed;
-        }
-        remaining -= static_cast<size_t>(received);
+    const int fd = httpd_req_to_sockfd(req);
+    if (fd < 0 || httpd_sess_set_recv_override(req->handle, fd, receive_body_socket) != ESP_OK) {
+        return RequestBodyReadResult::ReadError;
     }
-    return RequestBodyReadResult::Ok;
+    timeval timeout{};
+    timeout.tv_usec = kBodyRecvSliceMs * 1000;
+    if (setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout)) != 0) {
+        return RequestBodyReadResult::ReadError;
+    }
+    // Keep the SDK request (including its parser-buffered body bytes) and the
+    // same session alive while yielding. Only the HTTP task owns either one.
+    const auto receive_body = [&]() -> RequestBodyReadResult {
+        const uint32_t started = millis();
+        uint32_t progress_at = started;
+        size_t progress_bytes = 0;
+        size_t remaining = req->content_len;
+        char buffer[512];
+        while (remaining > 0) {
+            if (WakePowerGuard::backgroundPaused(millis())) {
+                const uint32_t paused_at = millis();
+                activity = {};
+                bool unused = false;
+                activity = wait_for_web_activity_admission(unused);
+                // Do not charge a protected display pause to client progress.
+                // The independent total budget still includes elapsed time.
+                progress_at += static_cast<uint32_t>(millis() - paused_at);
+            }
+            const uint32_t now = millis();
+            const bool total_timeout = static_cast<uint32_t>(now - started) >= kBodyReadTimeoutMs;
+            if (total_timeout || static_cast<uint32_t>(now - progress_at) >= kBodyReadProgressTimeoutMs) {
+                Logger::log(Logger::Warn, "Web", "HTTP body timeout: reason=%s bytes=%u elapsed_ms=%lu",
+                            total_timeout ? "time_limit" : "progress_timeout",
+                            static_cast<unsigned>(req->content_len - remaining),
+                            static_cast<unsigned long>(now - started));
+                return RequestBodyReadResult::Timeout;
+            }
+            const size_t chunk_size = std::min(remaining, sizeof(buffer));
+            const int received = httpd_req_recv(req, buffer, chunk_size);
+            if (received == HTTPD_SOCK_ERR_TIMEOUT) {
+                Watchdog::kick();
+                delay(1);
+                continue;
+            }
+            if (received <= 0) return RequestBodyReadResult::ReadError;
+            if (!out.concat(buffer, static_cast<unsigned int>(received))) {
+                return RequestBodyReadResult::AllocationFailed;
+            }
+            remaining -= static_cast<size_t>(received);
+            progress_bytes += static_cast<size_t>(received);
+            if (progress_bytes >= kBodyReadProgressBytes) {
+                progress_at = millis();
+                progress_bytes = 0;
+            }
+        }
+        return RequestBodyReadResult::Ok;
+    };
+    const RequestBodyReadResult result = receive_body();
+    // Always hold admission here, including timeout/error exits. Restore the
+    // normal server timeout before a keepalive request or another body reader.
+    timeout = {};
+    timeout.tv_sec = kHttpServerRecvWaitTimeoutS;
+    if (setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout)) != 0) {
+        return RequestBodyReadResult::ReadError;
+    }
+    return result;
 }
 
 std::list<EspHttpServerBackend::RouteRegistration> &backend_routes(void *storage) {
@@ -1089,7 +1165,8 @@ bool EspHttpServerBackend::registerRoute(RouteRegistration &route) {
     return true;
 }
 
-bool EspHttpServerBackend::prepareRequest(RouteRegistration &route, void *raw_req) {
+bool EspHttpServerBackend::prepareRequest(RouteRegistration &route, void *raw_req,
+                                         WakePowerGuard::Activity &activity) {
     auto *req = static_cast<httpd_req_t *>(raw_req);
     request_->begin(req);
     request_->appendArgsFromQuery();
@@ -1315,7 +1392,7 @@ bool EspHttpServerBackend::prepareRequest(RouteRegistration &route, void *raw_re
         return true;
     }
 
-    const RequestBodyReadResult body_result = read_request_body(req, body);
+    const RequestBodyReadResult body_result = read_request_body(req, body, activity);
     if (body_result != RequestBodyReadResult::Ok) {
         if (body_result == RequestBodyReadResult::TooLarge ||
             body_result == RequestBodyReadResult::AllocationFailed) {
@@ -1323,6 +1400,8 @@ bool EspHttpServerBackend::prepareRequest(RouteRegistration &route, void *raw_re
                                          body_result == RequestBodyReadResult::TooLarge
                                              ? "Request body is too large"
                                              : "Insufficient memory for request body");
+        } else if (body_result == RequestBodyReadResult::Timeout) {
+            request_->sendRejection(408, "Request body timed out. Please retry.");
         } else {
             request_->sendRejection(400, "Failed to read request body");
         }
@@ -1451,7 +1530,7 @@ static esp_err_t esp_route_dispatch(httpd_req_t *req) {
         return route->backend->rejectRequest(req, 503, "Display wake in progress", wake_activity);
     }
 
-    if (!route->backend->prepareRequest(*route, req)) {
+    if (!route->backend->prepareRequest(*route, req, wake_activity)) {
         // Preserve the error reply before the SDK closes the current session.
         return route->backend->finalizeRequest(wake_activity, true);
     }

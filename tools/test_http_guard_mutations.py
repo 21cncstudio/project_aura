@@ -30,8 +30,8 @@ MUTATIONS = [
      '    if (!worker_activity_)',
      'stop mutex prevents cleanup and lease release while SDK stop is still running'),
     ('http-no-reacquire', 's32', HTTP,
-     '                bool unused = false;\n                activity = wait_for_web_activity_admission(unused);',
-     '                while (WakePowerGuard::backgroundPaused(millis())) delay(1);',
+     '                bool unused = false;\n                activity = wait_for_web_activity_admission(unused);\n                progress_at += static_cast<uint32_t>(millis() - paused_at);',
+     '                while (WakePowerGuard::backgroundPaused(millis())) delay(1);\n                progress_at += static_cast<uint32_t>(millis() - paused_at);',
      'drain reacquires its activity lease between the two wakes'),
 ]
 
@@ -53,8 +53,11 @@ def main():
     out.mkdir(parents=True, exist_ok=False)
     base = out / 'baseline'
     inputs = list((root / 'src').rglob('*'))
+    inputs += list((root / 'include').rglob('*'))
     inputs += list((root / 'test/support/http_server').rglob('*'))
-    inputs += [root / 'tools/test_http_server_sdk.py']
+    inputs += list((root / 'test/support/web_handler_wiring').rglob('*'))
+    inputs += [root / 'test/mocks/Arduino.h']
+    inputs += [root / 'tools/test_http_server_sdk.py', root / 'tools/test_web_handler_wiring.py']
     ard = root / 'managed_components/espressif__arduino-esp32/cores/esp32'
     inputs += [ard / n for n in ['WString.cpp', 'WString.h', 'stdlib_noniso.c', 'stdlib_noniso.h', 'pgmspace.h']]
     original = []
