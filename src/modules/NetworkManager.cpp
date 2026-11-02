@@ -5,6 +5,7 @@
 // Purchase a Commercial License: see COMMERCIAL_LICENSE_SUMMARY.md
 
 #include "modules/NetworkManager.h"
+#include "core/WakePowerGuard.h"
 
 #include <cstdio>
 #include <cstring>
@@ -21,6 +22,8 @@
 #include "esp_eap_client.h"
 #endif
 #include "core/BootState.h"
+#include "core/WifiPowerSaveGuard.h"
+#include "web/WebWifiScanUtils.h"
 #include "core/NetworkCommandQueue.h"
 #include "core/Logger.h"
 #include "core/NetworkIdentity.h"
@@ -50,7 +53,6 @@ constexpr uint32_t kWifiColdBootWarmupMs = 2500UL;
 constexpr uint8_t kWifiColdBootSoftConnectAttempts = 3;
 constexpr uint32_t kWifiRecoveryRetryDelayMs = 30000UL;
 constexpr uint32_t kHostnameCheckIntervalMs = 5000UL;
-constexpr wifi_ps_type_t kWifiStaDefaultPowerSaveMode = WIFI_PS_NONE;
 #if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(6, 0, 0)
 constexpr wifi_err_reason_t kWifiInactiveReason = WIFI_REASON_DISASSOC_DUE_TO_INACTIVITY;
 #else
@@ -214,15 +216,16 @@ void network_wifi_event(arduino_event_id_t event, arduino_event_info_t info) {
     }
 }
 
-void network_wifi_start_scan() {
+bool network_wifi_start_scan() {
     if (g_network_command_queue) {
         if (g_network_command_queue->enqueue(NetworkCommandQueue::Type::RequestWifiScanStart) ||
             g_network_command_queue->publishWifiScanRequest(
                 NetworkCommandQueue::Type::RequestWifiScanStart)) {
-            return;
+            return true;
         }
     }
     LOGW("WiFi", "scan start request dropped: command queue unavailable");
+    return false;
 }
 
 void network_wifi_stop_scan() {
@@ -282,34 +285,10 @@ void apply_sta_default_power_save(const char *context) {
         return;
     }
 
-    wifi_ps_type_t current_mode = WIFI_PS_NONE;
-    const esp_err_t get_err = esp_wifi_get_ps(&current_mode);
-    if (get_err != ESP_OK) {
-        Logger::log(Logger::Warn, "WiFi",
-                    "failed to read STA power-save mode during %s: err=%d",
-                    context ? context : "unknown",
-                    static_cast<int>(get_err));
-        return;
+    if (!WifiPowerSaveGuard::disableByDefault()) {
+        Logger::log(Logger::Warn, "WiFi", "failed to set default power-save mode during %s",
+                    context ? context : "unknown");
     }
-
-    if (current_mode == kWifiStaDefaultPowerSaveMode) {
-        return;
-    }
-
-    const esp_err_t set_err = esp_wifi_set_ps(kWifiStaDefaultPowerSaveMode);
-    if (set_err == ESP_OK) {
-        Logger::log(Logger::Info, "WiFi",
-                    "STA power-save disabled (%s, prev=%d)",
-                    context ? context : "unknown",
-                    static_cast<int>(current_mode));
-        return;
-    }
-
-    Logger::log(Logger::Warn, "WiFi",
-                "failed to disable STA power-save during %s (current=%d, err=%d)",
-                context ? context : "unknown",
-                static_cast<int>(current_mode),
-                static_cast<int>(set_err));
 }
 
 } // namespace
@@ -671,12 +650,16 @@ bool AuraNetworkManager::applyEnabledIfDirty() {
 }
 
 void AuraNetworkManager::shutdownWifi(bool erase_sdk_credentials) {
+    if (wifi_scan_session_.active() || wifi_scan_transition_.pending()) {
+        wifi_scan_transition_.shutdown(erase_sdk_credentials);
+        stopScan();
+        return;
+    }
     stopMdns();
     stopAp();
-    WiFi.scanDelete();
+    // Retain worker ownership until its blocking SDK operation has returned.
+    stopScan();
     wifi_scan_options_.clear();
-    wifi_scan_in_progress_ = false;
-    wifi_scan_started_ms_ = 0;
     WiFi.disconnect(true, erase_sdk_credentials);
     WiFi.mode(WIFI_OFF);
     network_hostname_.clearLive();
@@ -740,37 +723,43 @@ void AuraNetworkManager::clearCredentials() {
     wifi_ui_dirty_ = true;
 }
 
+void AuraNetworkManager::buildScanOptions(int count) {
+    WebWifiScanUtils::WifiScanRow rows[WifiScanSession::kMaxRecords];
+    size_t used = 0;
+    for (int i = 0; i < count; ++i) {
+        const auto *row = wifi_scan_session_.record(static_cast<size_t>(i));
+        if (!row) continue;
+        const bool enterprise = row->auth_mode == WIFI_AUTH_WPA2_ENTERPRISE ||
+                                row->auth_mode == WIFI_AUTH_WPA3_ENT_192;
+        WebWifiScanUtils::addOrReplaceBestNetwork(rows, used, WifiScanSession::kMaxRecords,
+            String(row->ssid), row->rssi, row->auth_mode == WIFI_AUTH_OPEN, enterprise);
+    }
+    WebWifiScanUtils::sortNetworksByRssiDesc(rows, used);
+    wifi_scan_options_ = WebWifiScanUtils::renderNetworkItemsHtml(rows, used);
+}
+
 void AuraNetworkManager::startScan() {
-    if (WebHandlersIsOtaBusy()) {
+    if (WebHandlersIsOtaBusy()) return;
+    if (wifi_scan_session_.active()) {
+        if (wifi_scan_session_.cancelling()) wifi_scan_restart_pending_ = true;
         return;
     }
-    if (wifi_scan_in_progress_) {
-        return;
-    }
-    WiFi.scanDelete();
-    int ret = WiFi.scanNetworks(true);
-    if (ret == WIFI_SCAN_RUNNING) {
-        wifi_scan_in_progress_ = true;
-        wifi_scan_started_ms_ = millis();
-    } else if (ret >= 0) {
-        wifi_build_scan_items(ret);
-        WiFi.scanDelete();
-        wifi_scan_in_progress_ = false;
-        wifi_scan_started_ms_ = 0;
-    } else {
-        wifi_scan_in_progress_ = false;
-        wifi_scan_started_ms_ = 0;
+    const int ret = wifi_scan_session_.start();
+    wifi_scan_in_progress_ = wifi_scan_session_.active();
+    wifi_scan_started_ms_ = wifi_scan_in_progress_ ? millis() : 0;
+    if (ret >= 0) {
+        buildScanOptions(ret);
+        wifi_scan_session_.releaseResults();
+    } else if (ret != WIFI_SCAN_RUNNING) {
         LOGW("WiFi", "scan start failed: %d", ret);
     }
 }
 
 void AuraNetworkManager::stopScan() {
-    if (!wifi_scan_in_progress_) {
-        return;
-    }
-    WiFi.scanDelete();
-    wifi_scan_in_progress_ = false;
-    wifi_scan_started_ms_ = 0;
+    wifi_scan_restart_pending_ = false;
+    wifi_scan_session_.cancel();
+    wifi_scan_in_progress_ = wifi_scan_session_.active();
+    if (!wifi_scan_in_progress_) wifi_scan_started_ms_ = 0;
 }
 
 void AuraNetworkManager::connectSta() {
@@ -789,6 +778,14 @@ void AuraNetworkManager::startApOnDemand() {
         }
     }
     startAp();
+}
+
+void AuraNetworkManager::serviceWakeQuiescence() {
+    if (!wifi_scan_session_.active() || !WakePowerGuard::backgroundPaused(millis())) return;
+    if (!wifi_scan_session_.cancelling() && !wifi_scan_transition_.pending() &&
+        wifi_enabled_ && state() == WIFI_STATE_AP_CONFIG)
+        wifi_scan_restart_pending_ = true;
+    wifi_scan_session_.serviceWakeQuiescence();
 }
 
 void AuraNetworkManager::poll() {
@@ -841,35 +838,43 @@ void AuraNetworkManager::poll() {
         }
     }
 
-    if (state() == WIFI_STATE_AP_CONFIG) {
-        if (wifi_scan_in_progress_) {
-            if (ota_busy) {
-                stopScan();
-            } else {
-                const uint32_t now_ms = millis();
-                if (wifi_scan_started_ms_ != 0 &&
-                    static_cast<uint32_t>(now_ms - wifi_scan_started_ms_) > kWifiScanTimeoutMs) {
-                    LOGW("WiFi", "scan timeout after %u ms, aborting",
-                         static_cast<unsigned>(kWifiScanTimeoutMs));
-                    wifi_scan_options_.clear();
-                    stopScan();
-                }
-                if (wifi_scan_in_progress_) {
-                    int n = WiFi.scanComplete();
-                    if (n >= 0) {
-                        wifi_build_scan_items(n);
-                        WiFi.scanDelete();
-                        wifi_scan_in_progress_ = false;
-                        wifi_scan_started_ms_ = 0;
-                    } else if (n == WIFI_SCAN_FAILED) {
-                        wifi_scan_options_.clear();
-                        wifi_scan_in_progress_ = false;
-                        wifi_scan_started_ms_ = 0;
-                    }
-                }
-            }
+    // Poll the independent scan worker even after leaving AP mode. STA starts
+    // after the old driver operation ends, without waiting for Arduino events.
+    if (wifi_scan_in_progress_) {
+        const bool timed_out = static_cast<uint32_t>(millis() - wifi_scan_started_ms_) > kWifiScanTimeoutMs;
+        if ((ota_busy || timed_out) && !wifi_scan_session_.cancelling()) {
+            if (timed_out) LOGW("WiFi", "scan timeout; waiting for driver cancellation");
+            stopScan();
         }
-    } else if (state() == WIFI_STATE_STA_CONNECTED) {
+        int count = 0;
+        const auto result = wifi_scan_session_.poll(count);
+        if (result == WifiScanSession::Result::Ready) {
+            buildScanOptions(count);
+            wifi_scan_session_.releaseResults();
+        } else if (result == WifiScanSession::Result::Failed) {
+            wifi_scan_options_.clear();
+        }
+        wifi_scan_in_progress_ = wifi_scan_session_.active();
+        if (!wifi_scan_in_progress_) {
+            wifi_scan_started_ms_ = 0;
+        }
+    }
+
+    const auto transition = wifi_scan_transition_.take(wifi_scan_session_.active());
+    if (transition) {
+        wifi_scan_restart_pending_ = false;
+        if (transition.shutdown) shutdownWifi(transition.erase_credentials);
+        if (wifi_enabled_) {
+            if (transition.start == WifiScanTransition::Start::Sta) startSta();
+            else if (transition.start == WifiScanTransition::Start::Ap) startAp();
+        }
+    } else if (!wifi_scan_session_.active() && wifi_scan_restart_pending_ &&
+               wifi_enabled_ && state() == WIFI_STATE_AP_CONFIG && !ota_busy) {
+        wifi_scan_restart_pending_ = false;
+        startScan();
+    }
+
+    if (state() == WIFI_STATE_STA_CONNECTED) {
         // Periodic check of actual WiFi link while connected.
         static uint32_t last_check_ms = 0;
         static uint32_t last_ota_defer_log_ms = 0;
@@ -1041,6 +1046,11 @@ void AuraNetworkManager::startSta() {
         startAp();
         return;
     }
+    if (wifi_scan_session_.active() || wifi_scan_transition_.pending()) {
+        wifi_scan_transition_.start(WifiScanTransition::Start::Sta);
+        stopScan();
+        return;
+    }
     sta_last_rssi_valid_ = false;
     sta_last_rssi_dbm_ = 0;
 
@@ -1189,6 +1199,11 @@ void AuraNetworkManager::startSta() {
 }
 
 void AuraNetworkManager::startAp() {
+    if (wifi_scan_session_.active() || wifi_scan_transition_.pending()) {
+        wifi_scan_transition_.start(WifiScanTransition::Start::Ap);
+        stopScan();
+        return;
+    }
     stopMdns();
     WiFi.persistent(false);
     WiFi.mode(WIFI_AP_STA);

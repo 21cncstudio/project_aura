@@ -9,7 +9,7 @@
 namespace WebDashboardPage {
 
 RootAction decideRootAction(bool ap_mode, bool wifi_connected, const String &uri) {
-    if (ap_mode && uri == "/") {
+    if (ap_mode && (uri == "/" || (uri.length() > 1 && uri[0] == '/' && uri[1] == '?'))) {
         return RootAction::WifiPortal;
     }
     if (!ap_mode && !wifi_connected) {

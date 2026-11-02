@@ -5,6 +5,15 @@
 void setUp() {}
 void tearDown() {}
 
+
+void test_manual_utf8_ssid_preserves_original_bytes() {
+    // Same credential bytes supplied by manual entry or a decoded data-ssid.
+    const char *ssid = "\xD0\x94\xD0\xBE\xD0\xBC \"&<>+'";
+    const auto result = WebWifiSaveUtils::parseSaveInput(ssid, "secret12");
+    TEST_ASSERT_TRUE(result.success);
+    TEST_ASSERT_EQUAL_STRING(ssid, result.update.settings.ssid.c_str());
+}
+
 void test_web_wifi_save_utils_parse_accepts_valid_input() {
     const WebWifiSaveUtils::ParseResult result =
         WebWifiSaveUtils::parseSaveInput("AuraNet", "secret12");
@@ -259,6 +268,7 @@ void test_web_wifi_save_utils_parse_rejects_large_tls_private_key() {
 
 int main(int, char **) {
     UNITY_BEGIN();
+    RUN_TEST(test_manual_utf8_ssid_preserves_original_bytes);
     RUN_TEST(test_web_wifi_save_utils_parse_accepts_valid_input);
     RUN_TEST(test_web_wifi_save_utils_parse_validates_personal_password_length);
     RUN_TEST(test_web_wifi_save_utils_parse_rejects_missing_ssid_and_bad_password);

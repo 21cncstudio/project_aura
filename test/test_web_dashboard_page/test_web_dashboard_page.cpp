@@ -25,8 +25,19 @@ void test_web_dashboard_page_decide_root_action_serves_dashboard_when_allowed() 
                                                                              "/dashboard")));
 }
 
+
+void test_ap_root_query_remains_portal() {
+    for (const char *uri : {"/?", "/?cache=123", "/?next=/dashboard"}) {
+        TEST_ASSERT_EQUAL_INT(static_cast<int>(WebDashboardPage::RootAction::WifiPortal),
+                             static_cast<int>(WebDashboardPage::decideRootAction(true, false, uri)));
+    }
+    TEST_ASSERT_EQUAL_INT(static_cast<int>(WebDashboardPage::RootAction::Dashboard),
+                         static_cast<int>(WebDashboardPage::decideRootAction(true, false, "/dashboard?x=1")));
+}
+
 int main(int, char **) {
     UNITY_BEGIN();
+    RUN_TEST(test_ap_root_query_remains_portal);
     RUN_TEST(test_web_dashboard_page_decide_root_action_preserves_ap_root_portal);
     RUN_TEST(test_web_dashboard_page_decide_root_action_blocks_sta_dashboard_without_wifi);
     RUN_TEST(test_web_dashboard_page_decide_root_action_serves_dashboard_when_allowed);

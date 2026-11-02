@@ -68,6 +68,7 @@ static const char kWifiPageTemplate[] PROGMEM = R"HTML(
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
     <title>Project Aura | WiFi Setup</title>
+    <link rel="icon" href="data:,">
     <style>
         :root {
             color-scheme: dark;
@@ -582,6 +583,7 @@ static const char kWifiSavePage[] PROGMEM = R"HTML(
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
     <title>Project Aura | Setup</title>
+    <link rel="icon" href="data:,">
     <style>
         :root {
             color-scheme: dark;

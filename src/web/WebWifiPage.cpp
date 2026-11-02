@@ -6,70 +6,94 @@
 
 #include "web/WebWifiPage.h"
 
-#include <ctype.h>
 #include <stdio.h>
 #include <string.h>
-
-#include "web/WebTextUtils.h"
+#include <type_traits>
 
 namespace WebWifiPage {
-
 namespace {
 
-String uint_to_string(uint32_t value) {
-    char buf[16];
-    snprintf(buf, sizeof(buf), "%lu", static_cast<unsigned long>(value));
-    return String(buf);
+// The native unit suite aliases String to std::string (void reserve); the
+// SDK integration suite uses real Arduino String and exercises allocation failure.
+template <typename Text>
+bool reserve_checked(Text &text, size_t size) {
+    if constexpr (std::is_void<decltype(text.reserve(size))>::value) {
+        text.reserve(size);
+        return true;
+    } else {
+        return text.reserve(size);
+    }
 }
 
-String replace_placeholder(const String &input, const char *needle, const String &replacement) {
-    const char *src = input.c_str();
-    if (!src || !needle || *needle == '\0') {
-        return input;
-    }
+struct Replacement { const char *token; const char *value; };
 
-    const size_t needle_len = strlen(needle);
-    String out;
-    out.reserve(input.length() + replacement.length());
-
-    const char *segment = src;
-    while (*segment != '\0') {
-        const char *match = strstr(segment, needle);
-        if (!match) {
-            while (*segment != '\0') {
-                out += *segment++;
+// Measure first and allocate once. Only tokens from the original template are
+// interpreted: an SSID containing another token must remain literal text.
+bool render(const char *source, const Replacement (&replacements)[2], String &out) {
+    out = "";
+    if (!source || !*source) return false;
+    size_t expected = 0;
+    unsigned seen = 0;
+    for (unsigned pass = 0; pass < 2; ++pass) {
+        for (const char *pos = source; *pos;) {
+            const char *part = pos;
+            size_t length = 1;
+            size_t consumed = 1;
+            for (unsigned i = 0; i < 2; ++i) {
+                const auto &r = replacements[i];
+                if (strncmp(pos, r.token, strlen(r.token)) == 0) {
+                    if (!r.value) { out = ""; return false; }
+                    seen |= 1U << i;
+                    part = r.value;
+                    length = strlen(part);
+                    consumed = strlen(r.token);
+                    break;
+                }
             }
-            break;
+            if (pass == 0) {
+                if (length > SIZE_MAX - expected) return false;
+                expected += length;
+            } else {
+                for (size_t i = 0; i < length; ++i) out += part[i];
+            }
+            pos += consumed;
         }
-
-        while (segment < match) {
-            out += *segment++;
+        if (pass == 0 && (seen != 3 || !reserve_checked(out, expected))) {
+            out = "";
+            return false;
         }
-        out += replacement;
-        segment = match + needle_len;
     }
-
-    return out;
+    if (out.length() != expected) { out = ""; return false; }
+    return true;
 }
 
-bool string_is_empty(const String &value) {
-    return value.length() == 0;
+bool dashboard_url(const String &hostname, String &out) {
+    const char *name = hostname.length() ? hostname.c_str() : "aura";
+    // The network hostname is bounded, but check arithmetic before reserving.
+    const size_t length = strlen(name);
+    if (length > (SIZE_MAX - 24) / 6 || !reserve_checked(out, length * 6 + 24)) return false;
+    out = "http://";
+    size_t expected = 7;
+    for (; *name; ++name) {
+        const char *escaped = nullptr;
+        switch (*name) {
+            case '&': escaped = "&amp;"; break;
+            case '<': escaped = "&lt;"; break;
+            case '>': escaped = "&gt;"; break;
+            case '"': escaped = "&quot;"; break;
+            case '\'': escaped = "&#39;"; break;
+            default: out += *name; ++expected; break;
+        }
+        if (escaped) { out += escaped; expected += strlen(escaped); }
+    }
+    out += ".local/dashboard";
+    return out.length() == expected + strlen(".local/dashboard");
 }
-
-String hostname_dashboard_url(const String &hostname) {
-    const String safe_hostname = string_is_empty(hostname) ? String("aura") : hostname;
-    String url = "http://";
-    url += safe_hostname;
-    url += ".local/dashboard";
-    return url;
-}
-
 } // namespace
 
 String renderScanStatusJson(bool scan_in_progress) {
-    String json = "{\"success\":true,\"scan_in_progress\":";
-    json += scan_in_progress ? "true}" : "false}";
-    return json;
+    return scan_in_progress ? "{\"success\":true,\"scan_in_progress\":true}"
+                            : "{\"success\":true,\"scan_in_progress\":false}";
 }
 
 String captivePortalRedirectUrl(const String &ap_ip) {
@@ -80,24 +104,20 @@ String captivePortalRedirectUrl(const String &ap_ip) {
     return url;
 }
 
-String renderRootHtml(const String &html_template, const RootPageData &data) {
-    String html = html_template;
-    html = replace_placeholder(html, "{{SSID_ITEMS}}", data.ssid_items);
-    html = replace_placeholder(html,
-                               "{{SCAN_IN_PROGRESS}}",
-                               data.scan_in_progress ? String("1") : String("0"));
-    return html;
+bool renderRootHtml(const char *html_template, const RootPageData &data, String &out) {
+    const Replacement replacements[] = {{"{{SSID_ITEMS}}", data.ssid_items},
+                                        {"{{SCAN_IN_PROGRESS}}", data.scan_in_progress ? "1" : "0"}};
+    return render(html_template, replacements, out);
 }
 
-String renderSaveHtml(const String &html_template, const SavePageData &data) {
-    String html = html_template;
-    html = replace_placeholder(html,
-                               "{{HOSTNAME_DASHBOARD_URL}}",
-                               WebTextUtils::htmlEscape(hostname_dashboard_url(data.hostname)));
-    html = replace_placeholder(html,
-                               "{{WAIT_SECONDS}}",
-                               uint_to_string(data.wait_seconds == 0 ? 15 : data.wait_seconds));
-    return html;
+bool renderSaveHtml(const char *html_template, const SavePageData &data, String &out) {
+    out = "";
+    String url;
+    if (!dashboard_url(data.hostname, url)) return false;
+    char seconds[8];
+    snprintf(seconds, sizeof(seconds), "%u", data.wait_seconds ? data.wait_seconds : 15);
+    const Replacement replacements[] = {{"{{HOSTNAME_DASHBOARD_URL}}", url.c_str()},
+                                        {"{{WAIT_SECONDS}}", seconds}};
+    return render(html_template, replacements, out);
 }
-
 } // namespace WebWifiPage

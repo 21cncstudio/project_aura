@@ -10,6 +10,11 @@ class WifiPowerSaveGuard {
 public:
     WifiPowerSaveGuard() = default;
     ~WifiPowerSaveGuard();
+    WifiPowerSaveGuard(const WifiPowerSaveGuard &) = delete;
+    WifiPowerSaveGuard &operator=(const WifiPowerSaveGuard &) = delete;
+
+    // Change the baseline without allowing an older lease to restore PS later.
+    static bool disableByDefault();
 
     bool suspend();
     void restore();

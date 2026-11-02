@@ -7,6 +7,7 @@
 #include "web/WebWifiHandlers.h"
 
 #include "core/ConnectivityRuntime.h"
+#include "core/Logger.h"
 #include "web/WebTemplates.h"
 #include "web/WebUiBridge.h"
 #include "web/WebUiBridgeAdapters.h"
@@ -55,6 +56,16 @@ void handleSave(WebHandlerContext &context,
         return;
     }
 
+    WebWifiPage::SavePageData page_data{};
+    page_data.hostname = connectivity.hostname;
+    page_data.wait_seconds = 15;
+    String html;
+    if (!WebWifiPage::renderSaveHtml(WebTemplates::kWifiSavePage, page_data, html)) {
+        Logger::log(Logger::Warn, "Web", "WiFi save page preparation failed");
+        WebResponseUtils::sendNoStoreText(server, 503, "Unable to prepare WiFi setup. Please retry.");
+        return;
+    }
+
     const WebUiBridge::ApplyResult apply_result =
         context.web_ui_bridge->applyWifiSave(
             WebUiBridgeAdapters::toUiWifiSaveUpdate(parse_result.update));
@@ -68,10 +79,6 @@ void handleSave(WebHandlerContext &context,
         return;
     }
 
-    WebWifiPage::SavePageData page_data{};
-    page_data.hostname = connectivity.hostname.isEmpty() ? String("aura") : connectivity.hostname;
-    page_data.wait_seconds = 15;
-    const String html = WebWifiPage::renderSaveHtml(FPSTR(WebTemplates::kWifiSavePage), page_data);
     WebResponseUtils::sendHtmlStream(server, html, stream_context);
     deferred_actions.scheduleWifiStartSta(millis(), deferred_action_delay_ms);
 }

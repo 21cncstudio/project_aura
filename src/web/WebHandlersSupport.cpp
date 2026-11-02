@@ -14,6 +14,7 @@
 #include <freertos/portmacro.h>
 
 #include "core/Logger.h"
+#include "core/WifiPowerSaveGuard.h"
 #include "core/ConnectivityRuntime.h"
 #include "core/SafeRestart.h"
 #include "core/Watchdog.h"
@@ -41,8 +42,7 @@ WebOtaState g_ota_state;
 OtaImageIdentity::PrefixValidator g_ota_image_validator;
 WebStreamState g_web_stream_state;
 OtaRestartGate g_ota_restart_gate;
-bool g_ota_wifi_ps_saved = false;
-wifi_ps_type_t g_ota_wifi_ps_prev = WIFI_PS_NONE;
+WifiPowerSaveGuard g_ota_wifi_ps_guard;
 std::atomic<uint32_t> g_ota_upload_confirm_id{0};
 portMUX_TYPE g_ota_preflight_ui_lock = portMUX_INITIALIZER_UNLOCKED;
 OtaUiLineagePolicy::PreflightLease g_ota_preflight_ui_lease;
@@ -188,55 +188,13 @@ OtaPhysicalConfirm::ConsumeDecision ota_consume_physical_confirm(size_t expected
 }
 
 void ota_disable_wifi_power_save_for_upload() {
-    const wifi_mode_t mode = WiFi.getMode();
-    if ((mode & WIFI_MODE_STA) == 0) {
-        g_ota_wifi_ps_saved = false;
-        g_ota_wifi_ps_prev = WIFI_PS_NONE;
-        return;
+    if ((WiFi.getMode() & WIFI_MODE_STA) && !g_ota_wifi_ps_guard.suspend()) {
+        LOGW("OTA", "failed to acquire WiFi power-save guard");
     }
-
-    wifi_ps_type_t current_ps = WIFI_PS_NONE;
-    const esp_err_t get_err = esp_wifi_get_ps(&current_ps);
-    if (get_err != ESP_OK) {
-        LOGW("OTA", "failed to read WiFi power-save mode: %s", esp_err_to_name(get_err));
-        g_ota_wifi_ps_saved = false;
-        g_ota_wifi_ps_prev = WIFI_PS_NONE;
-        return;
-    }
-
-    g_ota_wifi_ps_prev = current_ps;
-    g_ota_wifi_ps_saved = true;
-    if (current_ps == WIFI_PS_NONE) {
-        return;
-    }
-
-    const esp_err_t set_err = esp_wifi_set_ps(WIFI_PS_NONE);
-    if (set_err == ESP_OK) {
-        LOGI("OTA", "WiFi power-save disabled for OTA (prev=%d)", static_cast<int>(current_ps));
-        return;
-    }
-
-    LOGW("OTA", "failed to disable WiFi power-save for OTA: %s", esp_err_to_name(set_err));
-    g_ota_wifi_ps_saved = false;
-    g_ota_wifi_ps_prev = WIFI_PS_NONE;
 }
 
 void ota_restore_wifi_power_save() {
-    if (!g_ota_wifi_ps_saved) {
-        return;
-    }
-
-    const wifi_ps_type_t restore_mode = g_ota_wifi_ps_prev;
-    const esp_err_t set_err = esp_wifi_set_ps(restore_mode);
-    if (set_err == ESP_OK) {
-        LOGI("OTA", "WiFi power-save restored after OTA (mode=%d)", static_cast<int>(restore_mode));
-    } else {
-        LOGW("OTA", "failed to restore WiFi power-save mode=%d: %s",
-             static_cast<int>(restore_mode),
-             esp_err_to_name(set_err));
-    }
-    g_ota_wifi_ps_saved = false;
-    g_ota_wifi_ps_prev = WIFI_PS_NONE;
+    g_ota_wifi_ps_guard.restore();
 }
 
 bool ota_try_begin_upload() {

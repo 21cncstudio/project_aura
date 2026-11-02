@@ -28,12 +28,24 @@
 namespace {
 
 constexpr uint16_t kHttpServerRecvWaitTimeoutS = 10;
-constexpr uint16_t kHttpServerSendWaitTimeoutS = 30;
+// Bound one synchronous chunk/plain response below the tightest stream idle
+// budget (10 s). Partial SDK sends share this deadline; they cannot restart it.
+constexpr uint16_t kHttpServerSendWaitTimeoutS = 5;
+constexpr uint32_t kHttpWriteBudgetMs = kHttpServerSendWaitTimeoutS * 1000UL;
 constexpr uint16_t kHttpServerMaxOpenSockets = 10;
 static_assert(kHttpServerMaxOpenSockets + 3 <= CONFIG_LWIP_MAX_SOCKETS,
               "HTTP client sockets plus three internal sockets must fit LWIP_MAX_SOCKETS");
 constexpr uint32_t kMultipartReadIdleTimeoutMs = 90UL * 1000UL;
 constexpr uint32_t kDrainRecvTimeoutMs = 200;
+// Chromium may finish writing a buffered upload before reading an early
+// response. Allow useful progress, with independent time/byte/idle bounds.
+// Allow a complete current image even at 64 KiB/s, with margin. This is a
+// per-attempt wall-clock bound, not a browser retry or whole-request deadline.
+constexpr uint32_t kCloseDrainTimeoutMs = 90000;
+constexpr uint32_t kCloseProgressTimeoutMs = 1500;
+constexpr size_t kCloseProgressBytes = 32 * 1024;
+constexpr size_t kCloseMaxDrainBytes = 8 * 1024 * 1024;
+constexpr uint32_t kCloseRecvSliceMs = 50;
 constexpr uint32_t kWakeActivityAdmissionTimeoutMs = 3000;
 
 WakePowerGuard::Activity wait_for_web_activity_admission(
@@ -49,6 +61,8 @@ WakePowerGuard::Activity wait_for_web_activity_admission(
         if (static_cast<uint32_t>(millis() - started_ms) >=
             kWakeActivityAdmissionTimeoutMs) {
             wait_exceeded = true;
+            // Preserve the hardware quiet window. A timeout only changes the
+            // eventual HTTP response; even FIN/RST must wait for admission.
         }
         delay(1);
     }
@@ -109,9 +123,10 @@ public:
     int socketSend(int sockfd, const char *buf, size_t size, int flags);
     bool prepareRequest(RouteRegistration &route, void *req);
     void resetRequest();
-    void finalizeRequest();
+    esp_err_t finalizeRequest(WakePowerGuard::Activity &activity, bool rejected = false);
+    esp_err_t rejectRequest(void *req, int status, const char *message, WakePowerGuard::Activity &activity);
     bool hasNotFoundHandler() const;
-    void dispatchNotFound(void *req);
+    void dispatchError(void *req, httpd_err_code_t error);
 
 private:
     bool registerRoute(RouteRegistration &route);
@@ -164,22 +179,6 @@ String read_header_value(httpd_req_t *req, const char *field) {
         return String();
     }
     return String(buffer.get());
-}
-
-void send_request_error_and_close(httpd_req_t *req,
-                                  const char *status,
-                                  const char *message) {
-    if (!req) {
-        return;
-    }
-    httpd_resp_set_status(req, status);
-    httpd_resp_set_type(req, "text/plain");
-    httpd_resp_set_hdr(req, "Connection", "close");
-    httpd_resp_send(req, message ? message : "Request rejected", HTTPD_RESP_USE_STRLEN);
-    const int sockfd = httpd_req_to_sockfd(req);
-    if (sockfd >= 0) {
-        httpd_sess_trigger_close(req->handle, sockfd);
-    }
 }
 
 RequestBodyReadResult read_request_body(httpd_req_t *req, String &out) {
@@ -413,6 +412,10 @@ public:
     void begin(httpd_req_t *req) {
         resetUploadResponseState();
         req_ = req;
+        close_requested_ = false;
+        response_bytes_sent_ = false;
+        socket_send_failed_ = false;
+        write_budget_active_ = false;
         send_capture_.reset();
         request_info_ = {};
         request_info_.path_truncated = web_stream_copy_text(
@@ -462,6 +465,10 @@ public:
     void reset() {
         resetUploadResponseState();
         req_ = nullptr;
+        close_requested_ = false;
+        response_bytes_sent_ = false;
+        socket_send_failed_ = false;
+        write_budget_active_ = false;
         send_capture_.reset();
         request_info_ = {};
         response_storage_.reset();
@@ -576,12 +583,13 @@ public:
     }
 
     void send(int status_code, const char *content_type, const char *content) override {
-        if (!req_) {
+        if (!req_ || close_requested_ || send_capture_.error().terminal) {
             return;
         }
         const char *stored_status = nullptr;
         if (!response_storage_.storeStatus(status_line_for_code(status_code), stored_status)) {
             LOGE("WEB", "response status storage failed: %d", status_code);
+            stopClient();
             return;
         }
         const esp_err_t status_err = httpd_resp_set_status(req_, stored_status);
@@ -589,25 +597,39 @@ public:
             LOGE("WEB", "response status rejected: %d (%s)",
                  status_code,
                  esp_err_to_name(status_err));
+            stopClient();
             return;
         }
         if (content_type) {
             const char *stored_content_type = nullptr;
             if (!response_storage_.storeContentType(content_type, stored_content_type)) {
                 LOGE("WEB", "response content type storage failed");
+                stopClient();
                 return;
             }
             const esp_err_t type_err = httpd_resp_set_type(req_, stored_content_type);
             if (type_err != ESP_OK) {
                 LOGE("WEB", "response content type rejected: %s", esp_err_to_name(type_err));
+                stopClient();
                 return;
             }
         }
-        httpd_resp_send(req_, content ? content : "", HTTPD_RESP_USE_STRLEN);
+        beginWriteBudget();
+        const esp_err_t result = httpd_resp_send(req_, content ? content : "", HTTPD_RESP_USE_STRLEN);
+        write_budget_active_ = false;
+        if (result != ESP_OK) {
+            LOGW("WEB", "HTTP response failed: status=%d sdk=%d", status_code, result);
+            stopClient();
+        }
+    }
+
+    void sendRejection(int status, const char *message) {
+        sendHeader("Connection", "close", false);
+        send(status, "text/plain", message);
     }
 
     bool clientConnected() const override {
-        return socketLikelyConnected();
+        return !close_requested_ && socketLikelyConnected();
     }
 
     void setUploadDeadlineMs(uint32_t timeout_ms) override {
@@ -659,7 +681,7 @@ public:
         size_t drained = 0;
         uint8_t drain_buffer[1024];
         while (pending_body_bytes_ > 0 && drained < max_bytes) {
-            if (static_cast<int32_t>(millis() - deadline_ms) >= 0) {
+            if (WakePowerGuard::backgroundPaused(millis()) || static_cast<int32_t>(millis() - deadline_ms) >= 0) {
                 break;
             }
 
@@ -689,20 +711,81 @@ public:
 
     void stopClient() override {
         stream_open_ = false; // Finalization must not send after an aborted chunk.
-        if (!req_) {
-            return;
+        // Requests execute synchronously on the HTTP task. Returning an error
+        // from dispatch lets the SDK close exactly this session before reuse.
+        // Repeated stop requests are idempotent and cannot exhaust queue_work.
+        close_requested_ = true;
+    }
+
+    void prepareSessionClose(WakePowerGuard::Activity &activity) {
+        if (!req_ || !response_bytes_sent_ || socket_send_failed_ || send_capture_.error().terminal) return;
+        const int fd = httpd_req_to_sockfd(req_);
+        // RFC 9112 9.6: let the peer consume the final response before a close
+        // with unread request data can cause RST. Keep one synchronous owner;
+        // neither queue_work nor a second session close is used here.
+        if (fd < 0 || shutdown(fd, SHUT_WR) != 0) return;
+        const uint32_t started = millis();
+        char discard[1024];
+        size_t bytes_since_yield = 0;
+        size_t drained = 0;
+        size_t progress_bytes = 0;
+        uint32_t progress_at = started;
+        while (drained < kCloseMaxDrainBytes &&
+               static_cast<uint32_t>(millis() - started) < kCloseDrainTimeoutMs) {
+            if (WakePowerGuard::backgroundPaused(millis())) {
+                // No app socket I/O while the backlight owner switches,
+                // settles and renders. Retain the same SDK session and resume
+                // draining afterwards: an early close would lose the reply.
+                const uint32_t paused_at = millis();
+                activity = {};
+                bool unused = false;
+                activity = wait_for_web_activity_admission(unused);
+                progress_at += static_cast<uint32_t>(millis() - paused_at);
+            }
+            if (static_cast<uint32_t>(millis() - progress_at) >= kCloseProgressTimeoutMs) break;
+            const uint32_t elapsed = static_cast<uint32_t>(millis() - started);
+            if (elapsed >= kCloseDrainTimeoutMs) break;
+            const uint32_t left = kCloseDrainTimeoutMs - elapsed;
+            const uint32_t slice = std::min(left, kCloseRecvSliceMs);
+            if (!slice) break;
+            timeval timeout{};
+            timeout.tv_usec = slice * 1000;
+            if (setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout)) != 0) break;
+            // The SDK won't run req_delete after ESP_FAIL. Drain the socket
+            // directly, including bytes beyond a dishonest Content-Length.
+            const int count = recv(fd, discard,
+                                   std::min(sizeof(discard), kCloseMaxDrainBytes - drained), 0);
+            if (count == 0) break;
+            if (count < 0 && errno != EAGAIN && errno != EWOULDBLOCK && errno != EINTR) break;
+            // Yield per batch, not per kilobyte: throttling this drain to
+            // ~1 MiB/s makes a browser's queued multi-megabyte upload hit the
+            // close deadline and lose its response despite a healthy link.
+            if (count > 0) {
+                const size_t received = static_cast<size_t>(count);
+                drained += received;
+                progress_bytes += received;
+                bytes_since_yield += received;
+                if (progress_bytes >= kCloseProgressBytes) {
+                    progress_at = millis();
+                    progress_bytes = 0;
+                }
+            }
+            if (count < 0 || bytes_since_yield >= 32 * 1024) {
+                delay(1);
+                bytes_since_yield = 0;
+            }
         }
-        const int sockfd = httpd_req_to_sockfd(req_);
-        if (sockfd >= 0) {
-            httpd_sess_trigger_close(req_->handle, sockfd);
-        }
+    }
+
+    esp_err_t result() const {
+        return close_requested_ || send_capture_.error().terminal ? ESP_FAIL : ESP_OK;
     }
 
     bool beginStreamResponse(int status_code,
                              const char *content_type,
                              size_t,
                              bool gzip_encoded) override {
-        if (!req_ || send_capture_.error().terminal) {
+        if (!req_ || close_requested_ || send_capture_.error().terminal) {
             if (!req_) send_capture_.failSetup(0, false);
             return false;
         }
@@ -740,10 +823,12 @@ public:
             last_error = send_capture_.error().socket_errno;
             return -1;
         }
+        beginWriteBudget();
         const bool ok = send_capture_.chunk(WebStreamStage::Body, data, size, [&]() {
             return httpd_resp_send_chunk(req_, reinterpret_cast<const char *>(data),
                                          static_cast<ssize_t>(size));
         });
+        write_budget_active_ = false;
         last_error = send_capture_.error().socket_errno;
         if (!ok) stream_open_ = false;
         return ok ? static_cast<int32_t>(size) : -1;
@@ -760,9 +845,11 @@ public:
             return !send_capture_.error().terminal;
         }
         stream_open_ = false;
+        beginWriteBudget();
         const bool ok = send_capture_.chunk(WebStreamStage::Finish, nullptr, 0, [&]() {
             return httpd_resp_send_chunk(req_, nullptr, 0);
         });
+        write_budget_active_ = false;
         last_error = send_capture_.error().socket_errno;
         if (!ok) stopClient();
         return ok;
@@ -777,12 +864,27 @@ public:
     void streamRequestInfo(WebStreamRequestInfo &info) const override { info = request_info_; }
 
     int socketSend(int sockfd, const char *buf, size_t size, int flags) {
-        const auto raw_send = [&]() { return ::send(sockfd, buf, size, flags); };
+        const auto raw_send = [&]() {
+            if (write_budget_active_) {
+                const uint32_t elapsed = millis() - write_budget_started_ms_;
+                if (elapsed >= kHttpWriteBudgetMs) { errno = ETIMEDOUT; return -1; }
+                const uint32_t remaining = kHttpWriteBudgetMs - elapsed;
+                timeval timeout{};
+                timeout.tv_sec = remaining / 1000;
+                timeout.tv_usec = (remaining % 1000) * 1000;
+                if (setsockopt(sockfd, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout)) != 0) return -1;
+            }
+            return static_cast<int>(::send(sockfd, buf, size, flags));
+        };
         const bool matching_request = req_ && httpd_req_to_sockfd(req_) == sockfd;
         const bool captured = matching_request && send_capture_.active();
         const int result = matching_request
             ? send_capture_.socketSend(buf, size, raw_send) : raw_send();
         const int socket_errno = result < 0 ? errno : 0;
+        if (matching_request) {
+            if (result > 0) response_bytes_sent_ = true;
+            if (result < 0) socket_send_failed_ = true;
+        }
         if (result >= 0) return result;
         // The hook survives keep-alive reuse. Preserve the SDK warning for
         // ordinary (non-streamed) replies/errors; those have no failure record.
@@ -824,6 +926,13 @@ public:
     }
 
 private:
+    void beginWriteBudget() {
+        write_budget_started_ms_ = millis();
+        write_budget_active_ = true;
+    }
+
+    uint32_t write_budget_started_ms_ = 0;
+    bool write_budget_active_ = false;
     httpd_req_t *req_ = nullptr;
     WebHttpSendCapture send_capture_;
     WebStreamRequestInfo request_info_;
@@ -832,6 +941,9 @@ private:
     String raw_body_;
     WebUpload upload_{};
     bool stream_open_ = false;
+    bool close_requested_ = false;
+    bool response_bytes_sent_ = false;
+    bool socket_send_failed_ = false;
     size_t pending_body_bytes_ = 0;
     uint32_t upload_deadline_ms_ = 0;
     WebUploadAbortReason upload_abort_reason_ = WebUploadAbortReason::None;
@@ -953,18 +1065,17 @@ bool EspHttpServerBackend::prepareRequest(RouteRegistration &route, void *raw_re
 
     if (route.upload_handler != nullptr) {
         if (content_type_lc.indexOf("multipart/form-data") < 0) {
-            httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Expected multipart/form-data upload");
+            request_->sendRejection(400, "Expected multipart/form-data upload");
             return false;
         }
 
         const String boundary = WebMultipart::parseBoundary(content_type);
         if (boundary.isEmpty()) {
-            httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Missing multipart boundary");
+            request_->sendRejection(400, "Missing multipart boundary");
             return false;
         }
         if (!WebServerLimits::multipartBoundarySizeAllowed(boundary.length())) {
-            send_request_error_and_close(req,
-                                         "413 Payload Too Large",
+            request_->sendRejection(413,
                                          "Multipart boundary is too large");
             return false;
         }
@@ -974,12 +1085,11 @@ bool EspHttpServerBackend::prepareRequest(RouteRegistration &route, void *raw_re
         const String expected_first_boundary = String("--") + boundary;
         if (!reader.readLine(line) || line != expected_first_boundary) {
             if (reader.limitExceeded()) {
-                send_request_error_and_close(req,
-                                             "413 Payload Too Large",
+                request_->sendRejection(413,
                                              "Multipart header is too large");
                 return false;
             }
-            httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Malformed multipart body");
+            request_->sendRejection(400, "Malformed multipart body");
             return false;
         }
 
@@ -1006,8 +1116,7 @@ bool EspHttpServerBackend::prepareRequest(RouteRegistration &route, void *raw_re
                 if (abort_started_upload()) {
                     return true;
                 }
-                send_request_error_and_close(req,
-                                             "413 Payload Too Large",
+                request_->sendRejection(413,
                                              "Too many multipart fields");
                 return false;
             }
@@ -1021,12 +1130,11 @@ bool EspHttpServerBackend::prepareRequest(RouteRegistration &route, void *raw_re
                         return true;
                     }
                     if (reader.limitExceeded()) {
-                        send_request_error_and_close(req,
-                                                     "413 Payload Too Large",
+                        request_->sendRejection(413,
                                                      "Multipart header is too large");
                         return false;
                     }
-                    httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Malformed multipart headers");
+                    request_->sendRejection(400, "Malformed multipart headers");
                     return false;
                 }
                 if (line.isEmpty()) {
@@ -1141,14 +1249,13 @@ bool EspHttpServerBackend::prepareRequest(RouteRegistration &route, void *raw_re
                     return true;
                 }
                 if (field_too_large || field_allocation_failed) {
-                    send_request_error_and_close(req,
-                                                 "413 Payload Too Large",
+                    request_->sendRejection(413,
                                                  field_too_large
                                                      ? "Multipart field is too large"
                                                      : "Insufficient memory for multipart field");
                     return false;
                 }
-                httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Malformed multipart content");
+                request_->sendRejection(400, "Malformed multipart content");
                 return false;
             }
 
@@ -1164,13 +1271,12 @@ bool EspHttpServerBackend::prepareRequest(RouteRegistration &route, void *raw_re
     if (body_result != RequestBodyReadResult::Ok) {
         if (body_result == RequestBodyReadResult::TooLarge ||
             body_result == RequestBodyReadResult::AllocationFailed) {
-            send_request_error_and_close(req,
-                                         "413 Payload Too Large",
+            request_->sendRejection(413,
                                          body_result == RequestBodyReadResult::TooLarge
                                              ? "Request body is too large"
                                              : "Insufficient memory for request body");
         } else {
-            httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Failed to read request body");
+            request_->sendRejection(400, "Failed to read request body");
         }
         return false;
     }
@@ -1190,25 +1296,42 @@ void EspHttpServerBackend::resetRequest() {
     }
 }
 
-void EspHttpServerBackend::finalizeRequest() {
-    if (request_) {
-        request_->endStreamResponse();
-        request_->reset();
-    }
+esp_err_t EspHttpServerBackend::rejectRequest(void *raw_req, int status, const char *message, WakePowerGuard::Activity &activity) {
+    request_->begin(static_cast<httpd_req_t *>(raw_req));
+    request_->sendRejection(status, message);
+    return finalizeRequest(activity, true);
+}
+
+esp_err_t EspHttpServerBackend::finalizeRequest(WakePowerGuard::Activity &activity, bool rejected) {
+    if (!request_) return ESP_FAIL;
+    if (rejected) request_->stopClient();
+    request_->endStreamResponse();
+    const esp_err_t result = request_->result();
+    if (result != ESP_OK) request_->prepareSessionClose(activity);
+    request_->reset();
+    return result;
 }
 
 bool EspHttpServerBackend::hasNotFoundHandler() const {
     return not_found_handler_ != nullptr;
 }
 
-void EspHttpServerBackend::dispatchNotFound(void *raw_req) {
-    if (!request_ || !not_found_handler_) {
+void EspHttpServerBackend::dispatchError(void *raw_req, httpd_err_code_t error) {
+    if (!request_ || (error != HTTPD_405_METHOD_NOT_ALLOWED && !not_found_handler_)) {
         return;
     }
     auto *req = static_cast<httpd_req_t *>(raw_req);
     request_->begin(req);
     request_->appendArgsFromQuery();
-    not_found_handler_();
+    if (error == HTTPD_405_METHOD_NOT_ALLOWED) {
+        // HEAD must never carry the SDK's default error body. Close after a
+        // method rejection, including requests with an unread POST body.
+        request_->sendHeader("Connection", "close", false);
+        request_->send(405, "text/plain", "");
+        request_->stopClient();
+    } else {
+        not_found_handler_();
+    }
 }
 
 void EspHttpServerBackend::begin() {
@@ -1227,7 +1350,16 @@ void EspHttpServerBackend::begin() {
     config.max_uri_handlers = WebServerLimits::kHttpServerMaxUriHandlers;
     config.max_resp_headers = WebHttpResponseStorage::Storage::kMaxHeaders;
     config.global_user_ctx = this;
-    config.global_user_ctx_free_fn = nullptr;
+    // The SDK borrows this pointer. Its default nullptr deleter calls free(),
+    // but the C++ backend is owned by the application's unique_ptr.
+    config.global_user_ctx_free_fn = [](void *) {};
+    // SDK remains the sole session owner. Its synchronous close hook also
+    // covers a wake arriving between dispatch return and session deletion.
+    config.close_fn = [](httpd_handle_t, int fd) {
+        bool unused = false;
+        auto activity = wait_for_web_activity_admission(unused);
+        close(fd);
+    };
     config.uri_match_fn = nullptr;
     // Keep the per-recv timeout moderate and let the multipart reader own
     // the longer no-progress budget so a single socket timeout does not
@@ -1245,6 +1377,7 @@ void EspHttpServerBackend::begin() {
         registerRoute(route);
     }
     httpd_register_err_handler(handle, HTTPD_404_NOT_FOUND, esp_not_found_dispatch);
+    httpd_register_err_handler(handle, HTTPD_405_METHOD_NOT_ALLOWED, esp_not_found_dispatch);
 }
 
 void EspHttpServerBackend::stop() {
@@ -1264,25 +1397,22 @@ static esp_err_t esp_route_dispatch(httpd_req_t *req) {
     bool wake_wait_exceeded = false;
     WakePowerGuard::Activity wake_activity =
         wait_for_web_activity_admission(wake_wait_exceeded);
-    if (!wake_activity || wake_wait_exceeded) {
+    if (wake_wait_exceeded) {
         // Even the timeout response is sent only after acquiring an activity
         // lease. It therefore cannot overlap the protected CH422G switch.
-        send_request_error_and_close(
-            req, "503 Service Unavailable", "Display wake in progress");
-        return ESP_OK;
+        return route->backend->rejectRequest(req, 503, "Display wake in progress", wake_activity);
     }
 
     if (!route->backend->prepareRequest(*route, req)) {
-        route->backend->resetRequest();
-        return ESP_OK;
+        // Preserve the error reply before the SDK closes the current session.
+        return route->backend->finalizeRequest(wake_activity, true);
     }
 
     route->handler();
-    route->backend->finalizeRequest();
-    return ESP_OK;
+    return route->backend->finalizeRequest(wake_activity);
 }
 
-static esp_err_t esp_not_found_dispatch(httpd_req_t *req, httpd_err_code_t) {
+static esp_err_t esp_not_found_dispatch(httpd_req_t *req, httpd_err_code_t error) {
     if (!req || !req->handle) {
         return ESP_FAIL;
     }
@@ -1290,21 +1420,19 @@ static esp_err_t esp_not_found_dispatch(httpd_req_t *req, httpd_err_code_t) {
     bool wake_wait_exceeded = false;
     WakePowerGuard::Activity wake_activity =
         wait_for_web_activity_admission(wake_wait_exceeded);
-    if (!wake_activity || wake_wait_exceeded) {
-        send_request_error_and_close(
-            req, "503 Service Unavailable", "Display wake in progress");
-        return ESP_OK;
+    if (wake_wait_exceeded) {
+        auto *backend = static_cast<EspHttpServerBackend *>(httpd_get_global_user_ctx(req->handle));
+        return backend ? backend->rejectRequest(req, 503, "Display wake in progress", wake_activity) : ESP_FAIL;
     }
 
     auto *backend =
         static_cast<EspHttpServerBackend *>(httpd_get_global_user_ctx(req->handle));
-    if (!backend || !backend->hasNotFoundHandler()) {
+    if (!backend || (error != HTTPD_405_METHOD_NOT_ALLOWED && !backend->hasNotFoundHandler())) {
         return httpd_resp_send_404(req);
     }
 
-    backend->dispatchNotFound(req);
-    backend->finalizeRequest();
-    return ESP_OK;
+    backend->dispatchError(req, error);
+    return backend->finalizeRequest(wake_activity);
 }
 
 std::unique_ptr<WebServerBackend> createDefaultWebServerBackend(uint16_t port) {

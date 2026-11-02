@@ -9,6 +9,7 @@
 #include <WiFi.h>
 
 #include "core/ConnectivityRuntime.h"
+#include "core/Logger.h"
 #include "web/WebDashboardPage.h"
 #include "web/WebTemplates.h"
 #include "web/WebWifiPage.h"
@@ -68,22 +69,26 @@ void handleWifiRoot(WebHandlerContext &context,
         return;
     }
 
-    if (server.hasArg("scan") && context.wifi_start_scan) {
-        context.wifi_start_scan();
+    bool scan_requested = false;
+    if (server.hasArg("scan")) {
+        scan_requested = context.wifi_start_scan && context.wifi_start_scan();
+        if (!scan_requested) {
+            WebResponseUtils::sendNoStoreText(server, 503, "Unable to start WiFi scan. Please retry.");
+            return;
+        }
     }
-    String list_items;
-    if (connectivity.wifi_scan_in_progress) {
-        list_items = FPSTR(WebTemplates::kWifiListScanning);
-    } else if (!connectivity.wifi_scan_options.isEmpty()) {
-        list_items = connectivity.wifi_scan_options;
-    } else {
-        list_items = FPSTR(WebTemplates::kWifiListEmpty);
-    }
+    const bool scanning = scan_requested || connectivity.wifi_scan_in_progress;
     WebWifiPage::RootPageData page_data{};
-    page_data.ssid_items = list_items;
-    page_data.scan_in_progress = connectivity.wifi_scan_in_progress;
-    const String html =
-        WebWifiPage::renderRootHtml(FPSTR(WebTemplates::kWifiPageTemplate), page_data);
+    page_data.ssid_items = scanning ? WebTemplates::kWifiListScanning
+        : (!connectivity.wifi_scan_options.isEmpty() ? connectivity.wifi_scan_options.c_str()
+                                                    : WebTemplates::kWifiListEmpty);
+    page_data.scan_in_progress = scanning;
+    String html;
+    if (!WebWifiPage::renderRootHtml(WebTemplates::kWifiPageTemplate, page_data, html)) {
+        Logger::log(Logger::Warn, "Web", "WiFi page preparation failed");
+        WebResponseUtils::sendNoStoreText(server, 503, "Unable to prepare WiFi setup. Please retry.");
+        return;
+    }
     WebResponseUtils::sendHtmlStream(server, html, stream_context);
 }
 
@@ -146,16 +151,21 @@ void handleWifiNotFound(WebHandlerContext &context) {
     if (!context.server || !context.connectivity_runtime) {
         return;
     }
+    const String uri = context.server->uri();
+    if (uri == "/favicon.ico" || uri.indexOf("/favicon.ico?") == 0) {
+        context.server->send(204, "image/x-icon", "");
+        return;
+    }
     const ConnectivityRuntimeSnapshot connectivity = context.connectivity_runtime->snapshot();
     if (connectivity.wifi_ap_mode) {
         const String portal_url = WebWifiPage::captivePortalRedirectUrl(connectivity.ap_ip);
         WebResponseUtils::sendNoStoreHeaders(*context.server);
         context.server->sendHeader("Location", portal_url, true);
-        context.server->send(302, "text/plain", "Redirecting to captive portal");
+        context.server->send(302, "text/plain", "");
         return;
     }
 
-    context.server->send(404, "text/plain", "Not found");
+    context.server->send(404, "text/plain", "");
 }
 
 }  // namespace WebPortalHandlers

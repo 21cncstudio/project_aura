@@ -38,6 +38,9 @@ void network_plane_task(void *arg) {
     for (;;) {
         Watchdog::kick();
         {
+            // Quiesce an existing scan before admission. Waiting for a new
+            // lease here would deadlock wake behind the scan it must stop.
+            ctx->networkManager.serviceWakeQuiescence();
             const uint32_t now_ms = millis();
             WakePowerGuard::Activity activity =
                 WakePowerGuard::tryAcquireActivity(now_ms);

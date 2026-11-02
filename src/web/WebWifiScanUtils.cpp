@@ -97,8 +97,9 @@ String renderNetworkItemsHtml(const WifiScanRow *rows, size_t row_count) {
 
     html.reserve(row_count * 170);
     for (size_t i = 0; i < row_count; ++i) {
-        const String ssid_label = WebTextUtils::wifiLabelSafe(rows[i].ssid);
-        const String ssid_html = WebTextUtils::htmlEscape(ssid_label);
+        // Browsers support UTF-8. Never replace the credential bytes with the
+        // ASCII-only label used on the device display.
+        const String ssid_html = WebTextUtils::htmlEscape(rows[i].ssid);
         const char *security = rows[i].enterprise ? "Enterprise" : (rows[i].open ? "Open" : "Secure");
         const String rssi_text = int_to_string(rows[i].rssi) + " dBm";
 

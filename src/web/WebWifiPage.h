@@ -12,7 +12,7 @@
 namespace WebWifiPage {
 
 struct RootPageData {
-    String ssid_items;
+    const char *ssid_items = "";
     bool scan_in_progress = false;
 };
 
@@ -23,7 +23,8 @@ struct SavePageData {
 
 String renderScanStatusJson(bool scan_in_progress);
 String captivePortalRedirectUrl(const String &ap_ip);
-String renderRootHtml(const String &html_template, const RootPageData &data);
-String renderSaveHtml(const String &html_template, const SavePageData &data);
+// On failure out is empty; callers must send an explicit error response.
+bool renderRootHtml(const char *html_template, const RootPageData &data, String &out);
+bool renderSaveHtml(const char *html_template, const SavePageData &data, String &out);
 
 } // namespace WebWifiPage

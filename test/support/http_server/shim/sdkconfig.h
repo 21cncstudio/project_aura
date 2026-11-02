@@ -1,0 +1,11 @@
+#pragma once
+/* Values copied from sdkconfig.idf61.4_3 where the HTTP server reads them. */
+#define CONFIG_HTTPD_MAX_REQ_HDR_LEN 1024
+#define CONFIG_HTTPD_MAX_URI_LEN 512
+#define CONFIG_HTTPD_ERR_RESP_NO_DELAY 1
+#define CONFIG_HTTPD_PURGE_BUF_LEN 32
+#define CONFIG_LWIP_MAX_SOCKETS 16
+#define CONFIG_LWIP_UDP_RECVMBOX_SIZE 6
+#define CONFIG_FREERTOS_HZ 1000
+#define CONFIG_LWIP_IPV4 1
+#define CONFIG_LWIP_NETIF_LOOPBACK 1

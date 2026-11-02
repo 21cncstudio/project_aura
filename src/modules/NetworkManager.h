@@ -11,6 +11,8 @@
 
 #include <Arduino.h>
 #include "core/NetworkHostname.h"
+#include "core/WifiScanSession.h"
+#include "core/WifiScanTransition.h"
 #include "modules/StorageManager.h"
 #include "web/WebContext.h"
 #include "web/WebTransport.h"
@@ -57,6 +59,7 @@ public:
     void attachCommandQueue(NetworkCommandQueue &commandQueue);
     void setStateChangeCallback(StateChangeCallback cb, void *ctx);
     void poll();
+    void serviceWakeQuiescence();
     void noteStaConnectTransientFailure(uint32_t reason);
     void requestHostnameCheck() { hostname_check_pending_.store(true, std::memory_order_release); }
 
@@ -142,6 +145,10 @@ private:
     uint32_t hostname_last_poll_ms_ = 0;
     String ap_ssid_;
     String wifi_scan_options_;
+    WifiScanSession wifi_scan_session_;
+    bool wifi_scan_restart_pending_ = false;
+    WifiScanTransition wifi_scan_transition_;
+    void buildScanOptions(int count);
     bool wifi_scan_in_progress_ = false;
     uint32_t wifi_scan_started_ms_ = 0;
     uint8_t wifi_retry_count_ = 0;

@@ -61,8 +61,17 @@ void test_web_wifi_scan_utils_render_network_items_html_marks_enterprise() {
     TEST_ASSERT_NOT_EQUAL(String::npos, html.find("data-enterprise=\"1\""));
 }
 
+
+void test_utf8_ssid_keeps_original_bytes_and_html_escaping() {
+    WebWifiScanUtils::WifiScanRow rows[1] = {{"\xD0\x94\xD0\xBE\xD0\xBC<&>\"'-WiFi", -45, 100, false}};
+    const String html = WebWifiScanUtils::renderNetworkItemsHtml(rows, 1);
+    TEST_ASSERT_NOT_EQUAL(String::npos, html.find("data-ssid=\"\xD0\x94\xD0\xBE\xD0\xBC&lt;&amp;&gt;&quot;&#39;-WiFi\""));
+    TEST_ASSERT_EQUAL(String::npos, html.find("data-ssid=\"??????"));
+}
+
 int main(int, char **) {
     UNITY_BEGIN();
+    RUN_TEST(test_utf8_ssid_keeps_original_bytes_and_html_escaping);
     RUN_TEST(test_web_wifi_scan_utils_keeps_best_duplicate_and_caps_list);
     RUN_TEST(test_web_wifi_scan_utils_sort_orders_by_strongest_rssi);
     RUN_TEST(test_web_wifi_scan_utils_render_network_items_html_escapes_ssid);
