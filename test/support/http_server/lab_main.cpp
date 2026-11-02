@@ -207,6 +207,13 @@ static std::vector<std::string> take_logs() {
     return copy;
 }
 
+static bool logged(const char *needle) {
+    const auto logs = take_logs();
+    return std::any_of(logs.begin(), logs.end(), [needle](const std::string &s) {
+        return s.find(needle) != std::string::npos;
+    });
+}
+
 // ---- Accept/close bookkeeping --------------------------------------------------
 static std::mutex g_fd_lock;
 static std::vector<std::pair<char, int>> g_fd_events;
@@ -1049,6 +1056,8 @@ static void s20_close_limits() {
                          "useful continuous progress cannot extend the 90 s total drain limit");
         else expect(r.status==413 && r.complete && sent<12*1024*1024 && elapsed<5000 && next.status==200,
                     "fast endless sender is cut off at the byte bound, not its Content-Length");
+        expect(logged(paced ? "reason=time_limit" : "reason=byte_limit"),
+               "close diagnostic identifies the actual time/byte bound");
         ::closesocket(s);
     }
 }
@@ -1086,6 +1095,7 @@ static void s22_failed_send_skips_drain() {
     printf("  status=%d closed=%d next=%d elapsed=%u\n",failed.status,failed.closed,next.status,elapsed);
     expect(failed.status==0 && failed.closed && next.status==200 && elapsed<700,
            "failed response bypasses drain and releases HTTP without a progress timeout");
+    expect(logged("reason=send_failed"), "diagnostic records skipped drain after send failure");
     ::closesocket(s);
 }
 static SOCKET open_rejected_upload(size_t total, std::string &post) {
@@ -1411,6 +1421,24 @@ static int serve_mode(uint32_t seconds) {
     return 0;
 }
 
+
+static void s33_close_diagnostic() {
+    printf("\n== S33 drain stop reasons distinguish sender stall and FIN ==\n");
+    set_mode(false);
+    for (bool finish : {false, true}) {
+        take_logs();
+        SOCKET s=cl_connect();
+        cl_send(s,"POST /test/echo HTTP/1.1\r\nHost: localhost\r\nContent-Length: 9999999\r\n\r\nF");
+        Reply r=cl_read(s,2000);
+        if (finish) ::shutdown(s,SD_SEND);
+        Reply next=one_shot("GET","/dashboard",4000);
+        expect(r.status==413 && r.complete && next.status==200, "rejection and next client survive cleanup");
+        expect(logged(finish ? "reason=peer_fin" : "reason=progress_timeout"),
+               "log distinguishes a stalled sender from orderly peer completion");
+        ::closesocket(s);
+    }
+}
+
 int main(int argc, char **argv) {
     timeBeginPeriod(1);
     WSADATA w;
@@ -1473,6 +1501,7 @@ int main(int argc, char **argv) {
     if (want("s30")) s30_scan_lease_covers_cleanup();
     if (want("s31")) s31_scan_stop_serializes_release();
     if (want("s32")) s32_http_reacquires_between_wakes();
+    if (want("s33")) s33_close_diagnostic();
     printf("\nunexpected=%d\n", g_fail);
     fflush(stdout);
     g_network_thread_run = false;

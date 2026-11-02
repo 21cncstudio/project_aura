@@ -718,20 +718,34 @@ public:
     }
 
     void prepareSessionClose(WakePowerGuard::Activity &activity) {
-        if (!req_ || !response_bytes_sent_ || socket_send_failed_ || send_capture_.error().terminal) return;
+        if (!req_) return;
+        if (!response_bytes_sent_ || socket_send_failed_ || send_capture_.error().terminal) {
+            Logger::log(Logger::Info, "Web", "HTTP close drain: reason=%s bytes=0",
+                        socket_send_failed_ || send_capture_.error().terminal
+                            ? "send_failed" : "no_response");
+            return;
+        }
         const int fd = httpd_req_to_sockfd(req_);
         // RFC 9112 9.6: let the peer consume the final response before a close
         // with unread request data can cause RST. Keep one synchronous owner;
         // neither queue_work nor a second session close is used here.
-        if (fd < 0 || shutdown(fd, SHUT_WR) != 0) return;
+        if (fd < 0 || shutdown(fd, SHUT_WR) != 0) {
+            const int error = fd < 0 ? EBADF : errno;
+            Logger::log(Logger::Warn, "Web", "HTTP close drain: reason=shutdown_failed bytes=0 errno=%d", error);
+            return;
+        }
         const uint32_t started = millis();
         char discard[1024];
         size_t bytes_since_yield = 0;
         size_t drained = 0;
         size_t progress_bytes = 0;
         uint32_t progress_at = started;
-        while (drained < kCloseMaxDrainBytes &&
-               static_cast<uint32_t>(millis() - started) < kCloseDrainTimeoutMs) {
+        const char *reason = "byte_limit";
+        int socket_error = 0;
+        while (drained < kCloseMaxDrainBytes) {
+            if (static_cast<uint32_t>(millis() - started) >= kCloseDrainTimeoutMs) {
+                reason = "time_limit"; break;
+            }
             if (WakePowerGuard::backgroundPaused(millis())) {
                 // No app socket I/O while the backlight owner switches,
                 // settles and renders. Retain the same SDK session and resume
@@ -742,21 +756,27 @@ public:
                 activity = wait_for_web_activity_admission(unused);
                 progress_at += static_cast<uint32_t>(millis() - paused_at);
             }
-            if (static_cast<uint32_t>(millis() - progress_at) >= kCloseProgressTimeoutMs) break;
+            if (static_cast<uint32_t>(millis() - progress_at) >= kCloseProgressTimeoutMs) {
+                reason = "progress_timeout"; break;
+            }
             const uint32_t elapsed = static_cast<uint32_t>(millis() - started);
-            if (elapsed >= kCloseDrainTimeoutMs) break;
+            if (elapsed >= kCloseDrainTimeoutMs) { reason = "time_limit"; break; }
             const uint32_t left = kCloseDrainTimeoutMs - elapsed;
             const uint32_t slice = std::min(left, kCloseRecvSliceMs);
-            if (!slice) break;
+            if (!slice) { reason = "time_limit"; break; }
             timeval timeout{};
             timeout.tv_usec = slice * 1000;
-            if (setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout)) != 0) break;
+            if (setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout)) != 0) {
+                socket_error = errno; reason = "socket_option_failed"; break;
+            }
             // The SDK won't run req_delete after ESP_FAIL. Drain the socket
             // directly, including bytes beyond a dishonest Content-Length.
             const int count = recv(fd, discard,
                                    std::min(sizeof(discard), kCloseMaxDrainBytes - drained), 0);
-            if (count == 0) break;
-            if (count < 0 && errno != EAGAIN && errno != EWOULDBLOCK && errno != EINTR) break;
+            if (count == 0) { reason = "peer_fin"; break; }
+            if (count < 0 && errno != EAGAIN && errno != EWOULDBLOCK && errno != EINTR) {
+                socket_error = errno; reason = "receive_failed"; break;
+            }
             // Yield per batch, not per kilobyte: throttling this drain to
             // ~1 MiB/s makes a browser's queued multi-megabyte upload hit the
             // close deadline and lose its response despite a healthy link.
@@ -775,6 +795,13 @@ public:
                 bytes_since_yield = 0;
             }
         }
+        // No URI, headers or body: rejected uploads may contain private data.
+        Logger::log(Logger::Info, "Web",
+                    "HTTP close drain: reason=%s bytes=%u elapsed_ms=%lu progress_bytes=%u progress_ms=%lu errno=%d",
+                    reason, static_cast<unsigned>(drained),
+                    static_cast<unsigned long>(millis() - started),
+                    static_cast<unsigned>(progress_bytes),
+                    static_cast<unsigned long>(millis() - progress_at), socket_error);
     }
 
     esp_err_t result() const {

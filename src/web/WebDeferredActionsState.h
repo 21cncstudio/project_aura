@@ -25,15 +25,21 @@ public:
     WebDeferredActionsState();
 
     void reset();
-    void scheduleWifiStartSta(uint32_t now_ms, uint32_t delay_ms);
+    // Called after the HTTP response. The grace period starts only after
+    // the network owner confirms scan completion, never after a stop request.
+    void scheduleWifiStartSta(uint32_t delay_ms);
     void scheduleMqttSync(uint32_t now_ms, uint32_t delay_ms);
-    WebDeferredActionsDue pollDue(uint32_t now_ms);
+    // prepare_wifi runs on the network owner under this state lock; it must
+    // not call back into WebDeferredActionsState. Null keeps Wi-Fi pending.
+    WebDeferredActionsDue pollDue(uint32_t now_ms, bool (*prepare_wifi)() = nullptr);
 
 private:
     struct State {
         bool wifi_start_sta = false;
         bool mqtt_sync = false;
         uint32_t wifi_start_sta_due_ms = 0;
+        uint32_t wifi_grace_ms = 0;
+        bool wifi_grace_started = false;
         uint32_t mqtt_sync_due_ms = 0;
     };
 

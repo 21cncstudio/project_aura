@@ -239,6 +239,10 @@ void network_wifi_stop_scan() {
     LOGW("WiFi", "scan stop request dropped: command queue unavailable");
 }
 
+bool network_wifi_prepare_sta() {
+    return g_network && g_network->prepareWifiStartSta();
+}
+
 void network_wifi_start_sta() {
     if (g_network) {
         g_network->connectSta();
@@ -338,6 +342,7 @@ void AuraNetworkManager::begin(StorageManager &storage) {
     web_ctx_.wifi_scan_options = &wifi_scan_options_;
     web_ctx_.wifi_start_scan = network_wifi_start_scan;
     web_ctx_.wifi_stop_scan = network_wifi_stop_scan;
+    web_ctx_.wifi_prepare_sta = network_wifi_prepare_sta;
     web_ctx_.wifi_start_sta = network_wifi_start_sta;
     WebHandlersInit(&web_ctx_);
     registerServerRoutes();
@@ -760,6 +765,14 @@ void AuraNetworkManager::stopScan() {
     wifi_scan_session_.cancel();
     wifi_scan_in_progress_ = wifi_scan_session_.active();
     if (!wifi_scan_in_progress_) wifi_scan_started_ms_ = 0;
+}
+
+bool AuraNetworkManager::prepareWifiStartSta() {
+    // Called only by WebHandlersPollDeferred on the network owner, with an
+    // admitted activity lease. A successful stop request is not completion.
+    wifi_scan_restart_pending_ = false;
+    if (wifi_scan_session_.active() && !wifi_scan_session_.cancelling()) stopScan();
+    return !wifi_scan_session_.active();
 }
 
 void AuraNetworkManager::connectSta() {

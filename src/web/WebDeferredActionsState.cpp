@@ -18,10 +18,12 @@ void WebDeferredActionsState::reset() {
     unlock();
 }
 
-void WebDeferredActionsState::scheduleWifiStartSta(uint32_t now_ms, uint32_t delay_ms) {
+void WebDeferredActionsState::scheduleWifiStartSta(uint32_t delay_ms) {
     lock();
     state_.wifi_start_sta = true;
-    state_.wifi_start_sta_due_ms = now_ms + delay_ms;
+    state_.wifi_grace_started = false;
+    state_.wifi_grace_ms = delay_ms;
+    state_.wifi_start_sta_due_ms = 0;
     unlock();
 }
 
@@ -32,13 +34,26 @@ void WebDeferredActionsState::scheduleMqttSync(uint32_t now_ms, uint32_t delay_m
     unlock();
 }
 
-WebDeferredActionsDue WebDeferredActionsState::pollDue(uint32_t now_ms) {
+WebDeferredActionsDue WebDeferredActionsState::pollDue(uint32_t now_ms, bool (*prepare_wifi)()) {
     lock();
     WebDeferredActionsDue due{};
-    if (state_.wifi_start_sta && deadlineReached(now_ms, state_.wifi_start_sta_due_ms)) {
-        state_.wifi_start_sta = false;
-        state_.wifi_start_sta_due_ms = 0;
-        due.wifi_start_sta = true;
+    if (state_.wifi_start_sta) {
+        // Re-check on every poll: a later Rescan invalidates elapsed grace.
+        // The callback requests cancellation and reports actual worker state.
+        if (!prepare_wifi || !prepare_wifi()) {
+            state_.wifi_grace_started = false;
+        } else {
+            if (!state_.wifi_grace_started) {
+                state_.wifi_start_sta_due_ms = now_ms + state_.wifi_grace_ms;
+                state_.wifi_grace_started = true;
+            }
+            if (deadlineReached(now_ms, state_.wifi_start_sta_due_ms)) {
+                state_.wifi_start_sta = false;
+                state_.wifi_grace_started = false;
+                state_.wifi_start_sta_due_ms = 0;
+                due.wifi_start_sta = true;
+            }
+        }
     }
     if (state_.mqtt_sync && deadlineReached(now_ms, state_.mqtt_sync_due_ms)) {
         state_.mqtt_sync = false;

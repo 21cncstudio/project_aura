@@ -286,7 +286,7 @@ void pollDeferred() {
                           expired_confirm_id);
     }
 
-    const WebDeferredActionsDue due = g_deferred_actions.pollDue(now_ms);
+    const WebDeferredActionsDue due = g_deferred_actions.pollDue(now_ms, g_ctx->wifi_prepare_sta);
 
     if (due.wifi_start_sta && g_ctx->wifi_start_sta) {
         g_ctx->wifi_start_sta();

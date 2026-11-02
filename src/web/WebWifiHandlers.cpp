@@ -80,7 +80,7 @@ void handleSave(WebHandlerContext &context,
     }
 
     WebResponseUtils::sendHtmlStream(server, html, stream_context);
-    deferred_actions.scheduleWifiStartSta(millis(), deferred_action_delay_ms);
+    deferred_actions.scheduleWifiStartSta(deferred_action_delay_ms);
 }
 
 }  // namespace WebWifiHandlers

@@ -41,6 +41,8 @@ struct WebHandlerContext {
     bool (*wifi_is_ap_mode)() = nullptr;
     bool (*wifi_start_scan)() = nullptr;
     void (*wifi_stop_scan)() = nullptr;
+    // Network-owner callback, unlike the queued HTTP/OTA stop hook above.
+    bool (*wifi_prepare_sta)() = nullptr;
     void (*wifi_start_sta)() = nullptr;
 
     MqttRuntime *mqtt_runtime = nullptr;

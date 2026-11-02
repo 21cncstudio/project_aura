@@ -71,6 +71,7 @@ public:
     void startApOnDemand();
     void startScan();
     void stopScan();
+    bool prepareWifiStartSta();
 
     bool isEnabled() const { return wifi_enabled_; }
     bool isEnabledDirty() const { return wifi_enabled_dirty_; }
