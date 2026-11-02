@@ -31,6 +31,7 @@ struct StreamContext {
     void (*captureFailureEnvironment)(void *context, WebStreamEnvironment &out) = nullptr;
 };
 
+void recordSimpleResponseFailure(WebRequest &server, const StreamContext &context);
 void sendNoStoreHeaders(WebRequest &server);
 void sendNoStoreText(WebRequest &server, int status_code, const char *message);
 void noteShellPriority(const StreamContext &context);

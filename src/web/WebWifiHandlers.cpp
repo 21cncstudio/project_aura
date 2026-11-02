@@ -18,7 +18,7 @@ namespace WebWifiHandlers {
 
 void handleSave(WebHandlerContext &context,
                 bool ota_busy,
-                uint32_t deferred_action_delay_ms,
+                uint64_t receipt,
                 WebDeferredActionsState &deferred_actions,
                 const WebResponseUtils::StreamContext &stream_context) {
     if (!context.server || !context.web_ui_bridge || !context.connectivity_runtime) {
@@ -58,6 +58,7 @@ void handleSave(WebHandlerContext &context,
 
     WebWifiPage::SavePageData page_data{};
     page_data.hostname = connectivity.hostname;
+    page_data.receipt = receipt;
     page_data.wait_seconds = 15;
     String html;
     if (!WebWifiPage::renderSaveHtml(WebTemplates::kWifiSavePage, page_data, html)) {
@@ -66,6 +67,7 @@ void handleSave(WebHandlerContext &context,
         return;
     }
 
+    deferred_actions.beginWifiSave(receipt);
     const WebUiBridge::ApplyResult apply_result =
         context.web_ui_bridge->applyWifiSave(
             WebUiBridgeAdapters::toUiWifiSaveUpdate(parse_result.update));
@@ -79,8 +81,36 @@ void handleSave(WebHandlerContext &context,
         return;
     }
 
-    WebResponseUtils::sendHtmlStream(server, html, stream_context);
-    deferred_actions.scheduleWifiStartSta(deferred_action_delay_ms);
+    if (WebResponseUtils::sendHtmlStream(server, html, stream_context)) {
+        deferred_actions.armWifiSave(receipt, millis());
+    }
+    // No timer fallback: a lost page must leave AP setup reachable.
+}
+
+void handleConfirm(WebHandlerContext &context, bool ota_busy, uint32_t delay_ms,
+                   WebDeferredActionsState &deferred_actions) {
+    if (!context.server || !context.connectivity_runtime) return;
+    auto &server = *context.server;
+    if (!context.connectivity_runtime->snapshot().wifi_ap_mode) {
+        WebResponseUtils::sendNoStoreText(server, 409, "WiFi confirmation allowed only in AP setup mode");
+        return;
+    }
+    if (ota_busy) { WebResponseUtils::sendNoStoreText(server, 503, "OTA in progress"); return; }
+    const String text = server.arg("receipt");
+    uint64_t receipt = 0;
+    if (text.length() == 16) {
+        for (unsigned i = 0; i < 16; ++i) {
+            const char c = text[i];
+            if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'))) { receipt = 0; break; }
+            receipt = (receipt << 4) | (c <= '9' ? c - '0' : c - 'a' + 10);
+        }
+    }
+    if (!deferred_actions.confirmWifiSave(receipt, millis(), delay_ms)) {
+        WebResponseUtils::sendNoStoreText(server, 409, "Setup page expired. Return to WiFi setup and save again.");
+        return;
+    }
+    WebResponseUtils::sendNoStoreText(server, 200,
+        "Aura is connecting to your WiFi. Wait about 15 seconds, then open the IP shown on its screen.");
 }
 
 }  // namespace WebWifiHandlers

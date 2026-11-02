@@ -69,6 +69,7 @@ public:
         return true;
     }
     virtual WebStreamError streamError() const { return {}; }
+    virtual bool takeSimpleResponseFailure(WebStreamFailure &) { return false; }
     virtual void streamRequestInfo(WebStreamRequestInfo &info) const {
         info.path_truncated = web_stream_copy_text(info.path, sizeof(info.path), uri().c_str(), true);
     }

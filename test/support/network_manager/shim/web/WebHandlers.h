@@ -4,4 +4,5 @@
 void WebHandlersInit(WebHandlerContext *);
 bool WebHandlersIsOtaBusy();
 void WebHandlersPollDeferred();
+void WebHandlersCancelWifiSave();
 inline String wifi_label_safe(const String &s) { return s; }

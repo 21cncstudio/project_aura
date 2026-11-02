@@ -29,7 +29,8 @@ struct Replacement { const char *token; const char *value; };
 
 // Measure first and allocate once. Only tokens from the original template are
 // interpreted: an SSID containing another token must remain literal text.
-bool render(const char *source, const Replacement (&replacements)[2], String &out) {
+template <size_t N>
+bool render(const char *source, const Replacement (&replacements)[N], String &out) {
     out = "";
     if (!source || !*source) return false;
     size_t expected = 0;
@@ -39,7 +40,7 @@ bool render(const char *source, const Replacement (&replacements)[2], String &ou
             const char *part = pos;
             size_t length = 1;
             size_t consumed = 1;
-            for (unsigned i = 0; i < 2; ++i) {
+            for (unsigned i = 0; i < N; ++i) {
                 const auto &r = replacements[i];
                 if (strncmp(pos, r.token, strlen(r.token)) == 0) {
                     if (!r.value) { out = ""; return false; }
@@ -58,7 +59,7 @@ bool render(const char *source, const Replacement (&replacements)[2], String &ou
             }
             pos += consumed;
         }
-        if (pass == 0 && (seen != 3 || !reserve_checked(out, expected))) {
+        if (pass == 0 && (seen != ((1U << N) - 1) || !reserve_checked(out, expected))) {
             out = "";
             return false;
         }
@@ -114,10 +115,13 @@ bool renderSaveHtml(const char *html_template, const SavePageData &data, String 
     out = "";
     String url;
     if (!dashboard_url(data.hostname, url)) return false;
+    if (!data.receipt) return false;
+    char receipt[17];
+    snprintf(receipt, sizeof(receipt), "%08x%08x", static_cast<unsigned>(data.receipt >> 32), static_cast<unsigned>(data.receipt));
     char seconds[8];
     snprintf(seconds, sizeof(seconds), "%u", data.wait_seconds ? data.wait_seconds : 15);
     const Replacement replacements[] = {{"{{HOSTNAME_DASHBOARD_URL}}", url.c_str()},
-                                        {"{{WAIT_SECONDS}}", seconds}};
+                                        {"{{WAIT_SECONDS}}", seconds}, {"{{WIFI_RECEIPT}}", receipt}};
     return render(html_template, replacements, out);
 }
 } // namespace WebWifiPage

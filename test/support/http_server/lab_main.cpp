@@ -33,6 +33,8 @@
 #include "web/WebTextUtils.h"
 #include "web/WebTransport.h"
 #include "web/WebWifiPage.h"
+#include "web/WebWifiHandlers.h"
+#include "web/WebUiBridge.h"
 #include "web/WebWifiScanUtils.h"
 #include "lab.h"
 
@@ -241,7 +243,7 @@ void dashboard_handle_styles() { LOG_REQ("dashboard_handle_styles"); WebPortalHa
 void dashboard_handle_app() { LOG_REQ("dashboard_handle_app"); WebPortalHandlers::handleDashboardApp(g_ctx, response_context()); }
 void wifi_handle_not_found() { LOG_REQ("wifi_handle_not_found"); WebPortalHandlers::handleWifiNotFound(g_ctx); }
 #define OTHER(name) void name() { g_ctx.server->send(501, "text/plain", "lab stub"); }
-OTHER(wifi_handle_save) OTHER(diag_handle_root) OTHER(sfa40_debug_handle_root) OTHER(mqtt_handle_root)
+OTHER(diag_handle_root) OTHER(sfa40_debug_handle_root) OTHER(mqtt_handle_root)
 OTHER(mqtt_handle_save) OTHER(theme_handle_root) OTHER(theme_handle_styles) OTHER(theme_handle_app)
 OTHER(theme_handle_state) OTHER(theme_handle_apply) OTHER(dac_handle_root) OTHER(dac_handle_styles)
 OTHER(dac_handle_app) OTHER(dac_handle_state) OTHER(dac_handle_action) OTHER(dac_handle_auto)
@@ -254,8 +256,33 @@ OTHER(diag_handle_data) OTHER(sfa40_debug_handle_data) OTHER(settings_handle_upd
 OTHER(ota_handle_prepare) OTHER(ota_handle_update) OTHER(ota_handle_upload)
 #include "web/WebRouteRegistry.cpp"
 
+static WebDeferredActionsState g_deferred;
+static WebUiBridge g_ui;
+static uint64_t g_receipt = 0x123456789abcdef1ULL;
+static bool g_save_send_fail = false, g_save_ota = false;
+void wifi_handle_save() {
+    if(g_save_send_fail)g_lab_fail_next_send=1;
+    WebWifiHandlers::handleSave(g_ctx,g_save_ota,g_receipt,g_deferred,response_context());
+    WebResponseUtils::recordSimpleResponseFailure(*g_ctx.server,response_context());
+}
+void wifi_handle_confirm() {
+    WebWifiHandlers::handleConfirm(g_ctx,g_save_ota,200,g_deferred);
+    WebResponseUtils::recordSimpleResponseFailure(*g_ctx.server,response_context());
+}
+
 // Test-only routes exercise the production transport and stream helper.
-static void test_plain_failure() { g_lab_fail_next_send = 1; g_ctx.server->send(200, "application/json", "{}"); }
+static void test_plain_failure() { g_lab_fail_next_send = 1; g_ctx.server->send(200, "application/json", "{}"); WebResponseUtils::recordSimpleResponseFailure(*g_ctx.server,response_context()); }
+static void test_plain_partial() {
+    String body;body.reserve(4096);for(int i=0;i<4096;++i)body+='p';
+    g_lab_fail_after_bytes=1000;g_ctx.server->send(200,"application/json",body);
+    WebResponseUtils::recordSimpleResponseFailure(*g_ctx.server,response_context());
+    WebResponseUtils::recordSimpleResponseFailure(*g_ctx.server,response_context());
+}
+static void test_plain_setup() {
+    g_ctx.server->sendHeader("X-Invalid","bad\r\ninjected: yes");
+    g_ctx.server->send(200,"application/json","{}");
+    WebResponseUtils::recordSimpleResponseFailure(*g_ctx.server,response_context());
+}
 static void test_finish_failure() { g_lab_fail_next_send = 1; WebResponseUtils::sendHtmlStream(*g_ctx.server, "", response_context()); }
 static void test_setup_failure() {
     g_ctx.server->sendHeader("X-Invalid", "value\r\ninjected: yes");
@@ -841,6 +868,7 @@ static void s15_save_page_allocations() {
     printf("\n== S15 save page rejects every allocation failure ==\n");
     WebWifiPage::SavePageData data{};
     data.hostname = "aura-kitchen";
+    data.receipt=0x123456789abcdef1ULL;
     for (int skip = 0; skip < 2; ++skip) {
         String html;
         g_lab_alloc_fail_min = 1; g_lab_alloc_skip_big = skip;
@@ -1052,7 +1080,7 @@ static void s20_close_limits() {
         Reply r=cl_read(s,2000);
         const uint32_t start=millis();
         std::string block(32768,'F'); size_t sent=0;
-        while(millis()-start<94000 && sent<64*1024*1024) {
+        while(millis()-start<124000 && sent<64*1024*1024) {
             const int n=::send(s,block.data(),static_cast<int>(block.size()),0);
             if(n<=0) break;
             sent+=static_cast<size_t>(n);
@@ -1061,8 +1089,8 @@ static void s20_close_limits() {
         Reply next=one_shot("GET","/dashboard",4000);
         const uint32_t elapsed=millis()-start;
         printf("  paced=%d sent=%u elapsed=%u\n",paced,unsigned(sent),elapsed);
-        if(paced) expect(r.status==413 && r.complete && elapsed>=88000 && elapsed<93500 && next.status==200,
-                         "useful continuous progress cannot extend the 90 s total drain limit");
+        if(paced) expect(r.status==413 && r.complete && elapsed>=118000 && elapsed<123500 && next.status==200,
+                         "useful continuous progress cannot extend the 120 s total drain limit");
         else expect(r.status==413 && r.complete && sent<12*1024*1024 && elapsed<5000 && next.status==200,
                     "fast endless sender is cut off at the byte bound, not its Content-Length");
         expect(logged(paced ? "reason=time_limit" : "reason=byte_limit"),
@@ -1178,6 +1206,21 @@ static void s24_slow_current_image() {
         expect(one_shot("GET","/dashboard").status==200,"next client survives slow current-size image");
     }
 }
+static void s37_slow_ap_rejected_image() {
+    printf("\n== S37 full rejected image at the measured slow-AP rate ==\n");
+    set_mode(false); g_x_reject_after=0;
+    const size_t total=3403060;
+    std::string post; SOCKET s=open_rejected_upload(total,post);
+    const uint32_t start=millis(); const size_t sent=paced_send(s,total,32); cl_send(s,post);
+    Reply r=cl_read(s,4000); ::closesocket(s);
+    const uint32_t elapsed=millis()-start;
+    printf("  total=%u sent=%u elapsed=%u status=%d complete=%d\n",unsigned(total),unsigned(sent),elapsed,r.status,r.complete);
+    expect(sent==total && elapsed>95000 && r.status==400 && r.complete &&
+           body_of(r).find("Image is not for this device")!=std::string::npos,
+           "3.4 MB at 32 KiB/s receives a complete rejection beyond the old 90 s bound");
+    expect(one_shot("GET","/dashboard").status==200,"next client survives a slow AP-size rejected image");
+}
+
 static void s25_wake_during_scan() {
     printf("\n== S25 scan quiesces before wake and keeps its lease on stop failure ==\n");
     WifiScanSession scan; int count=0;
@@ -1466,6 +1509,65 @@ static void s34_radio_retransmission_pauses() {
     expect(one_shot("GET","/dashboard").status==200,"next client works after paced rejection");
 }
 
+
+static Reply form_post(const char *path, const std::string &body) {
+    SOCKET s=cl_connect();
+    std::string req=get_req("POST",path,("Content-Type: application/x-www-form-urlencoded\r\nContent-Length: "+std::to_string(body.size())+"\r\n").c_str())+body;
+    cl_send(s,req);Reply reply=cl_read(s,3000);::closesocket(s);Sleep(20);return reply;
+}
+static bool save_scan_ready() { return true; }
+static void s35_save_receipt() {
+    printf("\n== S35 real save handlers require the loaded page receipt ==\n");
+    set_mode(true);g_deferred.reset();g_ui.saves=0;g_save_send_fail=false;g_save_ota=false;g_ui.fail=false;
+    auto r=form_post("/save","ssid=lab&pass=12345678");
+    const auto body=body_of(r);
+    expect(r.status==200 && r.complete && body.find("123456789abcdef1")!=std::string::npos && body.find("window.addEventListener('load'")!=std::string::npos,
+        "complete page includes receipt and defers automatic confirmation to window load");
+    expect(g_ui.saves==1 && !g_deferred.pollDue(millis()+60000,save_scan_ready).wifi_start_sta && !g_deferred.pollDue(millis()+60300,save_scan_ready).wifi_start_sta,
+        "persisted settings and successful socket writes alone never switch AP off");
+    for(const char *bad : {"", "0", "0000000000000000", "123456789abcdef2", "123456789abcde+1", "123456789abcdef11"})
+        expect(form_post("/wifi/confirm",std::string("receipt=")+bad).status==409,"missing, wrong or malformed receipt rejected");
+    expect(!g_deferred.pollDue(millis()+60000,save_scan_ready).wifi_start_sta,"bad receipts leave AP pending");
+    r=form_post("/wifi/confirm","receipt=123456789abcdef1");
+    const uint32_t now=millis();
+    expect(r.status==200 && r.complete,"loaded page confirmation is accepted");
+    expect(!g_deferred.pollDue(now,save_scan_ready).wifi_start_sta && g_deferred.pollDue(now+200,save_scan_ready).wifi_start_sta,
+        "only confirmation schedules the transition after scan completion and grace");
+    form_post("/wifi/confirm","receipt=123456789abcdef1");
+    expect(!g_deferred.pollDue(now+1000,save_scan_ready).wifi_start_sta,"duplicate acknowledgement cannot start STA twice");
+    g_save_send_fail=true;++g_receipt;
+    r=form_post("/save","ssid=lab&pass=12345678");g_save_send_fail=false;
+    expect(!r.complete,"injected send failure truncates the save page");
+    expect(form_post("/wifi/confirm","receipt=123456789abcdef2").status==409 && !g_deferred.pollDue(millis()+60000,save_scan_ready).wifi_start_sta,
+        "failed stream is not armed even if its receipt is known");
+    g_ui.fail=true;r=form_post("/save","ssid=lab&pass=12345678");g_ui.fail=false;
+    expect(r.status==503 && form_post("/wifi/confirm","receipt=123456789abcdef2").status==409,"persistence failure cannot arm confirmation");
+    g_save_ota=true;r=form_post("/save","ssid=lab&pass=12345678");
+    expect(r.status==503 && form_post("/wifi/confirm","receipt=123456789abcdef2").status==503,"OTA rejects both save and confirm");g_save_ota=false;
+    set_mode(false);
+    expect(form_post("/save","ssid=lab&pass=12345678").status==409 && form_post("/wifi/confirm","receipt=123456789abcdef2").status==409,"both operations require AP mode");
+    set_mode(true);g_deferred.reset();
+}
+static void s36_plain_send_diagnostic() {
+    printf("\n== S36 simple response failures enter the bounded HTTP history ==\n");
+    g_stream_state.reset();auto r=one_shot("GET","/test/plain-fail?password=never-log-this");
+    auto snap=g_stream_state.snapshot(millis());
+    expect(!r.complete && snap.stats.abort_count==1 && snap.failure_count==1,"failed ordinary send recorded once");
+    if(snap.failure_count){const auto &f=snap.failures[0];
+        expect(!strcmp(f.request.path,"/test/plain-fail") && !strcmp(f.request.user_agent,"lab/1"),"query stripped; bounded path and user-agent retained");
+        expect(f.error.terminal && f.error.sdk_error_valid && f.error.errno_valid && f.error.socket_errno==EIO && f.total==2,"raw SDK error and immediate errno retained with body length");}
+    one_shot("GET","/dashboard");snap=g_stream_state.snapshot(millis());
+    expect(snap.stats.abort_count==1,"next request does not replay prior simple failure");
+    r=one_shot("GET","/test/plain-partial");snap=g_stream_state.snapshot(millis());
+    expect(!r.complete && snap.stats.abort_count==2 && snap.failure_count==2,"partial body recorded once even when capture is consumed twice");
+    if(snap.failure_count){const auto &f=snap.failures[0];
+      expect(f.total==4096 && f.sent==0 && f.error.partial_body_bytes>0 && f.error.partial_body_bytes<4096 && f.error.wire_bytes==1000,
+        "partial body is distinguished from header bytes and complete chunks");}
+    r=one_shot("GET","/test/plain-setup");snap=g_stream_state.snapshot(millis());
+    expect(!r.complete && snap.stats.abort_count==3 && snap.failures[0].error.stage==WebStreamStage::Setup && !snap.failures[0].error.errno_valid,
+        "header setup failure recorded without inventing socket errno");
+}
+
 int main(int argc, char **argv) {
     timeBeginPeriod(1);
     WSADATA w;
@@ -1475,14 +1577,26 @@ int main(int argc, char **argv) {
     g_backend = createDefaultWebServerBackend(kPort);
     g_ctx.server = &g_backend->request();
     g_ctx.connectivity_runtime = &g_connectivity;
+    g_ctx.web_ui_bridge = &g_ui;
     g_ctx.wifi_start_scan = lab_wifi_start_scan;
     WebRouteRegistry::registerRoutes(*g_backend);
-    g_backend->onGet("/test/plain-fail", test_plain_failure);
-    g_backend->onGet("/test/finish-fail", test_finish_failure);
-    g_backend->onGet("/test/setup-fail", test_setup_failure);
-    g_backend->onGet("/test/stop-twice", test_stop_twice);
-    g_backend->onGet("/test/large", test_large_stream);
-    x_register();
+    // Production has room for eight spare routes. Register only the fixtures
+    // for this isolated case rather than silently exceeding its real limit.
+    if (argc < 2) { printf("Select one case, or use tools/test_http_server_sdk.py for the full suite\n"); return 2; }
+    if (!strcmp(argv[1], "s9")) {
+        g_backend->onGet("/test/plain-fail", test_plain_failure);
+        g_backend->onGet("/test/finish-fail", test_finish_failure);
+        g_backend->onGet("/test/setup-fail", test_setup_failure);
+        g_backend->onGet("/test/stop-twice", test_stop_twice);
+    } else if (!strcmp(argv[1], "s12")) {
+        g_backend->onGet("/test/large", test_large_stream);
+    } else if (!strcmp(argv[1], "s36")) {
+        g_backend->onGet("/test/plain-fail", test_plain_failure);
+        g_backend->onGet("/test/plain-partial", test_plain_partial);
+        g_backend->onGet("/test/plain-setup", test_plain_setup);
+    } else {
+        x_register();
+    }
     g_backend->begin();
     Sleep(150);
     std::thread net(network_thread);
@@ -1530,6 +1644,9 @@ int main(int argc, char **argv) {
     if (want("s32")) s32_http_reacquires_between_wakes();
     if (want("s33")) s33_close_diagnostic();
     if (want("s34")) s34_radio_retransmission_pauses();
+    if (want("s35")) s35_save_receipt();
+    if (want("s36")) s36_plain_send_diagnostic();
+    if (want("s37")) s37_slow_ap_rejected_image();
     printf("\nunexpected=%d\n", g_fail);
     fflush(stdout);
     g_network_thread_run = false;

@@ -649,9 +649,9 @@ static const char kWifiSavePage[] PROGMEM = R"HTML(
                 <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.55a11 11 0 0 1 14.08 0"></path><path d="M1.42 9a16 16 0 0 1 21.16 0"></path><path d="M8.53 16.11a6 6 0 0 1 6.95 0"></path><line x1="12" y1="20" x2="12.01" y2="20"></line></svg>
             </div>
             <h2>Project Aura</h2>
-            <div class="main-text">Settings sent</div>
+            <div class="main-text" id="status">Settings saved</div>
             <p class="sub-text">
-                Aura is switching from AP to your Wi-Fi network.
+                Once Aura starts connecting to your Wi-Fi network,
                 Wait about {{WAIT_SECONDS}} seconds, then open:
                 <br><code>http://&lt;ip&gt;/dashboard</code>
             </p>
@@ -661,9 +661,42 @@ static const char kWifiSavePage[] PROGMEM = R"HTML(
                 <br>
                 AP address <code>http://192.168.4.1</code> is only valid in setup mode.
             </div>
+            <form id="connect" method="post" action="/wifi/confirm">
+                <input type="hidden" name="receipt" value="{{WIFI_RECEIPT}}">
+                <button type="submit">Connect to Wi-Fi</button>
+            </form>
+            <p class="hint" id="connect-hint">With JavaScript enabled, connection starts automatically after this page loads. Otherwise, press Connect to Wi-Fi.</p>
         </div>
         <div class="footer">Powered by 21CNCStudio</div>
     </div>
+<script>
+(function () {
+    var form = document.getElementById('connect');
+    var busy = false;
+    function connect(event) {
+        if (event) event.preventDefault();
+        if (busy) return;
+        busy = true;
+        document.getElementById('status').textContent = 'Starting connection';
+        document.getElementById('connect-hint').textContent = 'Aura may leave this setup network now. If its screen still shows setup, you can retry Connect to Wi-Fi.';
+        var request = new XMLHttpRequest();
+        request.open('POST', '/wifi/confirm');
+        request.setRequestHeader('Content-Type', 'application/x-www-form-urlencoded');
+        request.timeout = 8000;
+        request.onloadend = function () {
+            busy = false;
+            if (request.status === 409) {
+                document.getElementById('connect-hint').textContent = 'Setup page expired. Open Wi-Fi setup and save again.';
+            } else if (request.status === 503) {
+                document.getElementById('connect-hint').textContent = 'Aura is busy updating. Retry Connect to Wi-Fi when the update finishes.';
+            }
+        };
+        request.send('receipt=' + encodeURIComponent(form.elements.receipt.value));
+    }
+    form.addEventListener('submit', connect);
+    window.addEventListener('load', function () { connect(); });
+})();
+</script>
 </body>
 </html>
 )HTML";

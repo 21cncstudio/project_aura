@@ -145,14 +145,27 @@ void WifiScanSession::runScan() {
     config.scan_time.active.max = 300; // Keep the previous discovery dwell.
     unsigned first_channel = 0;
     unsigned last_channel = 0;
+    unsigned active_first = 1, active_last = 14;
     if ((WiFi.getMode() & WIFI_MODE_AP) != 0) {
         wifi_country_t country{};
         error_ = esp_wifi_get_country(&country);
         if (error_ == ESP_OK) {
             first_channel = country.schan;
             last_channel = first_channel + country.nchan - 1;
-            if (first_channel < 1 || country.nchan == 0 || last_channel > 14)
+            if (first_channel < 1 || country.nchan == 0 || last_channel > 14 ||
+                (country.policy != WIFI_COUNTRY_POLICY_AUTO && country.policy != WIFI_COUNTRY_POLICY_MANUAL)) {
                 error_ = ESP_ERR_INVALID_ARG;
+            } else {
+                active_first = first_channel;
+                active_last = last_channel;
+                // Match SDK AUTO discovery: listen outside the configured
+                // active range, without transmitting probes there. MANUAL
+                // restricts discovery to the configured country channels.
+                if (country.policy == WIFI_COUNTRY_POLICY_AUTO) {
+                    first_channel = 1;
+                    last_channel = 14;
+                }
+            }
         }
     }
     // Espressif's provisioning manager splits SoftAP scans so beacons can be
@@ -163,6 +176,10 @@ void WifiScanSession::runScan() {
          error_ == ESP_OK && channel <= last_channel &&
          !cancel_requested_.load(std::memory_order_acquire); ++channel) {
         config.channel = static_cast<uint8_t>(channel);
+        config.scan_type = channel && (channel < active_first || channel > active_last)
+            ? WIFI_SCAN_TYPE_PASSIVE : WIFI_SCAN_TYPE_ACTIVE;
+        if (config.scan_type == WIFI_SCAN_TYPE_PASSIVE) config.scan_time.passive = 300;
+        else { config.scan_time.active.min = 100; config.scan_time.active.max = 300; }
         // block=true uses SDK completion, without posting WIFI_EVENT_SCAN_DONE.
         // Network.postEvent OOM therefore cannot strand this operation.
         error_ = esp_wifi_scan_start(&config, true);

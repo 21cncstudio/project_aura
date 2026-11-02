@@ -11,6 +11,7 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 
 
 def main():
@@ -18,7 +19,7 @@ def main():
     parser.add_argument('--idf-path', type=Path, required=True)
     parser.add_argument('--compiler-dir', type=Path, default=Path('C:/msys64/mingw64/bin'))
     parser.add_argument('--output-dir', type=Path)
-    parser.add_argument('--case', action='append', dest='cases', choices=['s'+str(i) for i in range(1,35)])
+    parser.add_argument('--case', action='append', dest='cases', choices=['s'+str(i) for i in range(1,38)])
     args = parser.parse_args()
     root = Path(__file__).resolve().parents[1]
     lab = root / 'test/support/http_server'
@@ -62,12 +63,12 @@ def main():
     compile_source(sdk / 'http_parser/http_parser.c', c_inc)
     for name in ['WString.cpp', 'WString.h', 'stdlib_noniso.c', 'stdlib_noniso.h', 'pgmspace.h']:
         shutil.copy2(ard / name, out / 'ard' / name)
-    cpp_inc = [lab / 'shim', lab, root / 'src', out / 'ard', hs / 'include', sdk / 'http_parser']
+    cpp_inc = [lab / 'shim', lab, root / 'src', root / 'include', out / 'ard', hs / 'include', sdk / 'http_parser']
     obj = compile_source(out / 'ard/WString.cpp', cpp_inc, True)
     run([args.compiler_dir / 'objcopy.exe', '--redefine-sym', 'realloc=lab_realloc', obj])
 
     for name in ['web/WebTransportEspHttpServer', 'web/WebStreamWriter', 'web/WebStreamPolicy', 'web/WebStreamState',
-                 'web/WebPortalHandlers', 'web/WebWifiPage', 'web/WebDashboardPage', 'web/WebWifiScanUtils', 'web/WebTextUtils',
+                 'web/WebWifiHandlers', 'web/WebDeferredActionsState', 'web/WebWifiSaveUtils', 'web/WebInputValidation', 'web/WebPortalHandlers', 'web/WebWifiPage', 'web/WebDashboardPage', 'web/WebWifiScanUtils', 'web/WebTextUtils',
                  'web/WebQueryString', 'web/WebMultipart', 'web/WebTemplatesDashboardAp', 'web/WebTemplatesDac',
                  'web/WebTemplatesTheme', 'core/WakePowerGuard', 'core/WifiScanSession', 'core/WifiPowerSaveGuard', 'web/WebResponseUtils']:
         compile_source(root / 'src' / (name + '.cpp'), cpp_inc, True)
@@ -76,13 +77,18 @@ def main():
     exe = out / 'probe.exe'
     run([args.compiler_dir / 'g++.exe', *objects, '-lws2_32', '-lwinmm', '-pthread', '-o', exe])
     cases = []
-    for case in args.cases or ['s' + str(i) for i in range(1, 35)]:
-        result = subprocess.run([str(exe), case], cwd=out, env=env, capture_output=True, text=True, timeout=120)
+    for case in args.cases or ['s' + str(i) for i in range(1, 38)]:
+        result = subprocess.run([str(exe), case], cwd=out, env=env, capture_output=True, text=True, timeout=180)
         (out / (case + '.log')).write_text(result.stdout + result.stderr, encoding='utf-8')
         print(result.stdout, end='')
         cases.append({'case': case, 'exit_code': result.returncode, 'passed': result.stdout.count('[PASS]'), 'failed': result.stdout.count('[FAIL]')})
+    wiring = subprocess.run([sys.executable, str(root / 'tools/test_web_handler_wiring.py'), '--output-dir', str(out / 'handler-wiring'), '--compiler-dir', str(args.compiler_dir)], cwd=root, env=env, capture_output=True, text=True, timeout=60)
+    (out / 'handler-wiring.log').write_text(wiring.stdout + wiring.stderr, encoding='utf-8')
+    print(wiring.stdout, end='')
+    if wiring.returncode:
+        raise RuntimeError('Production handler wiring failed: ' + wiring.stdout + wiring.stderr)
     sources += list((lab / 'shim').rglob('*.h')) + list((root / 'src/web').glob('*.h')) + [root / 'src/core' / name for name in ['WifiScanSession.h', 'WifiScanTransition.h', 'WifiPowerSaveGuard.h', 'WakePowerGuard.h']] + list((hs / 'include').rglob('*.h')) + [root / 'src/web/WebRouteRegistry.cpp', lab / 'lab.h', Path(__file__).resolve()]
-    report = {'platform': 'Windows loopback, real SDK session lifecycle, OS and Wi-Fi shims', 'cases': cases,
+    report = {'handler_wiring': json.loads((out / 'handler-wiring/result.json').read_text()), 'platform': 'Windows loopback, real SDK session lifecycle, OS and Wi-Fi shims', 'cases': cases,
               'commands': commands, 'sources': [{'path': str(p), 'sha256': hashlib.sha256(p.read_bytes()).hexdigest()} for p in sources]}
     (out / 'result.json').write_text(json.dumps(report, indent=2), encoding='utf-8')
     print('Evidence:', out)

@@ -78,8 +78,42 @@ void test_grace_handles_clock_wrap() {
     TEST_ASSERT_FALSE(state.pollDue(99, prepare_wifi).wifi_start_sta);
     TEST_ASSERT_TRUE(state.pollDue(100, prepare_wifi).wifi_start_sta);
 }
+void test_receipt_is_required_and_failed_response_cannot_confirm() {
+    WebDeferredActionsState s;s.beginWifiSave(42);
+    TEST_ASSERT_FALSE(s.pollDue(5000,prepare_wifi).wifi_start_sta);
+    TEST_ASSERT_FALSE(s.confirmWifiSave(42,5000,200));
+    s.armWifiSave(42,5000);
+    TEST_ASSERT_FALSE(s.confirmWifiSave(0,5000,200));
+    TEST_ASSERT_FALSE(s.confirmWifiSave(43,5000,200));
+    TEST_ASSERT_FALSE(s.pollDue(6000,prepare_wifi).wifi_start_sta);
+    TEST_ASSERT_TRUE(s.confirmWifiSave(42,6000,200));
+    TEST_ASSERT_FALSE(s.pollDue(6000,prepare_wifi).wifi_start_sta);
+    TEST_ASSERT_TRUE(s.confirmWifiSave(42,6199,200));
+    TEST_ASSERT_TRUE(s.pollDue(6200,prepare_wifi).wifi_start_sta);
+    TEST_ASSERT_TRUE(s.confirmWifiSave(42,6201,200));
+    TEST_ASSERT_FALSE(s.pollDue(9000,prepare_wifi).wifi_start_sta);
+}
+void test_superseded_expired_and_cancelled_receipts_cannot_switch() {
+    WebDeferredActionsState s;s.beginWifiSave(1);s.armWifiSave(1,0);
+    TEST_ASSERT_TRUE(s.confirmWifiSave(1,1,200));s.pollDue(2,prepare_wifi);
+    s.beginWifiSave(2);s.armWifiSave(1,3);
+    TEST_ASSERT_FALSE(s.confirmWifiSave(1,4,200));
+    TEST_ASSERT_FALSE(s.confirmWifiSave(2,4,200));
+    TEST_ASSERT_FALSE(s.pollDue(1000,prepare_wifi).wifi_start_sta);
+    s.armWifiSave(2,0xffffff00U);
+    TEST_ASSERT_TRUE(s.confirmWifiSave(2,100,200));
+    s.cancelWifiSave();s.scheduleMqttSync(0,1);
+    TEST_ASSERT_FALSE(s.confirmWifiSave(2,101,200));
+    auto due=s.pollDue(1000,prepare_wifi);TEST_ASSERT_FALSE(due.wifi_start_sta);TEST_ASSERT_TRUE(due.mqtt_sync);
+    s.beginWifiSave(3);s.armWifiSave(3,0xffffff00U);
+    TEST_ASSERT_FALSE(s.confirmWifiSave(3,uint32_t(0xffffff00U+600000),200));
+    TEST_ASSERT_FALSE(s.pollDue(700000,prepare_wifi).wifi_start_sta);
+}
+
 int main(int, char **) {
     UNITY_BEGIN();
+    RUN_TEST(test_receipt_is_required_and_failed_response_cannot_confirm);
+    RUN_TEST(test_superseded_expired_and_cancelled_receipts_cannot_switch);
     RUN_TEST(test_wifi_grace_starts_at_completion_not_request);
     RUN_TEST(test_no_scan_still_gets_full_grace);
     RUN_TEST(test_later_scan_invalidates_elapsed_grace);

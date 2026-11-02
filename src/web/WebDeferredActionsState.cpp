@@ -18,6 +18,42 @@ void WebDeferredActionsState::reset() {
     unlock();
 }
 
+void WebDeferredActionsState::beginWifiSave(uint64_t receipt) {
+    lock();
+    state_.wifi_start_sta = false;
+    state_.wifi_grace_started = false;
+    state_.wifi_receipt = receipt;
+    state_.wifi_receipt_armed = false;
+    state_.wifi_receipt_confirmed = false;
+    unlock();
+}
+
+void WebDeferredActionsState::cancelWifiSave() { beginWifiSave(0); }
+
+void WebDeferredActionsState::armWifiSave(uint64_t receipt, uint32_t now_ms) {
+    lock();
+    if (receipt && state_.wifi_receipt == receipt && !state_.wifi_receipt_confirmed) {
+        state_.wifi_receipt_armed = true;
+        state_.wifi_receipt_due_ms = now_ms + 600000;
+    }
+    unlock();
+}
+
+bool WebDeferredActionsState::confirmWifiSave(uint64_t receipt, uint32_t now_ms, uint32_t delay_ms) {
+    lock();
+    const bool valid = receipt && receipt == state_.wifi_receipt && state_.wifi_receipt_armed &&
+        !deadlineReached(now_ms, state_.wifi_receipt_due_ms);
+    if (valid && !state_.wifi_receipt_confirmed) {
+        state_.wifi_receipt_confirmed = true;
+        state_.wifi_start_sta = true;
+        state_.wifi_grace_started = false;
+        state_.wifi_grace_ms = delay_ms;
+        state_.wifi_start_sta_due_ms = 0;
+    }
+    unlock();
+    return valid;
+}
+
 void WebDeferredActionsState::scheduleWifiStartSta(uint32_t delay_ms) {
     lock();
     state_.wifi_start_sta = true;

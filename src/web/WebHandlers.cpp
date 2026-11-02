@@ -5,6 +5,7 @@
 // Purchase a Commercial License: see COMMERCIAL_LICENSE_SUMMARY.md
 
 #include "web/WebHandlers.h"
+#include <esp_random.h>
 
 #include "web/WebChartsApiHandlers.h"
 #include "web/WebDailyHistoryHandlers.h"
@@ -30,6 +31,7 @@ void with_context(Fn &&fn) {
         return;
     }
     fn(*context);
+    if (context->server) WebResponseUtils::recordSimpleResponseFailure(*context->server, WebHandlersSupport::responseContext());
 }
 
 template <typename Fn>
@@ -123,12 +125,21 @@ void dashboard_handle_app() {
     with_response_context(WebPortalHandlers::handleDashboardApp);
 }
 
+void WebHandlersCancelWifiSave() { WebHandlersSupport::deferredActions().cancelWifiSave(); }
+
+void wifi_handle_confirm() {
+    with_context([](WebHandlerContext &context) {
+        WebWifiHandlers::handleConfirm(context, WebHandlersSupport::isOtaBusy(),
+            WebHandlersSupport::deferredActionDelayMs(), WebHandlersSupport::deferredActions());
+    });
+}
+
 void wifi_handle_save() {
     with_context([](WebHandlerContext &context) {
         WebWifiHandlers::handleSave(
             context,
             WebHandlersSupport::isOtaBusy(),
-            WebHandlersSupport::deferredActionDelayMs(),
+            ((uint64_t(esp_random()) << 32) | esp_random()) | 1ULL,
             WebHandlersSupport::deferredActions(),
             WebHandlersSupport::responseContext());
     });

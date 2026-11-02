@@ -18,6 +18,8 @@ void dashboard_handle_root();
 void dashboard_handle_styles();
 void dashboard_handle_app();
 void wifi_handle_save();
+void wifi_handle_confirm();
+void WebHandlersCancelWifiSave();
 void wifi_handle_not_found();
 void diag_handle_root();
 void sfa40_debug_handle_root();

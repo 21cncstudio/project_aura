@@ -1268,6 +1268,7 @@ void AuraNetworkManager::startAp() {
 }
 
 void AuraNetworkManager::stopAp() {
+    WebHandlersCancelWifiSave();
     captive_dns_.stop();
     if (state() == WIFI_STATE_AP_CONFIG) {
         WiFi.enableAP(false);

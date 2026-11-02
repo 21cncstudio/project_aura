@@ -11,8 +11,8 @@ Run from the firmware checkout (Windows, MinGW):
 python -X utf8 tools/test_http_server_sdk.py --idf-path D:/21cncstudio/project_aura_aq/tools/idf61-sdk/esp-idf
 ```
 
-All 34 groups run by default. Use repeated `--case` arguments to select groups.
-Each group runs in its own process with a 120-second timeout; build commands,
+All 37 groups run by default. Use repeated `--case` arguments to select groups.
+Each group runs in its own process with a 180-second timeout; build commands,
 logs, source hashes and assertion counts are saved under `build/`.
 
 The ownership regressions added after the third independent review are ports of
@@ -56,9 +56,15 @@ S33 checks drain completion diagnostics for a peer FIN and an incomplete sender
 that hits the progress timeout. S20 and S22 also check the diagnostic reason for
 the total-time and byte limits.
 
-These tests do not remove the 90-second / 8-MiB drain bounds or the 32-KiB per
+These tests do not remove the 120-second / 8-MiB drain bounds or the 32-KiB per
 5000-ms progress requirement. Slow uploads and sender pauses can still lose a
 rejection; browser retries can occupy the server for more than one budget.
 Hardware qualification of the exact candidate remains separate.
 
 S34 sends four 64-KiB bursts with repeated 2.2-second pauses, reading the response only after the complete request. It protects delivery across TCP recovery pauses; the old 1500-ms progress window fails this scenario. S17 still bounds stalled/trickling peers, and S23 pauses wake for longer than the new window. These are host timings, not a guarantee for arbitrary radio loss.
+
+S35 runs the real save/confirmation handlers, covering lost responses, supersession, OTA/AP restrictions and delayed STA admission. S36 injects a failed ordinary response and checks bounded HTTP failure history.
+
+S37 sends a full 3,403,060-byte rejected image at 32 KiB/s and reads the reply only after upload completion. It protects delivery beyond the previous 90-second total bound. S20 separately checks that ongoing useful progress still cannot exceed the 120-second ceiling. Hardware speeds remain variable.
+
+The SDK runner also invokes `tools/test_web_handler_wiring.py` on every run. This compiles the real `WebHandlers.cpp` entry points with boundary spies and the real deferred-action state: it checks MQTT remains on its 200 ms schedule, Wi-Fi receives fresh nonzero receipts, missing contexts stay inert, and simple-response diagnostics are forwarded. LTO discards unrelated handler entry points; this is not an MQTT broker or UI integration test.

@@ -39,12 +39,13 @@ constexpr uint32_t kMultipartReadIdleTimeoutMs = 90UL * 1000UL;
 constexpr uint32_t kDrainRecvTimeoutMs = 200;
 // Chromium may finish writing a buffered upload before reading an early
 // response. Allow useful progress, with independent time/byte/idle bounds.
-// Allow a complete current image even at 64 KiB/s, with margin. This is a
-// per-attempt wall-clock bound, not a browser retry or whole-request deadline.
-constexpr uint32_t kCloseDrainTimeoutMs = 90000;
+// The measured 4.3-inch AP can sustain only 34-40 KiB/s. Give a current
+// ~3.4 MB rejected image margin at 32 KiB/s, while retaining the independent
+// progress/byte bounds and cooperative wake yielding. This is per teardown.
+constexpr uint32_t kCloseDrainTimeoutMs = 120000;
 // Real AP packet captures contain TCP retransmission recovery longer than
 // 1.5 s even at hundreds of KiB/s. Keep a useful-progress quota, allowing
-// recovery without resetting the independent 90 s / 8 MiB limits.
+// recovery without resetting the independent 120 s / 8 MiB limits.
 constexpr uint32_t kCloseProgressTimeoutMs = 5000;
 constexpr size_t kCloseProgressBytes = 32 * 1024;
 constexpr size_t kCloseMaxDrainBytes = 8 * 1024 * 1024;
@@ -420,6 +421,7 @@ public:
         socket_send_failed_ = false;
         write_budget_active_ = false;
         send_capture_.reset();
+        simple_failure_pending_ = false;
         request_info_ = {};
         request_info_.path_truncated = web_stream_copy_text(
             request_info_.path, sizeof(request_info_.path), req ? req->uri : nullptr, true);
@@ -473,6 +475,7 @@ public:
         socket_send_failed_ = false;
         write_budget_active_ = false;
         send_capture_.reset();
+        simple_failure_pending_ = false;
         request_info_ = {};
         response_storage_.reset();
         args_.clear();
@@ -586,48 +589,56 @@ public:
     }
 
     void send(int status_code, const char *content_type, const char *content) override {
-        if (!req_ || close_requested_ || send_capture_.error().terminal) {
+        if (!req_) return;
+        const char *body = content ? content : "";
+        const size_t length = strlen(body);
+        const uint32_t started = millis();
+        const auto failed = [&] {
+            simple_total_ = req_->method == HTTP_HEAD ? 0 : length;
+            simple_duration_ms_ = millis() - started;
+            simple_failure_pending_ = true;
+            stopClient();
+        };
+        if (close_requested_ || send_capture_.error().terminal) {
+            if (send_capture_.error().terminal) failed();
             return;
         }
         const char *stored_status = nullptr;
         if (!response_storage_.storeStatus(status_line_for_code(status_code), stored_status)) {
-            LOGE("WEB", "response status storage failed: %d", status_code);
-            stopClient();
-            return;
+            send_capture_.failSetup(0, false); failed(); return;
         }
         const esp_err_t status_err = httpd_resp_set_status(req_, stored_status);
-        if (status_err != ESP_OK) {
-            LOGE("WEB", "response status rejected: %d (%s)",
-                 status_code,
-                 esp_err_to_name(status_err));
-            stopClient();
-            return;
-        }
+        if (status_err != ESP_OK) { send_capture_.failSetup(status_err); failed(); return; }
         if (content_type) {
             const char *stored_content_type = nullptr;
             if (!response_storage_.storeContentType(content_type, stored_content_type)) {
-                LOGE("WEB", "response content type storage failed");
-                stopClient();
-                return;
+                send_capture_.failSetup(0, false); failed(); return;
             }
             const esp_err_t type_err = httpd_resp_set_type(req_, stored_content_type);
-            if (type_err != ESP_OK) {
-                LOGE("WEB", "response content type rejected: %s", esp_err_to_name(type_err));
-                stopClient();
-                return;
-            }
+            if (type_err != ESP_OK) { send_capture_.failSetup(type_err); failed(); return; }
         }
         beginWriteBudget();
-        const char *body = content ? content : "";
-        // The SDK does not suppress HEAD bodies. A null buffer with an explicit
-        // length keeps GET's Content-Length while sending headers only.
-        const esp_err_t result = httpd_resp_send(req_, req_->method == HTTP_HEAD ? nullptr : body,
-                                                strlen(body));
+        const uint8_t *wire_body = req_->method == HTTP_HEAD ? nullptr : reinterpret_cast<const uint8_t *>(body);
+        const bool ok = send_capture_.chunk(WebStreamStage::Body, wire_body, length, [&] {
+            // Preserve GET's Content-Length on HEAD, but send no body.
+            return httpd_resp_send(req_, reinterpret_cast<const char *>(wire_body), length);
+        });
         write_budget_active_ = false;
-        if (result != ESP_OK) {
-            LOGW("WEB", "HTTP response failed: status=%d sdk=%d", status_code, result);
-            stopClient();
-        }
+        if (!ok) failed();
+    }
+
+    bool takeSimpleResponseFailure(WebStreamFailure &out) override {
+        if (!simple_failure_pending_) return false;
+        simple_failure_pending_ = false;
+        out = {};
+        out.request = request_info_;
+        out.error = send_capture_.error();
+        out.total = static_cast<uint32_t>(simple_total_);
+        // A simple response is one SDK operation: partial body bytes are in
+        // error.partial_body_bytes, not counted as a fully accepted chunk.
+        out.duration_ms = out.max_write_ms = simple_duration_ms_;
+        out.reason = web_stream_error_reason(out.error);
+        return true;
     }
 
     void sendRejection(int status, const char *message) {
@@ -969,6 +980,9 @@ private:
     bool write_budget_active_ = false;
     httpd_req_t *req_ = nullptr;
     WebHttpSendCapture send_capture_;
+    bool simple_failure_pending_ = false;
+    size_t simple_total_ = 0;
+    uint32_t simple_duration_ms_ = 0;
     WebStreamRequestInfo request_info_;
     WebHttpResponseStorage::Storage response_storage_{};
     std::vector<WebQueryArg> args_{};

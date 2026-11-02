@@ -95,7 +95,7 @@ whole-artifact check without opening a serial port.
    reach the normal final response/cleanup path. No rejected bytes are passed
    to the OTA writer. Response cleanup may still receive and discard the whole
    remaining file: the final transport drain uses a TCP half-close, with limits
-   of 90 seconds, 8 MiB, and at least 32 KiB progress per 5000 ms. The earlier
+   of 120 seconds, 8 MiB, and at least 32 KiB progress per 5000 ms. The earlier
    OTA response pre-drain remains bounded to 32 KiB/1500 ms. Drain cooperatively
    pauses for guarded display wake; final close also waits for safe admission.
    These are per-teardown budgets, not a browser retry or full-request limit. A client outside

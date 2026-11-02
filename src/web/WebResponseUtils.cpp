@@ -143,6 +143,23 @@ bool stream_response_body(WebRequest &server,
 
 namespace WebResponseUtils {
 
+void recordSimpleResponseFailure(WebRequest &server, const StreamContext &context) {
+    WebStreamFailure failure{};
+    if (!server.takeSimpleResponseFailure(failure)) return;
+    failure.first_ms = failure.last_ms = context_now_ms(context);
+    if (context.captureFailureEnvironment)
+        context.captureFailureEnvironment(context.context, failure.environment);
+    const bool log = !context.stream_state || context.stream_state->recordFailure(failure);
+    record_web_stream_result(context, failure.request.path, failure.total, failure.sent, false,
+        failure.reason, failure.max_write_ms, failure.error.socket_errno);
+    if (log) Logger::log(Logger::Warn, "Web",
+        "HTTP response interrupted: path=%s total=%u partial=%lu sdk=%ld errno=%d valid=%u",
+        failure.request.path, static_cast<unsigned>(failure.total),
+        static_cast<unsigned long>(failure.error.partial_body_bytes),
+        static_cast<long>(failure.error.sdk_error), failure.error.socket_errno,
+        failure.error.errno_valid ? 1U : 0U);
+}
+
 void sendNoStoreHeaders(WebRequest &server) {
     send_no_store_headers(server);
 }

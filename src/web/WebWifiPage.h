@@ -19,6 +19,7 @@ struct RootPageData {
 struct SavePageData {
     String hostname;
     uint16_t wait_seconds = 15;
+    uint64_t receipt = 0;
 };
 
 String renderScanStatusJson(bool scan_in_progress);

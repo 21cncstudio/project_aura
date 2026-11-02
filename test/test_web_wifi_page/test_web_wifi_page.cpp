@@ -34,16 +34,19 @@ void test_web_wifi_page_render_root_html_replaces_items_and_scan_flag() {
 }
 
 void test_web_wifi_page_render_save_html_builds_hostname_url_and_wait_time() {
-    const String tpl = "{{HOSTNAME_DASHBOARD_URL}}|{{WAIT_SECONDS}}";
+    const String tpl = "{{HOSTNAME_DASHBOARD_URL}}|{{WAIT_SECONDS}}|{{WIFI_RECEIPT}}";
 
     WebWifiPage::SavePageData data{};
     data.hostname = "aura<&>";
     data.wait_seconds = 12;
+    data.receipt = 0x123456789abcdef0ULL;
 
     String html;
     TEST_ASSERT_TRUE(WebWifiPage::renderSaveHtml(tpl.c_str(), data, html));
     TEST_ASSERT_NOT_EQUAL(String::npos, html.find("http://aura&lt;&amp;&gt;.local/dashboard"));
-    TEST_ASSERT_NOT_EQUAL(String::npos, html.find("|12"));
+    TEST_ASSERT_NOT_EQUAL(String::npos, html.find("|12|123456789abcdef0"));
+    data.receipt=0;
+    TEST_ASSERT_FALSE(WebWifiPage::renderSaveHtml(tpl.c_str(), data, html));
 }
 
 void test_wifi_template_does_not_interpret_tokens_in_ssid() {

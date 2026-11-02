@@ -28,11 +28,12 @@ static std::atomic<uint32_t> cleanup_end{0}, ap_off{0};
 // ---- platform ----
 static const auto g_t0 = std::chrono::steady_clock::now();
 uint32_t millis() { return (uint32_t)std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - g_t0).count(); }
-static std::atomic<bool> hold_home_delay{false}, home_delay_entered{false};
+static std::atomic<bool> hold_home_delay{false}, home_delay_entered{false}, home_delay_left{false};
 void delay(uint32_t ms) {
     if (ms==10 && hold_home_delay.load()) {
         home_delay_entered=true;
         while (hold_home_delay.load()) Sleep(1);
+        home_delay_left=true;
     }
     Sleep(ms);
 }
@@ -50,12 +51,16 @@ struct Mock {
     std::atomic<int> scan_starts{0}, scan_stops{0}, clears{0}, during_scan{0}, in_protected{0}, begins{0}, softaps{0}, off_mode{0}, erase{0}, workers{0};
     std::atomic<int> country_first{1},country_count{1},country_error{ESP_OK},country_reads{0},current_channel{0},fail_channel{-1},clear_error{ESP_OK};
     std::atomic<bool> per_channel_records{false};
+    std::atomic<int> country_policy{WIFI_COUNTRY_POLICY_MANUAL};
+    std::atomic<bool> hold_stop{false}, stop_entered{false};
+    std::vector<int> scan_types;
     std::vector<unsigned> channels;
     std::vector<uint32_t> channel_starts,channel_ends;
     String hostname;
     void reset() {
         std::lock_guard<std::mutex> l(m); ops.clear(); mode = 0; status = WL_DISCONNECTED; in_scan = stop_seen = release = false; stop_ok = true; start_gate = worker_gate = task_fail = low_heap = ota = false;
         country_first=country_count=1;country_error=ESP_OK;country_reads=0;current_channel=0;fail_channel=-1;clear_error=ESP_OK;per_channel_records=false;
+        country_policy=WIFI_COUNTRY_POLICY_MANUAL;hold_stop=false;stop_entered=false;home_delay_left=false;scan_types.clear();
         channels.clear();channel_starts.clear();channel_ends.clear();hold_home_delay=false;home_delay_entered=false;
         auto_ms = -1; start_err = 0; clear_delay = 0; stop_delay = 0; scan_starts = scan_stops = clears = during_scan = in_protected = begins = softaps = off_mode = erase = 0;
     }
@@ -98,14 +103,14 @@ esp_err_t esp_netif_set_hostname(esp_netif_t *, const char *h) { g.hostname = h;
 esp_err_t esp_netif_get_hostname(esp_netif_t *, const char **h) { *h = g.hostname.c_str(); return ESP_OK; }
 
 esp_err_t esp_wifi_get_country(wifi_country_t *country) {
-    driver("get_country");++g.country_reads;country->schan=g.country_first;country->nchan=g.country_count;return g.country_error;
+    driver("get_country");++g.country_reads;country->schan=g.country_first;country->nchan=g.country_count;country->policy=static_cast<wifi_country_policy_t>(g.country_policy.load());return g.country_error;
 }
 esp_err_t esp_wifi_scan_start(const wifi_scan_config_t *config, bool block) {
     driver(block ? "scan_start(block)" : "scan_start(async)");
     if (g.mode.load() == 0) return ESP_ERR_WIFI_NOT_INIT;
     while (g.start_gate.load()) Sleep(1);
     g.current_channel=config->channel;
-    { std::lock_guard<std::mutex> l(g.m);g.channels.push_back(config->channel);g.channel_starts.push_back(millis()); }
+    { std::lock_guard<std::mutex> l(g.m);g.channels.push_back(config->channel);g.scan_types.push_back(config->scan_type);g.channel_starts.push_back(millis()); }
     ++g.scan_starts; g.stop_seen = false; g.release = false; g.in_scan = true;
     const uint32_t t = millis();
     while (!g.release.load() && !g.stop_seen.load()) {
@@ -119,6 +124,8 @@ esp_err_t esp_wifi_scan_start(const wifi_scan_config_t *config, bool block) {
 }
 esp_err_t esp_wifi_scan_stop() {
     driver("scan_stop"); ++g.scan_stops;
+    // Barrier is deliberately inside the SDK stop call.
+    g.stop_entered=true;while(g.hold_stop.load())Sleep(1);
     if (!g.stop_ok.load()) return ESP_FAIL;
     if (g.in_scan.load()) g.stop_seen = true;   // A stop before the driver scan has no effect.
     if (g.stop_delay.load()) { Sleep(g.stop_delay.load()); driver("scan_stop_exit"); }
@@ -152,6 +159,7 @@ void Logger::log(Level level, const char *tag, const char *fmt, ...) {
 std::unique_ptr<WebServerBackend> createDefaultWebServerBackend(uint16_t) { return std::unique_ptr<WebServerBackend>(new WebServerBackend()); }
 void WebHandlersInit(WebHandlerContext *ctx) { web_context = ctx; }
 bool WebHandlersIsOtaBusy() { return g.ota.load(); }
+void WebHandlersCancelWifiSave() { deferred.cancelWifiSave(); }
 void WebHandlersPollDeferred() {
     if (!web_context) return;
     const auto due = deferred.pollDue(millis(), web_context->wifi_prepare_sta);
@@ -549,7 +557,10 @@ static void a38() { S("A38 wake cancels during home airtime without starting ano
     WifiScanSession scan;int count=0;scan.start();const uint32_t t=millis();
     while(!home_delay_entered && millis()-t<1000)Sleep(1);
     expect(home_delay_entered && g.scan_starts==1,"worker is between channel scans");
-    WakePowerGuard::request(millis());scan.serviceWakeQuiescence();hold_home_delay=false;
+    expect(WakePowerGuard::activeOperations()==1,"home dwell retains the worker lease");
+    WakePowerGuard::request(millis());scan.serviceWakeQuiescence();
+    expect(WakePowerGuard::activeOperations()==1,"cancellation retains lease until worker exits home dwell");
+    hold_home_delay=false;
     expect(wait_scan(scan,count)==WifiScanSession::Result::Cancelled,"home-wait cancellation completes");
     expect(g.scan_starts==1 && g.clears==1,"cancelled worker cannot enter the next channel");
     expect(WakePowerGuard::activeOperations()==0,"home cancellation releases the wake lease");
@@ -576,9 +587,49 @@ static void a42() { S("A42 failed result cleanup forbids another channel");
     expect(wait_scan(scan,count)==WifiScanSession::Result::Failed,"cleanup failure fails the scan");
     expect(g.scan_starts==1 && g.clears==1 && WakePowerGuard::activeOperations()==0,"no further SDK list after cleanup failure");finish(); }
 
+static void a43() { S("A43 AUTO discovers passive channels outside the active country range");
+    boot(false,"");g.mode=WIFI_MODE_APSTA;g.auto_ms=0;g.country_count=11;g.country_policy=WIFI_COUNTRY_POLICY_AUTO;g.per_channel_records=true;
+    WifiScanSession scan;int count=0;scan.start();
+    expect(wait_scan(scan,count)==WifiScanSession::Result::Ready,"AUTO scan completes");
+    bool modes=true;{std::lock_guard<std::mutex> l(g.m);
+      modes=g.channels.size()==14 && g.scan_types.size()==14;
+      for(size_t i=0;modes && i<14;++i)modes &= g.channels[i]==i+1 && g.scan_types[i]==(i<11?WIFI_SCAN_TYPE_ACTIVE:WIFI_SCAN_TYPE_PASSIVE);}
+    expect(modes,"world-safe AUTO probes 1-11 and only listens on 12-14");
+    bool ch13=false;for(int i=0;i<count;++i)ch13 |= !strcmp(scan.record(i)->ssid,"channel-13");
+    expect(ch13 && count==15,"channel 13 AP is included in aggregated results");
+    expect(g.clears==14 && WakePowerGuard::activeOperations()==0,"all passive lists and the worker lease are released");scan.releaseResults();finish(); }
+static void a44() { S("A44 final lease release waits for stop during home dwell");
+    boot(false,"");g.mode=WIFI_MODE_APSTA;g.auto_ms=0;g.country_count=6;hold_home_delay=true;
+    WifiScanSession scan;int count=0;scan.start();uint32_t t=millis();
+    while(!home_delay_entered && millis()-t<1000)Sleep(1);
+    expect(home_delay_entered,"worker is past cleanup and inside home dwell");
+    g.hold_stop=true;WakePowerGuard::request(millis());
+    std::thread owner([&]{scan.serviceWakeQuiescence();});t=millis();
+    while(!g.stop_entered && millis()-t<1000)Sleep(1);
+    expect(g.stop_entered,"network owner holds worker mutex inside stop");
+    hold_home_delay=false;t=millis();while(!home_delay_left && millis()-t<1000)Sleep(1);
+    Sleep(250);
+    expect(home_delay_left && WakePowerGuard::activeOperations()==1,"final release cannot bypass the stop mutex after home dwell");
+    g.hold_stop=false;owner.join();
+    expect(wait_scan(scan,count)==WifiScanSession::Result::Cancelled,"worker completes after stop unlocks");
+    expect(g.scan_starts==1 && WakePowerGuard::activeOperations()==0,"no next channel or leaked lease");WakePowerGuard::cancel();finish(); }
+
+static void a45() { S("A45 AUTO lower passive range returns to active dwell");
+    boot(false,"");g.mode=WIFI_MODE_APSTA;g.auto_ms=0;g.country_first=3;g.country_count=6;g.country_policy=WIFI_COUNTRY_POLICY_AUTO;
+    WifiScanSession scan;int count=0;scan.start();expect(wait_scan(scan,count)==WifiScanSession::Result::Ready,"AUTO non-default range completes");
+    bool correct=true;{std::lock_guard<std::mutex> l(g.m);correct=g.channels.size()==14;
+      for(size_t i=0;correct && i<14;++i)correct &= g.scan_types[i]==((i>=2 && i<8)?WIFI_SCAN_TYPE_ACTIVE:WIFI_SCAN_TYPE_PASSIVE);}
+    expect(correct,"both sides of configured range are passive; configured range stays active");scan.releaseResults();finish(); }
+static void a46() { S("A46 MANUAL channel 13 remains active and does not scan 14");
+    boot(false,"");g.mode=WIFI_MODE_APSTA;g.auto_ms=0;g.country_count=13;
+    WifiScanSession scan;int count=0;scan.start();expect(wait_scan(scan,count)==WifiScanSession::Result::Ready,"MANUAL 1-13 completes");
+    bool correct=true;{std::lock_guard<std::mutex> l(g.m);correct=g.channels.size()==13 && g.channels.back()==13;
+      for(auto mode:g.scan_types)correct &= mode==WIFI_SCAN_TYPE_ACTIVE;}
+    expect(correct,"MANUAL probes only its configured 13 channels");scan.releaseResults();finish(); }
+
 int main(int argc, char **argv) {
     timeBeginPeriod(1);
-    void (*all[])() = {a1,a2,a3,a4,a5,a6,a7,a8,a9,a10,a11,a12,a13,a14,a15,a16,a17,a18,a19,a20,a21,a22,a23,a24,a25,a26,a27,a28,a29,a30,a31,a32,a33,a34,a35,a36,a37,a38,a39,a40,a41,a42};
+    void (*all[])() = {a1,a2,a3,a4,a5,a6,a7,a8,a9,a10,a11,a12,a13,a14,a15,a16,a17,a18,a19,a20,a21,a22,a23,a24,a25,a26,a27,a28,a29,a30,a31,a32,a33,a34,a35,a36,a37,a38,a39,a40,a41,a42,a43,a44,a45,a46};
     const int n = sizeof(all) / sizeof(all[0]);
     for (int i = 0; i < n; ++i) { char b[8]; snprintf(b, sizeof(b), "a%d", i + 1); if (argc < 2 || !strcmp(argv[1], b)) all[i](); }
     printf("\npassed=%d failed=%d\n", g_pass, g_fail); fflush(stdout);

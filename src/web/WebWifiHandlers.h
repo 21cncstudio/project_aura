@@ -16,8 +16,11 @@ namespace WebWifiHandlers {
 
 void handleSave(WebHandlerContext &context,
                 bool ota_busy,
-                uint32_t deferred_action_delay_ms,
+                uint64_t receipt,
                 WebDeferredActionsState &deferred_actions,
                 const WebResponseUtils::StreamContext &stream_context);
+
+void handleConfirm(WebHandlerContext &context, bool ota_busy, uint32_t delay_ms,
+                   WebDeferredActionsState &deferred_actions);
 
 }  // namespace WebWifiHandlers

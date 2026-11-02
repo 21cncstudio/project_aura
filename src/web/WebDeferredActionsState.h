@@ -25,6 +25,12 @@ public:
     WebDeferredActionsState();
 
     void reset();
+    // A successful socket write is not proof that the setup page arrived.
+    // The browser returns this one-use receipt only after its load event.
+    void beginWifiSave(uint64_t receipt);
+    void armWifiSave(uint64_t receipt, uint32_t now_ms);
+    bool confirmWifiSave(uint64_t receipt, uint32_t now_ms, uint32_t delay_ms);
+    void cancelWifiSave();
     // Called after the HTTP response. The grace period starts only after
     // the network owner confirms scan completion, never after a stop request.
     void scheduleWifiStartSta(uint32_t delay_ms);
@@ -35,6 +41,10 @@ public:
 
 private:
     struct State {
+        uint64_t wifi_receipt = 0;
+        uint32_t wifi_receipt_due_ms = 0;
+        bool wifi_receipt_armed = false;
+        bool wifi_receipt_confirmed = false;
         bool wifi_start_sta = false;
         bool mqtt_sync = false;
         uint32_t wifi_start_sta_due_ms = 0;

@@ -26,6 +26,7 @@ std::atomic<long> g_lab_alloc_failed{0};
 std::atomic<int> g_lab_server_sndbuf{0};
 std::atomic<int> g_lab_stall_fd{-1};            // emulate a peer that stopped ACKing
 std::atomic<int> g_lab_fail_next_send{0};
+std::atomic<int> g_lab_fail_after_bytes{-1};
 std::atomic<bool> g_lab_fail_scan_task{false};
 std::atomic<bool> g_lab_hold_scan_task{false}, g_lab_scan_task_waiting{false};
 std::atomic<int> g_lab_half_closed_fd{-1};
@@ -103,6 +104,9 @@ int sh_close(int fd) {
 }
 int sh_send(int fd, const void *buf, size_t n, int flags) {
     lab_check_guard_io(fd);
+    const int left=g_lab_fail_after_bytes.load();
+    if(left==0){g_lab_fail_after_bytes=-1;errno=EIO;return -1;}
+    if(left>0 && n>static_cast<size_t>(left))n=left;
     if (g_lab_fail_next_send.exchange(0)) { errno = EIO; return -1; }
     if (g_lab_stall_fd.load() == fd) {
         // Peer gone silently: on lwIP send() returns EAGAIN after SO_SNDTIMEO (30 s).
@@ -118,6 +122,7 @@ int sh_send(int fd, const void *buf, size_t n, int flags) {
     if (cap > 0 && n > static_cast<size_t>(cap)) n = static_cast<size_t>(cap);
     const int r = ::send(static_cast<SOCKET>(fd), static_cast<const char *>(buf), static_cast<int>(n), flags);
     if (r == SOCKET_ERROR) { set_errno_from_wsa(); return -1; }
+    if(left>0 && r>0)g_lab_fail_after_bytes-=r;
     return r;
 }
 int sh_recv(int fd, void *buf, size_t n, int flags) {

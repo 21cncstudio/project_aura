@@ -18,6 +18,7 @@ void registerRoutes(WebServerBackend &server) {
     server.onGet("/diag", diag_handle_root);
     server.onGet("/debug/sfa40", sfa40_debug_handle_root);
     server.onPost("/save", wifi_handle_save);
+    server.onPost("/wifi/confirm", wifi_handle_confirm);
     server.onGet("/mqtt", mqtt_handle_root);
     server.onPost("/mqtt", mqtt_handle_save);
     server.onGet("/theme", theme_handle_root);
