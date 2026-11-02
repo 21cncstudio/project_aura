@@ -1,0 +1,18 @@
+Проведи независимое read-only ревью AP/HTTP после аппаратной проверки Mac + Android.
+
+Рабочая общая прошивка: D:/21cncstudio/project_aura_aq/firmware-main, main. Сначала прочитай AGENTS.md, CURRENT_STATE.md и docs/HTTP_AP_ANDROID_MAC_20261102.md. Код кандидата основан на d10810a4; коммит реализации ec484f81dabaa6d85a3c83a6fab9fc23d83b78ca; отдельный документационный коммит надо определить по git log. Не меняй дерево, устройства/COM, Wi-Fi, Hub, commit/push/релизы. Host-проверки запускай в отдельной копии/каталоге; частные backup/config не выводи и не публикуй.
+
+Проверить три реализации и регрессии: AP-only CaptiveDnsReply/Server и NetworkManager lifecycle/admission; grouped WifiScanSession с country-каналами и 120 мс дома; HTTP progress drain 32 КиБ/5000 мс при 90 с/8 МиБ, HEAD и redirect body. Проверь отмену между SDK starts, ошибки cleanup, wake/lease/единственное закрытие, владельца DNS и границы пакета. Не считай host-shim доказательством lwIP/radio.
+
+Заявленные локальные результаты: native 1022/1022 (111 наборов), SDK HTTP 162/162 (34 группы), real NetworkManager 224/224 (42), DNS I/O 65/65, TCP5. DNS 3 и scan 4 мутации, прежние guard 4, старое окно падает на S34. Проверь, что fail действительно целевой, а не build error/timeout. Убедись, что описанные проверки являются постоянными тестами.
+
+Ignored evidence: build/http-ap-acceptance-20261102/. Финальные BIN artifacts-radio: 4_3 0ea63f716d5525757ac799dafdd456577341bfa52e3ec98fc8ad726aafb91d70; 7_dual_i2c f7fd468ab1f69b205f29ecda757a79ea3bba5c999cef6438f77b435701bc541f. source-final-hashes.json содержит 741 файл; production совпадает с source-radio-hashes.json. Последние actual builds и comment-only rebuilds сохранены; новые коммиты сами по себе не означают новые BIN.
+
+Особое внимание к НЕзакрытым случаям, без автоматического объявления их одной причиной:
+1. Android 4,3 radio-save-4: настройки применились, STA подтверждён, Chrome /save timed out. Сопоставь порядок WebDeferredActions, окончания scan, отправки HTML, grace и выключения AP. Сформулируй доказанный дефект либо минимальный опыт, который отличит TCP-доставку от клиентского маршрута. Не предлагай просто увеличивать delay без проверки.
+2. Android 4,3: partial /api/diag, длинные таймауты вне scan, неоднозначные UI dumps. Отдели прерванный preflight, ненаблюдённый start, истёкший deadline и реальный отказ страницы. Screenshot после незавершённого UI-сценария показывает полный список. OFF/wake этой платы с Android НЕ покрыты. Не удаляй неудачные попытки из знаменателя.
+3. Скорость: AP и STA, одинаковые короткие native-buffer прогоны, полный файл, Nagle/экран/буфер, потери pcap. Платы рядом; владелец видел разницу раньше. Это НЕ доказывает аппаратную причину. Через роутер меняются канал и сетевой путь. Curl ранний ответ прекращает тело — его reported speed_upload не является полным goodput.
+4. Android fresh join: NetworkStack private-IP detection пропускает HTTP captive probe. Первый успешный CNA на старом состоянии не даёт гарантии свежего auto-popup. Проверь AOSP/официальный CAPPORT; HTTP HTML option114 не равен HTTPS CAPPORT API. Обычная настройка работает после Connect only this time, но это не универсальная автоконфигурация.
+5. Подтверди возврат 7 на исходный Hub по полному readback и финальному runtime, исходные configs 4,3, cleanup телефона/Mac. Не приписывай неизменность flash после загрузки: проверка была до runtime-записей.
+
+Нужен вывод: реальные дефекты кода с file:line, воспроизводимые доказательства/негативные контроли, отдельно ограничения и неизвестное; точный следующий минимальный эксперимент. Весь AP/HTTP считать принятым нельзя. Причина Chris/#158 не установлена. Релиз/прошивку не выполняй.
