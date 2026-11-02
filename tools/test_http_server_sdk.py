@@ -18,7 +18,7 @@ def main():
     parser.add_argument('--idf-path', type=Path, required=True)
     parser.add_argument('--compiler-dir', type=Path, default=Path('C:/msys64/mingw64/bin'))
     parser.add_argument('--output-dir', type=Path)
-    parser.add_argument('--case', action='append', dest='cases', choices=['s'+str(i) for i in range(1,34)])
+    parser.add_argument('--case', action='append', dest='cases', choices=['s'+str(i) for i in range(1,35)])
     args = parser.parse_args()
     root = Path(__file__).resolve().parents[1]
     lab = root / 'test/support/http_server'
@@ -76,7 +76,7 @@ def main():
     exe = out / 'probe.exe'
     run([args.compiler_dir / 'g++.exe', *objects, '-lws2_32', '-lwinmm', '-pthread', '-o', exe])
     cases = []
-    for case in args.cases or ['s' + str(i) for i in range(1, 34)]:
+    for case in args.cases or ['s' + str(i) for i in range(1, 35)]:
         result = subprocess.run([str(exe), case], cwd=out, env=env, capture_output=True, text=True, timeout=120)
         (out / (case + '.log')).write_text(result.stdout + result.stderr, encoding='utf-8')
         print(result.stdout, end='')

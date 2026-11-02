@@ -75,6 +75,7 @@ static void check_scan_guard() {
 int LabWiFi::scanNetworks(bool) { return WIFI_SCAN_FAILED; }
 int LabWiFi::scanComplete() { return WIFI_SCAN_FAILED; }
 void LabWiFi::scanDelete() {}
+esp_err_t esp_wifi_get_country(wifi_country_t *country) { check_scan_guard(); *country = {}; return ESP_OK; }
 esp_err_t esp_wifi_scan_start(const wifi_scan_config_t *, bool block) {
     check_scan_guard();
     g_scan_blocking = block; ++g_scan_starts;
@@ -423,8 +424,16 @@ static void s1_routes() {
     Reply icon = one_shot("GET", "/favicon.ico?x=1");
     expect(icon.status == 204 && body_of(icon).empty() && header_value(icon.headers, "Location").empty(),
            "favicon never redirects to the HTML page");
+    for (const char *path : {"/generate_204", "/hotspot-detect.html", "/connecttest.txt"}) {
+        Reply captive = one_shot("GET", path);
+        expect(captive.status == 302 && !body_of(captive).empty() &&
+               header_value(captive.headers, "Location") == "http://192.168.4.1/",
+               "captive GET has an absolute redirect and a nonempty body");
+    }
     Reply head = one_shot("HEAD", "/unknown");
-    expect(head.status == 302 && head.raw_body.empty(), "unknown HEAD has no response body");
+    expect(head.status == 302 && head.raw_body.empty() &&
+           header_value(head.headers, "Content-Length") == "26",
+           "unknown HEAD has no response body and retains GET length");
     for (const char *path : {"/", "/wifi"}) {
         Reply rejected = one_shot("HEAD", path);
         expect(rejected.status == 405 && rejected.raw_body.empty() &&
@@ -967,8 +976,8 @@ static void s17_unfinished_body() {
     expect(rejected.status == 413 && rejected.complete, "silent sender receives rejection without sending the declared body");
     // Keep its read side open: the server must bound its own cleanup, not wait
     // for this peer or a huge Content-Length before servicing the next client.
-    Reply next = one_shot("GET", "/wifi?scan_status=1", 5000);
-    expect(next.status == 404 && millis()-start < 3500, "silent sender cleanup has an absolute deadline");
+    Reply next = one_shot("GET", "/wifi?scan_status=1", 7000);
+    expect(next.status == 404 && millis()-start < 6500, "silent sender cleanup has an absolute deadline");
     ::closesocket(s);
     s=cl_connect();
     cl_send(s, "POST /test/echo HTTP/1.1\r\nHost: localhost\r\nContent-Length: 999999999\r\n\r\nF");
@@ -976,9 +985,9 @@ static void s17_unfinished_body() {
     std::thread tx([&] { while(!stop) { if (::send(s,"F",1,0)<0) break; Sleep(10); } });
     const uint32_t trickle_start=millis();
     Reply trickle=cl_read(s,3000);
-    Reply following=one_shot("GET","/dashboard",4000);
+    Reply following=one_shot("GET","/dashboard",7000);
     stop=true; tx.join(); ::closesocket(s);
-    expect(trickle.status==413 && trickle.complete && following.status==200 && millis()-trickle_start<3500,
+    expect(trickle.status==413 && trickle.complete && following.status==200 && millis()-trickle_start<6500,
            "continuous trickle cannot extend the progress deadline");
 }
 
@@ -1144,7 +1153,7 @@ static void s23_wake_during_http_drain() {
     if(ready) {
         Sleep(100); WakePowerGuard::beginSettle(millis(),100); Sleep(110);
         expect(WakePowerGuard::beginRenderWait(millis()),"wake remains owner-controlled through settle");
-        Sleep(1700); // Longer than the drain's 1500 ms progress timeout.
+        Sleep(5200); // Longer than the drain's 5000 ms progress timeout.
         expect(WakePowerGuard::activeOperations()==0 && g_lab_guard_io==0,
                "no socket send/recv/shutdown/close in Switching, Settle or RenderWait");
         expect(WakePowerGuard::completeRenderWait(),"only the owner reopens admission");
@@ -1431,12 +1440,30 @@ static void s33_close_diagnostic() {
         cl_send(s,"POST /test/echo HTTP/1.1\r\nHost: localhost\r\nContent-Length: 9999999\r\n\r\nF");
         Reply r=cl_read(s,2000);
         if (finish) ::shutdown(s,SD_SEND);
-        Reply next=one_shot("GET","/dashboard",4000);
+        Reply next=one_shot("GET","/dashboard",7000);
         expect(r.status==413 && r.complete && next.status==200, "rejection and next client survive cleanup");
         expect(logged(finish ? "reason=peer_fin" : "reason=progress_timeout"),
                "log distinguishes a stalled sender from orderly peer completion");
         ::closesocket(s);
     }
+}
+
+static void s34_radio_retransmission_pauses() {
+    printf("\n== S34 sequential sender survives repeated radio recovery pauses ==\n");
+    set_mode(false);SOCKET s=cl_connect();int size=8192;
+    setsockopt(s,SOL_SOCKET,SO_SNDBUF,reinterpret_cast<const char*>(&size),sizeof(size));
+    cl_send(s,"POST /test/echo HTTP/1.1\r\nHost: localhost\r\nContent-Length: 262144\r\n\r\n");
+    const uint32_t start=millis();size_t sent=0;std::string block(4096,'F');
+    for(int burst=0;burst<4;++burst) {
+        if(burst)Sleep(2200);
+        const size_t end=(burst+1)*65536;
+        while(sent<end) {int n=::send(s,block.data(),int(std::min(block.size(),end-sent)),0);if(n<=0)break;sent+=n;}
+        if(sent<end)break;
+    }
+    Reply r=cl_read(s,3000);::closesocket(s);
+    expect(sent==262144 && millis()-start>=6500 && r.status==413 && r.complete,
+           "full rejection survives repeated 2.2 s recovery pauses before the client reads it");
+    expect(one_shot("GET","/dashboard").status==200,"next client works after paced rejection");
 }
 
 int main(int argc, char **argv) {
@@ -1502,6 +1529,7 @@ int main(int argc, char **argv) {
     if (want("s31")) s31_scan_stop_serializes_release();
     if (want("s32")) s32_http_reacquires_between_wakes();
     if (want("s33")) s33_close_diagnostic();
+    if (want("s34")) s34_radio_retransmission_pauses();
     printf("\nunexpected=%d\n", g_fail);
     fflush(stdout);
     g_network_thread_run = false;

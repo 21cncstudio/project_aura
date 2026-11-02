@@ -11,7 +11,7 @@ Run from the firmware checkout (Windows, MinGW):
 python -X utf8 tools/test_http_server_sdk.py --idf-path D:/21cncstudio/project_aura_aq/tools/idf61-sdk/esp-idf
 ```
 
-All 33 groups run by default. Use repeated `--case` arguments to select groups.
+All 34 groups run by default. Use repeated `--case` arguments to select groups.
 Each group runs in its own process with a 120-second timeout; build commands,
 logs, source hashes and assertion counts are saved under `build/`.
 
@@ -57,6 +57,8 @@ that hits the progress timeout. S20 and S22 also check the diagnostic reason for
 the total-time and byte limits.
 
 These tests do not remove the 90-second / 8-MiB drain bounds or the 32-KiB per
-1500-ms progress requirement. Slow uploads and sender pauses can still lose a
+5000-ms progress requirement. Slow uploads and sender pauses can still lose a
 rejection; browser retries can occupy the server for more than one budget.
 Hardware qualification of the exact candidate remains separate.
+
+S34 sends four 64-KiB bursts with repeated 2.2-second pauses, reading the response only after the complete request. It protects delivery across TCP recovery pauses; the old 1500-ms progress window fails this scenario. S17 still bounds stalled/trickling peers, and S23 pauses wake for longer than the new window. These are host timings, not a guarantee for arbitrary radio loss.

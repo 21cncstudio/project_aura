@@ -802,6 +802,18 @@ void AuraNetworkManager::serviceWakeQuiescence() {
 }
 
 void AuraNetworkManager::poll() {
+    // The network owner already holds admission. No DNS I/O runs in the
+    // protected display phases or on an independent UDP callback task.
+    if (state() == WIFI_STATE_AP_CONFIG) {
+        const uint32_t now = millis();
+        if (!captive_dns_.running() && now - captive_dns_last_attempt_ms_ >= 5000) {
+            captive_dns_last_attempt_ms_ = now;
+            captive_dns_.start(static_cast<uint32_t>(WiFi.softAPIP()));
+        }
+        captive_dns_.poll();
+    } else {
+        captive_dns_.stop();
+    }
     const bool ota_busy = WebHandlersIsOtaBusy();
     const uint32_t hostname_now_ms = millis();
     if (hostname_check_pending_.exchange(false, std::memory_order_acq_rel) ||
@@ -1240,6 +1252,10 @@ void AuraNetworkManager::startAp() {
     observeStaHostname();
     startServerIfNeeded();
     IPAddress ip = WiFi.softAPIP();
+    captive_dns_last_attempt_ms_ = millis();
+    if (!captive_dns_.start(static_cast<uint32_t>(ip))) {
+        LOGW("WiFi", "captive DNS unavailable; retrying while AP is active");
+    }
     startScan();
     setWifiState(WIFI_STATE_AP_CONFIG);
     wifi_retry_at_ms_ = 0;
@@ -1252,6 +1268,7 @@ void AuraNetworkManager::startAp() {
 }
 
 void AuraNetworkManager::stopAp() {
+    captive_dns_.stop();
     if (state() == WIFI_STATE_AP_CONFIG) {
         WiFi.enableAP(false);
     }

@@ -13,7 +13,7 @@ typedef struct { uint8_t ssid[33]; uint8_t ssid_len; uint8_t bssid[6]; uint8_t r
 typedef struct { wifi_event_sta_disconnected_t wifi_sta_disconnected; } arduino_event_info_t;
 typedef int wifi_event_id_t;
 typedef enum { WPA2_AUTH_PEAP, WPA2_AUTH_TTLS, WPA2_AUTH_TLS } wpa2_auth_method_t;
-struct IPAddress { String toString() const { return String("192.168.4.1"); } };
+struct IPAddress { explicit operator uint32_t() const { return 0x0104a8c0; } String toString() const { return String("192.168.4.1"); } };
 struct MockSta { bool started(); void *netif(); };
 struct MockWiFi {
     MockSta STA;

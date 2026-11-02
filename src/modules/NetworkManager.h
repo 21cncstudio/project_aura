@@ -11,6 +11,7 @@
 
 #include <Arduino.h>
 #include "core/NetworkHostname.h"
+#include "core/CaptiveDnsServer.h"
 #include "core/WifiScanSession.h"
 #include "core/WifiScanTransition.h"
 #include "modules/StorageManager.h"
@@ -147,6 +148,8 @@ private:
     String ap_ssid_;
     String wifi_scan_options_;
     WifiScanSession wifi_scan_session_;
+    CaptiveDnsServer captive_dns_;
+    uint32_t captive_dns_last_attempt_ms_ = 0;
     bool wifi_scan_restart_pending_ = false;
     WifiScanTransition wifi_scan_transition_;
     void buildScanOptions(int count);

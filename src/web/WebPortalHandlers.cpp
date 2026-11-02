@@ -161,7 +161,8 @@ void handleWifiNotFound(WebHandlerContext &context) {
         const String portal_url = WebWifiPage::captivePortalRedirectUrl(connectivity.ap_ip);
         WebResponseUtils::sendNoStoreHeaders(*context.server);
         context.server->sendHeader("Location", portal_url, true);
-        context.server->send(302, "text/plain", "");
+        // Captive clients (including iOS) need a response body as well as Location.
+        context.server->send(302, "text/plain", "Open the Wi-Fi setup page.");
         return;
     }
 

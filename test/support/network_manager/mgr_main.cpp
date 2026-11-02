@@ -28,7 +28,14 @@ static std::atomic<uint32_t> cleanup_end{0}, ap_off{0};
 // ---- platform ----
 static const auto g_t0 = std::chrono::steady_clock::now();
 uint32_t millis() { return (uint32_t)std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - g_t0).count(); }
-void delay(uint32_t ms) { Sleep(ms); }
+static std::atomic<bool> hold_home_delay{false}, home_delay_entered{false};
+void delay(uint32_t ms) {
+    if (ms==10 && hold_home_delay.load()) {
+        home_delay_entered=true;
+        while (hold_home_delay.load()) Sleep(1);
+    }
+    Sleep(ms);
+}
 bool boot_board_cold_start = false;
 MockWiFi WiFi;
 MockMdns MDNS;
@@ -41,9 +48,15 @@ struct Mock {
     std::atomic<bool> in_scan{false}, stop_seen{false}, release{false}, stop_ok{true}, start_gate{false}, worker_gate{false}, task_fail{false}, low_heap{false}, ota{false};
     std::atomic<int> auto_ms{-1}, start_err{0}, clear_delay{0}, stop_delay{0};
     std::atomic<int> scan_starts{0}, scan_stops{0}, clears{0}, during_scan{0}, in_protected{0}, begins{0}, softaps{0}, off_mode{0}, erase{0}, workers{0};
+    std::atomic<int> country_first{1},country_count{1},country_error{ESP_OK},country_reads{0},current_channel{0},fail_channel{-1},clear_error{ESP_OK};
+    std::atomic<bool> per_channel_records{false};
+    std::vector<unsigned> channels;
+    std::vector<uint32_t> channel_starts,channel_ends;
     String hostname;
     void reset() {
         std::lock_guard<std::mutex> l(m); ops.clear(); mode = 0; status = WL_DISCONNECTED; in_scan = stop_seen = release = false; stop_ok = true; start_gate = worker_gate = task_fail = low_heap = ota = false;
+        country_first=country_count=1;country_error=ESP_OK;country_reads=0;current_channel=0;fail_channel=-1;clear_error=ESP_OK;per_channel_records=false;
+        channels.clear();channel_starts.clear();channel_ends.clear();hold_home_delay=false;home_delay_entered=false;
         auto_ms = -1; start_err = 0; clear_delay = 0; stop_delay = 0; scan_starts = scan_stops = clears = during_scan = in_protected = begins = softaps = off_mode = erase = 0;
     }
     void op(const std::string &s) { std::lock_guard<std::mutex> l(m); ops.push_back(std::to_string(millis()) + " " + s); }
@@ -84,10 +97,15 @@ uint32_t heap_caps_get_largest_free_block(uint32_t) { return g.low_heap.load() ?
 esp_err_t esp_netif_set_hostname(esp_netif_t *, const char *h) { g.hostname = h; return ESP_OK; }
 esp_err_t esp_netif_get_hostname(esp_netif_t *, const char **h) { *h = g.hostname.c_str(); return ESP_OK; }
 
-esp_err_t esp_wifi_scan_start(const wifi_scan_config_t *, bool block) {
+esp_err_t esp_wifi_get_country(wifi_country_t *country) {
+    driver("get_country");++g.country_reads;country->schan=g.country_first;country->nchan=g.country_count;return g.country_error;
+}
+esp_err_t esp_wifi_scan_start(const wifi_scan_config_t *config, bool block) {
     driver(block ? "scan_start(block)" : "scan_start(async)");
     if (g.mode.load() == 0) return ESP_ERR_WIFI_NOT_INIT;
     while (g.start_gate.load()) Sleep(1);
+    g.current_channel=config->channel;
+    { std::lock_guard<std::mutex> l(g.m);g.channels.push_back(config->channel);g.channel_starts.push_back(millis()); }
     ++g.scan_starts; g.stop_seen = false; g.release = false; g.in_scan = true;
     const uint32_t t = millis();
     while (!g.release.load() && !g.stop_seen.load()) {
@@ -96,7 +114,8 @@ esp_err_t esp_wifi_scan_start(const wifi_scan_config_t *, bool block) {
         Sleep(1);
     }
     g.in_scan = false; g.op("scan_end");
-    return g.start_err.load();
+    { std::lock_guard<std::mutex> l(g.m);g.channel_ends.push_back(millis()); }
+    return config->channel==g.fail_channel ? ESP_FAIL : g.start_err.load();
 }
 esp_err_t esp_wifi_scan_stop() {
     driver("scan_stop"); ++g.scan_stops;
@@ -105,12 +124,17 @@ esp_err_t esp_wifi_scan_stop() {
     if (g.stop_delay.load()) { Sleep(g.stop_delay.load()); driver("scan_stop_exit"); }
     return ESP_OK;
 }
-esp_err_t esp_wifi_clear_ap_list() { driver("clear_ap_list"); ++g.clears; if (g.clear_delay.load()) { Sleep(g.clear_delay.load()); driver("clear_ap_list_exit"); } cleanup_end = millis(); return ESP_OK; }
+esp_err_t esp_wifi_clear_ap_list() { driver("clear_ap_list"); ++g.clears; if (g.clear_delay.load()) { Sleep(g.clear_delay.load()); driver("clear_ap_list_exit"); } cleanup_end = millis(); return g.clear_error; }
 esp_err_t esp_wifi_scan_get_ap_num(uint16_t *n) { driver("ap_num"); *n = 2; return ESP_OK; }
 static std::atomic<int> g_read{0};
 esp_err_t esp_wifi_scan_get_ap_record(wifi_ap_record_t *r) {
     driver("ap_rec"); const int i = g_read++ % 2;
-    snprintf((char *)r->ssid, sizeof(r->ssid), "net%d", i); r->rssi = (int8_t)(-40 - i); r->authmode = 3; return ESP_OK;
+    if (g.per_channel_records) {
+        if (i==0) strcpy((char*)r->ssid,"shared");
+        else snprintf((char*)r->ssid,sizeof(r->ssid),"channel-%d",g.current_channel.load());
+        r->rssi=-80+g.current_channel.load();
+    } else { snprintf((char *)r->ssid, sizeof(r->ssid), "net%d", i); r->rssi = (int8_t)(-40 - i); }
+    r->authmode = 3; return ESP_OK;
 }
 extern "C" BaseType_t xTaskCreatePinnedToCore(TaskFunction_t fn, const char *, uint32_t, void *arg, UBaseType_t, TaskHandle_t *, BaseType_t) {
     if (g.task_fail.load()) return pdFAIL;
@@ -199,6 +223,7 @@ static bool threaded_wake(uint32_t max_ms, uint32_t *waited) {
     return ok;
 }
 static void boot(bool enabled, const char *ssid) {
+    LabDns::reset();
     deferred.reset(); web_context = nullptr; cleanup_end = 0; ap_off = 0;
     g.reset(); g_warns.clear(); WakePowerGuard::resetForTest();
     st = new StorageManager(); st->stored.enabled = enabled; st->stored.ssid = ssid; st->stored.pass = ssid[0] ? "pw" : "";
@@ -467,9 +492,93 @@ static void a33() { S("A33 no active scan still preserves save grace");
     expect(ap_off.load()-start >= 200, "no-scan save has full grace too");
     finish(); }
 
+static void a34() { S("A34 captive DNS is scoped to AP and closes before STA");
+    boot(true, "");expect(LabDns::live==1,"AP starts DNS");
+    g.release=true;until([]{return !nm->scanInProgress();},500);run_for(20);
+    expect(LabDns::polls>0,"AP polls DNS");
+    command([]{nm->applySavedWiFiSettings(saved("home"));nm->connectSta();});
+    until([]{return g.begins>0;},1000);
+    expect(LabDns::live==0,"DNS closed on STA transition");
+    const int polls=LabDns::polls;run_for(50);expect(LabDns::polls==polls,"STA does not poll DNS");finish(); }
+static void a35() { S("A35 DNS follows OFF and wake admission");
+    boot(true, "");g.release=true;until([]{return !nm->scanInProgress();},500);
+    WakePowerGuard::request(millis());const int polls=LabDns::polls;
+    const uint32_t start=millis();while(!WakePowerGuard::evaluateSwitch(millis(),100,500).ready && millis()-start<700)tick();
+    expect(WakePowerGuard::beginSwitch(),"DNS does not hold an independent wake lease");run_for(50);
+    expect(LabDns::polls==polls,"DNS polling stops during wake protection");WakePowerGuard::cancel();
+    command([]{nm->setEnabled(false);});until([]{return nm->state()==AuraNetworkManager::WIFI_STATE_OFF;},1000);
+    expect(LabDns::live==0,"OFF closes DNS");finish(); }
+
+static void a36() { S("A36 failed DNS start retries without spinning");
+    boot(false, "");LabDns::fail_start=true;
+    command([]{nm->setEnabled(true);});
+    expect(until([]{return LabDns::starts>0;},1000),"AP attempts DNS start");
+    const int starts=LabDns::starts;g.release=true;run_for(100);
+    expect(LabDns::live==0 && LabDns::starts==starts,"failed start is rate limited");
+    LabDns::fail_start=false;
+    expect(until([]{return LabDns::live==1;},5500),"later poll recovers DNS");
+    expect(LabDns::starts==starts+1,"exactly one recovery attempt");finish(); }
+
+// The ownership cases above use a one-channel regulatory fixture. These cases
+// exercise the real worker across a full multi-channel scan without a manager
+// restart racing the assertions. Driver results remain deterministic shims.
+static WifiScanSession::Result wait_scan(WifiScanSession &scan,int &count) {
+    const uint32_t start=millis();
+    do { auto r=scan.poll(count);if(r!=WifiScanSession::Result::Pending)return r;Sleep(1); }
+    while(millis()-start<2500);
+    scan.cancel();return WifiScanSession::Result::Pending;
+}
+static void a37() { S("A37 SoftAP scan preserves home airtime and regulatory channels");
+    boot(false,"");g.mode=WIFI_MODE_APSTA;g.auto_ms=0;g.country_first=3;g.country_count=6;g.per_channel_records=true;
+    WifiScanSession scan;int count=0;scan.start();
+    expect(wait_scan(scan,count)==WifiScanSession::Result::Ready,"multi-channel scan completes");
+    bool order=false,gaps=true;
+    { std::lock_guard<std::mutex> l(g.m);order=g.channels==std::vector<unsigned>({3,4,5,6,7,8});
+      for(size_t i=1;i<g.channel_starts.size();++i)gaps &= g.channel_starts[i]-g.channel_ends[i-1]>=120; }
+    expect(order,"each allowed channel scanned once, with no out-of-country channels");
+    expect(gaps && g.scan_starts==6,"at least 120 ms home airtime between channels");
+    expect(g.clears==6,"every channel's SDK list is released");
+    bool strongest=false,first=false,last=false;
+    for(int i=0;i<count;++i){auto *r=scan.record(i);if(!r)continue;
+      if(!strcmp(r->ssid,"shared"))strongest=r->rssi==-72;
+      first |= !strcmp(r->ssid,"channel-3");last |= !strcmp(r->ssid,"channel-8");}
+    expect(count==7 && strongest && first && last,"results aggregate all channels and deduplicate by strongest RSSI");
+    expect(WakePowerGuard::activeOperations()==0,"completed scan releases its lease");scan.releaseResults();finish(); }
+static void a38() { S("A38 wake cancels during home airtime without starting another channel");
+    boot(false,"");g.mode=WIFI_MODE_APSTA;g.auto_ms=0;g.country_count=6;hold_home_delay=true;
+    WifiScanSession scan;int count=0;scan.start();const uint32_t t=millis();
+    while(!home_delay_entered && millis()-t<1000)Sleep(1);
+    expect(home_delay_entered && g.scan_starts==1,"worker is between channel scans");
+    WakePowerGuard::request(millis());scan.serviceWakeQuiescence();hold_home_delay=false;
+    expect(wait_scan(scan,count)==WifiScanSession::Result::Cancelled,"home-wait cancellation completes");
+    expect(g.scan_starts==1 && g.clears==1,"cancelled worker cannot enter the next channel");
+    expect(WakePowerGuard::activeOperations()==0,"home cancellation releases the wake lease");
+    WakePowerGuard::cancel();finish(); }
+static void a39() { S("A39 a later channel failure discards partial results");
+    boot(false,"");g.mode=WIFI_MODE_APSTA;g.auto_ms=0;g.country_count=6;g.fail_channel=3;
+    WifiScanSession scan;int count=0;scan.start();
+    expect(wait_scan(scan,count)==WifiScanSession::Result::Failed,"later SDK failure is reported");
+    expect(g.scan_starts==3 && g.clears==3,"failure stops further scans and cleans the failed channel");
+    expect(count==0 && scan.record(0)==nullptr,"partial list is not published as a complete scan");finish(); }
+static void a40() { S("A40 invalid or unavailable country never falls back to an unbounded AP scan");
+    boot(false,"");g.mode=WIFI_MODE_APSTA;g.auto_ms=0;
+    for(int variant=0;variant<4;++variant){g.country_error=variant==0?ESP_FAIL:ESP_OK;g.country_first=variant==1?0:1;g.country_count=variant==2?0:(variant==3?15:1);
+      WifiScanSession scan;int count=0;scan.start();expect(wait_scan(scan,count)==WifiScanSession::Result::Failed,"invalid regulatory input fails closed");}
+    expect(g.scan_starts==0 && g.clears==0 && WakePowerGuard::activeOperations()==0,"no scan or leaked lease after country error");finish(); }
+static void a41() { S("A41 STA-only scans keep SDK all-channel behavior");
+    boot(false,"");g.mode=WIFI_MODE_STA;g.auto_ms=0;g.country_count=14;
+    WifiScanSession scan;int count=0;scan.start();
+    expect(wait_scan(scan,count)==WifiScanSession::Result::Ready,"STA scan succeeds");
+    expect(g.scan_starts==1 && g.current_channel==0 && g.country_reads==0,"STA delegates all channels to the SDK");scan.releaseResults();finish(); }
+static void a42() { S("A42 failed result cleanup forbids another channel");
+    boot(false,"");g.mode=WIFI_MODE_APSTA;g.auto_ms=0;g.country_count=6;g.clear_error=ESP_FAIL;
+    WifiScanSession scan;int count=0;scan.start();
+    expect(wait_scan(scan,count)==WifiScanSession::Result::Failed,"cleanup failure fails the scan");
+    expect(g.scan_starts==1 && g.clears==1 && WakePowerGuard::activeOperations()==0,"no further SDK list after cleanup failure");finish(); }
+
 int main(int argc, char **argv) {
     timeBeginPeriod(1);
-    void (*all[])() = {a1,a2,a3,a4,a5,a6,a7,a8,a9,a10,a11,a12,a13,a14,a15,a16,a17,a18,a19,a20,a21,a22,a23,a24,a25,a26,a27,a28,a29,a30,a31,a32,a33};
+    void (*all[])() = {a1,a2,a3,a4,a5,a6,a7,a8,a9,a10,a11,a12,a13,a14,a15,a16,a17,a18,a19,a20,a21,a22,a23,a24,a25,a26,a27,a28,a29,a30,a31,a32,a33,a34,a35,a36,a37,a38,a39,a40,a41,a42};
     const int n = sizeof(all) / sizeof(all[0]);
     for (int i = 0; i < n; ++i) { char b[8]; snprintf(b, sizeof(b), "a%d", i + 1); if (argc < 2 || !strcmp(argv[1], b)) all[i](); }
     printf("\npassed=%d failed=%d\n", g_pass, g_fail); fflush(stdout);

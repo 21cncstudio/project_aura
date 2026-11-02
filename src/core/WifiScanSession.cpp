@@ -142,31 +142,64 @@ void WifiScanSession::runScan() {
     wifi_scan_config_t config{};
     config.scan_type = WIFI_SCAN_TYPE_ACTIVE;
     config.scan_time.active.min = 100;
-    config.scan_time.active.max = 300; // Match the previous Arduino defaults.
-    // block=true uses SDK completion, without posting WIFI_EVENT_SCAN_DONE.
-    // In particular, Network.postEvent OOM cannot strand this operation.
-    error_ = esp_wifi_scan_start(&config, true);
-    // Stop cannot race driver-result access or release the lease underneath it.
-    const std::lock_guard<std::mutex> lock(worker_mutex_);
-    if (error_ == ESP_OK && !cancel_requested_.load(std::memory_order_acquire)) {
-        uint16_t found = 0;
-        error_ = esp_wifi_scan_get_ap_num(&found);
-        for (uint16_t i = 0; error_ == ESP_OK && i < found; ++i) {
-            wifi_ap_record_t sdk_record{};
-            error_ = esp_wifi_scan_get_ap_record(&sdk_record);
-            if (error_ != ESP_OK) break;
-            Record row{};
-            memcpy(row.ssid, sdk_record.ssid, sizeof(row.ssid)-1);
-            row.rssi = sdk_record.rssi;
-            row.auth_mode = static_cast<uint8_t>(sdk_record.authmode);
-            keepRecord(row);
+    config.scan_time.active.max = 300; // Keep the previous discovery dwell.
+    unsigned first_channel = 0;
+    unsigned last_channel = 0;
+    if ((WiFi.getMode() & WIFI_MODE_AP) != 0) {
+        wifi_country_t country{};
+        error_ = esp_wifi_get_country(&country);
+        if (error_ == ESP_OK) {
+            first_channel = country.schan;
+            last_channel = first_channel + country.nchan - 1;
+            if (first_channel < 1 || country.nchan == 0 || last_channel > 14)
+                error_ = ESP_ERR_INVALID_ARG;
         }
     }
-    // Free any unread records on cancellation/failure, including allocation
-    // failures inside the driver. The network owner never touches SDK buffers.
-    const esp_err_t cleanup = esp_wifi_clear_ap_list();
-    if (cleanup != ESP_OK && cleanup != ESP_ERR_WIFI_NOT_INIT && cleanup != ESP_ERR_WIFI_NOT_STARTED)
-        LOGW("WiFi", "scan result cleanup failed: %d", cleanup);
+    // Espressif's provisioning manager splits SoftAP scans so beacons can be
+    // sent between groups. Use one channel per group (at most 300 ms away)
+    // and at least 120 ms at home; an all-channel scan can lose AP clients.
+    // Stay on the same leased worker and collect/deduplicate across channels.
+    for (unsigned channel = first_channel;
+         error_ == ESP_OK && channel <= last_channel &&
+         !cancel_requested_.load(std::memory_order_acquire); ++channel) {
+        config.channel = static_cast<uint8_t>(channel);
+        // block=true uses SDK completion, without posting WIFI_EVENT_SCAN_DONE.
+        // Network.postEvent OOM therefore cannot strand this operation.
+        error_ = esp_wifi_scan_start(&config, true);
+        {
+            // Stop cannot race result cleanup or release the lease under it.
+            const std::lock_guard<std::mutex> lock(worker_mutex_);
+            if (error_ == ESP_OK && !cancel_requested_.load(std::memory_order_acquire)) {
+                uint16_t found = 0;
+                error_ = esp_wifi_scan_get_ap_num(&found);
+                for (uint16_t i = 0; error_ == ESP_OK && i < found; ++i) {
+                    wifi_ap_record_t sdk_record{};
+                    error_ = esp_wifi_scan_get_ap_record(&sdk_record);
+                    if (error_ != ESP_OK) break;
+                    Record row{};
+                    memcpy(row.ssid, sdk_record.ssid, sizeof(row.ssid)-1);
+                    row.rssi = sdk_record.rssi;
+                    row.auth_mode = static_cast<uint8_t>(sdk_record.authmode);
+                    keepRecord(row);
+                }
+            }
+            // Each SDK scan owns a separate list, including failed/cancelled
+            // scans. Free it before starting another channel.
+            const esp_err_t cleanup = esp_wifi_clear_ap_list();
+            if (cleanup != ESP_OK) {
+                if (cleanup != ESP_ERR_WIFI_NOT_INIT && cleanup != ESP_ERR_WIFI_NOT_STARTED)
+                    LOGW("WiFi", "scan result cleanup failed: %d", cleanup);
+                if (error_ == ESP_OK) error_ = cleanup;
+            }
+        }
+        if (error_ != ESP_OK || channel == last_channel) break;
+        const uint32_t home_started = millis();
+        while (!cancel_requested_.load(std::memory_order_acquire) &&
+               static_cast<uint32_t>(millis() - home_started) < 120) {
+            delay(10); // Wake/cancel need not wait for the entire home dwell.
+        }
+    }
+    const std::lock_guard<std::mutex> lock(worker_mutex_);
     worker_activity_ = {};
 }
 

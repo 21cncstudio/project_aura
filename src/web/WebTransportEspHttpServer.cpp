@@ -42,7 +42,10 @@ constexpr uint32_t kDrainRecvTimeoutMs = 200;
 // Allow a complete current image even at 64 KiB/s, with margin. This is a
 // per-attempt wall-clock bound, not a browser retry or whole-request deadline.
 constexpr uint32_t kCloseDrainTimeoutMs = 90000;
-constexpr uint32_t kCloseProgressTimeoutMs = 1500;
+// Real AP packet captures contain TCP retransmission recovery longer than
+// 1.5 s even at hundreds of KiB/s. Keep a useful-progress quota, allowing
+// recovery without resetting the independent 90 s / 8 MiB limits.
+constexpr uint32_t kCloseProgressTimeoutMs = 5000;
 constexpr size_t kCloseProgressBytes = 32 * 1024;
 constexpr size_t kCloseMaxDrainBytes = 8 * 1024 * 1024;
 constexpr uint32_t kCloseRecvSliceMs = 50;
@@ -615,7 +618,11 @@ public:
             }
         }
         beginWriteBudget();
-        const esp_err_t result = httpd_resp_send(req_, content ? content : "", HTTPD_RESP_USE_STRLEN);
+        const char *body = content ? content : "";
+        // The SDK does not suppress HEAD bodies. A null buffer with an explicit
+        // length keeps GET's Content-Length while sending headers only.
+        const esp_err_t result = httpd_resp_send(req_, req_->method == HTTP_HEAD ? nullptr : body,
+                                                strlen(body));
         write_budget_active_ = false;
         if (result != ESP_OK) {
             LOGW("WEB", "HTTP response failed: status=%d sdk=%d", status_code, result);
@@ -1221,8 +1228,8 @@ bool EspHttpServerBackend::prepareRequest(RouteRegistration &route, void *raw_re
 
                 if (request_->uploadRejected()) {
                     // A prefix/identity rejection is terminal. Preserve its
-                    // reason and reach the route's final response + cleanup
-                    // without reading the rest of the rejected file.
+                    // reason for the route's response; session close then drains
+                    // the unread body within the independent bounded budget.
                     request_->setPendingBodyBytes(reader.remainingBytesOnSocket());
                     return true;
                 }
