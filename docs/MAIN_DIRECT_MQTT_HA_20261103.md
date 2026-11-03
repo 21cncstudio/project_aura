@@ -51,8 +51,11 @@ Pixel сам вернулся в Meotida; Aura на точном 184845b вер�
 
 По явному запросу владельца успешные медленные отправки переведены с Warn
 на Debug. Счётчики slow_count/max_write и история настоящих ошибок сохранены.
-Ошибки/обрывы остаются Warn. Реальный Logger по умолчанию Info, поэтому
-успешная задержка не попадает в обычный журнал и пользовательские alerts.
+Ошибки/обрывы остаются Warn. Уточнено последующим аппаратным прогоном:
+Info — значение по умолчанию класса Logger, но production вызывает begin
+с `Config::LOG_LEVEL=3` (Debug). Поэтому строка остаётся в техническом USB
+и recent diagnostics как `[D]`; SystemEventPolicy исключает её из событий
+пользовательского журнала/HA, а SystemLogFilter — из пользовательских alerts.
 Используется существующая фильтрация; проверены локальный Logger и официальное
 [описание уровней Espressif](https://developer.espressif.com/blog/2025/09/espressif_logging/).
 Native WebResponseUtils/WebStreamState: 15/15, включая реальный Logger,
