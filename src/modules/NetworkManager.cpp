@@ -197,10 +197,15 @@ void network_wifi_event(arduino_event_id_t event, arduino_event_info_t info) {
     const bool is_connecting =
         g_network && g_network->state() == AuraNetworkManager::WIFI_STATE_STA_CONNECTING;
     const bool retryable_connect_reason = is_connecting && is_retryable_connect_reason(reason);
+    const bool terminal_connect_reason = reason == WIFI_REASON_AUTH_FAIL || reason == WIFI_REASON_ASSOC_FAIL;
+    const bool quiet_startup_retry = is_connecting && terminal_connect_reason &&
+                                    g_network->isStartupStaRetryQuiet(millis());
 
-    Logger::log(retryable_connect_reason ? Logger::Info : Logger::Warn,
+    Logger::log((retryable_connect_reason || quiet_startup_retry) ? Logger::Info : Logger::Warn,
                 "WiFi",
-                retryable_connect_reason
+                quiet_startup_retry
+                    ? "STA startup retry (reason=%u %s, rssi=%d dBm, status=%d, ota_busy=%s, ssid=%s, bssid=%s)"
+                    : retryable_connect_reason
                     ? "STA connect transient (reason=%u %s, rssi=%d dBm, status=%d, ota_busy=%s, ssid=%s, bssid=%s)"
                     : "STA disconnected (reason=%u %s, rssi=%d dBm, status=%d, ota_busy=%s, ssid=%s, bssid=%s)",
                 static_cast<unsigned>(disc.reason),
@@ -213,8 +218,7 @@ void network_wifi_event(arduino_event_id_t event, arduino_event_info_t info) {
 
     if (retryable_connect_reason && g_network) {
         g_network->noteStaConnectTransientFailure(static_cast<uint32_t>(reason));
-    } else if (is_connecting &&
-               (reason == WIFI_REASON_AUTH_FAIL || reason == WIFI_REASON_ASSOC_FAIL)) {
+    } else if (is_connecting && terminal_connect_reason) {
         // Publish the event to the network owner. Arduino's status can still
         // describe an older attempt, and its first AUTH_FAIL may be DISCONNECTED.
         g_network->noteStaConnectFailure();
@@ -376,6 +380,7 @@ void AuraNetworkManager::begin(StorageManager &storage) {
     if (wifi_enabled_) {
         if (!wifi_ssid_.isEmpty()) {
             wifi_cold_boot_warmup_pending_ = boot_board_cold_start;
+            wifi_startup_retry_quiet_until_ms_.store(millis() + 30000UL, std::memory_order_release);
             setWifiState(WIFI_STATE_OFF);
             wifi_retry_count_ = 0;
             wifi_retry_at_ms_ = millis() + kInitialWifiConnectDelayMs;
@@ -484,6 +489,7 @@ void AuraNetworkManager::resetStaConnectAttemptState() {
 }
 
 void AuraNetworkManager::resetColdBootStaAssist() {
+    wifi_startup_retry_quiet_until_ms_.store(0, std::memory_order_release);
     wifi_cold_boot_warmup_pending_ = false;
     wifi_cold_boot_warmup_active_ = false;
     wifi_cold_boot_soft_connects_left_ = 0;
@@ -503,7 +509,7 @@ void AuraNetworkManager::scheduleStaRetry(const char *log_reason, bool warn) {
                     static_cast<unsigned>(wifi_retry_count_),
                     static_cast<unsigned>(Config::WIFI_CONNECT_MAX_RETRIES));
     } else {
-        Logger::log(warn ? Logger::Warn : Logger::Info, "WiFi",
+        Logger::log(Logger::Warn, "WiFi",
                     "%s, enter error state; background retry in %u seconds",
                     (log_reason && log_reason[0] != '\0') ? log_reason : "connect failed",
                     static_cast<unsigned>(kWifiRecoveryRetryDelayMs / 1000UL));
@@ -529,6 +535,12 @@ void AuraNetworkManager::noteStaConnectFailure() {
     if (state() == WIFI_STATE_STA_CONNECTING) {
         wifi_connect_failed_.store(true, std::memory_order_release);
     }
+}
+
+bool AuraNetworkManager::isStartupStaRetryQuiet(uint32_t now_ms) const {
+    const uint32_t until_ms = wifi_startup_retry_quiet_until_ms_.load(std::memory_order_acquire);
+    return state() == WIFI_STATE_STA_CONNECTING && until_ms != 0 &&
+           static_cast<int32_t>(now_ms - until_ms) < 0;
 }
 
 String AuraNetworkManager::localUrl(const char *path) const {
@@ -738,6 +750,8 @@ bool AuraNetworkManager::prepareWifiStartSta() {
 }
 
 void AuraNetworkManager::connectSta() {
+    // Explicit reconnects/configuration are outside automatic startup grace.
+    wifi_startup_retry_quiet_until_ms_.store(0, std::memory_order_release);
     wifi_retry_at_ms_ = 0;
     wifi_retry_count_ = 0;
     startSta();
@@ -815,7 +829,8 @@ void AuraNetworkManager::poll() {
             scheduleStaRetry("connect transient failed early", false);
         } else if (wifi_connect_failed_.load(std::memory_order_acquire) ||
                    (millis() - wifi_connect_start_ms_ > Config::WIFI_CONNECT_TIMEOUT_MS)) {
-            scheduleStaRetry("connect failed");
+            const bool quiet = isStartupStaRetryQuiet(millis());
+            scheduleStaRetry(quiet ? "initial connection pending" : "connect failed", !quiet);
         }
     } else if (state() == WIFI_STATE_OFF && wifi_enabled_ && wifi_retry_at_ms_ != 0) {
         const uint32_t now_ms = millis();
@@ -1149,6 +1164,10 @@ void AuraNetworkManager::startSta() {
     }
 
     // Arm this attempt before connect can publish an asynchronous failure.
+    if (wifi_retry_count_ >= Config::WIFI_CONNECT_MAX_RETRIES) {
+        // The final bounded attempt must report failure even inside startup grace.
+        wifi_startup_retry_quiet_until_ms_.store(0, std::memory_order_release);
+    }
     resetStaConnectAttemptState();
     setWifiState(WIFI_STATE_STA_CONNECTING);
     wifi_connect_start_ms_ = millis();

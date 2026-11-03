@@ -63,6 +63,7 @@ public:
     void serviceWakeQuiescence();
     void noteStaConnectTransientFailure(uint32_t reason);
     void noteStaConnectFailure();
+    bool isStartupStaRetryQuiet(uint32_t now_ms) const;
     void requestHostnameCheck() { hostname_check_pending_.store(true, std::memory_order_release); }
 
     bool setEnabled(bool enabled);
@@ -165,6 +166,7 @@ private:
     std::atomic<uint8_t> wifi_connect_transient_failures_{0};
     std::atomic<uint32_t> wifi_connect_last_transient_reason_{0};
     std::atomic<bool> wifi_connect_failed_{false};
+    std::atomic<uint32_t> wifi_startup_retry_quiet_until_ms_{0};
     bool wifi_cold_boot_warmup_pending_ = false;
     bool wifi_cold_boot_warmup_active_ = false;
     uint8_t wifi_cold_boot_soft_connects_left_ = 0;

@@ -683,9 +683,42 @@ static void a50() { S("A50 synchronous connect rejection and early failure callb
     }
 }
 
+static void a51() { S("A51 startup retry is quiet only before first success and within 30 seconds");
+    boot(true,"home");expect(until([]{return g.begins==1;},4000),"initial attempt starts");
+    expect(nm->isStartupStaRetryQuiet(millis()),"startup attempt is in informational grace");
+    expect(!nm->isStartupStaRetryQuiet(millis()+30000),"grace has a finite 30-second deadline");
+    const size_t warnings=g_warns.size();arduino_event_info_t info{};info.wifi_sta_disconnected.reason=WIFI_REASON_AUTH_FAIL;
+    wifi_callback(ARDUINO_EVENT_WIFI_STA_DISCONNECTED,info);tick();
+    expect(g_warns.size()==warnings,"initial auth retry produces no warning");
+    expect(until([]{return g.begins==2;},1000),"quiet logging does not postpone retry");
+    g.status=WL_CONNECTED;tick();expect(!nm->isStartupStaRetryQuiet(millis()),"first successful connection ends grace");
+    wifi_callback(ARDUINO_EVENT_WIFI_STA_DISCONNECTED,info);
+    expect(g_warns.size()==warnings+1,"failure after success remains a warning");finish(); }
+
+static void a52() { S("A52 exhausted startup attempts remain visible and manual reconnect is not quiet");
+    boot(true,"home");expect(until([]{return g.begins==1;},4000),"initial attempt starts");
+    arduino_event_info_t info{};info.wifi_sta_disconnected.reason=WIFI_REASON_AUTH_FAIL;
+    for(unsigned attempt=0;attempt<Config::WIFI_CONNECT_MAX_RETRIES;++attempt){
+        const int before=g.begins;wifi_callback(ARDUINO_EVENT_WIFI_STA_DISCONNECTED,info);tick();
+        expect(until([&]{return g.begins==before+1;},1000),"bounded retry still runs during grace");
+    }
+    expect(!nm->isStartupStaRetryQuiet(millis()),"last allowed attempt has no grace");
+    const size_t warnings=g_warns.size();wifi_callback(ARDUINO_EVENT_WIFI_STA_DISCONNECTED,info);tick();
+    expect(g_warns.size()>=warnings+2,"terminal auth failure and exhausted budget both warn");
+    command([]{nm->connectSta();});
+    expect(!nm->isStartupStaRetryQuiet(millis()),"manual connect cannot rearm startup grace");finish(); }
+
+static void a53() { S("A53 explicit reconnect cancels unexpired startup grace");
+    boot(true,"home");expect(until([]{return g.begins==1;},4000),"initial attempt starts");
+    expect(nm->isStartupStaRetryQuiet(millis()),"grace initially armed");
+    command([]{nm->connectSta();});expect(!nm->isStartupStaRetryQuiet(millis()),"explicit reconnect cancels grace immediately");
+    const size_t warnings=g_warns.size();arduino_event_info_t info{};info.wifi_sta_disconnected.reason=WIFI_REASON_AUTH_FAIL;
+    wifi_callback(ARDUINO_EVENT_WIFI_STA_DISCONNECTED,info);tick();
+    expect(g_warns.size()>=warnings+2,"manual connection failure is visible inside original 30-second window");finish(); }
+
 int main(int argc, char **argv) {
     timeBeginPeriod(1);
-    void (*all[])() = {a1,a2,a3,a4,a5,a6,a7,a8,a9,a10,a11,a12,a13,a14,a15,a16,a17,a18,a19,a20,a21,a22,a23,a24,a25,a26,a27,a28,a29,a30,a31,a32,a33,a34,a35,a36,a37,a38,a39,a40,a41,a42,a43,a44,a45,a46,a47,a48,a49,a50};
+    void (*all[])() = {a1,a2,a3,a4,a5,a6,a7,a8,a9,a10,a11,a12,a13,a14,a15,a16,a17,a18,a19,a20,a21,a22,a23,a24,a25,a26,a27,a28,a29,a30,a31,a32,a33,a34,a35,a36,a37,a38,a39,a40,a41,a42,a43,a44,a45,a46,a47,a48,a49,a50,a51,a52,a53};
     const int n = sizeof(all) / sizeof(all[0]);
     for (int i = 0; i < n; ++i) { char b[8]; snprintf(b, sizeof(b), "a%d", i + 1); if (argc < 2 || !strcmp(argv[1], b)) all[i](); }
     printf("\npassed=%d failed=%d\n", g_pass, g_fail); fflush(stdout);
