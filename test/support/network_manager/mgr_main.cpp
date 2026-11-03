@@ -51,7 +51,7 @@ struct Mock {
     std::atomic<int> auto_ms{-1}, start_err{0}, clear_delay{0}, stop_delay{0};
     std::atomic<int> scan_starts{0}, scan_stops{0}, clears{0}, during_scan{0}, in_protected{0}, begins{0}, softaps{0}, off_mode{0}, erase{0}, workers{0};
     std::atomic<int> sync_scans{0}, pinned_begins{0};
-    bool connect_start_ok=true,fail_during_connect=false;
+    bool connect_start_ok=true,fail_during_connect=false,fail_during_disconnect=false;
     std::atomic<int> country_first{1},country_count{1},country_error{ESP_OK},country_reads{0},current_channel{0},fail_channel{-1},clear_error{ESP_OK};
     std::atomic<bool> per_channel_records{false};
     std::atomic<int> country_policy{WIFI_COUNTRY_POLICY_MANUAL};
@@ -67,7 +67,7 @@ struct Mock {
         channels.clear();channel_starts.clear();channel_ends.clear();hold_home_delay=false;home_delay_entered=false;
         auto_ms = -1; start_err = 0; clear_delay = 0; stop_delay = 0; scan_starts = scan_stops = clears = during_scan = in_protected = begins = softaps = off_mode = erase = 0;
         sync_scans = pinned_begins = 0;
-        connect_start_ok=true;fail_during_connect=false;
+        connect_start_ok=true;fail_during_connect=false;fail_during_disconnect=false;
     }
     void op(const std::string &s) { std::lock_guard<std::mutex> l(m); ops.push_back(std::to_string(millis()) + " " + s); }
 } g;
@@ -99,7 +99,17 @@ wifi_event_id_t MockWiFi::onEvent(void (*cb)(arduino_event_id_t, arduino_event_i
 bool MockWiFi::setHostname(const char *) { return true; }
 bool MockWiFi::mode(wifi_mode_t m) { radio("mode(" + std::to_string((int)m) + ")"); g.mode = m; if (m == 0) ++g.off_mode; return true; }
 wifi_mode_t MockWiFi::getMode() { return (wifi_mode_t)g.mode.load(); }
-bool MockWiFi::disconnect(bool off, bool erase) { radio(std::string("disconnect(") + (off ? "off" : "keep") + "," + (erase ? "erase" : "keep") + ")"); if (erase) ++g.erase; if (off) g.mode = g.mode.load() & ~WIFI_MODE_STA; return true; }
+bool MockWiFi::disconnect(bool off, bool erase) {
+    radio(std::string("disconnect(") + (off ? "off" : "keep") + "," + (erase ? "erase" : "keep") + ")");
+    if (erase) ++g.erase;
+    if (off) g.mode = g.mode.load() & ~WIFI_MODE_STA;
+    if (g.fail_during_disconnect) {
+        g.fail_during_disconnect=false;
+        arduino_event_info_t info{};info.wifi_sta_disconnected.reason=WIFI_REASON_AUTH_FAIL;
+        wifi_callback(ARDUINO_EVENT_WIFI_STA_DISCONNECTED,info);
+    }
+    return true;
+}
 bool MockWiFi::softAP(const char *) { radio("softAP"); ++g.softaps; return true; }
 bool MockWiFi::enableAP(bool on) { radio(on ? "enableAP(1)" : "enableAP(0)"); if (!on) ap_off = millis(); if (!on) g.mode = g.mode.load() & ~WIFI_MODE_AP; return true; }
 void MockWiFi::setAutoReconnect(bool) {}
@@ -684,7 +694,7 @@ static void a50() { S("A50 synchronous connect rejection and early failure callb
 }
 
 static void a51() { S("A51 startup retry is quiet only before first success and within 30 seconds");
-    boot(true,"home");expect(until([]{return g.begins==1;},4000),"initial attempt starts");
+    const uint32_t started=millis();boot(true,"home");expect(until([]{return g.begins==1;},4000),"initial attempt starts");
     expect(nm->isStartupStaRetryQuiet(millis()),"startup attempt is in informational grace");
     expect(!nm->isStartupStaRetryQuiet(millis()+30000),"grace has a finite 30-second deadline");
     const size_t warnings=g_warns.size();arduino_event_info_t info{};info.wifi_sta_disconnected.reason=WIFI_REASON_AUTH_FAIL;
@@ -692,8 +702,14 @@ static void a51() { S("A51 startup retry is quiet only before first success and 
     expect(g_warns.size()==warnings,"initial auth retry produces no warning");
     expect(until([]{return g.begins==2;},1000),"quiet logging does not postpone retry");
     g.status=WL_CONNECTED;tick();expect(!nm->isStartupStaRetryQuiet(millis()),"first successful connection ends grace");
-    wifi_callback(ARDUINO_EVENT_WIFI_STA_DISCONNECTED,info);
-    expect(g_warns.size()==warnings+1,"failure after success remains a warning");finish(); }
+    g.status=WL_DISCONNECTED;wifi_callback(ARDUINO_EVENT_WIFI_STA_DISCONNECTED,info);
+    expect(g_warns.size()==warnings+1,"failure after success remains a warning");
+    // Exercise an automatic reconnect: checking grace while CONNECTED is vacuous.
+    expect(until([]{return g.begins==3;},16500),"lost established link starts automatic reconnect");
+    expect(millis()-started<30000 && nm->state()==AuraNetworkManager::WIFI_STATE_STA_CONNECTING,"reconnect occurs inside the original startup window");
+    const size_t reconnect_warnings=g_warns.size();
+    wifi_callback(ARDUINO_EVENT_WIFI_STA_DISCONNECTED,info);tick();
+    expect(g_warns.size()==reconnect_warnings+2,"authentication failure on automatic reconnect warns after first success");finish(); }
 
 static void a52() { S("A52 exhausted startup attempts remain visible and manual reconnect is not quiet");
     boot(true,"home");expect(until([]{return g.begins==1;},4000),"initial attempt starts");
@@ -716,9 +732,49 @@ static void a53() { S("A53 explicit reconnect cancels unexpired startup grace");
     wifi_callback(ARDUINO_EVENT_WIFI_STA_DISCONNECTED,info);tick();
     expect(g_warns.size()>=warnings+2,"manual connection failure is visible inside original 30-second window");finish(); }
 
+static void a54() { S("A54 delayed failures cannot poison the next connection attempt");
+    for(int variant=0;variant<3;++variant) {
+        boot_board_cold_start=true;boot(true,"home");boot_board_cold_start=false;
+        expect(until([]{return g.begins==1;},7000),"cold initial attempt starts");
+        arduino_event_info_t info{};info.wifi_sta_disconnected.reason=WIFI_REASON_AUTH_FAIL;
+        // A callback during disconnect can arrive after the retry reset but before OFF.
+        g.fail_during_disconnect=variant==2;
+        wifi_callback(ARDUINO_EVENT_WIFI_STA_DISCONNECTED,info);tick();
+        expect(nm->state()==AuraNetworkManager::WIFI_STATE_OFF && nm->retryCount()==1,"retry is waiting between attempts");
+        if(variant==0)wifi_callback(ARDUINO_EVENT_WIFI_STA_DISCONNECTED,info);
+        // Model a callback that read CONNECTING before the owner moved to OFF.
+        if(variant==1)nm->noteStaConnectFailure();
+        expect(until([]{return g.begins==2;},1000),"next attempt starts on the original schedule");
+        run_for(80);
+        expect(g.begins==2 && nm->retryCount()==1 && nm->state()==AuraNetworkManager::WIFI_STATE_STA_CONNECTING,"late previous failure does not cancel the fresh attempt");
+        g.status=WL_CONNECTED;tick();expect(nm->isConnected(),"fresh attempt can complete");finish();
+    }
+}
+
+static void a55() { S("A55 startup grace is limited to auth and association failures");
+    for(auto reason:{WIFI_REASON_AUTH_FAIL,WIFI_REASON_ASSOC_FAIL,WIFI_REASON_MIC_FAILURE,WIFI_REASON_4WAY_HANDSHAKE_TIMEOUT}) {
+        boot(true,"home");expect(until([]{return g.begins==1;},4000),"initial attempt starts");
+        arduino_event_info_t info{};info.wifi_sta_disconnected.reason=reason;
+        const size_t warnings=g_warns.size();wifi_callback(ARDUINO_EVENT_WIFI_STA_DISCONNECTED,info);
+        const bool quiet=reason==WIFI_REASON_AUTH_FAIL || reason==WIFI_REASON_ASSOC_FAIL;
+        expect(g_warns.size()==warnings+(quiet?0:1),"only the two startup reasons receive informational logging");
+        tick();
+        if(quiet)expect(nm->retryCount()==1 && nm->state()==AuraNetworkManager::WIFI_STATE_OFF,"both terminal reasons schedule an immediate bounded retry");
+        else expect(nm->retryCount()==0 && nm->state()==AuraNetworkManager::WIFI_STATE_STA_CONNECTING,"other reasons keep their existing retry policy");
+        if(reason==WIFI_REASON_ASSOC_FAIL) {
+            for(unsigned attempt=1;attempt<=Config::WIFI_CONNECT_MAX_RETRIES;++attempt) {
+                expect(until([&]{return g.begins==int(attempt+1);},1000),"association retry starts");
+                const size_t before=g_warns.size();wifi_callback(ARDUINO_EVENT_WIFI_STA_DISCONNECTED,info);tick();
+                if(attempt==Config::WIFI_CONNECT_MAX_RETRIES)expect(g_warns.size()==before+2,"final association failure and exhausted budget remain warnings");
+            }
+        }
+        command([]{nm->setEnabled(false);});tick();finish();
+    }
+}
+
 int main(int argc, char **argv) {
     timeBeginPeriod(1);
-    void (*all[])() = {a1,a2,a3,a4,a5,a6,a7,a8,a9,a10,a11,a12,a13,a14,a15,a16,a17,a18,a19,a20,a21,a22,a23,a24,a25,a26,a27,a28,a29,a30,a31,a32,a33,a34,a35,a36,a37,a38,a39,a40,a41,a42,a43,a44,a45,a46,a47,a48,a49,a50,a51,a52,a53};
+    void (*all[])() = {a1,a2,a3,a4,a5,a6,a7,a8,a9,a10,a11,a12,a13,a14,a15,a16,a17,a18,a19,a20,a21,a22,a23,a24,a25,a26,a27,a28,a29,a30,a31,a32,a33,a34,a35,a36,a37,a38,a39,a40,a41,a42,a43,a44,a45,a46,a47,a48,a49,a50,a51,a52,a53,a54,a55};
     const int n = sizeof(all) / sizeof(all[0]);
     for (int i = 0; i < n; ++i) { char b[8]; snprintf(b, sizeof(b), "a%d", i + 1); if (argc < 2 || !strcmp(argv[1], b)) all[i](); }
     printf("\npassed=%d failed=%d\n", g_pass, g_fail); fflush(stdout);

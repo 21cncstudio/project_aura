@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "web/WebResponseUtils.h"
+#include "core/Logger.h"
 
 namespace {
 
@@ -202,8 +203,8 @@ WebResponseUtils::StreamContext make_context(FakeRuntime &runtime, WebStreamStat
 
 }  // namespace
 
-void setUp() {}
-void tearDown() {}
+void setUp() { Logger::setLevel(Logger::Info); Logger::resetRecentForTest(); }
+void tearDown() { Logger::setLevel(Logger::Info); Logger::resetRecentForTest(); }
 
 void test_send_html_stream_records_result_and_headers() {
     FakeRuntime runtime;
@@ -352,6 +353,24 @@ void test_setup_failure_stops_before_body_and_success_preserves_history() {
     TEST_ASSERT_EQUAL_UINT32(1, snapshot.failure_count);
     TEST_ASSERT_EQUAL(StreamAbortReason::InternalError, snapshot.failures[0].reason);
     TEST_ASSERT_EQUAL_UINT32(1, runtime.environment_captures);
+
+    Logger::RecentEntry entries[4]{};
+    TEST_ASSERT_EQUAL_UINT32(1, Logger::copyRecent(entries, 4));
+    TEST_ASSERT_EQUAL(Logger::Warn, entries[0].level);
+    TEST_ASSERT_NOT_NULL(strstr(entries[0].message, "HTTP interrupted"));
+    // Slow success adds diagnostics, but does not create a user-facing warning.
+    TEST_ASSERT_EQUAL_UINT32(1, Logger::copyRecentAlerts(entries, 4));
+
+    Logger::resetRecentForTest();
+    Logger::setLevel(Logger::Debug);
+    FakeRequest debug_success(runtime);
+    debug_success.enqueueWrite({5, 0, 250, true});
+    TEST_ASSERT_TRUE(WebResponseUtils::sendHtmlStream(debug_success, "hello", context));
+    TEST_ASSERT_EQUAL_UINT32(1, Logger::copyRecent(entries, 4));
+    TEST_ASSERT_EQUAL(Logger::Debug, entries[0].level);
+    TEST_ASSERT_NOT_NULL(strstr(entries[0].message, "HTTP slow write"));
+    TEST_ASSERT_EQUAL_UINT32(0, Logger::copyRecentAlerts(entries, 4));
+    TEST_ASSERT_EQUAL_UINT32(2, state.snapshot(runtime.now_ms).stats.slow_count);
 }
 
 void test_repeated_failure_logs_do_not_hide_abort_counts() {

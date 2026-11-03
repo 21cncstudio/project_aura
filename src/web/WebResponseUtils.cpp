@@ -131,7 +131,9 @@ bool stream_response_body(WebRequest &server,
                         failure.error.errno_valid ? 1U : 0U, static_cast<unsigned long>(failure.count));
         }
     } else if (max_write_ms >= context.slow_write_warn_ms) {
-        Logger::log(Logger::Warn, "Web", "HTTP slow write: path=%s size=%u max_write_ms=%u",
+        // Completion succeeded. Keep latency in diagnostics without presenting
+        // it as a failed request in the normal user log.
+        Logger::log(Logger::Debug, "Web", "HTTP slow write: path=%s size=%u max_write_ms=%u",
                     request.path, static_cast<unsigned>(body_size), static_cast<unsigned>(max_write_ms));
     }
     record_web_stream_result(context, request.path, body_size, sent, ok, abort_reason,

@@ -29,7 +29,7 @@ if r.returncode:
     print('LINK FAIL', r.stderr[-3000:]); sys.exit(2)
 print('built', out / 'mgr.exe')
 
-result = subprocess.run([str(out / 'mgr.exe'), *sys.argv[3:]], env=env, cwd=out, capture_output=True, text=True, timeout=120)
+result = subprocess.run([str(out / 'mgr.exe'), *sys.argv[3:]], env=env, cwd=out, capture_output=True, text=True, timeout=180)
 (out / 'result.log').write_text(result.stdout + result.stderr, encoding='utf-8')
 print(result.stdout)
 raise SystemExit(result.returncode)
