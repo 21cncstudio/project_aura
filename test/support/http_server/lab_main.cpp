@@ -1612,10 +1612,15 @@ static void s38_body_yields_and_restores_timeout() {
     expect(r.status == 200 && r.complete && body_of(r) == std::string(2048, 'x'),
            "resumed request preserves all bytes including SDK parser-buffered data");
     expect(g_body_handler_calls == 1, "body handler runs exactly once after complete reception");
-    // The parser starts after the first byte. It must retain the original
-    // receive timeout rather than the body's 50 ms cooperative slice.
-    cl_send(s, "G"); Sleep(200);
-    cl_send(s, "ET /wifi HTTP/1.1\r\nHost: localhost\r\n\r\n");
+    // Observe delivery at the server before timing the pause. A lone "G" was
+    // buffered on the Windows test path, allowing a missing timeout restore to
+    // pass. An ignored leading CRLF starts parsing without completing a header.
+    g_lab_guard_recv_bytes = 0;
+    cl_send(s, "\r\n");
+    expect(wait_for_test([] { return g_lab_guard_recv_bytes.load() >= 2; }),
+           "keepalive prefix reaches the server before the timed pause");
+    Sleep(3000);
+    cl_send(s, "GET /wifi HTTP/1.1\r\nHost: localhost\r\n\r\n");
     r = cl_read(s, 3000);
     expect(r.status == 200 && r.complete, "keepalive header parsing restores the normal receive timeout");
     ::closesocket(s); g_lab_guard_fd = -1;

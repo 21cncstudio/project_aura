@@ -1,4 +1,4 @@
-"""Verify the four AP/HTTP ownership regressions with deliberate isolated edits.
+"""Verify AP/HTTP ownership and accepted-body regressions with isolated edits.
 
 Windows/MinGW only, like test_http_server_sdk.py. Copies sources into a new
 evidence directory; never edits production files. A build error, timeout, or
@@ -35,6 +35,29 @@ MUTATIONS = [
      'drain reacquires its activity lease between the two wakes'),
 ]
 
+BODY_MUTATIONS = [
+    ('body-no-timeout-restore', 's38', HTTP,
+     '    timeout.tv_sec = kHttpServerRecvWaitTimeoutS;\n    if (setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout)) != 0) {',
+     '    timeout.tv_usec = kBodyRecvSliceMs * 1000;\n    if (setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout)) != 0) {',
+     'keepalive header parsing restores the normal receive timeout'),
+    ('body-no-wake-yield', 's38', HTTP,
+     '        while (remaining > 0) {\n            if (WakePowerGuard::backgroundPaused(millis())) {',
+     '        while (remaining > 0) {\n            if (false) {',
+     'accepted body yields to the wake owner promptly'),
+    ('body-no-progress-deadline', 's39', HTTP,
+     '            if (total_timeout || static_cast<uint32_t>(now - progress_at) >= kBodyReadProgressTimeoutMs) {',
+     '            if (total_timeout) {',
+     'lack of useful body progress produces a bounded complete 408'),
+    ('body-byte-trickle-resets-progress', 's39', HTTP,
+     '            if (progress_bytes >= kBodyReadProgressBytes) {',
+     '            if (progress_bytes > 0) {',
+     'lack of useful body progress produces a bounded complete 408'),
+    ('body-no-total-deadline', 's40', HTTP,
+     '            const bool total_timeout = static_cast<uint32_t>(now - started) >= kBodyReadTimeoutMs;',
+     '            const bool total_timeout = false;',
+     'steady progress still stops at the aggregate body deadline'),
+]
+
 
 def sha(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
@@ -45,7 +68,10 @@ def main():
     parser.add_argument('--idf-path', type=Path, required=True)
     parser.add_argument('--compiler-dir', type=Path, default=Path('C:/msys64/mingw64/bin'))
     parser.add_argument('--output-dir', type=Path)
+    parser.add_argument('--group', choices=['guard', 'body', 'all'], default='guard')
     args = parser.parse_args()
+    mutations = ((MUTATIONS if args.group != 'body' else []) +
+                 (BODY_MUTATIONS if args.group != 'guard' else []))
     root = Path(__file__).resolve().parents[1]
     stamp = datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S%fZ')
     out = (args.output_dir or root / 'build/http-guard-mutations' / stamp).resolve()
@@ -103,18 +129,20 @@ def main():
         if expected_failure is None:
             passed = code == 0 and correct_cases and all(x['passed'] > 0 and x['failed'] == 0 and x['exit_code'] == 0 for x in actual)
         else:
+            failures = [line.strip()[7:] for line in output.splitlines() if line.strip().startswith('[FAIL] ')]
             passed = (code == 1 and correct_cases and len(actual) == 1 and
-                      actual[0]['exit_code'] == 1 and actual[0]['failed'] == 1 and
-                      '[FAIL] ' + expected_failure in output)
+                      actual[0]['exit_code'] == 1 and actual[0]['failed'] > 0 and
+                      len(failures) == actual[0]['failed'] and
+                      all(failure == expected_failure for failure in failures))
         results.append({'name': name, 'cases': actual, 'runner_exit': code, 'timeout': timed_out,
                         'expected_failure': expected_failure, 'verified': passed, 'command': command})
         (out / 'result.json').write_text(json.dumps(results, indent=2), encoding='utf-8')
         print(name + ': ' + ('PASS' if passed else 'FAIL'), flush=True)
         return passed
 
-    if not execute('control', base, [m[1] for m in MUTATIONS]):
+    if not execute('control', base, list(dict.fromkeys(m[1] for m in mutations))):
         return 1
-    for name, case, relative, before, after, message in MUTATIONS:
+    for name, case, relative, before, after, message in mutations:
         work = out / 'mutants' / name
         shutil.copytree(base, work)
         source = work / relative

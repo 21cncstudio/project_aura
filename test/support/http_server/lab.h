@@ -19,4 +19,5 @@ extern std::atomic<bool> g_lab_hold_scan_task, g_lab_scan_task_waiting;
 extern std::atomic<int> g_lab_half_closed_fd;
 
 extern std::atomic<int> g_lab_last_accepted, g_lab_guard_fd, g_lab_guard_io;
+extern std::atomic<int> g_lab_guard_recv_bytes;
 void lab_check_guard_io(int fd);

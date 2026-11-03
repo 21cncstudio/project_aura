@@ -12,6 +12,7 @@
 
 extern "C" { int g_lab_esp_log = 1; }
 std::atomic<int> g_lab_last_accepted{-1}, g_lab_guard_fd{-1}, g_lab_guard_io{0};
+std::atomic<int> g_lab_guard_recv_bytes{0};
 void lab_check_guard_io(int fd) {
     if (fd != g_lab_guard_fd) return;
     const auto p=WakePowerGuard::phase(millis());
@@ -129,6 +130,7 @@ int sh_recv(int fd, void *buf, size_t n, int flags) {
     lab_check_guard_io(fd);
     const int r = ::recv(static_cast<SOCKET>(fd), static_cast<char *>(buf), static_cast<int>(n), flags);
     if (r == SOCKET_ERROR) { set_errno_from_wsa(); return -1; }
+    if (r > 0 && fd == g_lab_guard_fd) g_lab_guard_recv_bytes += r;
     return r;
 }
 int sh_sendto(int fd, const void *buf, size_t n, int flags, const struct sockaddr *to, socklen_t tolen) {

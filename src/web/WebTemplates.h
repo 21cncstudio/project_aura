@@ -468,7 +468,7 @@ static const char kWifiPageTemplate[] PROGMEM = R"HTML(
             document.getElementById('selected-ssid').value = ssid;
 
             var items = document.querySelectorAll('.network-item');
-            items.forEach(function(item) { item.classList.remove('selected'); });
+            for (var i = 0; i < items.length; i++) items[i].classList.remove('selected');
             element.classList.add('selected');
 
             var submitBtn = document.getElementById('submit-btn');
@@ -500,33 +500,48 @@ static const char kWifiPageTemplate[] PROGMEM = R"HTML(
         }
 
         function watchScanProgress() {
-            var poll = async function() {
-                var controller = new AbortController();
-                // Bound headers and JSON body together. Start the next attempt
-                // only after this one settles, including abort cleanup.
-                var timeout = setTimeout(function() { controller.abort(); }, 15000);
-                var nextDelay = 8000;
-                try {
-                    var response = await fetch('/wifi?scan_status=1&ts=' + Date.now(), {
-                        cache: 'no-store', signal: controller.signal
-                    });
-                    if (!response.ok) throw new Error('HTTP ' + response.status);
-                    var payload = await response.json();
-                    if (!payload || payload.success !== true ||
-                        typeof payload.scan_in_progress !== 'boolean') {
-                        throw new Error('Invalid scan status');
-                    }
-                    if (payload.scan_in_progress === false) {
-                        window.location.replace('/wifi');
-                        return;
-                    }
-                    nextDelay = 5000;
-                } catch (err) {
-                    // The AP can briefly disappear from the radio during scan.
-                } finally {
+            var poll = function() {
+                // XHR keeps this captive page usable without async/fetch or
+                // AbortController. The deadline covers headers AND the body.
+                var request = new XMLHttpRequest();
+                var finished = false;
+                var timeout = setTimeout(function() { finish(false); }, 15000);
+                function finish(readResponse) {
+                    if (finished) return;
+                    finished = true;
                     clearTimeout(timeout);
+                    // Detach before abort: abort may synchronously fire events.
+                    request.onreadystatechange = request.onerror = request.onabort = null;
+                    var nextDelay = 8000;
+                    if (readResponse) {
+                        try {
+                            if (request.status < 200 || request.status >= 300) throw new Error('HTTP');
+                            var payload = JSON.parse(request.responseText);
+                            if (!payload || payload.success !== true ||
+                                typeof payload.scan_in_progress !== 'boolean') throw new Error('Invalid scan status');
+                            if (payload.scan_in_progress === false) {
+                                window.location.replace('/wifi');
+                                return;
+                            }
+                            nextDelay = 5000;
+                        } catch (err) {
+                            // A failed/incomplete response is retried below.
+                        }
+                    } else {
+                        request.abort();
+                    }
+                    setTimeout(poll, nextDelay);
                 }
-                setTimeout(poll, nextDelay);
+                request.onreadystatechange = function() {
+                    if (request.readyState === 4) finish(true);
+                };
+                request.onerror = request.onabort = function() { finish(false); };
+                try {
+                    request.open('GET', '/wifi?scan_status=1&ts=' + Date.now(), true);
+                    request.send(null);
+                } catch (err) {
+                    finish(false);
+                }
             };
             setTimeout(poll, 2000);
         }
@@ -547,15 +562,16 @@ static const char kWifiPageTemplate[] PROGMEM = R"HTML(
         });
 
         function setupNetworkItems() {
-            document.querySelectorAll('.network-item').forEach(function(item) {
-                item.addEventListener('click', function() {
+            var items = document.querySelectorAll('.network-item');
+            for (var i = 0; i < items.length; i++) {
+                items[i].addEventListener('click', function() {
                     if (this.getAttribute('data-manual') === '1') {
                         handleManualEntry(this);
                     } else {
                         selectNetwork(this.getAttribute('data-ssid'), this);
                     }
                 });
-            });
+            }
         }
 
         function togglePass() {
