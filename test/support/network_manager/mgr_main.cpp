@@ -49,6 +49,7 @@ struct Mock {
     std::atomic<bool> in_scan{false}, stop_seen{false}, release{false}, stop_ok{true}, start_gate{false}, worker_gate{false}, task_fail{false}, low_heap{false}, ota{false};
     std::atomic<int> auto_ms{-1}, start_err{0}, clear_delay{0}, stop_delay{0};
     std::atomic<int> scan_starts{0}, scan_stops{0}, clears{0}, during_scan{0}, in_protected{0}, begins{0}, softaps{0}, off_mode{0}, erase{0}, workers{0};
+    std::atomic<int> sync_scans{0}, pinned_begins{0};
     std::atomic<int> country_first{1},country_count{1},country_error{ESP_OK},country_reads{0},current_channel{0},fail_channel{-1},clear_error{ESP_OK};
     std::atomic<bool> per_channel_records{false};
     std::atomic<int> country_policy{WIFI_COUNTRY_POLICY_MANUAL};
@@ -63,6 +64,7 @@ struct Mock {
         country_policy=WIFI_COUNTRY_POLICY_MANUAL;hold_stop=false;stop_entered=false;home_delay_left=false;scan_types.clear();
         channels.clear();channel_starts.clear();channel_ends.clear();hold_home_delay=false;home_delay_entered=false;
         auto_ms = -1; start_err = 0; clear_delay = 0; stop_delay = 0; scan_starts = scan_stops = clears = during_scan = in_protected = begins = softaps = off_mode = erase = 0;
+        sync_scans = pinned_begins = 0;
     }
     void op(const std::string &s) { std::lock_guard<std::mutex> l(m); ops.push_back(std::to_string(millis()) + " " + s); }
 } g;
@@ -93,9 +95,9 @@ bool MockWiFi::softAP(const char *) { radio("softAP"); ++g.softaps; return true;
 bool MockWiFi::enableAP(bool on) { radio(on ? "enableAP(1)" : "enableAP(0)"); if (!on) ap_off = millis(); if (!on) g.mode = g.mode.load() & ~WIFI_MODE_AP; return true; }
 void MockWiFi::setAutoReconnect(bool) {}
 wl_status_t MockWiFi::status() { return (wl_status_t)g.status.load(); }
-wl_status_t MockWiFi::begin(const char *, const char *, int32_t, const uint8_t *, bool) { radio("begin"); ++g.begins; return WL_DISCONNECTED; }
+wl_status_t MockWiFi::begin(const char *, const char *, int32_t channel, const uint8_t *bssid, bool) { radio("begin"); ++g.begins; if (channel || bssid) ++g.pinned_begins; g.status=WL_DISCONNECTED; return WL_DISCONNECTED; }
 wl_status_t MockWiFi::begin(const char *, wpa2_auth_method_t, const char *, const char *, const char *, const char *, const char *, const char *, int, int32_t, const uint8_t *, bool) { radio("begin-ent"); ++g.begins; return WL_DISCONNECTED; }
-int MockWiFi::scanNetworks(bool, bool) { return 0; }
+int MockWiFi::scanNetworks(bool, bool) { ++g.sync_scans; return 0; }
 void MockWiFi::scanDelete() {}
 uint32_t heap_caps_get_free_size(uint32_t) { return g.low_heap.load() ? 1000 : 200000; }
 uint32_t heap_caps_get_largest_free_block(uint32_t) { return g.low_heap.load() ? 1000 : 100000; }
@@ -627,9 +629,34 @@ static void a46() { S("A46 MANUAL channel 13 remains active and does not scan 14
       for(auto mode:g.scan_types)correct &= mode==WIFI_SCAN_TYPE_ACTIVE;}
     expect(correct,"MANUAL probes only its configured 13 channels");scan.releaseResults();finish(); }
 
+static void a47() { S("A47 cold boot delegates AP selection to the driver");
+    boot_board_cold_start=true;boot(true,"home");boot_board_cold_start=false;
+    expect(until([]{return g.begins==1;},7000),"cold warmup leads to a first connection");
+    expect(g.sync_scans==0 && g.pinned_begins==0,"no synchronous pre-scan or BSSID/channel pinning");
+    expect(g.off_mode==1,"cold warmup keeps its existing single radio reset");
+    g.status=WL_CONNECTED;tick();
+    expect(nm->isConnected(),"first connection can complete normally");finish(); }
+
+static void a48() { S("A48 terminal authentication failure uses bounded owner retries");
+    boot(true,"home");expect(until([]{return g.begins==1;},4000),"STA attempt starts");
+    // The real Arduino callback status is independently exercised by the overlay test.
+    for(unsigned attempt=0;attempt<=Config::WIFI_CONNECT_MAX_RETRIES;++attempt) {
+        const int before=g.begins;g.status=WL_CONNECT_FAILED;tick();
+        expect(nm->state()==AuraNetworkManager::WIFI_STATE_OFF,"terminal failure ends attempt on next poll");
+        expect(g.begins==before,"no immediate busy-loop retry");
+        if(attempt<Config::WIFI_CONNECT_MAX_RETRIES) {
+            expect(until([&]{return g.begins==before+1;},1000),"owner retries after its scheduled delay");
+            expect(nm->retryCount()==attempt+1,"retry budget advances once");
+        } else {
+            run_for(600);expect(g.begins==before,"exhausted budget enters background backoff");
+        }
+    }
+    command([]{nm->setEnabled(false);});tick();
+    expect(g.erase==0,"authentication failures never erase stored credentials");finish(); }
+
 int main(int argc, char **argv) {
     timeBeginPeriod(1);
-    void (*all[])() = {a1,a2,a3,a4,a5,a6,a7,a8,a9,a10,a11,a12,a13,a14,a15,a16,a17,a18,a19,a20,a21,a22,a23,a24,a25,a26,a27,a28,a29,a30,a31,a32,a33,a34,a35,a36,a37,a38,a39,a40,a41,a42,a43,a44,a45,a46};
+    void (*all[])() = {a1,a2,a3,a4,a5,a6,a7,a8,a9,a10,a11,a12,a13,a14,a15,a16,a17,a18,a19,a20,a21,a22,a23,a24,a25,a26,a27,a28,a29,a30,a31,a32,a33,a34,a35,a36,a37,a38,a39,a40,a41,a42,a43,a44,a45,a46,a47,a48};
     const int n = sizeof(all) / sizeof(all[0]);
     for (int i = 0; i < n; ++i) { char b[8]; snprintf(b, sizeof(b), "a%d", i + 1); if (argc < 2 || !strcmp(argv[1], b)) all[i](); }
     printf("\npassed=%d failed=%d\n", g_pass, g_fail); fflush(stdout);

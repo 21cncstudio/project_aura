@@ -107,7 +107,6 @@ private:
     void resetColdBootStaAssist();
     void shutdownWifi(bool erase_sdk_credentials);
     void applyRuntimeWiFiSettings(const Config::WifiSettings &settings);
-    bool resolveStaConnectTarget(int32_t &channel_out, uint8_t bssid_out[6], int32_t &rssi_out);
     void warmupIfDisabled();
     bool enterpriseSettingsReadyForConnect() const;
     void beginStaConnect(int32_t channel, const uint8_t *bssid);
@@ -167,7 +166,6 @@ private:
     bool wifi_cold_boot_warmup_pending_ = false;
     bool wifi_cold_boot_warmup_active_ = false;
     uint8_t wifi_cold_boot_soft_connects_left_ = 0;
-    bool wifi_cold_boot_targeted_connect_active_ = false;
     bool server_routes_registered_ = false;
     bool mdns_started_ = false;
     StateChangeCallback state_change_cb_ = nullptr;

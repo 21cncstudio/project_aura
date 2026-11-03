@@ -23,6 +23,14 @@ class WifiOverlayTests(unittest.TestCase):
             overlay.adapt(overlay.BEFORE * 2)
         with self.assertRaises(ValueError):
             overlay.adapt(overlay.AFTER)
+        source = UPSTREAM.read_text(encoding="utf-8")
+        for needle in (overlay.BEFORE, overlay.STATUS_BEFORE):
+            for replacement in ("", needle * 2):
+                with self.subTest(needle=needle, replacement=replacement):
+                    with self.assertRaises(ValueError):
+                        overlay.adapt(source.replace(needle, replacement))
+        with self.assertRaises(ValueError):
+            overlay.adapt(overlay.adapt(source))
 
     def test_actual_callback_honors_disabled_reconnect_and_preserves_enabled_behavior(self):
         source = overlay.adapt(UPSTREAM.read_text(encoding="utf-8"))

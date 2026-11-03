@@ -371,7 +371,6 @@ void AuraNetworkManager::begin(StorageManager &storage) {
     if (wifi_enabled_) {
         if (!wifi_ssid_.isEmpty()) {
             wifi_cold_boot_warmup_pending_ = boot_board_cold_start;
-            wifi_cold_boot_targeted_connect_active_ = boot_board_cold_start;
             setWifiState(WIFI_STATE_OFF);
             wifi_retry_count_ = 0;
             wifi_retry_at_ms_ = millis() + kInitialWifiConnectDelayMs;
@@ -482,55 +481,6 @@ void AuraNetworkManager::resetColdBootStaAssist() {
     wifi_cold_boot_warmup_pending_ = false;
     wifi_cold_boot_warmup_active_ = false;
     wifi_cold_boot_soft_connects_left_ = 0;
-    wifi_cold_boot_targeted_connect_active_ = false;
-}
-
-bool AuraNetworkManager::resolveStaConnectTarget(int32_t &channel_out,
-                                                 uint8_t bssid_out[6],
-                                                 int32_t &rssi_out) {
-    channel_out = 0;
-    rssi_out = -128;
-    if (!bssid_out) {
-        return false;
-    }
-    memset(bssid_out, 0, 6);
-
-    WiFi.scanDelete();
-    const int found = WiFi.scanNetworks(false, false);
-    if (found <= 0) {
-        WiFi.scanDelete();
-        return false;
-    }
-
-    int best_index = -1;
-    int32_t best_rssi = INT32_MIN;
-    for (int i = 0; i < found; ++i) {
-        if (WiFi.SSID(i) != wifi_ssid_) {
-            continue;
-        }
-        const int32_t candidate_rssi = WiFi.RSSI(i);
-        if (best_index < 0 || candidate_rssi > best_rssi) {
-            best_index = i;
-            best_rssi = candidate_rssi;
-        }
-    }
-
-    if (best_index < 0) {
-        WiFi.scanDelete();
-        return false;
-    }
-
-    const uint8_t *scan_bssid = WiFi.BSSID(best_index);
-    if (!scan_bssid) {
-        WiFi.scanDelete();
-        return false;
-    }
-
-    memcpy(bssid_out, scan_bssid, 6);
-    channel_out = WiFi.channel(best_index);
-    rssi_out = WiFi.RSSI(best_index);
-    WiFi.scanDelete();
-    return channel_out > 0;
 }
 
 void AuraNetworkManager::scheduleStaRetry(const char *log_reason, bool warn) {
@@ -1184,34 +1134,9 @@ void AuraNetworkManager::startSta() {
         return;
     }
 
-    bool targeted_connect = false;
-    if (wifi_cold_boot_targeted_connect_active_) {
-        wifi_cold_boot_targeted_connect_active_ = false;
-        // This synchronous scan is intentionally limited to the power-on
-        // cold-boot assist path, before web/MQTT/OTA deferred work is expected
-        // to be active. Do not reuse it for runtime reconnects without moving
-        // target selection to an async scan flow; blocking here would stall
-        // WebHandlersPollDeferred() and OTA deferred restart polling.
-        int32_t target_channel = 0;
-        int32_t target_rssi = -128;
-        uint8_t target_bssid[6] = {};
-        if (resolveStaConnectTarget(target_channel, target_bssid, target_rssi)) {
-            char bssid_text[18];
-            format_wifi_event_bssid(target_bssid, bssid_text, sizeof(bssid_text));
-            Logger::log(Logger::Info, "WiFi",
-                        "targeted connect prepared (channel=%d, rssi=%d dBm, bssid=%s)",
-                        static_cast<int>(target_channel),
-                        static_cast<int>(target_rssi),
-                        bssid_text);
-            beginStaConnect(target_channel, target_bssid);
-            targeted_connect = true;
-        } else {
-            LOGI("WiFi", "targeted connect fallback: SSID not found in scan");
-        }
-    }
-    if (!targeted_connect) {
-        beginStaConnect(0, nullptr);
-    }
+    // Use the driver's ordinary SSID selection on the first cold attempt too.
+    // Avoid a blocking pre-scan and a separate BSSID-pinned connection path.
+    beginStaConnect(0, nullptr);
     startServerIfNeeded();
     setWifiState(WIFI_STATE_STA_CONNECTING);
     wifi_connect_start_ms_ = millis();
