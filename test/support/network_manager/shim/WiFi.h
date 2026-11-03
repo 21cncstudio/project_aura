@@ -7,14 +7,18 @@ typedef enum { WIFI_MODE_NULL=0, WIFI_MODE_STA=1, WIFI_MODE_AP=2, WIFI_MODE_APST
 #define WIFI_AP WIFI_MODE_AP
 #define WIFI_AP_STA WIFI_MODE_APSTA
 typedef enum { WL_IDLE_STATUS=0, WL_NO_SSID_AVAIL=1, WL_CONNECTED=3, WL_CONNECT_FAILED=4, WL_DISCONNECTED=6 } wl_status_t;
-typedef enum { WIFI_REASON_AUTH_EXPIRE=2, WIFI_REASON_AUTH_LEAVE=3, WIFI_REASON_DISASSOC_DUE_TO_INACTIVITY=4, WIFI_REASON_NO_AP_FOUND=201 } wifi_err_reason_t;
+typedef enum { WIFI_REASON_AUTH_EXPIRE=2, WIFI_REASON_AUTH_LEAVE=3, WIFI_REASON_DISASSOC_DUE_TO_INACTIVITY=4, WIFI_REASON_NO_AP_FOUND=201, WIFI_REASON_AUTH_FAIL=202, WIFI_REASON_ASSOC_FAIL=203 } wifi_err_reason_t;
 typedef enum { ARDUINO_EVENT_WIFI_STA_START, ARDUINO_EVENT_WIFI_STA_STOP, ARDUINO_EVENT_WIFI_STA_GOT_IP, ARDUINO_EVENT_WIFI_STA_DISCONNECTED } arduino_event_id_t;
 typedef struct { uint8_t ssid[33]; uint8_t ssid_len; uint8_t bssid[6]; uint8_t reason; int8_t rssi; } wifi_event_sta_disconnected_t;
 typedef struct { wifi_event_sta_disconnected_t wifi_sta_disconnected; } arduino_event_info_t;
 typedef int wifi_event_id_t;
 typedef enum { WPA2_AUTH_PEAP, WPA2_AUTH_TTLS, WPA2_AUTH_TLS } wpa2_auth_method_t;
 struct IPAddress { explicit operator uint32_t() const { return 0x0104a8c0; } String toString() const { return String("192.168.4.1"); } };
-struct MockSta { bool started(); void *netif(); };
+struct MockSta {
+    bool started(); void *netif();
+    bool connect(const char *, const char *, int32_t, const uint8_t *, bool);
+    bool connect(const char *, wpa2_auth_method_t, const char *, const char *, const char *, const char *, const char *, const char *, int, int32_t, const uint8_t *, bool);
+};
 struct MockWiFi {
     MockSta STA;
     void persistent(bool);

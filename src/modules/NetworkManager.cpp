@@ -213,6 +213,11 @@ void network_wifi_event(arduino_event_id_t event, arduino_event_info_t info) {
 
     if (retryable_connect_reason && g_network) {
         g_network->noteStaConnectTransientFailure(static_cast<uint32_t>(reason));
+    } else if (is_connecting &&
+               (reason == WIFI_REASON_AUTH_FAIL || reason == WIFI_REASON_ASSOC_FAIL)) {
+        // Publish the event to the network owner. Arduino's status can still
+        // describe an older attempt, and its first AUTH_FAIL may be DISCONNECTED.
+        g_network->noteStaConnectFailure();
     }
 }
 
@@ -473,6 +478,7 @@ void AuraNetworkManager::startServerIfNeeded() {
 }
 
 void AuraNetworkManager::resetStaConnectAttemptState() {
+    wifi_connect_failed_.store(false, std::memory_order_release);
     wifi_connect_transient_failures_.store(0, std::memory_order_release);
     wifi_connect_last_transient_reason_.store(0, std::memory_order_release);
 }
@@ -517,6 +523,12 @@ void AuraNetworkManager::noteStaConnectTransientFailure(uint32_t reason) {
         wifi_connect_transient_failures_.store(current + 1, std::memory_order_release);
     }
     wifi_connect_last_transient_reason_.store(reason, std::memory_order_release);
+}
+
+void AuraNetworkManager::noteStaConnectFailure() {
+    if (state() == WIFI_STATE_STA_CONNECTING) {
+        wifi_connect_failed_.store(true, std::memory_order_release);
+    }
 }
 
 String AuraNetworkManager::localUrl(const char *path) const {
@@ -801,7 +813,7 @@ void AuraNetworkManager::poll() {
                         WiFi.localIP().toString().c_str());
         } else if (early_retry_reason) {
             scheduleStaRetry("connect transient failed early", false);
-        } else if (st == WL_CONNECT_FAILED ||
+        } else if (wifi_connect_failed_.load(std::memory_order_acquire) ||
                    (millis() - wifi_connect_start_ms_ > Config::WIFI_CONNECT_TIMEOUT_MS)) {
             scheduleStaRetry("connect failed");
         }
@@ -941,11 +953,12 @@ bool AuraNetworkManager::enterpriseSettingsReadyForConnect() const {
            !wifi_eap_client_key_pem_.isEmpty();
 }
 
-void AuraNetworkManager::beginStaConnect(int32_t channel, const uint8_t *bssid) {
+bool AuraNetworkManager::beginStaConnect(int32_t channel, const uint8_t *bssid) {
     if (wifi_auth_mode_ != Config::WifiAuthMode::Enterprise) {
         clear_sta_enterprise_state();
-        WiFi.begin(wifi_ssid_.c_str(), wifi_pass_.c_str(), channel, bssid, true);
-        return;
+        // startSta has already started and verified the STA interface. Use the
+        // bool API: WiFi.begin() instead returns the possibly stale wl_status_t.
+        return WiFi.STA.connect(wifi_ssid_.c_str(), wifi_pass_.c_str(), channel, bssid, true);
     }
 
     clear_sta_enterprise_state();
@@ -963,7 +976,7 @@ void AuraNetworkManager::beginStaConnect(int32_t channel, const uint8_t *bssid) 
     const char *client_key = wifi_eap_client_key_pem_.isEmpty()
                                  ? nullptr
                                  : wifi_eap_client_key_pem_.c_str();
-    WiFi.begin(wifi_ssid_.c_str(),
+    return WiFi.STA.connect(wifi_ssid_.c_str(),
                method,
                wifi_identity_.c_str(),
                wifi_username_.c_str(),
@@ -979,6 +992,7 @@ void AuraNetworkManager::beginStaConnect(int32_t channel, const uint8_t *bssid) 
     (void)channel;
     (void)bssid;
     LOGW("WiFi", "enterprise support is not enabled in SDK config");
+    return false;
 #endif
 }
 
@@ -1134,12 +1148,17 @@ void AuraNetworkManager::startSta() {
         return;
     }
 
-    // Use the driver's ordinary SSID selection on the first cold attempt too.
-    // Avoid a blocking pre-scan and a separate BSSID-pinned connection path.
-    beginStaConnect(0, nullptr);
-    startServerIfNeeded();
+    // Arm this attempt before connect can publish an asynchronous failure.
+    resetStaConnectAttemptState();
     setWifiState(WIFI_STATE_STA_CONNECTING);
     wifi_connect_start_ms_ = millis();
+    // Use the driver's ordinary SSID selection on the first cold attempt too.
+    // Avoid a blocking pre-scan and a separate BSSID-pinned connection path.
+    if (!beginStaConnect(0, nullptr)) {
+        scheduleStaRetry("STA connect could not start");
+        return;
+    }
+    startServerIfNeeded();
     wifi_connected_since_ms_ = 0;
     wifi_ui_dirty_ = true;
     String safe_ssid = wifi_label_safe(wifi_ssid_);

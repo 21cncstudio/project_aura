@@ -62,6 +62,7 @@ public:
     void poll();
     void serviceWakeQuiescence();
     void noteStaConnectTransientFailure(uint32_t reason);
+    void noteStaConnectFailure();
     void requestHostnameCheck() { hostname_check_pending_.store(true, std::memory_order_release); }
 
     bool setEnabled(bool enabled);
@@ -109,7 +110,7 @@ private:
     void applyRuntimeWiFiSettings(const Config::WifiSettings &settings);
     void warmupIfDisabled();
     bool enterpriseSettingsReadyForConnect() const;
-    void beginStaConnect(int32_t channel, const uint8_t *bssid);
+    bool beginStaConnect(int32_t channel, const uint8_t *bssid);
     bool applyStaHostname();
     void observeStaHostname();
     void startSta();
@@ -163,6 +164,7 @@ private:
     std::atomic<bool> wifi_ui_dirty_{false};
     std::atomic<uint8_t> wifi_connect_transient_failures_{0};
     std::atomic<uint32_t> wifi_connect_last_transient_reason_{0};
+    std::atomic<bool> wifi_connect_failed_{false};
     bool wifi_cold_boot_warmup_pending_ = false;
     bool wifi_cold_boot_warmup_active_ = false;
     uint8_t wifi_cold_boot_soft_connects_left_ = 0;

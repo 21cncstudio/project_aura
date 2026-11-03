@@ -71,9 +71,6 @@ int main(int argc, char **argv) {
         assert(sta.connects == 1 && sta.disconnects == 1);
     } else {
         emit(ARDUINO_EVENT_WIFI_STA_DISCONNECTED, WIFI_REASON_AUTH_FAIL);
-        // With Arduino retry disabled the owner must see a terminal failure on
-        // the first attempt too, instead of waiting for its connection timeout.
-        assert(sta.status == (sta.enabled ? WL_DISCONNECTED : WL_CONNECT_FAILED));
         assert(sta.connects == (sta.enabled ? 1 : 0));
         emit(ARDUINO_EVENT_WIFI_STA_DISCONNECTED, WIFI_REASON_BEACON_TIMEOUT);
         assert(sta.connects == (sta.enabled ? 2 : 0));

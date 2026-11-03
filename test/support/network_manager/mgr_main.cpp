@@ -40,6 +40,7 @@ void delay(uint32_t ms) {
 bool boot_board_cold_start = false;
 MockWiFi WiFi;
 MockMdns MDNS;
+static void (*wifi_callback)(arduino_event_id_t, arduino_event_info_t) = nullptr;
 
 struct Mock {
     std::mutex m;
@@ -50,6 +51,7 @@ struct Mock {
     std::atomic<int> auto_ms{-1}, start_err{0}, clear_delay{0}, stop_delay{0};
     std::atomic<int> scan_starts{0}, scan_stops{0}, clears{0}, during_scan{0}, in_protected{0}, begins{0}, softaps{0}, off_mode{0}, erase{0}, workers{0};
     std::atomic<int> sync_scans{0}, pinned_begins{0};
+    bool connect_start_ok=true,fail_during_connect=false;
     std::atomic<int> country_first{1},country_count{1},country_error{ESP_OK},country_reads{0},current_channel{0},fail_channel{-1},clear_error{ESP_OK};
     std::atomic<bool> per_channel_records{false};
     std::atomic<int> country_policy{WIFI_COUNTRY_POLICY_MANUAL};
@@ -65,6 +67,7 @@ struct Mock {
         channels.clear();channel_starts.clear();channel_ends.clear();hold_home_delay=false;home_delay_entered=false;
         auto_ms = -1; start_err = 0; clear_delay = 0; stop_delay = 0; scan_starts = scan_stops = clears = during_scan = in_protected = begins = softaps = off_mode = erase = 0;
         sync_scans = pinned_begins = 0;
+        connect_start_ok=true;fail_during_connect=false;
     }
     void op(const std::string &s) { std::lock_guard<std::mutex> l(m); ops.push_back(std::to_string(millis()) + " " + s); }
 } g;
@@ -84,9 +87,15 @@ static void driver(const std::string &name) {
     if (protected_phase()) { ++g.in_protected; g.op("VIOLATION driver call in protected phase: " + name); }
 }
 bool MockSta::started() { return (g.mode.load() & WIFI_MODE_STA) != 0; }
+bool MockSta::connect(const char *,const char *,int32_t channel,const uint8_t *bssid,bool) {
+    radio("STA.connect");++g.begins;if(channel || bssid)++g.pinned_begins;
+    if(g.fail_during_connect){arduino_event_info_t info{};info.wifi_sta_disconnected.reason=WIFI_REASON_AUTH_FAIL;wifi_callback(ARDUINO_EVENT_WIFI_STA_DISCONNECTED,info);}
+    return g.connect_start_ok;
+}
+bool MockSta::connect(const char *,wpa2_auth_method_t,const char *,const char *,const char *,const char *,const char *,const char *,int,int32_t,const uint8_t *,bool) { radio("STA.connect-ent");++g.begins;return g.connect_start_ok; }
 void *MockSta::netif() { return nullptr; }
 void MockWiFi::persistent(bool) {}
-wifi_event_id_t MockWiFi::onEvent(void (*)(arduino_event_id_t, arduino_event_info_t)) { return 1; }
+wifi_event_id_t MockWiFi::onEvent(void (*cb)(arduino_event_id_t, arduino_event_info_t)) { wifi_callback=cb; return 1; }
 bool MockWiFi::setHostname(const char *) { return true; }
 bool MockWiFi::mode(wifi_mode_t m) { radio("mode(" + std::to_string((int)m) + ")"); g.mode = m; if (m == 0) ++g.off_mode; return true; }
 wifi_mode_t MockWiFi::getMode() { return (wifi_mode_t)g.mode.load(); }
@@ -95,7 +104,7 @@ bool MockWiFi::softAP(const char *) { radio("softAP"); ++g.softaps; return true;
 bool MockWiFi::enableAP(bool on) { radio(on ? "enableAP(1)" : "enableAP(0)"); if (!on) ap_off = millis(); if (!on) g.mode = g.mode.load() & ~WIFI_MODE_AP; return true; }
 void MockWiFi::setAutoReconnect(bool) {}
 wl_status_t MockWiFi::status() { return (wl_status_t)g.status.load(); }
-wl_status_t MockWiFi::begin(const char *, const char *, int32_t channel, const uint8_t *bssid, bool) { radio("begin"); ++g.begins; if (channel || bssid) ++g.pinned_begins; g.status=WL_DISCONNECTED; return WL_DISCONNECTED; }
+wl_status_t MockWiFi::begin(const char *, const char *, int32_t channel, const uint8_t *bssid, bool) { radio("begin"); ++g.begins; if (channel || bssid) ++g.pinned_begins; return status(); }
 wl_status_t MockWiFi::begin(const char *, wpa2_auth_method_t, const char *, const char *, const char *, const char *, const char *, const char *, int, int32_t, const uint8_t *, bool) { radio("begin-ent"); ++g.begins; return WL_DISCONNECTED; }
 int MockWiFi::scanNetworks(bool, bool) { ++g.sync_scans; return 0; }
 void MockWiFi::scanDelete() {}
@@ -641,7 +650,9 @@ static void a48() { S("A48 terminal authentication failure uses bounded owner re
     boot(true,"home");expect(until([]{return g.begins==1;},4000),"STA attempt starts");
     // The real Arduino callback status is independently exercised by the overlay test.
     for(unsigned attempt=0;attempt<=Config::WIFI_CONNECT_MAX_RETRIES;++attempt) {
-        const int before=g.begins;g.status=WL_CONNECT_FAILED;tick();
+        const int before=g.begins;g.status=WL_DISCONNECTED;
+        arduino_event_info_t info{};info.wifi_sta_disconnected.reason=WIFI_REASON_AUTH_FAIL;
+        wifi_callback(ARDUINO_EVENT_WIFI_STA_DISCONNECTED,info);tick();
         expect(nm->state()==AuraNetworkManager::WIFI_STATE_OFF,"terminal failure ends attempt on next poll");
         expect(g.begins==before,"no immediate busy-loop retry");
         if(attempt<Config::WIFI_CONNECT_MAX_RETRIES) {
@@ -654,9 +665,27 @@ static void a48() { S("A48 terminal authentication failure uses bounded owner re
     command([]{nm->setEnabled(false);});tick();
     expect(g.erase==0,"authentication failures never erase stored credentials");finish(); }
 
+static void a49() { S("A49 stale Arduino failure cannot cancel a fresh attempt");
+    boot(true,"home");expect(until([]{return g.begins==1;},4000),"first attempt starts");
+    g.status=WL_CONNECT_FAILED;arduino_event_info_t info{};info.wifi_sta_disconnected.reason=WIFI_REASON_AUTH_FAIL;
+    wifi_callback(ARDUINO_EVENT_WIFI_STA_DISCONNECTED,info);tick();
+    expect(until([]{return g.begins==2;},1000),"second attempt starts after failure event");
+    run_for(500);
+    expect(g.status==WL_CONNECT_FAILED && g.begins==2 && nm->state()==AuraNetworkManager::WIFI_STATE_STA_CONNECTING,"old status alone cannot reject the second attempt");
+    g.status=WL_CONNECTED;tick();expect(nm->isConnected() && nm->retryCount()==0,"second attempt completes and resets budget");finish(); }
+
+static void a50() { S("A50 synchronous connect rejection and early failure callback are retained");
+    for(int variant=0;variant<2;++variant) {
+        boot(true,"home");g.connect_start_ok=variant!=0;g.fail_during_connect=variant==1;
+        expect(until([]{return g.begins==1;},4000),"connect API invoked");tick();
+        expect(nm->state()==AuraNetworkManager::WIFI_STATE_OFF && nm->retryCount()==1,"both immediate rejection and callback during connect enter bounded retry");
+        command([]{nm->setEnabled(false);});tick();finish();
+    }
+}
+
 int main(int argc, char **argv) {
     timeBeginPeriod(1);
-    void (*all[])() = {a1,a2,a3,a4,a5,a6,a7,a8,a9,a10,a11,a12,a13,a14,a15,a16,a17,a18,a19,a20,a21,a22,a23,a24,a25,a26,a27,a28,a29,a30,a31,a32,a33,a34,a35,a36,a37,a38,a39,a40,a41,a42,a43,a44,a45,a46,a47,a48};
+    void (*all[])() = {a1,a2,a3,a4,a5,a6,a7,a8,a9,a10,a11,a12,a13,a14,a15,a16,a17,a18,a19,a20,a21,a22,a23,a24,a25,a26,a27,a28,a29,a30,a31,a32,a33,a34,a35,a36,a37,a38,a39,a40,a41,a42,a43,a44,a45,a46,a47,a48,a49,a50};
     const int n = sizeof(all) / sizeof(all[0]);
     for (int i = 0; i < n; ++i) { char b[8]; snprintf(b, sizeof(b), "a%d", i + 1); if (argc < 2 || !strcmp(argv[1], b)) all[i](); }
     printf("\npassed=%d failed=%d\n", g_pass, g_fail); fflush(stdout);

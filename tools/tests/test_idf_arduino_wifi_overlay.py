@@ -24,7 +24,7 @@ class WifiOverlayTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             overlay.adapt(overlay.AFTER)
         source = UPSTREAM.read_text(encoding="utf-8")
-        for needle in (overlay.BEFORE, overlay.STATUS_BEFORE):
+        for needle in (overlay.BEFORE,):
             for replacement in ("", needle * 2):
                 with self.subTest(needle=needle, replacement=replacement):
                     with self.assertRaises(ValueError):
