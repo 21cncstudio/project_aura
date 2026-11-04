@@ -1,3 +1,5 @@
+- 2026-11-04: Beta 2dcd878 published/current for 4.3-inch and 7-inch from exact tested 16 MHz BINs. Old 1625a09 blocked and removed from public downloads. 526 site + 182 firmware/backend + 39 isolated SQL + 13 public checks PASS; both browser model/Update confirmations verified. Stable 1.2.0 and Hub unchanged. [Publication receipt](docs/BETA_PUBLICATION_20261104.md).
+
 # Aura AQ общая прошивка
 
 - 2026-11-04, **владелец разрешил push общей main и замену beta в веб-инсталлере**. В выпуск идут точные испытанные BIN `2dcd878` / `2dcd878-7-dual-i2c`, оба 16 МГц; новые отчёты оформляются отдельным коммитом без пересборки приложений. Старую beta убрать из активного выбора, сохранив историю/артефакты; Stable и Hub не менять. Проверены public target `21cncstudio/project_aura`, прежний remote main `77bfb4b0`, 245 outgoing blobs и новые отчёты на известные Wi-Fi/MQTT секреты — совпадений нет. Подготовка/публикация ещё выполняются; факт завершения будет записан отдельно.
