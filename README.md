@@ -458,7 +458,8 @@ Want to talk with Aura builders and follow the wider ecosystem? Join Discord: ht
 - Trademark and branding use is covered by `TRADEMARKS.md`.
 
 ## Tests
-See `TESTING.md` for native host tests and `scripts/run_tests.ps1`.
+See `TESTING.md` for native host tests, `scripts/run_tests.ps1` (Windows) and
+`scripts/run_tests.sh` (Linux).
 
 ## Repo Layout
 - `src/core/` boot, init, reliability

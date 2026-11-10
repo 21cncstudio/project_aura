@@ -4,6 +4,10 @@ import io
 import json
 import os
 from pathlib import Path
+import shutil
+import stat
+import subprocess
+import sys
 import tempfile
 from types import SimpleNamespace
 import unittest
@@ -12,6 +16,7 @@ from unittest.mock import patch
 from scripts import run_native_tests as launcher
 from scripts.run_native_tests import (
     DEFAULT_INVOCATIONS,
+    HOST_PLATFORMS,
     NativeTestError,
     choose_invocations,
     compiler_first_environment,
@@ -19,8 +24,12 @@ from scripts.run_native_tests import (
     isolated_build_dir,
     pio_command,
     platformio_runtime,
+    toolchain_identity,
     validate_report,
 )
+
+SUPPORTED_HOST = sys.platform in HOST_PLATFORMS
+REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 class NativeTestLauncherTests(unittest.TestCase):
@@ -159,24 +168,149 @@ class NativeTestLauncherTests(unittest.TestCase):
         self.assertEqual(baseline, isolated_build_dir(self.project, identity, self.expected))
         self.assertTrue(baseline.is_relative_to(self.project / ".pio" / "native-tests"))
 
-    @unittest.skipUnless(os.name == "nt", "Official launcher uses the Windows penv layout")
-    def test_canonical_penv_can_upgrade_python_or_platformio_distribution(self):
-        penv = self.project / ".platformio" / "penv"
-        python = penv / "Scripts" / "python.exe"
-        fake_pio = SimpleNamespace(
+    def fake_platformio(self, penv, site_packages):
+        return SimpleNamespace(
             __title__="platformio", __version__="6.2.0",
-            __file__=str(penv / "Lib" / "site-packages" / "platformio" / "__init__.py"),
+            __file__=str(penv / site_packages / "platformio" / "__init__.py"),
         )
+
+    def observe_runtime(self, platform, executable, prefix, fake_pio):
         with (
+            patch.object(launcher.sys, "platform", platform),
             patch.object(launcher.Path, "home", return_value=self.project),
-            patch.object(launcher.sys, "executable", str(python)),
+            patch.object(launcher.sys, "executable", str(executable)),
+            patch.object(launcher.sys, "prefix", str(prefix)),
             patch.object(launcher.sys, "version_info", (3, 12, 0)),
             patch.dict("sys.modules", {"platformio": fake_pio}),
         ):
-            observed = platformio_runtime()
+            return platformio_runtime()
+
+    def test_canonical_penv_can_upgrade_python_or_platformio_distribution(self):
+        penv = self.project / ".platformio" / "penv"
+        python = penv / "Scripts" / "python.exe"
+        fake_pio = self.fake_platformio(penv, Path("Lib") / "site-packages")
+        observed = self.observe_runtime("win32", python, penv, fake_pio)
         self.assertEqual([3, 12, 0], observed["python_version"])
         self.assertEqual("platformio", observed["platformio"])
         self.assertEqual("6.2.0", observed["platformio_version"])
+
+    def test_linux_canonical_penv_is_used_unresolved_inside_the_venv(self):
+        penv = self.project / ".platformio" / "penv"
+        python = penv / "bin" / "python"
+        base = self.project / "base" / "python3.12"
+        base.parent.mkdir()
+        base.write_text("", encoding="utf-8")
+        python.parent.mkdir(parents=True)
+        python.symlink_to(base)
+        fake_pio = self.fake_platformio(penv, Path("lib") / "python3.12" / "site-packages")
+        observed = self.observe_runtime("linux", python, penv, fake_pio)
+        # Resolving would name the base interpreter, which cannot import PlatformIO
+        # and would move PLATFORMIO_CORE_DIR outside ~/.platformio.
+        self.assertEqual(str(python), observed["python"])
+        self.assertEqual(self.project / ".platformio", Path(observed["python"]).parents[2])
+        self.assertEqual("6.2.0", observed["platformio_version"])
+
+    def test_linux_rejects_base_interpreter_and_foreign_venv(self):
+        penv = self.project / ".platformio" / "penv"
+        python = penv / "bin" / "python"
+        base = self.project / "base" / "python3.12"
+        base.parent.mkdir()
+        base.write_text("", encoding="utf-8")
+        python.parent.mkdir(parents=True)
+        python.symlink_to(base)
+        fake_pio = self.fake_platformio(penv, Path("lib") / "python3.12" / "site-packages")
+        for executable, prefix in (
+            (base, penv),  # same file once resolved, but not the venv
+            (python, self.project / "other-venv"),
+            (self.project / "other-venv" / "bin" / "python", penv),
+        ):
+            with self.subTest(executable=executable, prefix=prefix):
+                with self.assertRaisesRegex(NativeTestError, "scripts/run_tests.sh"):
+                    self.observe_runtime("linux", executable, prefix, fake_pio)
+
+    def test_platformio_must_load_from_the_canonical_penv(self):
+        penv = self.project / ".platformio" / "penv"
+        python = penv / "bin" / "python"
+        foreign = self.fake_platformio(self.project / "user-site", Path("lib"))
+        with self.assertRaisesRegex(NativeTestError, "outside the canonical penv"):
+            self.observe_runtime("linux", python, penv, foreign)
+
+    def test_unsupported_host_fails_instead_of_guessing_a_layout(self):
+        for name in ("darwin", "cygwin"):
+            with self.subTest(platform=name), patch.object(launcher.sys, "platform", name):
+                with self.assertRaisesRegex(NativeTestError, "Unsupported host"):
+                    launcher.host_platform()
+                with self.assertRaisesRegex(NativeTestError, "Unsupported host"):
+                    platformio_runtime()
+
+    def write_fake_compiler(self, directory, name, target, version):
+        path = directory / name
+        path.write_text(
+            "#!/bin/sh\n"
+            f'case "$1" in -dumpmachine) echo {target} ;; -dumpfullversion) echo {version} ;;'
+            " *) exit 9 ;; esac\n",
+            encoding="utf-8",
+        )
+        path.chmod(path.stat().st_mode | stat.S_IXUSR)
+
+    @unittest.skipUnless(sys.platform == "linux", "Fake compilers are POSIX shell scripts")
+    def test_linux_toolchain_identity_requires_matching_native_gcc_pair(self):
+        compilers = self.project / "bin"
+        compilers.mkdir()
+        cases = (
+            (("x86_64-linux-gnu", "13.3.0"), ("x86_64-linux-gnu", "13.3.0"), None),
+            (("x86_64-w64-mingw32", "13.3.0"), ("x86_64-w64-mingw32", "13.3.0"), "Unsupported native compiler target"),
+            (("aarch64-linux-gnu", "13.3.0"), ("aarch64-linux-gnu", "13.3.0"), "Unsupported native compiler target"),
+            (("x86_64-linux-gnu", "13.3.0"), ("x86_64-linux-gnu", "14.1.0"), "versions do not match"),
+        )
+        with patch.object(launcher.sys, "platform", "linux"):
+            for gcc, gxx, error in cases:
+                with self.subTest(gcc=gcc, gxx=gxx):
+                    self.write_fake_compiler(compilers, "gcc", *gcc)
+                    self.write_fake_compiler(compilers, "g++", *gxx)
+                    if error:
+                        with self.assertRaisesRegex(NativeTestError, error):
+                            toolchain_identity(compilers, dict(os.environ))
+                    else:
+                        identity = toolchain_identity(compilers, dict(os.environ))
+                        self.assertEqual("13.3.0", identity["version"])
+                        self.assertEqual(["g++", "gcc"], sorted(identity["files"]))
+            (compilers / "g++").unlink()
+            with self.assertRaisesRegex(NativeTestError, "Missing supported native toolchain file"):
+                toolchain_identity(compilers, dict(os.environ))
+
+    def test_windows_toolchain_still_requires_every_mingw_runtime_dll(self):
+        compilers = self.project / "mingw"
+        compilers.mkdir()
+        for name in ("gcc.exe", "g++.exe", "libgcc_s_seh-1.dll", "libstdc++-6.dll"):
+            (compilers / name).write_text("", encoding="utf-8")
+        with patch.object(launcher.sys, "platform", "win32"):
+            with self.assertRaisesRegex(NativeTestError, "libwinpthread-1.dll"):
+                toolchain_identity(compilers, dict(os.environ))
+
+    def test_compiler_dir_defaults_per_host_and_explicit_dir_wins(self):
+        (self.project / "platformio.ini").write_text("[env:native_test]\n", encoding="utf-8")
+        seen = []
+
+        def stop_after_compiler_dir(compiler_dir, child_env):
+            seen.append(compiler_dir)
+            raise NativeTestError("stop")
+
+        for platform, argv, expected in (
+            ("linux", [], Path("/usr/bin").resolve()),
+            ("win32", [], Path("C:/msys64/mingw64/bin").resolve()),
+            ("linux", ["--compiler-dir", str(self.project)], self.project),
+        ):
+            with self.subTest(platform=platform, argv=argv):
+                with (
+                    patch.object(launcher.sys, "platform", platform),
+                    patch.object(launcher, "__file__", str(self.project / "scripts" / "run_native_tests.py")),
+                    patch.object(launcher, "platformio_runtime", return_value={"python": "p/x/y/python"}),
+                    patch.object(launcher, "toolchain_identity", side_effect=stop_after_compiler_dir),
+                    redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()),
+                ):
+                    self.assertEqual(1, launcher.main(argv))
+                self.assertEqual(expected, seen[-1])
 
     def test_defaults_preserve_all_ten_official_invocations(self):
         self.assertEqual(list(DEFAULT_INVOCATIONS), choose_invocations([], []))
@@ -246,7 +380,7 @@ class NativeTestLauncherTests(unittest.TestCase):
         self.assertEqual("-vvv", command[-1])
         self.assertFalse(any(argument.startswith("--without-") for argument in command))
 
-    @unittest.skipUnless(os.name == "nt", "Official launcher uses a Windows OS file lock")
+    @unittest.skipUnless(SUPPORTED_HOST, "Launcher lock is implemented for Windows and Linux")
     def test_lock_rejects_overlap_and_is_reusable_after_release(self):
         path = self.project / "launcher.lock"
         with exclusive_launcher_lock(path):
@@ -256,7 +390,7 @@ class NativeTestLauncherTests(unittest.TestCase):
         with exclusive_launcher_lock(path):
             pass
 
-    @unittest.skipUnless(os.name == "nt", "Official launcher uses a Windows OS file lock")
+    @unittest.skipUnless(SUPPORTED_HOST, "Launcher lock is implemented for Windows and Linux")
     def test_launcher_needs_both_successful_pio_exit_and_fresh_verified_report(self):
         (self.project / "platformio.ini").write_text("[env:native_test]\n", encoding="utf-8")
         runtime = {"python": str(self.project / "penv" / "Scripts" / "python.exe")}
@@ -292,6 +426,67 @@ class NativeTestLauncherTests(unittest.TestCase):
             for path in (self.project / ".pio" / "native-tests" / "reports").glob("*/launcher.json")
         ]
         self.assertEqual(["FAILED", "FAILED", "PASSED"], sorted(item["status"] for item in manifests))
+
+
+@unittest.skipUnless(sys.platform == "linux" and shutil.which("bash"), "Linux launcher script")
+class LinuxRunTestsScriptTests(unittest.TestCase):
+    """scripts/run_tests.sh mirrors scripts/run_tests.ps1."""
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.home = Path(self.temp.name)
+        self.script = REPO_ROOT / "scripts" / "run_tests.sh"
+
+    def run_script(self, *args):
+        env = {"HOME": str(self.home), "PATH": os.environ["PATH"]}
+        return subprocess.run(
+            ["bash", str(self.script), *args], env=env, capture_output=True, text=True, timeout=30
+        )
+
+    def install_echo_python(self):
+        python = self.home / ".platformio" / "penv" / "bin" / "python"
+        python.parent.mkdir(parents=True)
+        python.write_text('#!/bin/sh\nfor a in "$@"; do echo "$a"; done\n', encoding="utf-8")
+        python.chmod(python.stat().st_mode | stat.S_IXUSR)
+
+    def test_refuses_without_canonical_penv_instead_of_using_path_python(self):
+        result = self.run_script()
+        self.assertEqual(2, result.returncode)
+        self.assertIn("does not fall back to a PATH installation", result.stderr)
+        self.assertIn(str(self.home / ".platformio" / "penv" / "bin" / "python"), result.stderr)
+
+    def test_forwards_options_like_the_powershell_launcher(self):
+        self.install_echo_python()
+        result = self.run_script(
+            "--environment", "native_test", "--environment", "native_test_sfa30_driver",
+            "--filter", "test_web_events_utils", "--compiler-dir", "/opt/gcc/bin", "--verbosity", "2",
+        )
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertEqual(
+            [
+                "-I", str(REPO_ROOT / "scripts" / "run_native_tests.py"),
+                "--environment", "native_test", "--environment", "native_test_sfa30_driver",
+                "--filter", "test_web_events_utils", "--compiler-dir", "/opt/gcc/bin", "-vv",
+            ],
+            result.stdout.splitlines(),
+        )
+
+    def test_without_options_runs_the_launcher_defaults(self):
+        self.install_echo_python()
+        result = self.run_script()
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertEqual(
+            ["-I", str(REPO_ROOT / "scripts" / "run_native_tests.py")], result.stdout.splitlines()
+        )
+
+    def test_rejects_invalid_arguments(self):
+        self.install_echo_python()
+        for args in (("--verbosity", "4"), ("--verbosity", "x"), ("--environment",), ("--bogus",)):
+            with self.subTest(args=args):
+                result = self.run_script(*args)
+                self.assertEqual(2, result.returncode)
+                self.assertTrue(result.stderr.startswith("Usage:") or "run_tests.sh:" in result.stderr)
 
 
 if __name__ == "__main__":
