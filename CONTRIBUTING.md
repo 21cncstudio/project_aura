@@ -44,7 +44,7 @@ I love pull requests! Here's a quick guide:
     *   Keep changes focused and well-scoped.
     *   Follow the existing code style.
     *   Add SPDX headers to new files (copy from existing files).
-3.  **Test**: Run tests (`scripts/run_tests.ps1`) or verify on hardware.
+3.  **Test**: Run tests (`scripts/run_tests.ps1`, or `scripts/run_tests.sh` on Linux) or verify on hardware.
 4.  **Pull Request**:
     *   Open a PR against the `main` branch.
     *   Describe your changes clearly.

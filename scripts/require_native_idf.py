@@ -3,5 +3,6 @@ Import("env")
 raise RuntimeError(
     "Aura firmware in this branch requires ESP-IDF 6.1 / LVGL 9.6. "
     "Use scripts/build_idf.ps1 -Profile 4_3 or -Profile 7_dual_i2c. "
-    "PlatformIO native tests remain available through scripts/run_tests.ps1."
+    "PlatformIO native tests remain available through scripts/run_tests.ps1 "
+    "(Windows) or scripts/run_tests.sh (Linux)."
 )

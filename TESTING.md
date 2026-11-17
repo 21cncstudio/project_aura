@@ -44,3 +44,27 @@ the launcher's identity, cache-isolation, and case-source checks:
 
 The launcher only starts host-side PlatformIO tests. It does not open serial
 ports, flash a controller, or interact with connected I2C hardware.
+
+### Linux
+
+Prerequisites:
+
+- The distribution's native GCC and G++ (target `x86_64-linux-gnu`, as on
+  Debian/Ubuntu x86-64), for example `sudo apt install build-essential`.
+- PlatformIO installed in `~/.platformio/penv`, for example with the official
+  `get-platformio.py` installer.
+
+From the repository root:
+
+```bash
+./scripts/run_tests.sh
+./scripts/run_tests.sh --environment native_test --filter test_web_events_utils --verbosity 1
+```
+
+`run_tests.sh` mirrors `run_tests.ps1`: it runs the same ten environments
+through the same `run_native_tests.py` launcher, with the same identity,
+cache-isolation and case-source checks and the same `launcher.json` evidence.
+The only supported interpreter is `~/.platformio/penv/bin/python`; there is no
+fallback to a Python on `PATH`. `--environment` and `--filter` may be repeated.
+Supply `--compiler-dir` if GCC is not in `/usr/bin`. Other hosts (macOS, other
+compiler targets) are rejected with an explicit error.

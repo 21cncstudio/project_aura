@@ -1,6 +1,8 @@
-"""Run native Unity tests through the canonical Windows PlatformIO installation.
+"""Run native Unity tests through the canonical PlatformIO installation.
 
-Use scripts/run_tests.ps1, optionally with -Environment and -Filter. The normal
+Use scripts/run_tests.ps1 on Windows or scripts/run_tests.sh on Linux,
+optionally with an environment and filter. Each host has exactly one supported
+PlatformIO interpreter and native toolchain (see HOST_PLATFORMS). The normal
 PlatformIO build and NativeTestOutputReader still run every executable. A fresh
 JSON report must identify actual Unity source paths for every selected suite.
 """
@@ -9,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 from contextlib import contextmanager
+from dataclasses import dataclass
 from datetime import datetime, timezone
 import hashlib
 import json
@@ -43,6 +46,52 @@ class NativeTestError(RuntimeError):
     pass
 
 
+@dataclass(frozen=True)
+class HostPlatform:
+    """The single supported PlatformIO runtime and native toolchain for one host OS."""
+
+    launcher: str
+    penv_python: tuple[str, ...]
+    resolve_python: bool
+    compilers: tuple[str, str]
+    runtime_files: tuple[str, ...]
+    compiler_target: str
+    default_compiler_dir: str
+
+
+HOST_PLATFORMS = {
+    "win32": HostPlatform(
+        launcher="scripts/run_tests.ps1",
+        penv_python=("Scripts", "python.exe"),
+        resolve_python=True,
+        compilers=("gcc.exe", "g++.exe"),
+        runtime_files=RUNTIME_DLLS,
+        compiler_target="x86_64-w64-mingw32",
+        default_compiler_dir="C:/msys64/mingw64/bin",
+    ),
+    # The POSIX venv python is a symlink to the base interpreter, so its path is
+    # compared and used unresolved; resolving it would leave the venv.
+    "linux": HostPlatform(
+        launcher="scripts/run_tests.sh",
+        penv_python=("bin", "python"),
+        resolve_python=False,
+        compilers=("gcc", "g++"),
+        runtime_files=(),
+        compiler_target="x86_64-linux-gnu",
+        default_compiler_dir="/usr/bin",
+    ),
+}
+
+
+def host_platform() -> HostPlatform:
+    platform = HOST_PLATFORMS.get(sys.platform)
+    if platform is None:
+        raise NativeTestError(
+            f"Unsupported host {sys.platform!r}; supported hosts: {', '.join(sorted(HOST_PLATFORMS))}"
+        )
+    return platform
+
+
 def file_sha256(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as stream:
@@ -58,18 +107,27 @@ def fingerprint(value: object) -> str:
 
 
 def platformio_runtime() -> dict:
+    host = host_platform()
+    penv = Path.home() / ".platformio" / "penv"
+    python = penv.joinpath(*host.penv_python)
+    if host.resolve_python:
+        running_canonical = Path(sys.executable).resolve() == python.resolve()
+    else:
+        running_canonical = (
+            Path(sys.executable).absolute() == python
+            and Path(sys.prefix).resolve() == penv.resolve()
+        )
+    if not running_canonical:
+        raise NativeTestError(
+            f"Use {host.launcher} with the canonical penv interpreter: {python}"
+        )
     import platformio
 
-    python = Path.home() / ".platformio" / "penv" / "Scripts" / "python.exe"
-    if os.name != "nt" or Path(sys.executable).resolve() != python.resolve():
-        raise NativeTestError(
-            f"Use scripts/run_tests.ps1 with the canonical penv interpreter: {python}"
-        )
     module_path = Path(platformio.__file__).resolve()
-    if not module_path.is_relative_to(python.parent.parent.resolve()):
+    if not module_path.is_relative_to(penv.resolve()):
         raise NativeTestError(f"PlatformIO loaded outside the canonical penv: {module_path}")
     return {
-        "python": str(python.resolve()),
+        "python": str(python.resolve() if host.resolve_python else python),
         "python_version": list(sys.version_info[:3]),
         "platformio": platformio.__title__,
         "platformio_version": platformio.__version__,
@@ -88,12 +146,14 @@ def compiler_first_environment(base: dict, compiler_dir: Path) -> dict:
 
 
 def toolchain_identity(compiler_dir: Path, child_env: dict) -> dict:
-    files = ("gcc.exe", "g++.exe", *RUNTIME_DLLS)
+    host = host_platform()
+    gcc, gxx = host.compilers
+    files = (gcc, gxx, *host.runtime_files)
     for name in files:
         if not (compiler_dir / name).is_file():
-            raise NativeTestError(f"Missing supported MinGW toolchain file: {compiler_dir / name}")
+            raise NativeTestError(f"Missing supported native toolchain file: {compiler_dir / name}")
     versions = {}
-    for name in ("gcc.exe", "g++.exe"):
+    for name in host.compilers:
         compiler = str(compiler_dir / name)
         target = subprocess.check_output(
             [compiler, "-dumpmachine"], env=child_env, text=True, timeout=10
@@ -101,13 +161,13 @@ def toolchain_identity(compiler_dir: Path, child_env: dict) -> dict:
         versions[name] = subprocess.check_output(
             [compiler, "-dumpfullversion"], env=child_env, text=True, timeout=10
         ).strip()
-        if target != "x86_64-w64-mingw32":
+        if target != host.compiler_target:
             raise NativeTestError(f"Unsupported native compiler target: {target}")
-    if versions["gcc.exe"] != versions["g++.exe"]:
+    if versions[gcc] != versions[gxx]:
         raise NativeTestError("gcc and g++ versions do not match")
     return {
         "bin": str(compiler_dir),
-        "version": versions["g++.exe"],
+        "version": versions[gxx],
         "files": {name: file_sha256(compiler_dir / name) for name in files},
     }
 
@@ -212,8 +272,7 @@ def validate_report(report: dict, project: Path, expected: dict) -> dict:
 def exclusive_launcher_lock(path: Path):
     # The OS releases the lock after an interrupted/crashed launcher. Keep the
     # file rather than deleting a pathname another launcher may already hold.
-    import msvcrt
-
+    host_platform()
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a+b") as stream:
         if stream.tell() == 0:
@@ -221,14 +280,39 @@ def exclusive_launcher_lock(path: Path):
             stream.flush()
         stream.seek(0)
         try:
-            msvcrt.locking(stream.fileno(), msvcrt.LK_NBLCK, 1)
+            _lock_exclusive(stream)
         except OSError as error:
             raise NativeTestError("Another native test launcher is running for this project") from error
         try:
             yield
         finally:
             stream.seek(0)
-            msvcrt.locking(stream.fileno(), msvcrt.LK_UNLCK, 1)
+            _unlock_exclusive(stream)
+
+
+def _lock_exclusive(stream) -> None:
+    """Take the non-blocking OS lock: msvcrt byte lock on Windows, flock on Linux."""
+    if sys.platform == "win32":
+        import msvcrt
+
+        msvcrt.locking(stream.fileno(), msvcrt.LK_NBLCK, 1)
+    else:
+        import fcntl
+
+        # flock, not lockf: POSIX record locks are per process, so a second
+        # launcher thread or handle in the same process would not be refused.
+        fcntl.flock(stream.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+
+
+def _unlock_exclusive(stream) -> None:
+    if sys.platform == "win32":
+        import msvcrt
+
+        msvcrt.locking(stream.fileno(), msvcrt.LK_UNLCK, 1)
+    else:
+        import fcntl
+
+        fcntl.flock(stream.fileno(), fcntl.LOCK_UN)
 
 
 def pio_command(python: str, project: Path, environment: str, filters: tuple,
@@ -260,7 +344,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("-e", "--environment", action="append", default=[])
     parser.add_argument("-f", "--filter", action="append", default=[])
-    parser.add_argument("--compiler-dir", type=Path, default=Path("C:/msys64/mingw64/bin"))
+    parser.add_argument("--compiler-dir", type=Path)
     parser.add_argument("-v", "--verbose", action="count", default=0)
     args = parser.parse_args(argv)
     project = Path(__file__).resolve().parents[1]
@@ -272,7 +356,7 @@ def main(argv: list[str] | None = None) -> int:
         if not (project / "platformio.ini").is_file():
             raise NativeTestError(f"Project configuration missing: {project / 'platformio.ini'}")
         runtime = platformio_runtime()
-        compiler_dir = args.compiler_dir.resolve()
+        compiler_dir = (args.compiler_dir or Path(host_platform().default_compiler_dir)).resolve()
         child_env = compiler_first_environment(dict(os.environ), compiler_dir)
         child_env["PLATFORMIO_CORE_DIR"] = str(Path(runtime["python"]).parents[2])
         identity = {"runtime": runtime, "toolchain": toolchain_identity(compiler_dir, child_env)}
@@ -291,7 +375,8 @@ def main(argv: list[str] | None = None) -> int:
             manifest_path = reports / "launcher.json"
             manifest.update(identity=identity, project_dir=str(project), run_id=run_id)
             print(f"Native runtime: {runtime['python']}", flush=True)
-            print(f"Compiler and DLL PATH first: {compiler_dir}", flush=True)
+            path_label = "Compiler and DLL PATH" if host_platform().runtime_files else "Compiler PATH"
+            print(f"{path_label} first: {compiler_dir}", flush=True)
             print(f"Native evidence: {reports}", flush=True)
             for index, ((environment, filters), expected) in enumerate(zip(invocations, selections)):
                 build_dir = isolated_build_dir(project, identity, expected)

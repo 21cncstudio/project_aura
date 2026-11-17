@@ -3,3 +3,6 @@ components/espressif__esp32_display_panel/** -text -whitespace
 
 # Preserve the downloaded, hash-pinned manufacturer reference.
 docs/datasheets/SEN0321/DFRobot_OzoneSensor_reference/** -text -whitespace
+
+# Keep the Linux test entry point runnable after Windows checkouts/archives.
+scripts/run_tests.sh text eol=lf
