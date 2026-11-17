@@ -194,6 +194,11 @@ class NativeTestLauncherTests(unittest.TestCase):
         self.assertEqual("platformio", observed["platformio"])
         self.assertEqual("6.2.0", observed["platformio_version"])
 
+    def test_linux_launcher_has_lf_line_endings(self):
+        script = (REPO_ROOT / "scripts" / "run_tests.sh").read_bytes()
+        self.assertTrue(script.startswith(b"#!/usr/bin/env bash\n"))
+        self.assertNotIn(b"\r", script)
+
     def test_linux_runtime_policy_without_symlink_privileges(self):
         # Exercise the path/prefix policy on every host without requiring
         # Windows Developer Mode. The Linux-only cases below use real links.
