@@ -194,6 +194,32 @@ class NativeTestLauncherTests(unittest.TestCase):
         self.assertEqual("platformio", observed["platformio"])
         self.assertEqual("6.2.0", observed["platformio_version"])
 
+    def test_linux_runtime_policy_without_symlink_privileges(self):
+        # Exercise the path/prefix policy on every host without requiring
+        # Windows Developer Mode. The Linux-only cases below use real links.
+        penv = self.project / ".platformio" / "penv"
+        python = penv / "bin" / "python"
+        base = self.project / "base" / "python3.12"
+        fake_pio = self.fake_platformio(penv, Path("lib") / "python3.12" / "site-packages")
+        resolve = Path.resolve
+
+        def resolve_venv_link(path, *args, **kwargs):
+            return base if path == python else resolve(path, *args, **kwargs)
+
+        with patch.object(launcher.Path, "resolve", resolve_venv_link):
+            observed = self.observe_runtime("linux", python, penv, fake_pio)
+            self.assertEqual(str(python), observed["python"])
+            self.assertEqual(self.project / ".platformio", Path(observed["python"]).parents[2])
+            for executable, prefix in (
+                (base, penv),
+                (python, self.project / "other-venv"),
+                (self.project / "other-venv" / "bin" / "python", penv),
+            ):
+                with self.subTest(executable=executable, prefix=prefix):
+                    with self.assertRaisesRegex(NativeTestError, "scripts/run_tests.sh"):
+                        self.observe_runtime("linux", executable, prefix, fake_pio)
+
+    @unittest.skipUnless(sys.platform == "linux", "Real Linux venv symlink layout")
     def test_linux_canonical_penv_is_used_unresolved_inside_the_venv(self):
         penv = self.project / ".platformio" / "penv"
         python = penv / "bin" / "python"
@@ -210,6 +236,7 @@ class NativeTestLauncherTests(unittest.TestCase):
         self.assertEqual(self.project / ".platformio", Path(observed["python"]).parents[2])
         self.assertEqual("6.2.0", observed["platformio_version"])
 
+    @unittest.skipUnless(sys.platform == "linux", "Real Linux venv symlink layout")
     def test_linux_rejects_base_interpreter_and_foreign_venv(self):
         penv = self.project / ".platformio" / "penv"
         python = penv / "bin" / "python"
